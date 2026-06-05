@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a5fb4" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Кредит" />
+  <title>Кредитный калькулятор</title>
+  <style>
+:root {
+  --bg: #f4f5f7;
+  --surface: #fff;
+  --text: #1a1d23;
+  --muted: #5c6370;
+  --border: #dde1e8;
+  --accent: #1a5fb4;
+  --accent-hover: #154a8f;
+  --principal: #2ec27e;
+  --interest: #e66100;
+  --deferred: #c08000;
+  --radius: 10px;
+  --font: "Segoe UI", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 2.5rem;
+}
+.app-footer {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.app-footer__text {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.app-footer__brand { font-weight: 500; color: #7a8494; }
+.app-footer__sep { margin: 0 0.2em; font-weight: 400; }
+.app-footer__author { font-weight: 500; color: var(--muted); }
+.app-footer__dot { margin: 0 0.35em; opacity: 0.45; }
+.app-footer__rights {
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+.header { position: relative; }
+.header h1 { margin: 0 0 0.25rem; font-size: 1.75rem; font-weight: 600; }
+.subtitle { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.lang-switcher { position: absolute; top: 0; right: 0; display: flex; gap: 3px; }
+.lang-btn { padding: 3px 9px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; transition: background 0.15s, color 0.15s; }
+.lang-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.lang-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  margin-top: 1.25rem;
+}
+.hidden { display: none !important; }
+.inputs-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+  align-items: end;
+}
+.inputs-hint {
+  grid-column: 1 / -1;
+  margin: -0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.inputs-panel .actions { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .inputs-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.field label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.field input,
+.field select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.field input:focus,
+.field select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.date-info {
+  margin: 0 0 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.btn-primary {
+  padding: 0.6rem 1.25rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+.btn-secondary {
+  padding: 0.6rem 1.25rem;
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-secondary:hover { background: #eef4fc; }
+.btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  align-items: stretch;
+}
+@media (max-width: 640px) {
+  .summary-grid { grid-template-columns: 1fr; }
+}
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.summary-card h2 { margin: 0 0 0.75rem; font-size: 1.1rem; font-weight: 600; }
+.summary-dl {
+  margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.summary-dl__details {
+  flex: 1;
+  min-height: 5.5rem;
+  padding-bottom: 0.75rem;
+}
+.summary-dl__totals {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 2px solid var(--border);
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.summary-dl__details .summary-row:last-child,
+.summary-dl__totals .summary-row:last-child { border-bottom: none; }
+.summary-row dt { color: var(--muted); font-size: 0.85rem; flex-shrink: 0; }
+.summary-row dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.summary-dd--wrap {
+  max-width: 58%;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.summary-row--highlight dt { color: var(--text); font-weight: 500; }
+.summary-row--highlight dd { color: var(--accent); font-size: 1.05rem; }
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+.tab {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: var(--muted);
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.tab-panel { margin-top: 0.75rem; }
+.table-wrap {
+  overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+}
+table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+th, td {
+  padding: 0.5rem 0.65rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+th:first-child, td:first-child,
+th:nth-child(2), td:nth-child(2) { text-align: center; }
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+tbody tr:hover { background: #f8f9fb; }
+.chart-hint { margin: 0 0 1rem; color: var(--muted); font-size: 0.9rem; }
+.chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.75rem;
+  margin-bottom: 1.25rem;
+}
+.chart-toggle { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; }
+.chart-type-picker {
+  padding-left: 1.75rem;
+  border-left: 1px solid var(--border);
+}
+.chart-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.chart-toggle label:has(input:checked) {
+  color: var(--text);
+  font-weight: 500;
+}
+.chart-figure.hidden { display: none; }
+@media (max-width: 520px) {
+  .chart-type-picker {
+    padding-left: 0;
+    border-left: none;
+    width: 100%;
+  }
+}
+.charts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+@media (min-width: 720px) {
+  .charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.chart-figure { margin: 0; }
+.chart-figure figcaption {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+.chart-canvas-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  min-height: 200px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fafbfc;
+}
+.chart-canvas-wrap canvas {
+  display: block;
+  height: 200px;
+  min-height: 200px;
+  max-width: none;
+}
+.chart-figure .legend-inline {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.legend-inline span::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+.legend-inline .leg-principal::before { background: var(--principal); }
+.legend-inline .leg-interest::before { background: var(--interest); }
+.legend-inline .leg-deferred::before { background: var(--deferred); }
+.deferred-col { display: none; }
+.has-deferred .deferred-col { display: table-cell; }
+.input-addon { display: flex; }
+.input-addon input { flex: 1; border-radius: 6px 0 0 6px; border-right: none; }
+.input-addon select { width: auto; min-width: 3.5rem; border-radius: 0 6px 6px 0; border-left: none; background: #f4f5f7; }
+.input-stepper { display: flex; }
+.input-stepper input { flex: 1; border-radius: 6px 0 0 6px; border-right: none; }
+.stepper-btns { display: flex; flex-direction: column; flex-shrink: 0; }
+.stepper-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 2rem; flex: 1;
+  border: 1px solid var(--border); background: #f4f5f7;
+  color: var(--muted); cursor: pointer; line-height: 1;
+  font-size: 0.55rem; padding: 0; user-select: none;
+}
+.stepper-btn:first-child { border-radius: 0 6px 0 0; border-bottom: none; }
+.stepper-btn:last-child  { border-radius: 0 0 6px 0; }
+.stepper-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.grace-row td { color: #9aa3b0; }
+.grace-cell { font-size: 0.78rem; color: #9aa3b0; font-style: italic; letter-spacing: 0.01em; }
+.print-section-title { display: none; }
+@media print {
+  .inputs-panel, .tabs, .app-footer, .chart-controls, .chart-hint { display: none !important; }
+  .panel.summary.hidden { display: block !important; }
+  .tab-panel.hidden { display: block !important; }
+  .table-wrap { max-height: none !important; overflow: visible !important; }
+  .chart-canvas-wrap { overflow: visible !important; }
+  .app { padding: 0.5rem 0; max-width: 100%; }
+  .panel { border: none; box-shadow: none; padding: 0.5rem 0; }
+  h1 { font-size: 1.2rem; }
+  thead th { position: static; }
+  .actions .btn-primary, .actions .btn-secondary { display: none !important; }
+  .lang-switcher { display: none !important; }
+  .print-section-title {
+    display: block;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1a3c6e;
+    margin: 0 0 0.4rem;
+    padding-top: 0.6rem;
+    border-top: 2px solid #1a3c6e;
+    page-break-before: always;
+  }
+  #annuity-table .print-section-title { page-break-before: avoid; }
+}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1 data-i18n="title">Кредитный калькулятор</h1>
+      <p class="subtitle" data-i18n="subtitle">Помесячный расчёт: аннуитет и дифференцированные платежи</p>
+      <div class="lang-switcher" role="group" aria-label="Language">
+        <button class="lang-btn active" data-lang="ru">РУ</button>
+        <button class="lang-btn" data-lang="kk">ҚАЗ</button>
+        <button class="lang-btn" data-lang="en">EN</button>
+      </div>
+    </header>
+
+    <section class="panel inputs-panel">
+      <div class="field">
+        <label for="amount" data-i18n="lbl.amount">Сумма кредита, ₸</label>
+        <input type="text" id="amount" inputmode="numeric" autocomplete="off" value="1 000 000" />
+      </div>
+      <div class="field">
+        <label for="rate" data-i18n="lbl.rate">Ставка, % годовых</label>
+        <div class="input-stepper">
+          <input type="text" id="rate" inputmode="decimal" autocomplete="off" value="12" />
+          <div class="stepper-btns">
+            <button type="button" class="stepper-btn" id="rateUp" aria-label="+0.25%">▲</button>
+            <button type="button" class="stepper-btn" id="rateDn" aria-label="-0.25%">▼</button>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label for="dayBasis" data-i18n="lbl.dayBasis">База расчёта</label>
+        <select id="dayBasis">
+          <option value="360" selected data-i18n="opt.act360">ACT/360 (факт/360)</option>
+          <option value="365" data-i18n="opt.act365">ACT/365 (факт/365)</option>
+          <option value="30_360" data-i18n="opt.30_360">30/360 (европейский)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="term" data-i18n="lbl.term">Срок, месяцев</label>
+        <input type="number" id="term" min="1" max="600" step="1" value="36" />
+      </div>
+      <div class="field">
+        <label for="disbursementDate" data-i18n="lbl.disbursement">Дата выдачи займа</label>
+        <input type="date" id="disbursementDate" title="Первый платёж — со следующего периода" />
+      </div>
+      <div class="field">
+        <label for="gracePeriod" data-i18n="lbl.grace">Льготный период, мес.</label>
+        <input type="number" id="gracePeriod" min="0" max="360" step="1" value="0" title="Платежи отсутствуют; начисленные проценты равномерно распределяются по основному сроку" />
+      </div>
+      <div class="field">
+        <label for="paymentFreq" data-i18n="lbl.freq">Периодичность</label>
+        <select id="paymentFreq">
+          <option value="1" selected data-i18n="opt.monthly">Ежемесячно</option>
+          <option value="3" data-i18n="opt.quarterly">Ежеквартально</option>
+        </select>
+      </div>
+      <div class="field" style="position:relative">
+        <label for="commissionVal" data-i18n="lbl.commission">Комиссия за организацию займа</label>
+        <div class="input-addon">
+          <input type="text" id="commissionVal" inputmode="decimal" min="0" step="0.01" value="0" />
+          <select id="commissionType">
+            <option value="sum" selected>₸</option>
+            <option value="pct">%</option>
+          </select>
+        </div>
+        <small id="commissionPctHint" style="position:absolute;left:0;bottom:-1.25em;color:var(--accent);font-size:0.78rem;white-space:nowrap;visibility:hidden"></small>
+      </div>
+      <p class="inputs-hint" data-i18n="hint.inputs">Первый платёж — со следующего периода · Льготный: платежи отсутствуют, начисленные проценты равномерно распределяются по основному сроку · Комиссия за организацию займа включается в расчёт ГЭСВ</p>
+      <div class="actions">
+        <button type="button" id="calcBtn" class="btn-primary" data-i18n="btn.calc">Рассчитать</button>
+        <button type="button" id="exportBtn" class="btn-secondary" data-i18n="btn.excel">Выгрузить в Excel</button>
+        <button type="button" id="wordBtn" class="btn-secondary" data-i18n="btn.word">Выгрузить в Word</button>
+        <button type="button" id="pdfBtn" class="btn-secondary" data-i18n="btn.pdf">Выгрузить в PDF</button>
+      </div>
+    </section>
+
+    <section id="summary" class="panel summary hidden">
+      <p id="dateInfo" class="date-info"></p>
+      <div class="summary-grid">
+        <article class="summary-card" data-type="annuity">
+          <h2 data-i18n="card.annuity">Аннуитет</h2>
+          <dl class="summary-dl">
+            <div class="summary-dl__details">
+              <div class="summary-row">
+                <dt id="annuityPaymentLabel" data-i18n="lbl.monthlyPmt">Ежемесячный платёж</dt>
+                <dd id="annuityPayment">—</dd>
+              </div>
+              <div class="summary-row">
+                <dt data-i18n="lbl.structure">Структура 1-го / последнего</dt>
+                <dd id="annuityStructure" class="summary-dd--wrap">—</dd>
+              </div>
+            </div>
+            <div class="summary-dl__totals">
+              <div class="summary-row">
+                <dt data-i18n="lbl.totalPaid">Всего выплат</dt>
+                <dd id="annuityTotal">—</dd>
+              </div>
+              <div class="summary-row summary-row--highlight">
+                <dt data-i18n="lbl.overpay">Переплата</dt>
+                <dd id="annuityOverpay">—</dd>
+              </div>
+              <div class="summary-row">
+                <dt data-i18n="lbl.eir">ГЭСВ</dt>
+                <dd id="annuityEIR">—</dd>
+              </div>
+            </div>
+          </dl>
+        </article>
+        <article class="summary-card" data-type="diff">
+          <h2 data-i18n="card.diff">Дифференцированный</h2>
+          <dl class="summary-dl">
+            <div class="summary-dl__details">
+              <div class="summary-row">
+                <dt data-i18n="lbl.firstPmt">Первый платёж</dt>
+                <dd id="diffFirst">—</dd>
+              </div>
+              <div class="summary-row">
+                <dt data-i18n="lbl.lastPmt">Последний платёж</dt>
+                <dd id="diffLast">—</dd>
+              </div>
+            </div>
+            <div class="summary-dl__totals">
+              <div class="summary-row">
+                <dt data-i18n="lbl.totalPaid">Всего выплат</dt>
+                <dd id="diffTotal">—</dd>
+              </div>
+              <div class="summary-row summary-row--highlight">
+                <dt data-i18n="lbl.overpay">Переплата</dt>
+                <dd id="diffOverpay">—</dd>
+              </div>
+              <div class="summary-row">
+                <dt data-i18n="lbl.eir">ГЭСВ</dt>
+                <dd id="diffEIR">—</dd>
+              </div>
+            </div>
+          </dl>
+        </article>
+      </div>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab active" data-tab="annuity-table" role="tab" data-i18n="tab.annuity">Аннуитетный график</button>
+      <button type="button" class="tab" data-tab="diff-table" role="tab" data-i18n="tab.diff">График дифференцированный</button>
+      <button type="button" class="tab" data-tab="breakdown" role="tab" data-i18n="tab.breakdown">Разрез платежей</button>
+    </nav>
+
+    <section id="annuity-table" class="tab-panel active panel">
+      <h3 class="print-section-title" data-i18n="tab.annuity">Аннуитетный график</h3>
+      <div class="table-wrap">
+        <table id="annuityTable">
+          <thead>
+            <tr>
+              <th data-i18n="th.num">№</th>
+              <th data-i18n="th.date">Дата</th>
+              <th data-i18n="th.payment">Платёж</th>
+              <th data-i18n="th.principal">Основной долг</th>
+              <th data-i18n="th.interest">Проценты</th>
+              <th class="deferred-col" data-i18n="th.deferred">Отсрочка</th>
+              <th data-i18n="th.balance">Остаток долга</th>
+            </tr>
+          </thead>
+          <tbody id="annuityBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="diff-table" class="tab-panel panel hidden">
+      <h3 class="print-section-title" data-i18n="tab.diff">График дифференцированный</h3>
+      <div class="table-wrap">
+        <table id="diffTable">
+          <thead>
+            <tr>
+              <th data-i18n="th.num">№</th>
+              <th data-i18n="th.date">Дата</th>
+              <th data-i18n="th.payment">Платёж</th>
+              <th data-i18n="th.principal">Основной долг</th>
+              <th data-i18n="th.interest">Проценты</th>
+              <th class="deferred-col" data-i18n="th.deferred">Отсрочка</th>
+              <th data-i18n="th.balance">Остаток долга</th>
+            </tr>
+          </thead>
+          <tbody id="diffBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="breakdown" class="tab-panel panel hidden">
+      <h3 class="print-section-title" data-i18n="tab.breakdown">Разрез платежей</h3>
+      <p class="chart-hint" data-i18n="chart.hint">Структура каждого платежа: основной долг и проценты</p>
+      <div class="chart-controls">
+        <div class="chart-toggle" role="group" aria-label="Режим отображения">
+          <label><input type="radio" name="chartView" value="both" checked /> <span data-i18n="chart.viewBoth">Оба графика</span></label>
+          <label><input type="radio" name="chartView" value="single" /> <span data-i18n="chart.viewSingle">Один график</span></label>
+        </div>
+        <div id="chartTypePicker" class="chart-toggle chart-type-picker hidden" role="group" aria-label="Тип графика">
+          <label><input type="radio" name="chartType" value="annuity" checked /> <span data-i18n="chart.typeAnnuity">Аннуитет</span></label>
+          <label><input type="radio" name="chartType" value="diff" /> <span data-i18n="chart.typeDiff">Дифференцированный</span></label>
+        </div>
+      </div>
+      <div class="charts">
+        <figure class="chart-figure" data-chart="annuity">
+          <figcaption data-i18n="chart.capAnnuity">Аннуитет — разрез по периодам</figcaption>
+          <div class="chart-canvas-wrap">
+            <canvas id="chartAnnuity"></canvas>
+          </div>
+          <p class="legend-inline">
+            <span class="leg-principal" data-i18n="leg.principal">Основной долг</span>
+            <span class="leg-interest" data-i18n="leg.interest">Проценты</span>
+            <span class="leg-deferred deferred-legend hidden" data-i18n="leg.deferred">Отсрочка</span>
+          </p>
+        </figure>
+        <figure class="chart-figure" data-chart="diff">
+          <figcaption data-i18n="chart.capDiff">Дифференцированный — разрез по периодам</figcaption>
+          <div class="chart-canvas-wrap">
+            <canvas id="chartDiff"></canvas>
+          </div>
+          <p class="legend-inline">
+            <span class="leg-principal" data-i18n="leg.principal">Основной долг</span>
+            <span class="leg-interest" data-i18n="leg.interest">Проценты</span>
+            <span class="leg-deferred deferred-legend hidden" data-i18n="leg.deferred">Отсрочка</span>
+          </p>
+        </figure>
+      </div>
+    </section>
+
+    <footer class="app-footer">
+      <p class="app-footer__text">
+        <span class="app-footer__brand">Vibecoding</span>
+        <span class="app-footer__sep">from</span>
+        <span class="app-footer__author">Boris Khmarnyy</span>
+        <span class="app-footer__dot" aria-hidden="true">·</span>
+        <span class="app-footer__rights">All Rights Reserved</span>
+      </p>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script>
+(function () {
+  "use strict";
+
+  // ─── i18n ─────────────────────────────────────────────────────────────
+  var currentLang = "ru";
+  var TRANSLATIONS = {
+    ru: {
+      title: "Кредитный калькулятор",
+      subtitle: "Помесячный расчёт: аннуитет и дифференцированные платежи",
+      "lbl.amount": "Сумма кредита, ₸", "lbl.rate": "Ставка, % годовых",
+      "lbl.dayBasis": "База расчёта", "lbl.term": "Срок, месяцев",
+      "lbl.disbursement": "Дата выдачи займа", "lbl.grace": "Льготный период, мес.",
+      "lbl.freq": "Периодичность", "lbl.commission": "Комиссия за организацию займа",
+      "opt.act360": "ACT/360 (факт/360)", "opt.act365": "ACT/365 (факт/365)",
+      "opt.30_360": "30/360 (европейский)", "opt.monthly": "Ежемесячно", "opt.quarterly": "Ежеквартально",
+      "btn.calc": "Рассчитать", "btn.excel": "Выгрузить в Excel",
+      "btn.word": "Выгрузить в Word", "btn.pdf": "Выгрузить в PDF",
+      "hint.inputs": "Первый платёж — со следующего периода · Льготный: платежи отсутствуют, начисленные проценты равномерно распределяются по основному сроку · Комиссия за организацию займа включается в расчёт ГЭСВ",
+      "card.annuity": "Аннуитет", "card.diff": "Дифференцированный",
+      "lbl.monthlyPmt": "Ежемесячный платёж", "lbl.quarterlyPmt": "Квартальный платёж",
+      "lbl.structure": "Структура 1-го / последнего",
+      "lbl.totalPaid": "Всего выплат", "lbl.overpay": "Переплата", "lbl.eir": "ГЭСВ",
+      "lbl.firstPmt": "Первый платёж", "lbl.lastPmt": "Последний платёж",
+      "tab.annuity": "Аннуитетный график", "tab.diff": "График дифференцированный", "tab.breakdown": "Разрез платежей",
+      "th.num": "№", "th.date": "Дата", "th.payment": "Платёж",
+      "th.principal": "Основной долг", "th.interest": "Проценты",
+      "th.deferred": "Отсрочка", "th.balance": "Остаток долга",
+      "chart.hint": "Структура каждого платежа: основной долг и проценты",
+      "chart.viewBoth": "Оба графика", "chart.viewSingle": "Один график",
+      "chart.typeAnnuity": "Аннуитет", "chart.typeDiff": "Дифференцированный",
+      "chart.capAnnuity": "Аннуитет — разрез по периодам", "chart.capDiff": "Дифференцированный — разрез по периодам",
+      "leg.principal": "Основной долг", "leg.interest": "Проценты", "leg.deferred": "Отсрочка",
+      "word.title": "Кредитный калькулятор", "word.params": "Параметры займа",
+      "word.annuitySchedule": "Аннуитетный график платежей", "word.diffSchedule": "Дифференцированный график платежей",
+      "word.grace": "льгота",
+      "err.amount": "Укажите корректную сумму кредита.", "err.rate": "Укажите корректную ставку.",
+      "err.term": "Срок должен быть не менее 1 месяца.", "err.periods": "Срок слишком мал для выбранной периодичности.",
+      "err.grace": "Льготный период не может быть больше или равен сроку кредита.",
+      "err.disbursement": "Укажите корректную дату выдачи займа.",
+      "err.commissionPct": "Комиссия в % не может превышать 100%.", "err.commissionSum": "Комиссия в ₸ не может превышать сумму кредита.",
+      "err.noCalc": "Сначала нажмите «Рассчитать».",
+      "err.excel": "Библиотека Excel не загрузилась. Нужен интернет для загрузки страницы.", "err.excelFail": "Не удалось создать файл Excel. Попробуйте ещё раз.",
+    },
+    kk: {
+      title: "Несие калькуляторы",
+      subtitle: "Ай сайынғы есептеу: аннуитет және дифференциалды төлемдер",
+      "lbl.amount": "Несие сомасы, ₸", "lbl.rate": "Мөлшерлеме, % жылдық",
+      "lbl.dayBasis": "Есептеу базасы", "lbl.term": "Мерзімі, ай",
+      "lbl.disbursement": "Берілген күн", "lbl.grace": "Жеңілдік кезеңі, ай",
+      "lbl.freq": "Кезеңділік", "lbl.commission": "Несие ұйымдастыру комиссиясы",
+      "opt.act360": "ACT/360 (факт/360)", "opt.act365": "ACT/365 (факт/365)",
+      "opt.30_360": "30/360 (еуропалық)", "opt.monthly": "Ай сайын", "opt.quarterly": "Тоқсан сайын",
+      "btn.calc": "Есептеу", "btn.excel": "Excel-ке шығару",
+      "btn.word": "Word-ке шығару", "btn.pdf": "PDF-ке шығару",
+      "hint.inputs": "Бірінші төлем — келесі кезеңнен · Жеңілдік: төлемдер жоқ, есептелген пайыздар негізгі мерзімге тең бөлінеді · Несие ұйымдастыру комиссиясы ЖЭТМ есебіне қосылады",
+      "card.annuity": "Аннуитет", "card.diff": "Дифференциалды",
+      "lbl.monthlyPmt": "Ай сайынғы төлем", "lbl.quarterlyPmt": "Тоқсандық төлем",
+      "lbl.structure": "1-ші / соңғы төлем құрылымы",
+      "lbl.totalPaid": "Барлық төлем", "lbl.overpay": "Артық төлем", "lbl.eir": "ЖЭТМ",
+      "lbl.firstPmt": "Бірінші төлем", "lbl.lastPmt": "Соңғы төлем",
+      "tab.annuity": "Аннуитеттік кесте", "tab.diff": "Дифференциалды кесте", "tab.breakdown": "Төлем құрылымы",
+      "th.num": "№", "th.date": "Күн", "th.payment": "Төлем",
+      "th.principal": "Негізгі қарыз", "th.interest": "Пайыздар",
+      "th.deferred": "Кейінге қалдыру", "th.balance": "Қарыз қалдығы",
+      "chart.hint": "Әр төлемнің құрылымы: негізгі қарыз және пайыздар",
+      "chart.viewBoth": "Екі кесте", "chart.viewSingle": "Бір кесте",
+      "chart.typeAnnuity": "Аннуитет", "chart.typeDiff": "Дифференциалды",
+      "chart.capAnnuity": "Аннуитет — кезең бойынша бөлу", "chart.capDiff": "Дифференциалды — кезең бойынша бөлу",
+      "leg.principal": "Негізгі қарыз", "leg.interest": "Пайыздар", "leg.deferred": "Кейінге қалдыру",
+      "word.title": "Несие калькуляторы", "word.params": "Несие параметрлері",
+      "word.annuitySchedule": "Аннуитеттік төлем кестесі", "word.diffSchedule": "Дифференциалды төлем кестесі",
+      "word.grace": "жеңілдік",
+      "err.amount": "Несие сомасын дұрыс енгізіңіз.", "err.rate": "Мөлшерлемені дұрыс енгізіңіз.",
+      "err.term": "Мерзімі кемінде 1 ай болуы керек.", "err.periods": "Мерзімі таңдалған кезеңділік үшін тым қысқа.",
+      "err.grace": "Жеңілдік кезеңі несие мерзімінен кем болуы керек.",
+      "err.disbursement": "Берілген күнді дұрыс енгізіңіз.",
+      "err.commissionPct": "% комиссия 100%-дан аспауы керек.", "err.commissionSum": "₸ комиссия несие сомасынан аспауы керек.",
+      "err.noCalc": "Алдымен «Есептеу» түймесін басыңыз.",
+      "err.excel": "Excel кітапханасы жүктелмеді. Интернет қажет.", "err.excelFail": "Excel файлын жасау мүмкін болмады. Қайта көріңіз.",
+    },
+    en: {
+      title: "Loan Calculator",
+      subtitle: "Monthly calculation: annuity and differentiated payments",
+      "lbl.amount": "Loan amount, ₸", "lbl.rate": "Rate, % per annum",
+      "lbl.dayBasis": "Day count basis", "lbl.term": "Term, months",
+      "lbl.disbursement": "Disbursement date", "lbl.grace": "Grace period, months",
+      "lbl.freq": "Payment frequency", "lbl.commission": "Origination commission",
+      "opt.act360": "ACT/360 (actual/360)", "opt.act365": "ACT/365 (actual/365)",
+      "opt.30_360": "30/360 (European)", "opt.monthly": "Monthly", "opt.quarterly": "Quarterly",
+      "btn.calc": "Calculate", "btn.excel": "Export to Excel",
+      "btn.word": "Export to Word", "btn.pdf": "Export to PDF",
+      "hint.inputs": "First payment — from the next period · Grace: no payments, accrued interest is spread evenly over the main term · Origination commission is included in the EIR calculation",
+      "card.annuity": "Annuity", "card.diff": "Differentiated",
+      "lbl.monthlyPmt": "Monthly payment", "lbl.quarterlyPmt": "Quarterly payment",
+      "lbl.structure": "Structure 1st / last",
+      "lbl.totalPaid": "Total payments", "lbl.overpay": "Overpayment", "lbl.eir": "EIR",
+      "lbl.firstPmt": "First payment", "lbl.lastPmt": "Last payment",
+      "tab.annuity": "Annuity schedule", "tab.diff": "Differentiated schedule", "tab.breakdown": "Payment breakdown",
+      "th.num": "No.", "th.date": "Date", "th.payment": "Payment",
+      "th.principal": "Principal", "th.interest": "Interest",
+      "th.deferred": "Deferred", "th.balance": "Balance",
+      "chart.hint": "Structure of each payment: principal and interest",
+      "chart.viewBoth": "Both schedules", "chart.viewSingle": "One schedule",
+      "chart.typeAnnuity": "Annuity", "chart.typeDiff": "Differentiated",
+      "chart.capAnnuity": "Annuity — breakdown by period", "chart.capDiff": "Differentiated — breakdown by period",
+      "leg.principal": "Principal", "leg.interest": "Interest", "leg.deferred": "Deferred",
+      "word.title": "Loan Calculator", "word.params": "Loan Parameters",
+      "word.annuitySchedule": "Annuity Payment Schedule", "word.diffSchedule": "Differentiated Payment Schedule",
+      "word.grace": "grace",
+      "err.amount": "Please enter a valid loan amount.", "err.rate": "Please enter a valid interest rate.",
+      "err.term": "Term must be at least 1 month.", "err.periods": "Term is too short for the selected frequency.",
+      "err.grace": "Grace period cannot be greater than or equal to the loan term.",
+      "err.disbursement": "Please enter a valid disbursement date.",
+      "err.commissionPct": "Commission in % cannot exceed 100%.", "err.commissionSum": "Commission in ₸ cannot exceed the loan amount.",
+      "err.noCalc": "Please click «Calculate» first.",
+      "err.excel": "Excel library failed to load. Internet connection required.", "err.excelFail": "Failed to create Excel file. Please try again.",
+    },
+  };
+  function t(key) { return (TRANSLATIONS[currentLang] || TRANSLATIONS.ru)[key] || key; }
+  function applyLang() {
+    document.querySelectorAll("[data-i18n]").forEach(function(el) {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+  }
+  function setLanguage(lang) {
+    currentLang = lang;
+    document.querySelectorAll(".lang-btn").forEach(function(b) {
+      b.classList.toggle("active", b.getAttribute("data-lang") === lang);
+    });
+    applyLang();
+    // Re-update dynamic payment label if results are visible
+    var payLbl = document.getElementById("annuityPaymentLabel");
+    if (payLbl && lastAnnuity) {
+      var freq = Number(paymentFreqEl.value) === 3 ? 3 : 1;
+      payLbl.textContent = freq === 3 ? t("lbl.quarterlyPmt") : t("lbl.monthlyPmt");
+    }
+  }
+
+  // ─── Day-basis helpers ────────────────────────────────────────────────
+  function dayBasisLabel(db) {
+    if (db.type === "30_360") return "30/360 (европейский)";
+    if (db.type === "act365") return "ACT/365 (факт/365)";
+    return "ACT/360 (факт/360)";
+  }
+
+  function parseDayBasis(value) {
+    if (value === "365") return { type: "act365", basis: 365 };
+    if (value === "30_360") return { type: "30_360", basis: 360 };
+    return { type: "act360", basis: 360 };
+  }
+
+  // ExcelJS converts Date via UTC — force UTC midnight so no fractional time ends up in the serial
+  function toExcelDate(d) {
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  }
+
+  function daysBetween(from, to) {
+    return Math.max(0, Math.round((to - from) / 86400000));
+  }
+
+  function addMonths(date, count) {
+    var d = new Date(date);
+    d.setMonth(d.getMonth() + count);
+    return d;
+  }
+
+  // periodIdx is 1-based; freq = months per period (1 = monthly, 3 = quarterly)
+  function daysInPeriod(disbDate, periodIdx, freq, dayBasis) {
+    if (dayBasis.type === "30_360") return 30 * freq;
+    var start = periodIdx === 1 ? disbDate : addMonths(disbDate, (periodIdx - 1) * freq);
+    var end = addMonths(disbDate, periodIdx * freq);
+    return daysBetween(start, end);
+  }
+
+  function periodInterest(balance, annualRatePercent, days, dayBasis) {
+    if (days <= 0 || balance <= 0 || annualRatePercent <= 0) return 0;
+    return balance * (annualRatePercent / 100) * (days / dayBasis.basis);
+  }
+
+  function applyAnnuityPeriod(balance, payment, annualRatePercent, days, dayBasis, isLast) {
+    var interest = periodInterest(balance, annualRatePercent, days, dayBasis);
+    if (payment < interest - 1e-6) return null;
+    var principalPart = Math.min(balance, payment - interest);
+    if (principalPart < 0) return null;
+    if (isLast) principalPart = balance;
+    return {
+      principalPart: principalPart,
+      interest: interest,
+      actualPayment: interest + principalPart,
+      nextBalance: Math.max(0, balance - principalPart),
+    };
+  }
+
+  // Binary-search for constant payment over mainPeriods starting at startPeriodIdx
+  function annuityPaymentForPeriods(principal, annualRatePercent, mainPeriods, startPeriodIdx, disbDate, dayBasis, freq) {
+    if (mainPeriods <= 0) return 0;
+    if (annualRatePercent <= 0) return round2(principal / mainPeriods);
+
+    function simulate(payment) {
+      var balance = principal;
+      for (var q = 0; q < mainPeriods; q++) {
+        var step = applyAnnuityPeriod(
+          balance, payment, annualRatePercent,
+          daysInPeriod(disbDate, startPeriodIdx + q, freq, dayBasis),
+          dayBasis, false
+        );
+        if (!step) return principal * 10;
+        balance = step.nextBalance;
+      }
+      return balance;
+    }
+
+    var maxInterest = 0;
+    for (var q = 0; q < mainPeriods; q++) {
+      var interest = periodInterest(
+        principal, annualRatePercent,
+        daysInPeriod(disbDate, startPeriodIdx + q, freq, dayBasis), dayBasis
+      );
+      if (interest > maxInterest) maxInterest = interest;
+    }
+
+    var lo = maxInterest;
+    var hi = principal / mainPeriods + lo * mainPeriods;
+    for (var i = 0; i < 100; i++) {
+      var mid = (lo + hi) / 2;
+      if (simulate(mid) > 0.005) lo = mid; else hi = mid;
+    }
+    return round2((lo + hi) / 2);
+  }
+
+  // ─── Date helpers ─────────────────────────────────────────────────────
+  function todayISODate() { return toISODate(new Date()); }
+
+  function toISODate(date) {
+    var y = date.getFullYear();
+    var m = String(date.getMonth() + 1).padStart(2, "0");
+    var d = String(date.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+
+  function parseDisbursementDate(iso) {
+    if (!iso) return null;
+    var parts = String(iso).split("-").map(Number);
+    if (parts.length !== 3) return null;
+    var date = new Date(parts[0], parts[1] - 1, parts[2]);
+    if (Number.isNaN(date.getTime())) return null;
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+
+  function paymentDate(disbDate, periodIdx, freq) {
+    return addMonths(disbDate, periodIdx * freq);
+  }
+
+  // ─── Schedule builders ────────────────────────────────────────────────
+  function buildAnnuitySchedule(principal, annualRatePercent, months, disbDate, dayBasis, gracePeriods, freq) {
+    var totalPeriods = Math.floor(months / freq);
+    var mainPeriods = totalPeriods - gracePeriods;
+    var rows = [];
+    var totalPaid = 0;
+    var balance = principal; // balance stays at principal during grace (no capitalization)
+    var deferredTotal = 0;
+
+    // Grace phase: interest accrues but is NOT paid and NOT added to balance
+    for (var p = 1; p <= gracePeriods; p++) {
+      var gDays = daysInPeriod(disbDate, p, freq, dayBasis);
+      var gInterest = periodInterest(balance, annualRatePercent, gDays, dayBasis);
+      deferredTotal += gInterest;
+      rows.push({
+        month: p, date: paymentDate(disbDate, p, freq), days: gDays,
+        payment: 0, principal: 0, interest: round2(gInterest), deferred: 0,
+        balance: round2(balance), isGrace: true,
+      });
+    }
+
+    if (mainPeriods <= 0) return { rows: rows, payment: 0, totalPaid: 0, deferredTotal: round2(deferredTotal) };
+
+    // Deferred interest spread equally across all main periods
+    var deferredInstallment = mainPeriods > 0 ? deferredTotal / mainPeriods : 0;
+    var startIdx = gracePeriods + 1;
+    // Annuity is calculated on original principal (balance unchanged from grace)
+    var basePayment = annuityPaymentForPeriods(balance, annualRatePercent, mainPeriods, startIdx, disbDate, dayBasis, freq);
+
+    for (var q = 0; q < mainPeriods; q++) {
+      var pIdx = startIdx + q;
+      var days = daysInPeriod(disbDate, pIdx, freq, dayBasis);
+      var step = applyAnnuityPeriod(balance, basePayment, annualRatePercent, days, dayBasis, q === mainPeriods - 1);
+      if (!step) break;
+      balance = step.nextBalance;
+      var rowDeferred = round2(deferredInstallment);
+      var rowInterest = round2(step.interest + deferredInstallment);
+      var rowPayment = round2(step.actualPayment + deferredInstallment);
+      totalPaid += rowPayment;
+      rows.push({
+        month: pIdx, date: paymentDate(disbDate, pIdx, freq), days: days,
+        payment: rowPayment, principal: round2(step.principalPart),
+        interest: rowInterest, deferred: rowDeferred,
+        balance: round2(balance), isGrace: false,
+      });
+    }
+    return {
+      rows: rows,
+      payment: round2(basePayment + deferredInstallment),
+      totalPaid: round2(totalPaid),
+      deferredTotal: round2(deferredTotal),
+    };
+  }
+
+  function buildDifferentiatedSchedule(principal, annualRatePercent, months, disbDate, dayBasis, gracePeriods, freq) {
+    var totalPeriods = Math.floor(months / freq);
+    var mainPeriods = totalPeriods - gracePeriods;
+    var rows = [];
+    var totalPaid = 0;
+    var balance = principal; // balance stays at principal during grace (no capitalization)
+    var deferredTotal = 0;
+
+    // Grace phase
+    for (var p = 1; p <= gracePeriods; p++) {
+      var gDays = daysInPeriod(disbDate, p, freq, dayBasis);
+      var gInterest = periodInterest(balance, annualRatePercent, gDays, dayBasis);
+      deferredTotal += gInterest;
+      rows.push({
+        month: p, date: paymentDate(disbDate, p, freq), days: gDays,
+        payment: 0, principal: 0, interest: round2(gInterest), deferred: 0,
+        balance: round2(balance), isGrace: true,
+      });
+    }
+
+    var deferredInstallment = mainPeriods > 0 ? deferredTotal / mainPeriods : 0;
+    var principalPart = mainPeriods > 0 ? balance / mainPeriods : 0;
+    for (var q = 0; q < mainPeriods; q++) {
+      var pIdx = gracePeriods + 1 + q;
+      var days = daysInPeriod(disbDate, pIdx, freq, dayBasis);
+      var periodInt = periodInterest(balance, annualRatePercent, days, dayBasis);
+      var body = q === mainPeriods - 1 ? balance : principalPart;
+      var rowDeferred = round2(deferredInstallment);
+      var rowInterest = round2(periodInt + deferredInstallment);
+      var rowPayment = round2(body + rowInterest);
+      balance = Math.max(0, balance - body);
+      totalPaid += rowPayment;
+      rows.push({
+        month: pIdx, date: paymentDate(disbDate, pIdx, freq), days: days,
+        payment: rowPayment, principal: round2(body),
+        interest: rowInterest, deferred: rowDeferred,
+        balance: round2(balance), isGrace: false,
+      });
+    }
+
+    var mainRows = rows.filter(function (r) { return !r.isGrace; });
+    return {
+      rows: rows,
+      firstPayment: round2(mainRows.length ? mainRows[0].payment : 0),
+      lastPayment: round2(mainRows.length ? mainRows[mainRows.length - 1].payment : 0),
+      totalPaid: round2(totalPaid),
+      deferredTotal: round2(deferredTotal),
+    };
+  }
+
+  // ─── Formatting ───────────────────────────────────────────────────────
+  function round2(n) { return Math.round(n * 100) / 100; }
+
+  function formatMoney(n) {
+    return new Intl.NumberFormat("kk-KZ", { style: "currency", currency: "KZT", maximumFractionDigits: 0 }).format(n);
+  }
+
+  function parseAmountInput(value) {
+    var digits = String(value).replace(/\D/g, "");
+    return digits === "" ? NaN : Number(digits);
+  }
+
+  function formatAmountInput(value) {
+    var n = typeof value === "number" ? value : parseAmountInput(value);
+    return Number.isFinite(n) ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) : "";
+  }
+
+  function formatDate(d) {
+    return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+  }
+
+  function interestSharePercent(payment, interest) {
+    if (!payment || payment <= 0) return 0;
+    return Math.round((interest / payment) * 100);
+  }
+
+  // ─── Excel export ─────────────────────────────────────────────────────
+  var FMT_CURRENCY = '#,##0" ₸"';
+  var FMT_PERCENT = '0.0"%"';
+  var FMT_INT = "#,##0";
+  var FMT_DATE = "dd.mm.yyyy";
+  var COLOR = {
+    accent: "FF1A5FB4", accentLight: "FFEEF4FC", border: "FFE8EBF0", zebra: "FFF8F9FB",
+    white: "FFFFFFFF", text: "FF1A1D23", muted: "FF5C6370", principal: "FF1B7A4A",
+    interest: "FFC45C00", grace: "FFF2F2F2",
+  };
+
+  function thinBorder() {
+    return {
+      top: { style: "thin", color: { argb: COLOR.border } },
+      left: { style: "thin", color: { argb: COLOR.border } },
+      bottom: { style: "thin", color: { argb: COLOR.border } },
+      right: { style: "thin", color: { argb: COLOR.border } },
+    };
+  }
+
+  function setCurrency(cell, value, bold) {
+    cell.value = value;
+    cell.numFmt = FMT_CURRENCY;
+    cell.alignment = { horizontal: "right", vertical: "middle" };
+    cell.border = thinBorder();
+    cell.font = { name: "Calibri", size: 11, bold: !!bold, color: { argb: bold ? COLOR.accent : COLOR.text } };
+    if (bold) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR.accentLight } };
+  }
+
+  function setLabel(cell, text) {
+    cell.value = text;
+    cell.alignment = { horizontal: "left", vertical: "middle" };
+    cell.border = thinBorder();
+    cell.font = { name: "Calibri", size: 11, color: { argb: COLOR.muted } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR.zebra } };
+  }
+
+  function styleHeaderRow(row) {
+    row.height = 22;
+    row.eachCell(function (cell) {
+      cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR.accent } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFFFFFFF" } },
+        left: { style: "thin", color: { argb: "FFFFFFFF" } },
+        bottom: { style: "thin", color: { argb: "FFFFFFFF" } },
+        right: { style: "thin", color: { argb: "FFFFFFFF" } },
+      };
+    });
+  }
+
+  function addSheetTitle(sheet, title, subtitle, colLetter) {
+    sheet.mergeCells("A1:" + colLetter + "1");
+    sheet.getCell("A1").value = title;
+    sheet.getCell("A1").font = { name: "Calibri", size: 16, bold: true, color: { argb: COLOR.accent } };
+    sheet.getRow(1).height = 28;
+    sheet.mergeCells("A2:" + colLetter + "2");
+    sheet.getCell("A2").value = subtitle;
+    sheet.getCell("A2").font = { name: "Calibri", size: 10, color: { argb: COLOR.muted } };
+  }
+
+  function buildParamsSheet(workbook, data) {
+    var principal = data.principal, rate = data.rate, months = data.months;
+    var disbursement = data.disbursement, firstPayment = data.firstPayment, dayBasis = data.dayBasis;
+    var annuity = data.annuity, diff = data.diff;
+    var gracePeriods = data.gracePeriods || 0;
+    var freq = data.freq || 1;
+    var sheet = workbook.addWorksheet("Параметры", { views: [{ showGridLines: true }] });
+    sheet.columns = [{ width: 28 }, { width: 20 }];
+    var stamp = new Intl.DateTimeFormat("ru-RU", {
+      day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit",
+    }).format(new Date());
+    addSheetTitle(sheet, "Кредитный калькулятор", "Сформировано: " + stamp, "B");
+    var head = sheet.getRow(4);
+    head.values = ["Параметр", "Значение"];
+    styleHeaderRow(head);
+    var r = 5;
+    function addRow(label, value, fmt) {
+      setLabel(sheet.getCell("A" + r), label);
+      var c = sheet.getCell("B" + r);
+      c.value = value; c.numFmt = fmt;
+      c.alignment = { horizontal: "right", vertical: "middle" };
+      c.border = thinBorder();
+      c.font = { name: "Calibri", size: 11 };
+      r++;
+    }
+    function addTextRow(label, value) {
+      setLabel(sheet.getCell("A" + r), label);
+      var c = sheet.getCell("B" + r);
+      c.value = value;
+      c.alignment = { horizontal: "right", vertical: "middle" };
+      c.border = thinBorder();
+      c.font = { name: "Calibri", size: 11 };
+      r++;
+    }
+    addRow("Сумма кредита", principal, FMT_CURRENCY);
+    addRow("Ставка (годовых)", rate, FMT_PERCENT);
+    addTextRow("База расчёта", dayBasisLabel(dayBasis));
+    addRow("Срок (месяцев)", months, FMT_INT);
+    addTextRow("Периодичность", freq === 3 ? "Ежеквартально" : "Ежемесячно");
+    if (gracePeriods > 0) addRow("Льготный период (пер.)", gracePeriods, FMT_INT);
+    setLabel(sheet.getCell("A" + r), "Дата выдачи займа");
+    var disbCell = sheet.getCell("B" + r);
+    disbCell.value = toExcelDate(disbursement); disbCell.numFmt = FMT_DATE;
+    disbCell.alignment = { horizontal: "right", vertical: "middle" };
+    disbCell.border = thinBorder(); disbCell.font = { name: "Calibri", size: 11 };
+    r++;
+    setLabel(sheet.getCell("A" + r), "Первый платёж");
+    var firstCell = sheet.getCell("B" + r);
+    firstCell.value = toExcelDate(firstPayment); firstCell.numFmt = FMT_DATE;
+    firstCell.alignment = { horizontal: "right", vertical: "middle" };
+    firstCell.border = thinBorder(); firstCell.font = { name: "Calibri", size: 11 };
+    r += 2;
+    function section(title) {
+      sheet.mergeCells("A" + r + ":B" + r);
+      var c = sheet.getCell("A" + r);
+      c.value = title;
+      c.font = { name: "Calibri", size: 11, bold: true, color: { argb: COLOR.accent } };
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR.accentLight } };
+      c.border = thinBorder();
+      r++;
+    }
+    var commissionAmt = data.commissionAmt || 0;
+    if (commissionAmt > 0) addRow("Комиссия за организацию займа", commissionAmt, FMT_CURRENCY);
+    section("Аннуитет");
+    addRow("Размер платежа", annuity.payment, FMT_CURRENCY);
+    addRow("Всего выплат", annuity.totalPaid, FMT_CURRENCY);
+    setLabel(sheet.getCell("A" + r), "Переплата");
+    setCurrency(sheet.getCell("B" + r), annuity.totalPaid - principal, true);
+    r++;
+    if (data.annuityEIR !== null && data.annuityEIR !== undefined) addRow("ГЭСВ (аннуитет)", data.annuityEIR, '0.000"%"');
+    r++;
+    section("Дифференцированный");
+    addRow("Первый платёж", diff.firstPayment, FMT_CURRENCY);
+    addRow("Последний платёж", diff.lastPayment, FMT_CURRENCY);
+    addRow("Всего выплат", diff.totalPaid, FMT_CURRENCY);
+    setLabel(sheet.getCell("A" + r), "Переплата");
+    setCurrency(sheet.getCell("B" + r), diff.totalPaid - principal, true);
+    r++;
+    if (data.diffEIR !== null && data.diffEIR !== undefined) addRow("ГЭСВ (диф.)", data.diffEIR, '0.000"%"');
+  }
+
+  var COLOR_DEFERRED_BG = "FFFFF3CD";
+  var COLOR_DEFERRED_FG = "FFC08000";
+
+  function buildScheduleSheet(workbook, sheetName, subtitle, rows) {
+    var hasDeferred = rows.some(function (r) { return (r.deferred || 0) > 0; });
+    var lastCol = hasDeferred ? "G" : "F";
+    var sheet = workbook.addWorksheet(sheetName, { views: [{ state: "frozen", ySplit: 4, activeCell: "A5" }] });
+    if (hasDeferred) {
+      sheet.columns = [{ width: 6 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 15 }];
+    } else {
+      sheet.columns = [{ width: 6 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 15 }];
+    }
+    addSheetTitle(sheet, "График платежей", subtitle, lastCol);
+    var head = sheet.getRow(4);
+    if (hasDeferred) {
+      head.values = ["№", "Дата", "Платёж", "Основной долг", "Проценты", "Отсрочка", "Остаток долга"];
+    } else {
+      head.values = ["№", "Дата", "Платёж", "Основной долг", "Проценты", "Остаток долга"];
+    }
+    styleHeaderRow(head);
+    var rowNum = 5;
+    rows.forEach(function (item, i) {
+      var isGrace = !!item.isGrace;
+      var alt = i % 2 === 1;
+      var bg = isGrace ? COLOR.grace : (alt ? COLOR.zebra : COLOR.white);
+      var fgText = isGrace ? COLOR.muted : COLOR.text;
+      var row = sheet.getRow(rowNum);
+      row.getCell(1).value = item.month;
+      row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+      row.getCell(1).font = { name: "Calibri", size: 11, color: { argb: fgText } };
+      row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+      row.getCell(1).border = thinBorder();
+      var dateCell = row.getCell(2);
+      dateCell.value = toExcelDate(item.date); dateCell.numFmt = FMT_DATE;
+      dateCell.alignment = { horizontal: "center", vertical: "middle" };
+      dateCell.font = { name: "Calibri", size: 11, color: { argb: fgText } };
+      dateCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+      dateCell.border = thinBorder();
+      // Pure interest (without deferred) for column 5
+      var pureInterest = isGrace ? item.interest : Math.max(0, item.interest - (item.deferred || 0));
+      var balanceCol = hasDeferred ? 7 : 6;
+      var colDefs = [
+        { col: 3, val: item.payment, color: fgText, bold: false },
+        { col: 4, val: item.principal, color: isGrace ? COLOR.muted : COLOR.principal, bold: false },
+        { col: 5, val: pureInterest, color: COLOR.interest, bold: false },
+      ];
+      if (hasDeferred) {
+        colDefs.push({ col: 6, val: item.deferred || 0, color: COLOR_DEFERRED_FG, bold: false, deferBg: !isGrace && (item.deferred || 0) > 0 });
+      }
+      colDefs.push({ col: balanceCol, val: item.balance, color: fgText, bold: !isGrace });
+      colDefs.forEach(function (mc) {
+        var c = row.getCell(mc.col);
+        c.value = mc.val; c.numFmt = FMT_CURRENCY;
+        c.alignment = { horizontal: "right", vertical: "middle" };
+        c.font = { name: "Calibri", size: 11, bold: mc.bold, color: { argb: mc.color } };
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: mc.deferBg ? COLOR_DEFERRED_BG : bg } };
+        c.border = thinBorder();
+      });
+      rowNum++;
+    });
+    rowNum++;
+    var totalPay = rows.reduce(function (s, r) { return s + r.payment; }, 0);
+    var totalPrincipal = rows.reduce(function (s, r) { return s + r.principal; }, 0);
+    var pureInterestTotal = rows.reduce(function (s, r) {
+      return s + (r.isGrace ? r.interest : Math.max(0, r.interest - (r.deferred || 0)));
+    }, 0);
+    var totalDeferred = rows.reduce(function (s, r) { return s + (r.deferred || 0); }, 0);
+    var totalRow = sheet.getRow(rowNum);
+    if (hasDeferred) {
+      totalRow.values = ["", "Итого", totalPay, totalPrincipal, pureInterestTotal, totalDeferred, 0];
+    } else {
+      totalRow.values = ["", "Итого", totalPay, totalPrincipal, pureInterestTotal, 0];
+    }
+    var totCols = hasDeferred ? 7 : 6;
+    totalRow.eachCell(function (cell, col) {
+      if (col === 1 || col > totCols) return;
+      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: COLOR.accent } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR.accentLight } };
+      cell.border = thinBorder();
+      if (col >= 3) { cell.numFmt = FMT_CURRENCY; cell.alignment = { horizontal: "right", vertical: "middle" }; }
+      else if (col === 2) { cell.alignment = { horizontal: "center", vertical: "middle" }; }
+    });
+    sheet.autoFilter = "A4:" + lastCol + "4";
+  }
+
+  async function exportLoanToExcel(principal, rate, months, disbursement, dayBasis, gracePeriods, freq, annuity, diff, commissionAmt, annuityEIR, diffEIR) {
+    if (typeof ExcelJS === "undefined") {
+      alert(t("err.excel"));
+      return;
+    }
+    var workbook = new ExcelJS.Workbook();
+    workbook.creator = "Кредитный калькулятор";
+    workbook.created = new Date();
+    var freqLabel = freq === 3 ? "ежеквартально" : "ежемесячно";
+    buildParamsSheet(workbook, {
+      principal: principal, rate: rate, months: months, disbursement: disbursement,
+      firstPayment: paymentDate(disbursement, 1, freq), dayBasis: dayBasis,
+      gracePeriods: gracePeriods, freq: freq, annuity: annuity, diff: diff,
+      commissionAmt: commissionAmt, annuityEIR: annuityEIR, diffEIR: diffEIR,
+    });
+    buildScheduleSheet(workbook, "Аннуитет",
+      "Аннуитет — " + freqLabel + ", " + dayBasisLabel(dayBasis), annuity.rows);
+    buildScheduleSheet(workbook, "Дифференцированный",
+      "Дифференцированный — " + freqLabel + ", " + dayBasisLabel(dayBasis), diff.rows);
+    var buffer = await workbook.xlsx.writeBuffer();
+    var blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ─── DOM refs ─────────────────────────────────────────────────────────
+  var amountEl = document.getElementById("amount");
+  var rateEl = document.getElementById("rate");
+  var termEl = document.getElementById("term");
+  var disbursementEl = document.getElementById("disbursementDate");
+  var dayBasisEl = document.getElementById("dayBasis");
+  var gracePeriodEl = document.getElementById("gracePeriod");
+  var paymentFreqEl = document.getElementById("paymentFreq");
+  var commissionValEl = document.getElementById("commissionVal");
+  var commissionTypeEl = document.getElementById("commissionType");
+  var dateInfoEl = document.getElementById("dateInfo");
+  var calcBtn = document.getElementById("calcBtn");
+  var exportBtn = document.getElementById("exportBtn");
+  var pdfBtn = document.getElementById("pdfBtn");
+  var wordBtn = document.getElementById("wordBtn");
+  var summaryEl = document.getElementById("summary");
+  var annuityBody = document.getElementById("annuityBody");
+  var diffBody = document.getElementById("diffBody");
+  var lastAnnuity = null;
+  var lastDiff = null;
+  var lastAnnuityEIR = null;
+  var lastDiffEIR = null;
+  var lastInput = null;
+  var chartsDirty = true;
+
+  var CHART_HEIGHT = 200;
+  var CHART_BAR_W = 12;
+  var CHART_BAR_GAP = 3;
+  var CHART_MAX_BARS = 24;
+
+  // ─── Input reading ────────────────────────────────────────────────────
+  function readInputs() {
+    var principal = parseAmountInput(amountEl.value);
+    var rate = parseRateInput(rateEl.value);
+    var months = Math.floor(Number(termEl.value));
+    var graceMonths = Math.max(0, Math.floor(Number(gracePeriodEl.value)) || 0);
+    var freq = Number(paymentFreqEl.value) === 3 ? 3 : 1;
+    if (!Number.isFinite(principal) || principal <= 0) { alert(t("err.amount")); return null; }
+    if (!Number.isFinite(rate) || rate < 0) { alert(t("err.rate")); return null; }
+    if (!Number.isFinite(months) || months < 1) { alert(t("err.term")); return null; }
+    var totalPeriods = Math.floor(months / freq);
+    if (totalPeriods < 1) { alert(t("err.periods")); return null; }
+    var gracePeriods = Math.floor(graceMonths / freq);
+    if (gracePeriods >= totalPeriods) { alert(t("err.grace")); return null; }
+    var disbursement = parseDisbursementDate(disbursementEl.value);
+    if (!disbursement) { alert(t("err.disbursement")); return null; }
+    var commissionVal = Math.max(0, parseAmountInput(commissionValEl.value) || 0);
+    var commissionType = commissionTypeEl.value; // "pct" or "sum"
+    var commissionAmt;
+    var commissionHintEl = document.getElementById("commissionPctHint");
+    if (commissionType === "pct") {
+      if (commissionVal > 100) { alert(t("err.commissionPct")); return null; }
+      commissionAmt = principal * commissionVal / 100;
+      if (commissionHintEl) { commissionHintEl.textContent = "= " + formatMoney(commissionAmt); commissionHintEl.style.visibility = "visible"; }
+    } else {
+      if (commissionVal > principal) { alert(t("err.commissionSum")); return null; }
+      commissionAmt = commissionVal;
+      if (commissionHintEl) { commissionHintEl.textContent = ""; commissionHintEl.style.visibility = "hidden"; }
+    }
+    var netPrincipal = principal - commissionAmt;
+    return {
+      principal: principal, rate: rate, months: months,
+      disbursement: disbursement, dayBasis: parseDayBasis(dayBasisEl.value),
+      gracePeriods: gracePeriods, freq: freq, graceMonths: graceMonths,
+      commissionAmt: commissionAmt, commissionVal: commissionVal, commissionType: commissionType,
+      netPrincipal: netPrincipal,
+    };
+  }
+
+  // ─── EIR / ГЭСВ (IRR bisection) ──────────────────────────────────────
+  function calcEIR(netPrincipal, rows, disbDate) {
+    if (!netPrincipal || netPrincipal <= 0 || !rows || !rows.length) return null;
+    var cf = rows.map(function(r) {
+      return { t: daysBetween(disbDate, r.date) / 365, pmt: r.payment };
+    });
+    function npv(r) {
+      return cf.reduce(function(s, c) {
+        return s + c.pmt / Math.pow(1 + r, c.t);
+      }, -netPrincipal);
+    }
+    var lo = -0.9999, hi = 100;
+    for (var i = 0; i < 300; i++) {
+      var mid = (lo + hi) / 2;
+      if (npv(mid) > 0) lo = mid; else hi = mid;
+    }
+    return Math.round((lo + hi) / 2 * 10000) / 100; // percent, 2 decimal places
+  }
+
+  // ─── Table rendering ──────────────────────────────────────────────────
+  function renderTable(tbody, rows) {
+    tbody.innerHTML = rows.map(function (r) {
+      var cls = r.isGrace ? ' class="grace-row"' : "";
+      var paymentCell = r.isGrace ? '<span class="grace-cell">льгота</span>' : formatMoney(r.payment);
+      var principalCell = r.isGrace ? "" : formatMoney(r.principal);
+      var deferredCell = r.isGrace
+        ? '<td class="deferred-col"></td>'
+        : '<td class="deferred-col" style="color:var(--deferred);font-size:0.82rem">' +
+          (r.deferred > 0 ? formatMoney(r.deferred) : "") + "</td>";
+      return "<tr" + cls + "><td>" + r.month + "</td><td>" + formatDate(r.date) + "</td><td>" +
+        paymentCell + "</td><td>" + principalCell + "</td><td>" +
+        formatMoney(r.interest) + "</td>" + deferredCell + "<td>" + formatMoney(r.balance) + "</td></tr>";
+    }).join("");
+  }
+
+  // ─── Chart helpers ────────────────────────────────────────────────────
+  function formatShort(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(0) + "k";
+    return String(Math.round(n));
+  }
+
+  function getChartContainerWidth(wrap) {
+    if (wrap && wrap.clientWidth > 0) return wrap.clientWidth;
+    return 600;
+  }
+
+  function scheduleBreakdownRedraw() {
+    redrawCharts();
+    requestAnimationFrame(redrawCharts);
+  }
+
+  function maxPayment(sampled) {
+    var maxPay = 1;
+    for (var i = 0; i < sampled.length; i++) {
+      if (sampled[i].payment > maxPay) maxPay = sampled[i].payment;
+    }
+    return maxPay;
+  }
+
+  function drawBreakdownChart(canvas, rows) {
+    if (!canvas || !rows || !rows.length) return;
+    var figure = canvas.closest(".chart-figure");
+    if (figure && figure.classList.contains("hidden")) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    var wrap = canvas.parentElement;
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    var step = Math.max(1, Math.ceil(rows.length / CHART_MAX_BARS));
+    var sampled = rows.filter(function (_, i) { return i % step === 0 || i === rows.length - 1; });
+    if (!sampled.length) return;
+    var maxPay = maxPayment(sampled);
+    var n = sampled.length;
+    var pad = { top: 14, right: 12, bottom: 26, left: 46 };
+    var plotW = n * CHART_BAR_W + Math.max(0, n - 1) * CHART_BAR_GAP;
+    var containerW = getChartContainerWidth(wrap);
+    var w = Math.max(pad.left + pad.right + plotW, containerW);
+    var h = CHART_HEIGHT;
+    var chartH = h - pad.top - pad.bottom;
+    var plotLeft = pad.left + Math.max(0, (w - pad.left - pad.right - plotW) / 2);
+    var plotRight = plotLeft + plotW;
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    if (w < 50 || h < 50) return;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+    var rootStyle = getComputedStyle(document.documentElement);
+    var principalColor = (rootStyle.getPropertyValue("--principal") || "#2ec27e").trim();
+    var interestColor = (rootStyle.getPropertyValue("--interest") || "#e66100").trim();
+    var deferredColor = (rootStyle.getPropertyValue("--deferred") || "#c08000").trim();
+    ctx.strokeStyle = "#e8ebf0";
+    ctx.fillStyle = "#5c6370";
+    ctx.font = "10px Segoe UI, system-ui, sans-serif";
+    for (var i = 0; i <= 4; i++) {
+      var y = pad.top + (chartH * i) / 4;
+      ctx.beginPath();
+      ctx.moveTo(plotLeft, y);
+      ctx.lineTo(plotRight, y);
+      ctx.stroke();
+      ctx.textAlign = "right";
+      ctx.fillText(formatShort(maxPay * (1 - i / 4)), plotLeft - 5, y + 3);
+    }
+    var labelEvery = n <= 12 ? 1 : Math.ceil(n / 12);
+    sampled.forEach(function (row, i) {
+      var x = plotLeft + i * (CHART_BAR_W + CHART_BAR_GAP);
+      var totalH = (row.payment / maxPay) * chartH;
+      var principalH = (row.principal / maxPay) * chartH;
+      var deferAmt = row.deferred || 0;
+      var pureInterest = Math.max(0, row.interest - deferAmt);
+      var pureInterestH = (pureInterest / maxPay) * chartH;
+      var deferredH = (deferAmt / maxPay) * chartH;
+      // Principal (green, bottom)
+      ctx.fillStyle = principalColor;
+      ctx.fillRect(x, pad.top + chartH - principalH, CHART_BAR_W, principalH);
+      // Pure interest (orange, middle)
+      ctx.fillStyle = interestColor;
+      ctx.fillRect(x, pad.top + chartH - principalH - pureInterestH, CHART_BAR_W, pureInterestH);
+      // Deferred installment (amber, top)
+      if (deferredH > 0.5) {
+        ctx.fillStyle = deferredColor;
+        ctx.fillRect(x, pad.top + chartH - totalH, CHART_BAR_W, deferredH);
+      }
+      if (i % labelEvery === 0 || i === n - 1) {
+        ctx.textAlign = "center";
+        ctx.font = "9px Segoe UI, system-ui, sans-serif";
+        ctx.fillText(String(row.month), x + CHART_BAR_W / 2, h - 6);
+      }
+    });
+    ctx.textAlign = "left";
+    ctx.font = "10px Segoe UI, system-ui, sans-serif";
+    ctx.fillText("₸", 6, pad.top + 8);
+  }
+
+  function updateBreakdownView() {
+    var view = document.querySelector('input[name="chartView"]:checked');
+    view = view ? view.value : "both";
+    var type = document.querySelector('input[name="chartType"]:checked');
+    type = type ? type.value : "annuity";
+    var picker = document.getElementById("chartTypePicker");
+    if (picker) picker.classList.toggle("hidden", view !== "single");
+    document.querySelectorAll("#breakdown .chart-figure").forEach(function (fig) {
+      fig.classList.toggle("hidden", view !== "both" && fig.dataset.chart !== type);
+    });
+  }
+
+  function redrawCharts() {
+    if (!lastAnnuity || !lastDiff) return;
+    updateBreakdownView();
+    drawBreakdownChart(document.getElementById("chartAnnuity"), lastAnnuity.rows);
+    drawBreakdownChart(document.getElementById("chartDiff"), lastDiff.rows);
+    chartsDirty = false;
+  }
+
+  // ─── Main calculate ───────────────────────────────────────────────────
+  function calculate() {
+    var input = readInputs();
+    if (!input) return;
+    var principal = input.principal, rate = input.rate, months = input.months;
+    var disbursement = input.disbursement, dayBasis = input.dayBasis;
+    var gracePeriods = input.gracePeriods, freq = input.freq;
+
+    lastAnnuity = buildAnnuitySchedule(principal, rate, months, disbursement, dayBasis, gracePeriods, freq);
+    lastDiff = buildDifferentiatedSchedule(principal, rate, months, disbursement, dayBasis, gracePeriods, freq);
+
+    var freqLabel = freq === 3 ? "ежеквартально" : "ежемесячно";
+    var info = "Дата выдачи: " + formatDate(disbursement) +
+      " · Первый платёж: " + formatDate(paymentDate(disbursement, 1, freq)) +
+      " · " + dayBasisLabel(dayBasis) + " · " + freqLabel;
+    var deferredTotal = lastAnnuity.deferredTotal || 0;
+    if (gracePeriods > 0) {
+      info += " · Льготный период: " + (gracePeriods * freq) + " мес.";
+      if (deferredTotal > 0) {
+        var mainPeriods = Math.floor(months / freq) - gracePeriods;
+        var installment = mainPeriods > 0 ? round2(deferredTotal / mainPeriods) : 0;
+        info += " · Отсрочка: " + formatMoney(deferredTotal) +
+          " (" + formatMoney(installment) + "/" + (freq === 3 ? "кв." : "мес.") + ")";
+      }
+    }
+    dateInfoEl.textContent = info;
+
+    // Show/hide deferred column and chart legend
+    var hasDeferred = deferredTotal > 0;
+    document.getElementById("annuityTable").classList.toggle("has-deferred", hasDeferred);
+    document.getElementById("diffTable").classList.toggle("has-deferred", hasDeferred);
+    document.querySelectorAll(".deferred-legend").forEach(function (el) {
+      el.classList.toggle("hidden", !hasDeferred);
+    });
+
+    var paymentLabelEl = document.getElementById("annuityPaymentLabel");
+    if (paymentLabelEl) paymentLabelEl.textContent = freq === 3 ? t("lbl.quarterlyPmt") : t("lbl.monthlyPmt");
+
+    document.getElementById("annuityPayment").textContent = formatMoney(lastAnnuity.payment);
+    var nonGraceRows = lastAnnuity.rows.filter(function (r) { return !r.isGrace; });
+    var rowFirst = nonGraceRows[0];
+    var rowLast = nonGraceRows[nonGraceRows.length - 1];
+    if (rowFirst && rowLast) {
+      document.getElementById("annuityStructure").textContent =
+        "1-й: " + interestSharePercent(rowFirst.payment, rowFirst.interest) + "% проц. (" +
+        formatMoney(rowFirst.interest) + ") · последний: " +
+        interestSharePercent(rowLast.payment, rowLast.interest) + "% проц. (" +
+        formatMoney(rowLast.interest) + ")";
+    }
+    document.getElementById("annuityTotal").textContent = formatMoney(lastAnnuity.totalPaid);
+    document.getElementById("annuityOverpay").textContent = formatMoney(lastAnnuity.totalPaid - principal);
+    document.getElementById("diffFirst").textContent = formatMoney(lastDiff.firstPayment);
+    document.getElementById("diffLast").textContent = formatMoney(lastDiff.lastPayment);
+    document.getElementById("diffTotal").textContent = formatMoney(lastDiff.totalPaid);
+    document.getElementById("diffOverpay").textContent = formatMoney(lastDiff.totalPaid - principal);
+    var netPrincipal = input.netPrincipal;
+    lastAnnuityEIR = calcEIR(netPrincipal, lastAnnuity.rows, disbursement);
+    lastDiffEIR    = calcEIR(netPrincipal, lastDiff.rows,    disbursement);
+    lastInput = input;
+    document.getElementById("annuityEIR").textContent = lastAnnuityEIR !== null ? lastAnnuityEIR.toFixed(3) + " %" : "—";
+    document.getElementById("diffEIR").textContent    = lastDiffEIR    !== null ? lastDiffEIR.toFixed(3)    + " %" : "—";
+    renderTable(annuityBody, lastAnnuity.rows);
+    renderTable(diffBody, lastDiff.rows);
+    summaryEl.classList.remove("hidden");
+    chartsDirty = true;
+    scheduleBreakdownRedraw();
+  }
+
+  // ─── Tab management ───────────────────────────────────────────────────
+  function activateTab(btn) {
+    document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("active"); });
+    document.querySelectorAll(".tab-panel").forEach(function (p) {
+      p.classList.add("hidden");
+      p.classList.remove("active");
+    });
+    btn.classList.add("active");
+    var panel = document.getElementById(btn.dataset.tab);
+    if (!panel) return;
+    panel.classList.remove("hidden");
+    panel.classList.add("active");
+    if (btn.dataset.tab === "breakdown" && lastAnnuity) {
+      updateBreakdownView();
+      scheduleBreakdownRedraw();
+    }
+  }
+
+  // ─── Export ───────────────────────────────────────────────────────────
+  async function exportExcel() {
+    var input = readInputs();
+    if (!input) return;
+    if (!lastAnnuity || !lastDiff) calculate();
+    if (!lastAnnuity || !lastDiff) return;
+    var btn = exportBtn;
+    var prevText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Выгрузка…";
+    try {
+      await exportLoanToExcel(
+        input.principal, input.rate, input.months, input.disbursement, input.dayBasis,
+        input.gracePeriods, input.freq, lastAnnuity, lastDiff,
+        input.commissionAmt, lastAnnuityEIR, lastDiffEIR
+      );
+    } catch (err) {
+      console.error(err);
+      alert(t("err.excelFail"));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prevText;
+    }
+  }
+
+  // ─── Word export ─────────────────────────────────────────────────────
+  function exportWord() {
+    if (!lastAnnuity || !lastDiff) { alert(t("err.noCalc")); return; }
+    var input = lastInput;
+    var commAmt = input.commissionAmt || 0;
+    var freqLabel = input.freq === 3 ? t("opt.quarterly") : t("opt.monthly");
+    var pmtLabel  = input.freq === 3 ? t("lbl.quarterlyPmt") : t("lbl.monthlyPmt");
+    var stamp = new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" });
+
+    // Numbers without currency sign (sign lives in column header to save space)
+    function fnum(n) {
+      return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
+    }
+    function overpayPct(overpay, principal) {
+      return principal > 0 ? " (" + (overpay / principal * 100).toFixed(1) + "%)" : "";
+    }
+
+    // ── CSS ──────────────────────────────────────────────────────────────
+    var CSS =
+      "@page { size: A4; margin: 1.8cm 1.5cm 1.8cm 2cm; }" +
+      "body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; margin: 0; color: #1a1d23; }" +
+      "table { border-collapse: collapse; }" +
+      ".pb { page-break-before: always; }" +
+      // schedule table
+      ".sched { width: 100%; table-layout: fixed; font-size: 8pt; }" +
+      ".sched th { background: #1a5fb4; color: #fff; font-weight: bold; font-size: 7.5pt; padding: 4px 3px; text-align: right; border: 1pt solid #1a4a9c; }" +
+      ".sched th.c { text-align: center; }" +
+      ".sched td { padding: 2.5px 3px; border: 1pt solid #dde1e8; text-align: right; }" +
+      ".sched td.c { text-align: center; }" +
+      ".sched tbody tr.alt td { background: #f8f9fb; }" +
+      ".sched .grace td { color: #9aa3b0; font-style: italic; }" +
+      ".sched tfoot td { font-weight: bold; background: #eef4fc; color: #1a3c6e; border-top: 1.5pt solid #1a5fb4; }";
+
+    // ── Title bar ────────────────────────────────────────────────────────
+    var titleBar =
+      "<table width='100%' cellpadding='0' cellspacing='0' style='background:#1a3c6e;margin-bottom:14px'>" +
+        "<tr>" +
+          "<td width='65%' style='padding:8px 14px;font-size:15pt;font-weight:bold;color:#fff'>" + t("word.title") + "</td>" +
+          "<td width='35%' style='padding:8px 14px;font-size:8.5pt;color:#a8c0dc;text-align:right;vertical-align:bottom;white-space:nowrap'>Сформировано: " + stamp + "</td>" +
+        "</tr>" +
+      "</table>";
+
+    // ── Parameters (2 columns of key→value, side by side via real <table>) ──
+    function pr(lbl, val) {
+      return "<tr>" +
+        "<td style='padding:3px 10px 3px 0;color:#555;font-size:9pt;white-space:nowrap'>" + lbl + "</td>" +
+        "<td style='padding:3px 0;font-weight:bold;font-size:9pt;text-align:right'>" + val + "</td>" +
+      "</tr>";
+    }
+    var paramsLeft  = "<table cellspacing='0'>" +
+      pr(t("lbl.amount"),   formatMoney(input.principal)) +
+      pr(t("lbl.rate"),     input.rate + " % годовых") +
+      pr(t("lbl.term"),     input.months + " мес.") +
+      pr(t("lbl.dayBasis"), dayBasisLabel(input.dayBasis)) +
+      "</table>";
+    var paramsRight = "<table cellspacing='0'>" +
+      pr("Дата выдачи займа", formatDate(input.disbursement)) +
+      pr("Первый платёж",     formatDate(paymentDate(input.disbursement, 1, input.freq))) +
+      pr(t("lbl.freq"),      freqLabel) +
+      pr(t("lbl.grace"),     input.graceMonths > 0 ? input.graceMonths + " мес." : "—") +
+      (commAmt > 0 ? pr(t("lbl.commission"), formatMoney(commAmt) + " *") : "") +
+      "</table>";
+
+    var sectionTitle = function(txt) {
+      return "<table width='100%' cellspacing='0' style='margin-bottom:6px'><tr>" +
+        "<td style='width:5px;min-width:5px;background:#1a5fb4'>&nbsp;</td>" +
+        "<td style='padding:3px 8px;background:#eef4fc;font-size:9pt;font-weight:bold;color:#1a3c6e;text-transform:uppercase;letter-spacing:0.04em'>" + txt + "</td>" +
+        "</tr></table>";
+    };
+
+    var paramsBlock =
+      sectionTitle(t("word.params")) +
+      "<table width='100%' cellspacing='0' style='margin-bottom:16px'><tr>" +
+        "<td width='46%' valign='top'>" + paramsLeft  + "</td>" +
+        "<td width='8%'></td>" +
+        "<td width='46%' valign='top'>" + paramsRight + "</td>" +
+      "</tr></table>";
+
+    // ── Result cards — single unified table, rows always aligned ─────────
+    var annNonGrace  = lastAnnuity.rows.filter(function(r){ return !r.isGrace; });
+    var diffNonGrace = lastDiff.rows.filter(function(r){ return !r.isGrace; });
+    var annFirst  = annNonGrace[0];
+    var annLast   = annNonGrace[annNonGrace.length - 1];
+    var diffFirst = diffNonGrace[0];
+    var diffLast  = diffNonGrace[diffNonGrace.length - 1];
+    var annOverpay  = lastAnnuity.totalPaid - input.principal;
+    var diffOverpay = lastDiff.totalPaid    - input.principal;
+    var ann1pct  = annFirst  ? interestSharePercent(annFirst.payment,  annFirst.interest)  : 0;
+    var annLpct  = annLast   ? interestSharePercent(annLast.payment,   annLast.interest)   : 0;
+    var dif1pct  = diffFirst ? interestSharePercent(diffFirst.payment, diffFirst.interest) : 0;
+    var difLpct  = diffLast  ? interestSharePercent(diffLast.payment,  diffLast.interest)  : 0;
+
+    var BLUE  = "#1a5fb4";
+    var GREEN = "#1a7a55";
+
+    // Small-label + bold-value cell content
+    function mc(label, value, color) {
+      return "<small style='color:#777;font-size:7.5pt'>" + label + "</small><br>" +
+        "<b style='font-size:9.5pt;color:" + (color || "#1a1d23") + "'>" + value + "</b>";
+    }
+
+    // A row with one cell per card (synchronized)
+    function uRow(annContent, diffContent, bgAnn, bgDiff) {
+      return "<tr>" +
+        "<td width='48%' style='padding:6px 10px;border-bottom:1pt solid #dde5f0;" +
+          "border-left:3pt solid " + BLUE + ";" + (bgAnn ? "background:" + bgAnn + ";" : "") + "'>" + annContent + "</td>" +
+        "<td width='4%' style='border:none'></td>" +
+        "<td width='48%' style='padding:6px 10px;border-bottom:1pt solid #dde5f0;" +
+          "border-left:3pt solid " + GREEN + ";" + (bgDiff ? "background:" + bgDiff + ";" : "") + "'>" + diffContent + "</td>" +
+      "</tr>";
+    }
+
+    // Thin separator row
+    function uSep() {
+      return "<tr>" +
+        "<td style='padding:3px 0;background:#dce8fb;border-left:3pt solid " + BLUE  + "'></td>" +
+        "<td style='border:none'></td>" +
+        "<td style='padding:3px 0;background:#d4ede4;border-left:3pt solid " + GREEN + "'></td>" +
+      "</tr>";
+    }
+
+    var cardsHtml =
+      // ── Header row ──
+      "<tr>" +
+        "<td width='48%' style='background:" + BLUE  + ";padding:7px 12px;font-size:11pt;font-weight:bold;color:#fff;border-left:3pt solid " + BLUE  + "'>" + t("card.annuity") + "</td>" +
+        "<td width='4%'  style='border:none'></td>" +
+        "<td width='48%' style='background:" + GREEN + ";padding:7px 12px;font-size:11pt;font-weight:bold;color:#fff;border-left:3pt solid " + GREEN + "'>" + t("card.diff")    + "</td>" +
+      "</tr>" +
+      // ── Payment ──
+      uRow(
+        mc(pmtLabel, formatMoney(lastAnnuity.payment), BLUE),
+        mc(t("lbl.firstPmt") + " / " + t("lbl.lastPmt"),
+          formatMoney(lastDiff.firstPayment) + " / " + formatMoney(lastDiff.lastPayment), GREEN)
+      ) +
+      // ── 1st payment structure ──
+      uRow(
+        annFirst ? mc("Структура 1-го платежа",
+          ann1pct + "% проц. (" + formatMoney(annFirst.interest) + ") + " +
+          (100 - ann1pct) + "% осн. долга (" + formatMoney(annFirst.principal) + ")") : "&nbsp;",
+        diffFirst ? mc("Структура 1-го платежа",
+          dif1pct + "% проц. (" + formatMoney(diffFirst.interest) + ") + " +
+          (100 - dif1pct) + "% осн. долга (" + formatMoney(diffFirst.principal) + ")") : "&nbsp;"
+      ) +
+      // ── Last payment structure ──
+      uRow(
+        annLast ? mc("Структура последнего платежа",
+          annLpct + "% проц. (" + formatMoney(annLast.interest) + ") + " +
+          (100 - annLpct) + "% осн. долга (" + formatMoney(annLast.principal) + ")") : "&nbsp;",
+        diffLast ? mc("Структура последнего платежа",
+          difLpct + "% проц. (" + formatMoney(diffLast.interest) + ") + " +
+          (100 - difLpct) + "% осн. долга (" + formatMoney(diffLast.principal) + ")") : "&nbsp;"
+      ) +
+      uSep() +
+      // ── Totals ──
+      uRow(
+        mc(t("lbl.totalPaid"), formatMoney(lastAnnuity.totalPaid)),
+        mc(t("lbl.totalPaid"), formatMoney(lastDiff.totalPaid))
+      ) +
+      // ── Overpayment (highlighted) ──
+      uRow(
+        mc(t("lbl.overpay"),
+          formatMoney(annOverpay) + " (" + (annOverpay / input.principal * 100).toFixed(1) + "%)", BLUE),
+        mc(t("lbl.overpay"),
+          formatMoney(diffOverpay) + " (" + (diffOverpay / input.principal * 100).toFixed(1) + "%)", GREEN),
+        "#eef4fc", "#eaf5f0"
+      ) +
+      uSep() +
+      // ── EIR (highlighted) ──
+      uRow(
+        mc(t("lbl.eir"), lastAnnuityEIR !== null ? lastAnnuityEIR.toFixed(3) + " %" : "—", BLUE),
+        mc(t("lbl.eir"), lastDiffEIR    !== null ? lastDiffEIR.toFixed(3)    + " %" : "—", GREEN),
+        "#eef4fc", "#eaf5f0"
+      );
+
+    var cardsBlock =
+      sectionTitle("Результаты расчёта") +
+      "<table width='100%' cellspacing='0' cellpadding='0' style='margin-bottom:14px'>" +
+      cardsHtml + "</table>";
+
+    // ── Notes: grace period / commission ─────────────────────────────────
+    var notes = [];
+    if (input.gracePeriods > 0 && lastAnnuity.deferredTotal > 0) {
+      var defTotal = lastAnnuity.deferredTotal;
+      var mainPeriods = Math.floor(input.months / input.freq) - input.gracePeriods;
+      var defInst = mainPeriods > 0 ? round2(defTotal / mainPeriods) : 0;
+      var ppLabel = input.freq === 3 ? "кв." : "мес.";
+      notes.push("Льготный период " + input.graceMonths + " мес. — начисленные за период проценты <b>" +
+        formatMoney(defTotal) + "</b> не выплачиваются, а равномерно распределяются по " + mainPeriods +
+        " основным периодам (<b>" + formatMoney(defInst) + "/" + ppLabel + "</b>).");
+    }
+    if (commAmt > 0) {
+      notes.push("* Комиссия за организацию займа <b>" + formatMoney(commAmt) + "</b> включена в расчёт ГЭСВ " +
+        "(вычтена из суммы займа при вычислении внутренней нормы доходности).");
+    }
+    var notesBlock = notes.length
+      ? "<table width='100%' cellspacing='0' style='border:1pt solid #c5d8f2;background:#f6f9ff;margin-bottom:14px'>" +
+        notes.map(function(n) {
+          return "<tr><td style='padding:5px 10px;font-size:8.5pt;color:#444;border-bottom:1pt solid #e0eaf8'>" + n + "</td></tr>";
+        }).join("") + "</table>"
+      : "";
+
+    // ── Schedule tables ───────────────────────────────────────────────────
+    function schedHtml(rows, title, subtitle) {
+      var def = rows.some(function(r){ return (r.deferred || 0) > 0; });
+      var colWidths = def ? [4, 10, 15, 15, 13, 12, 31] : [4, 11, 17, 17, 15, 36];
+      var cols = colWidths.map(function(w){ return "<col style='width:" + w + "%'/>"; }).join("");
+      var th = function(txt, cls) { return "<th" + (cls ? " class='" + cls + "'" : "") + ">" + txt + "</th>"; };
+      var headRow = "<tr>" +
+        th(t("th.num"), "c") + th(t("th.date"), "c") +
+        th(t("th.payment") + ", ₸") + th(t("th.principal") + ", ₸") +
+        th(t("th.interest") + ", ₸") +
+        (def ? th(t("th.deferred") + ", ₸") : "") +
+        th(t("th.balance") + ", ₸") + "</tr>";
+      var totPay = 0, totPrinc = 0, totInt = 0, totDef = 0;
+      var bodyRows = rows.map(function(r, idx) {
+        var g = !!r.isGrace;
+        if (!g) { totPay += r.payment; totPrinc += r.principal; totDef += (r.deferred || 0); }
+        var pureInt = g ? r.interest : Math.max(0, r.interest - (r.deferred || 0));
+        totInt += pureInt;
+        var td = function(txt, cls) { return "<td" + (cls ? " class='" + cls + "'" : "") + ">" + txt + "</td>"; };
+        var trCls = g ? " class='grace'" : (idx % 2 === 1 ? " class='alt'" : "");
+        return "<tr" + trCls + ">" +
+          td(r.month, "c") + td(formatDate(r.date), "c") +
+          td(g ? "<i>" + t("word.grace") + "</i>" : fnum(r.payment)) +
+          td(g ? "" : fnum(r.principal)) +
+          td(fnum(pureInt)) +
+          (def ? td(r.deferred > 0 ? fnum(r.deferred) : "") : "") +
+          td(fnum(r.balance)) +
+          "</tr>";
+      }).join("");
+      var footRow = "<tr>" +
+        "<td></td><td style='text-align:center'>Итого</td>" +
+        "<td>" + fnum(totPay) + "</td><td>" + fnum(totPrinc) + "</td><td>" + fnum(totInt) + "</td>" +
+        (def ? "<td>" + fnum(totDef) + "</td>" : "") +
+        "<td></td></tr>";
+
+      var schedTitle =
+        "<table width='100%' cellspacing='0' style='margin-bottom:6px'><tr>" +
+          "<td width='4' style='background:#1a5fb4'>&nbsp;</td>" +
+          "<td style='padding:5px 10px;background:#eef4fc'>" +
+            "<span style='font-size:11pt;font-weight:bold;color:#1a3c6e'>" + title + "</span>" +
+            "&nbsp;&nbsp;<span style='font-size:8.5pt;color:#666'>" + subtitle + "</span>" +
+          "</td>" +
+        "</tr></table>";
+
+      return "<div class='pb'></div>" + schedTitle +
+        "<table class='sched'><colgroup>" + cols + "</colgroup>" +
+        "<thead>" + headRow + "</thead>" +
+        "<tbody>" + bodyRows + "</tbody>" +
+        "<tfoot>" + footRow + "</tfoot>" +
+        "</table>";
+    }
+
+    var html = "<!DOCTYPE html><html><head><meta charset='UTF-8'/><style>" + CSS + "</style></head><body>" +
+      titleBar +
+      paramsBlock +
+      cardsBlock +
+      notesBlock +
+      schedHtml(lastAnnuity.rows, t("word.annuitySchedule"), freqLabel + " · " + dayBasisLabel(input.dayBasis)) +
+      schedHtml(lastDiff.rows,    t("word.diffSchedule"),    freqLabel + " · " + dayBasisLabel(input.dayBasis)) +
+      "</body></html>";
+
+    var blob = new Blob(["\ufeff" + html], { type: "application/msword" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".doc";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ─── Rate field helpers ───────────────────────────────────────────────
+  function parseRateInput(value) {
+    var s = String(value).replace(/\s/g, "").replace(",", ".");
+    var n = parseFloat(s);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function formatRateField() {
+    var n = parseRateInput(rateEl.value);
+    if (Number.isFinite(n)) {
+      rateEl.value = n % 1 === 0 ? String(n) : String(Math.round(n * 10000) / 10000);
+    }
+  }
+
+  // ─── Amount field formatting ──────────────────────────────────────────
+  function formatAmountField() {
+    var n = parseAmountInput(amountEl.value);
+    amountEl.value = Number.isFinite(n) ? formatAmountInput(n) : "";
+  }
+  function formatCommissionField() {
+    if (commissionTypeEl.value === "sum") {
+      var n = parseAmountInput(commissionValEl.value);
+      commissionValEl.value = Number.isFinite(n) && n > 0 ? formatAmountInput(n) : "0";
+    }
+  }
+
+  // ─── Event wiring ─────────────────────────────────────────────────────
+  // ─── Rate stepper buttons ─────────────────────────────────────────────
+  // Click          → 1 step of 0.01, no repeat
+  // Hold 0–500 ms  → pause (no repeat yet)
+  // Hold 500–1500 ms → repeat every 200 ms, step 0.01
+  // Hold 1500–3000 ms → repeat every 110 ms, step 0.1
+  // Hold 3000+ ms  → repeat every 70 ms,  step 1.0
+  (function () {
+    var MIN = 0;
+    var MAX = 100;
+    var REPEAT_DELAY = 500;     // ms before auto-repeat kicks in
+    var STAGES = [
+      { after:    0, step: 0.01, interval: 200 },
+      { after: 1500, step: 0.1,  interval: 110 },
+      { after: 3000, step: 1.0,  interval:  70 },
+    ];
+
+    var rafId = null;
+    var holding = false;
+    var holdDir = 1;
+    var holdStart = 0;
+    var lastTick = 0;
+
+    function currentStage(elapsed) {
+      var st = STAGES[0];
+      for (var i = 0; i < STAGES.length; i++) {
+        if (elapsed >= STAGES[i].after) st = STAGES[i];
+      }
+      return st;
+    }
+
+    function stepRate(dir, step) {
+      var cur = parseRateInput(rateEl.value);
+      if (!Number.isFinite(cur)) cur = 0;
+      var next = Math.round((cur + dir * step) * 100000) / 100000;
+      if (next < MIN) next = MIN;
+      if (next > MAX) next = MAX;
+      next = Math.round(next * 10000) / 10000;
+      rateEl.value = String(next);
+      calculate();
+    }
+
+    function tick(ts) {
+      if (!holding) return;
+      var elapsed = ts - holdStart;
+      if (elapsed >= REPEAT_DELAY) {
+        var st = currentStage(elapsed - REPEAT_DELAY);
+        if (ts - lastTick >= st.interval) {
+          stepRate(holdDir, st.step);
+          lastTick = ts;
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function startHold(dir) {
+      holding = true;
+      holdDir = dir;
+      holdStart = performance.now();
+      lastTick = holdStart;
+      stepRate(dir, STAGES[0].step); // single immediate step on press
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function stopHold() {
+      holding = false;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    }
+
+    function bindBtn(btn, dir) {
+      btn.addEventListener("mousedown",  function (e) { e.preventDefault(); startHold(dir); });
+      btn.addEventListener("touchstart", function (e) { e.preventDefault(); startHold(dir); }, { passive: false });
+      ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach(function (ev) {
+        btn.addEventListener(ev, stopHold);
+      });
+    }
+
+    bindBtn(document.getElementById("rateUp"), +1);
+    bindBtn(document.getElementById("rateDn"), -1);
+  }());
+
+  amountEl.addEventListener("input", formatAmountField);
+  amountEl.addEventListener("blur", formatAmountField);
+  rateEl.addEventListener("blur", formatRateField);
+  commissionValEl.addEventListener("blur", formatCommissionField);
+  commissionTypeEl.addEventListener("change", formatCommissionField);
+  calcBtn.addEventListener("click", calculate);
+  exportBtn.addEventListener("click", exportExcel);
+  pdfBtn.addEventListener("click", function () { window.print(); });
+  wordBtn.addEventListener("click", exportWord);
+  document.querySelectorAll(".lang-btn").forEach(function(btn) {
+    btn.addEventListener("click", function() { setLanguage(btn.getAttribute("data-lang")); });
+  });
+  ["amount", "rate", "term", "gracePeriod"].forEach(function (id) {
+    document.getElementById(id).addEventListener("keydown", function (e) { if (e.key === "Enter") calculate(); });
+  });
+  document.querySelectorAll(".tab").forEach(function (btn) {
+    btn.addEventListener("click", function () { activateTab(btn); });
+  });
+  document.querySelectorAll('input[name="chartView"]').forEach(function (el) {
+    el.addEventListener("change", function () { updateBreakdownView(); scheduleBreakdownRedraw(); });
+  });
+  document.querySelectorAll('input[name="chartType"]').forEach(function (el) {
+    el.addEventListener("change", function () { updateBreakdownView(); scheduleBreakdownRedraw(); });
+  });
+  disbursementEl.value = todayISODate();
+  disbursementEl.addEventListener("change", calculate);
+  dayBasisEl.addEventListener("change", calculate);
+  paymentFreqEl.addEventListener("change", calculate);
+  gracePeriodEl.addEventListener("change", calculate);
+  commissionValEl.addEventListener("change", calculate);
+  commissionTypeEl.addEventListener("change", calculate);
+  window.addEventListener("resize", function () {
+    if (lastAnnuity) scheduleBreakdownRedraw();
+  });
+  if (disbursementEl.value) calculate();
+})();
+  </script>
+</body>
+</html>
