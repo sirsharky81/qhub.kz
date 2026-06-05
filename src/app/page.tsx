@@ -91,21 +91,13 @@ export default function Home() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {apps.map((app) => {
-            const isLive = !app.comingSoon;
-            const Wrapper = isLive ? Link : "div";
-            return (
-              <Wrapper
-                key={app.id}
-                {...(isLive ? { href: app.href } : {})}
-                className={`app-card relative rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4 overflow-hidden shadow-sm ${
-                  isLive ? "cursor-pointer" : "opacity-50 cursor-default"
-                }`}
-              >
-                {/* Subtle tinted bg */}
-                <div
-                  className={`absolute inset-0 bg-gradient-to-br ${app.color} pointer-events-none`}
-                />
+            const cardClass = `app-card relative rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4 overflow-hidden shadow-sm ${
+              app.comingSoon ? "opacity-50 cursor-default" : "cursor-pointer"
+            }`;
 
+            const inner = (
+              <>
+                <div className={`absolute inset-0 bg-gradient-to-br ${app.color} pointer-events-none`} />
                 {app.featured && (
                   <span className="absolute top-4 right-4 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border border-blue-200 text-blue-600 bg-blue-50">
                     Запущено
@@ -116,28 +108,28 @@ export default function Home() {
                     Скоро
                   </span>
                 )}
-
                 <div className="relative text-3xl">{app.icon}</div>
-
                 <div className="relative flex-1">
                   <h3 className="font-semibold text-base mb-1.5 text-gray-900">{app.title}</h3>
                   <p className="text-sm text-gray-500 leading-relaxed">{app.description}</p>
                 </div>
-
                 <div className="relative flex items-center justify-between">
                   <div className="flex gap-1.5 flex-wrap">
                     {app.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200"
-                      >
+                      <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
                         {TAG_LABELS[tag]}
                       </span>
                     ))}
                   </div>
                   <span className="text-xs text-gray-400 font-mono">{app.author}</span>
                 </div>
-              </Wrapper>
+              </>
+            );
+
+            return app.comingSoon ? (
+              <div key={app.id} className={cardClass}>{inner}</div>
+            ) : (
+              <Link key={app.id} href={app.href} className={cardClass}>{inner}</Link>
             );
           })}
         </div>
