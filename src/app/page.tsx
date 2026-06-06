@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import { apps, TAG_LABELS } from "@/data/apps";
 
@@ -111,7 +112,19 @@ export default function Home() {
                     Скоро
                   </span>
                 )}
-                <div className="relative text-3xl">{app.icon}</div>
+                <div className="relative text-3xl">
+                  {app.icon.startsWith("/") ? (
+                    <Image
+                      src={app.icon}
+                      alt={app.title}
+                      width={40}
+                      height={40}
+                      className="object-contain mix-blend-multiply"
+                    />
+                  ) : (
+                    app.icon
+                  )}
+                </div>
                 <div className="relative flex-1">
                   <h3 className="font-semibold text-base mb-1.5 text-gray-900">{app.title}</h3>
                   <p className="text-sm text-gray-500 leading-relaxed">{app.description}</p>

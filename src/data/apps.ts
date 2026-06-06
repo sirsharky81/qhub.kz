@@ -1,4 +1,4 @@
-export type AppTag = "finance" | "productivity" | "tools" | "lifestyle" | "business" | "photo";
+export type AppTag = "finance" | "productivity" | "tools" | "lifestyle" | "business" | "photo" | "food";
 
 export interface App {
   id: string;
@@ -22,6 +22,7 @@ export const TAG_LABELS: Record<AppTag, string> = {
   lifestyle: "Быт",
   business: "Бизнес",
   photo: "Фото",
+  food: "Кулинария",
 };
 
 export const apps: App[] = [
@@ -49,6 +50,20 @@ export const apps: App[] = [
     tags: ["tools", "photo"],
     icon: "📷",
     color: "from-violet-500/10 to-violet-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    featured: false,
+  },
+  {
+    id: "recipe-finder",
+    title: "Что приготовить?",
+    description: "Введите продукты из холодильника или сфотографируйте его — ИИ предложит 5 блюд с рецептами.",
+    longDescription:
+      "Загрузите список ингредиентов или сделайте фото холодильника. ИИ подберёт 5 блюд с учётом типа кухни и категории (завтрак, обед, ужин). Каждый рецепт содержит время приготовления, сложность, калорийность и пошаговые инструкции. Экспорт в Word или печать.",
+    href: "/apps/recipe-finder",
+    tags: ["food", "lifestyle"],
+    icon: "/apps/meal-match-logo.png",
+    color: "from-green-500/10 to-green-600/5",
     author: "QHub",
     authorType: "qhub",
     featured: false,
