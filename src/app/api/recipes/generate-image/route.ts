@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       quality: "standard",
     });
 
-    const imageUrl = response.data[0]?.url;
+    const imageUrl = response.data?.[0]?.url;
     if (!imageUrl) {
       return Response.json({ error: "Изображение не сгенерировано" }, { status: 500 });
     }
