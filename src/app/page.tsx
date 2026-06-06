@@ -2,6 +2,9 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { apps, TAG_LABELS } from "@/data/apps";
 
+const liveCount = apps.filter((a) => !a.comingSoon).length;
+const comingSoonCount = apps.filter((a) => a.comingSoon).length;
+
 export default function Home() {
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-900">
@@ -62,8 +65,8 @@ export default function Home() {
         {/* Stats row */}
         <div className="relative mt-16 flex flex-wrap justify-center gap-8 sm:gap-16">
           {[
-            { value: "1", label: "Запущенное приложение" },
-            { value: "3+", label: "Скоро на платформе" },
+            { value: String(liveCount), label: liveCount === 1 ? "Запущенное приложение" : "Запущенных приложения" },
+            { value: `${comingSoonCount}+`, label: "Скоро на платформе" },
             { value: "100%", label: "Бесплатно" },
           ].map((s) => (
             <div key={s.label} className="flex flex-col items-center gap-1">
