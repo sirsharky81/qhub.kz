@@ -117,15 +117,15 @@ export default function RecipeFinderClient() {
               {/* photo button inside textarea */}
               <button
                 onClick={() => setShowPhoto((v) => !v)}
-                title="Сфотографировать холодильник"
                 className={[
-                  "absolute top-0 right-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-base",
+                  "absolute top-0 right-0 flex flex-col items-center justify-center gap-0.5 px-1.5 py-1 rounded-lg transition-colors",
                   showPhoto
                     ? "bg-gray-900 text-white"
-                    : "text-gray-300 hover:text-gray-600 hover:bg-gray-50",
+                    : "text-gray-400 hover:text-gray-700 hover:bg-gray-50",
                 ].join(" ")}
               >
-                📸
+                <span className="text-base leading-none">📸</span>
+                <span className="text-[9px] font-medium leading-none">Фото</span>
               </button>
               {query.length > 0 && (
                 <button
@@ -196,23 +196,26 @@ export default function RecipeFinderClient() {
           )}
 
           {/* Filters toggle */}
-          <div className="px-4 pb-2 flex items-center gap-3 border-t border-gray-50">
+          <div className="px-4 pb-2 border-t border-gray-100 pt-2">
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors py-2"
+              className={[
+                "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                showFilters
+                  ? "bg-gray-900 text-white border-gray-900"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-400",
+              ].join(" ")}
             >
-              <span className={`transition-transform text-[10px] ${showFilters ? "rotate-180" : ""}`}>▾</span>
-              Фильтры
+              <svg className={`w-3 h-3 transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 4l4 4 4-4"/>
+              </svg>
+              Кухня и категория
               {(cuisine !== "any" || category !== "any") && (
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block" />
               )}
             </button>
-            <span className="text-gray-200 text-xs hidden sm:inline">|</span>
-            <p className="text-xs text-gray-400 italic hidden sm:block">
-              Enter — найти · Shift+Enter — новая строка · 📸 — фото
-            </p>
-            <p className="text-xs text-gray-400 italic sm:hidden">
-              📸 — сделать фото холодильника
+            <p className="text-[10px] text-gray-400 mt-1 hidden sm:block">
+              Enter — найти · Shift+Enter — новая строка
             </p>
           </div>
 

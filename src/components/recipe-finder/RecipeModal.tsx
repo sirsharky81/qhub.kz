@@ -125,10 +125,10 @@ export default function RecipeModal({ recipe, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative w-full sm:max-w-2xl max-h-[92vh] sm:max-h-[90vh] bg-white sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden rounded-t-3xl">
+      <div className="relative w-full sm:max-w-2xl max-h-[92dvh] sm:max-h-[88vh] bg-white sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden rounded-t-3xl">
 
         {/* Hero header — gradient + emoji */}
-        <div className={`flex-shrink-0 relative bg-gradient-to-br ${gradient} p-6 pb-5`}>
+        <div className={`flex-shrink-0 relative bg-gradient-to-br ${gradient} px-5 pt-4 pb-4`}>
           <button
             onClick={onClose}
             className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors text-lg"
@@ -136,19 +136,19 @@ export default function RecipeModal({ recipe, onClose }: Props) {
             ×
           </button>
 
-          <div className="flex items-end gap-4">
-            <div className="w-20 h-20 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0 shadow-inner">
-              <span className="text-5xl">{emoji}</span>
+          <div className="flex items-center gap-3">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
+              <span className="text-4xl">{emoji}</span>
             </div>
-            <div className="flex-1 min-w-0 pb-1">
-              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className={["px-2 py-0.5 text-[10px] font-semibold rounded-full border", DIFFICULTY_COLORS[recipe.difficulty]].join(" ")}>
                   {DIFFICULTY_LABELS[recipe.difficulty]}
                 </span>
                 <span className="text-[11px] text-white/70">{recipe.cuisine} · {recipe.category}</span>
               </div>
-              <h2 className="text-xl font-bold text-white leading-tight">{recipe.title}</h2>
-              <p className="text-sm text-white/75 mt-1 leading-relaxed line-clamp-2">{recipe.description}</p>
+              <h2 className="text-2xl font-bold text-white leading-tight tracking-tight">{recipe.title}</h2>
+              <p className="text-xs text-white/70 mt-0.5 leading-relaxed line-clamp-2">{recipe.description}</p>
             </div>
           </div>
         </div>
