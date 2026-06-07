@@ -45,6 +45,7 @@ export interface GenerateRecipesRequest {
   query: string;
   cuisine: CuisineType;
   category: MealCategory;
+  strictIngredients: boolean;
 }
 
 export interface GenerateRecipesResponse {

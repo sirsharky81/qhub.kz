@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Неверный формат запроса" }, { status: 400 });
   }
 
-  const { query, cuisine, category } = body;
+  const { query, cuisine, category, strictIngredients } = body;
 
   if (!query || query.trim().length === 0) {
     return Response.json({ error: "Запрос пустой" }, { status: 400 });
@@ -26,12 +26,15 @@ export async function POST(request: Request) {
 
   const cuisineFilter = cuisine !== "any" ? `\nТип кухни: ${cuisine}` : "";
   const categoryFilter = category !== "any" ? `\nКатегория блюда: ${category}` : "";
+  const strictNote = strictIngredients
+    ? "\n⚠️ СТРОГИЙ РЕЖИМ: предлагай ТОЛЬКО блюда, которые можно приготовить исключительно из перечисленных ингредиентов. Никаких дополнительных продуктов. missingIngredients должен быть пустым массивом."
+    : "";
 
   const systemPrompt = `Ты — профессиональный шеф-повар и кулинарный ИИ-помощник.
 Отвечай ТОЛЬКО на русском языке.
 Возвращай ответ строго в формате JSON без markdown-обёртки.`;
 
-  const userPrompt = `Запрос пользователя: "${query.trim()}"${cuisineFilter}${categoryFilter}
+  const userPrompt = `Запрос пользователя: "${query.trim()}"${cuisineFilter}${categoryFilter}${strictNote}
 
 Запрос может быть одним из:
 1. Список ингредиентов (например: "яйца, картошка, лук") — предложи 5 блюд из этих продуктов

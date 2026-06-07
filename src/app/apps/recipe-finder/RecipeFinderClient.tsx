@@ -36,6 +36,7 @@ export default function RecipeFinderClient() {
   const [showFilters, setShowFilters] = useState(false);
   const [showPhoto, setShowPhoto] = useState(false);
   const [intentLabel, setIntentLabel] = useState<string | null>(null);
+  const [strictIngredients, setStrictIngredients] = useState(false);
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -57,7 +58,7 @@ export default function RecipeFinderClient() {
       const res = await fetch("/api/recipes/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query.trim(), cuisine, category }),
+        body: JSON.stringify({ query: query.trim(), cuisine, category, strictIngredients }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -222,6 +223,34 @@ export default function RecipeFinderClient() {
               />
             </div>
           )}
+
+          {/* Strict mode toggle */}
+          <div className="px-4 pb-3">
+            <button
+              onClick={() => setStrictIngredients((v) => !v)}
+              className="flex items-center gap-2.5 group w-full"
+            >
+              <div className={[
+                "relative w-9 h-5 rounded-full transition-colors flex-shrink-0",
+                strictIngredients ? "bg-gray-900" : "bg-gray-200",
+              ].join(" ")}>
+                <span className={[
+                  "absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform",
+                  strictIngredients ? "translate-x-4" : "translate-x-0.5",
+                ].join(" ")} />
+              </div>
+              <div className="text-left">
+                <span className={["text-xs font-medium transition-colors", strictIngredients ? "text-gray-900" : "text-gray-500"].join(" ")}>
+                  Только из этих продуктов
+                </span>
+                <p className="text-[10px] text-gray-400 leading-tight">
+                  {strictIngredients
+                    ? "Без дополнительных покупок — только то, что есть"
+                    : "Можно предлагать рецепты с недостающими продуктами"}
+                </p>
+              </div>
+            </button>
+          </div>
 
           <div className="px-4 pb-4">
             <button
