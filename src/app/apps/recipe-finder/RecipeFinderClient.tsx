@@ -225,28 +225,30 @@ export default function RecipeFinderClient() {
           )}
 
           {/* Strict mode toggle */}
-          <div className="px-4 pb-3">
+          <div className="mx-4 mb-3 p-3 rounded-xl border border-gray-100 bg-gray-50">
             <button
               onClick={() => setStrictIngredients((v) => !v)}
-              className="flex items-center gap-2.5 group w-full"
+              className="flex items-center gap-3 w-full text-left"
             >
+              {/* toggle track */}
               <div className={[
-                "relative w-9 h-5 rounded-full transition-colors flex-shrink-0",
-                strictIngredients ? "bg-gray-900" : "bg-gray-200",
+                "relative flex-shrink-0 w-10 h-6 rounded-full transition-colors duration-200",
+                strictIngredients ? "bg-gray-900" : "bg-gray-300",
               ].join(" ")}>
+                {/* toggle thumb */}
                 <span className={[
-                  "absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform",
-                  strictIngredients ? "translate-x-4" : "translate-x-0.5",
+                  "absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-200",
+                  strictIngredients ? "left-5" : "left-1",
                 ].join(" ")} />
               </div>
-              <div className="text-left">
-                <span className={["text-xs font-medium transition-colors", strictIngredients ? "text-gray-900" : "text-gray-500"].join(" ")}>
+              <div className="min-w-0">
+                <p className={["text-xs font-semibold", strictIngredients ? "text-gray-900" : "text-gray-600"].join(" ")}>
                   Только из этих продуктов
-                </span>
-                <p className="text-[10px] text-gray-400 leading-tight">
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
                   {strictIngredients
-                    ? "Без дополнительных покупок — только то, что есть"
-                    : "Можно предлагать рецепты с недостающими продуктами"}
+                    ? "Без докупок — только то, что есть дома"
+                    : "Допускать рецепты с недостающими продуктами"}
                 </p>
               </div>
             </button>
