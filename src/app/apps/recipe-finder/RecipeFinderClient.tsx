@@ -7,6 +7,13 @@ import RecipeCard from "@/components/recipe-finder/RecipeCard";
 import RecipeModal from "@/components/recipe-finder/RecipeModal";
 import { Recipe, CuisineType, MealCategory } from "@/lib/recipe-finder/types";
 
+const QUICK_INGREDIENTS = [
+  "Яйца", "Молоко", "Масло сливочное", "Мука", "Картофель", "Лук",
+  "Морковь", "Чеснок", "Помидоры", "Огурцы", "Сыр", "Сметана",
+  "Куриное филе", "Говядина", "Фарш", "Рис", "Макароны", "Гречка",
+  "Творог", "Кефир", "Капуста", "Перец болгарский", "Грибы", "Колбаса",
+];
+
 const PLACEHOLDERS = [
   "яйца, картошка, лук, сыр...",
   "хочу что-то на ужин за 30 минут",
@@ -129,7 +136,7 @@ export default function RecipeFinderClient() {
               )}
             </div>
 
-            {/* Example chips */}
+            {/* Example chips — when empty */}
             {query.length === 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {["яйца, картошка, лук", "борщ", "ужин за 30 минут", "лёгкий завтрак"].map((ex) => (
@@ -143,6 +150,34 @@ export default function RecipeFinderClient() {
                 ))}
               </div>
             )}
+
+            {/* Quick ingredients */}
+            <div className="mt-3">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                Быстрое добавление
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {QUICK_INGREDIENTS
+                  .filter((q) => !query.toLowerCase().includes(q.toLowerCase()))
+                  .slice(0, 16)
+                  .map((ing) => (
+                    <button
+                      key={ing}
+                      onClick={() => {
+                        setQuery((prev) => {
+                          const trimmed = prev.trimEnd();
+                          if (!trimmed) return ing;
+                          return trimmed.endsWith(",") ? `${trimmed} ${ing}` : `${trimmed}, ${ing}`;
+                        });
+                        textareaRef.current?.focus();
+                      }}
+                      className="px-2.5 py-1 text-[11px] border border-gray-200 rounded-full text-gray-600 hover:border-gray-400 hover:bg-gray-50 transition-colors"
+                    >
+                      + {ing}
+                    </button>
+                  ))}
+              </div>
+            </div>
           </div>
 
           {/* Photo capture panel */}
