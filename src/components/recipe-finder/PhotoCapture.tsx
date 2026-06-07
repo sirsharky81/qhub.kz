@@ -88,8 +88,8 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
               <span className="text-3xl">📸</span>
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-800">Сфотографируйте холодильник</p>
-              <p className="text-xs text-gray-500 mt-1">или загрузите фото с продуктами</p>
+              <p className="text-sm font-semibold text-gray-800">Поиск рецептов по фото продуктов</p>
+              <p className="text-xs text-gray-500 mt-1">Сфотографируйте продукты или загрузите готовое фото</p>
             </div>
             <div className="flex gap-2 mt-1">
               <span className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg">
