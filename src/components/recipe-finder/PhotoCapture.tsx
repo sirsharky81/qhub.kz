@@ -9,7 +9,8 @@ interface Props {
 }
 
 export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading }: Props) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [analyzed, setAnalyzed] = useState(false);
@@ -45,6 +46,7 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = "";
 
     if (!file.type.startsWith("image/")) {
       setError("Выберите файл изображения (JPEG, PNG, WEBP)");
@@ -64,13 +66,21 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
     setPreview(null);
     setError(null);
     setAnalyzed(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* Two hidden inputs: camera and gallery */}
       <input
-        ref={fileInputRef}
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      <input
+        ref={galleryInputRef}
         type="file"
         accept="image/*"
         onChange={handleFileChange}
@@ -78,22 +88,29 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
       />
 
       {!preview ? (
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all group"
-        >
+        <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-16 h-16 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center group-hover:scale-105 transition-transform">
+            <div className="w-14 h-14 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center">
               <span className="text-3xl">📸</span>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-800">Поиск рецептов по фото продуктов</p>
               <p className="text-xs text-gray-500 mt-1">Сфотографируйте продукты или загрузите готовое фото</p>
             </div>
+            {/* Two separate buttons for camera and gallery */}
             <div className="flex gap-2 mt-1">
-              <span className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg">
-                📷 Камера / Файл
-              </span>
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3 py-2 bg-gray-900 hover:bg-gray-700 text-white text-xs font-medium rounded-lg transition-colors"
+              >
+                📷 Камера
+              </button>
+              <button
+                onClick={() => galleryInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 hover:border-gray-400 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+              >
+                🖼 Галерея
+              </button>
             </div>
           </div>
         </div>
@@ -106,7 +123,7 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
           />
           {isLoading && (
             <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
-              <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin" />
+              <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
               <p className="text-white text-sm font-medium">Анализирую продукты...</p>
             </div>
           )}
@@ -136,7 +153,7 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
       )}
 
       <p className="text-xs text-gray-400 text-center">
-        ИИ автоматически распознает продукты на фото и добавит их в список ингредиентов
+        ИИ распознает продукты на фото и добавит их в поиск
       </p>
     </div>
   );
