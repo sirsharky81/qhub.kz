@@ -157,7 +157,7 @@ export default function RecipeModal({ recipe, onClose }: Props) {
         <div className="flex-shrink-0 grid grid-cols-4 divide-x divide-gray-100 border-b border-gray-100">
           {[
             { emoji: "⏱", label: "Время",     value: `${recipe.cookingTime} мин` },
-            { emoji: "🔥", label: "Калории",   value: `${recipe.calories} ккал` },
+            { emoji: "🔥", label: "Калории",   value: `${recipe.calories} ккал/порц.` },
             { emoji: "👥", label: "Порций",    value: String(recipe.servings) },
             { emoji: "📊", label: "Сложность", value: DIFFICULTY_LABELS[recipe.difficulty] },
           ].map(({ emoji: e, label, value }) => (
@@ -175,11 +175,11 @@ export default function RecipeModal({ recipe, onClose }: Props) {
             <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
               <span>🛒</span> Ингредиенты
             </h3>
-            <div className="space-y-1.5">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0">
               {recipe.ingredients.map((ing, i) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                  <span className="text-sm text-gray-800">{ing.name}</span>
-                  <span className="text-sm font-medium text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">{ing.amount}</span>
+                <div key={i} className="flex items-center justify-between py-1 border-b border-gray-50">
+                  <span className="text-xs text-gray-800 truncate mr-2">{ing.name}</span>
+                  <span className="text-xs font-medium text-gray-500 whitespace-nowrap">{ing.amount}</span>
                 </div>
               ))}
             </div>
