@@ -73,7 +73,6 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         onChange={handleFileChange}
         className="hidden"
       />
