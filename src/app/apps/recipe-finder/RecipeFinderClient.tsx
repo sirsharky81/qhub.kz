@@ -241,14 +241,14 @@ export default function RecipeFinderClient() {
                   strictIngredients ? "left-5" : "left-1",
                 ].join(" ")} />
               </div>
-              <div className="min-w-0">
-                <p className={["text-xs font-semibold", strictIngredients ? "text-gray-900" : "text-gray-600"].join(" ")}>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-gray-700">
                   Только из этих продуктов
                 </p>
                 <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
                   {strictIngredients
-                    ? "Без докупок — только то, что есть дома"
-                    : "Допускать рецепты с недостающими продуктами"}
+                    ? "✓ Включено — рецепты без лишних покупок"
+                    : "Выключено — можно предлагать с докупкой"}
                 </p>
               </div>
             </button>
