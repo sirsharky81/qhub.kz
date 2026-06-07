@@ -224,31 +224,32 @@ export default function RecipeFinderClient() {
             </div>
           )}
 
-          {/* Strict mode toggle */}
+          {/* Ingredients mode toggle */}
           <div className="mx-4 mb-3 p-3 rounded-xl border border-gray-100 bg-gray-50">
             <button
               onClick={() => setStrictIngredients((v) => !v)}
               className="flex items-center gap-3 w-full text-left"
             >
-              {/* toggle track */}
+              {/* toggle track — ON (black) = allow extras = !strictIngredients */}
               <div className={[
                 "relative flex-shrink-0 w-10 h-6 rounded-full transition-colors duration-200",
-                strictIngredients ? "bg-gray-900" : "bg-gray-300",
+                !strictIngredients ? "bg-gray-900" : "bg-gray-300",
               ].join(" ")}>
-                {/* toggle thumb */}
                 <span className={[
                   "absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-200",
-                  strictIngredients ? "left-5" : "left-1",
+                  !strictIngredients ? "left-5" : "left-1",
                 ].join(" ")} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-gray-700">
-                  Только из этих продуктов
+                <p className={["text-xs font-semibold", !strictIngredients ? "text-gray-900" : "text-gray-400"].join(" ")}>
+                  {!strictIngredients
+                    ? "Добавлять ингредиенты не из списка"
+                    : "Строго по списку продуктов"}
                 </p>
                 <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
-                  {strictIngredients
-                    ? "✓ Включено — рецепты без лишних покупок"
-                    : "Выключено — можно предлагать с докупкой"}
+                  {!strictIngredients
+                    ? "ИИ может использовать дополнительные продукты"
+                    : "Только то, что есть — без лишних покупок"}
                 </p>
               </div>
             </button>
