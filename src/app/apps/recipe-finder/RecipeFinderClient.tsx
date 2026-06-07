@@ -212,7 +212,7 @@ export default function RecipeFinderClient() {
               Enter — найти · Shift+Enter — новая строка · 📸 — фото
             </p>
             <p className="text-xs text-gray-400 italic sm:hidden">
-              📸 — сфото холодильник
+              📸 — сделать фото холодильника
             </p>
           </div>
 
