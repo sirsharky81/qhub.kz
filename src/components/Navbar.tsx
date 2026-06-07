@@ -39,6 +39,12 @@ export default function Navbar() {
             <Link href="/#submit" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
               Для разработчиков
             </Link>
+            <Link href="/merch" className="text-sm text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1.5">
+              Merch
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-900 text-white font-medium leading-none tracking-wide">
+                скоро
+              </span>
+            </Link>
           </div>
 
           {/* CTAs */}
@@ -77,6 +83,12 @@ export default function Navbar() {
             <Link href="/#about" onClick={() => setMenuOpen(false)} className="text-sm text-gray-600 hover:text-gray-900 py-1">О проекте</Link>
             <Link href="/#apps" onClick={() => setMenuOpen(false)} className="text-sm text-gray-600 hover:text-gray-900 py-1">Приложения</Link>
             <Link href="/#submit" onClick={() => setMenuOpen(false)} className="text-sm text-gray-600 hover:text-gray-900 py-1">Для разработчиков</Link>
+            <Link href="/merch" onClick={() => setMenuOpen(false)} className="text-sm text-gray-600 hover:text-gray-900 py-1 flex items-center gap-1.5">
+              Merch
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-900 text-white font-medium leading-none tracking-wide">
+                скоро
+              </span>
+            </Link>
             <button
               onClick={() => { setMenuOpen(false); setIdeaOpen(true); }}
               className="text-sm text-left text-gray-600 hover:text-gray-900 py-1"
