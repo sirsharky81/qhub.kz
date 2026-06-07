@@ -18,27 +18,32 @@ export async function POST(request: Request) {
     return Response.json({ error: "Неверный формат запроса" }, { status: 400 });
   }
 
-  const { ingredients, cuisine, category } = body;
+  const { query, cuisine, category } = body;
 
-  if (!ingredients || ingredients.length === 0) {
-    return Response.json({ error: "Список ингредиентов пуст" }, { status: 400 });
+  if (!query || query.trim().length === 0) {
+    return Response.json({ error: "Запрос пустой" }, { status: 400 });
   }
 
-  const cuisinePrompt = cuisine !== "any" ? `, кухня: ${cuisine}` : "";
-  const categoryPrompt = category !== "any" ? `, категория: ${category}` : "";
+  const cuisineFilter = cuisine !== "any" ? `\nТип кухни: ${cuisine}` : "";
+  const categoryFilter = category !== "any" ? `\nКатегория блюда: ${category}` : "";
 
-  const systemPrompt = `Ты — профессиональный шеф-повар и кулинарный консультант. 
-Твоя задача — предлагать вкусные, реалистичные рецепты на основе имеющихся ингредиентов.
+  const systemPrompt = `Ты — профессиональный шеф-повар и кулинарный ИИ-помощник.
 Отвечай ТОЛЬКО на русском языке.
 Возвращай ответ строго в формате JSON без markdown-обёртки.`;
 
-  const userPrompt = `Имеющиеся продукты: ${ingredients.join(", ")}
-${cuisinePrompt}${categoryPrompt}
+  const userPrompt = `Запрос пользователя: "${query.trim()}"${cuisineFilter}${categoryFilter}
 
-Предложи ровно 5 блюд, которые можно приготовить из этих продуктов (допускается использование базовых специй, соли, масла и воды без перечисления).
+Запрос может быть одним из:
+1. Список ингредиентов (например: "яйца, картошка, лук") — предложи 5 блюд из этих продуктов
+2. Название блюда (например: "борщ", "паста карбонара") — предложи это блюдо и 4 вариации или похожих
+3. Пожелание (например: "хочу что-то на ужин за 30 минут", "лёгкий завтрак без глютена") — интерпретируй и предложи 5 подходящих блюд
+4. Комбинация (например: "что приготовить из курицы на ужин быстро") — учти всё сразу
+
+Определи намерение самостоятельно и предложи ровно 5 рецептов.
 
 Верни JSON в таком формате:
 {
+  "intent": "ingredients | dish | wish | mixed",
   "recipes": [
     {
       "id": "уникальная строка",
@@ -53,7 +58,7 @@ ${cuisinePrompt}${categoryPrompt}
       "ingredients": [
         { "name": "Название ингредиента", "amount": "количество и единица измерения" }
       ],
-      "steps": ["Шаг 1...", "Шаг 2...", ...],
+      "steps": ["Шаг 1...", "Шаг 2...", "Шаг 3..."],
       "usedIngredients": ["ингредиент1", "ингредиент2"],
       "missingIngredients": []
     }
@@ -61,10 +66,10 @@ ${cuisinePrompt}${categoryPrompt}
 }
 
 Важно:
-- Используй максимально ингредиенты из предоставленного списка
 - steps должны быть подробными (5-10 шагов)
 - Калорийность должна быть реалистичной
-- Обеспечь разнообразие блюд`;
+- Обеспечь разнообразие среди 5 рецептов
+- Базовые специи, соль, масло, вода — считаются доступными всегда`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -83,7 +88,7 @@ ${cuisinePrompt}${categoryPrompt}
       return Response.json({ error: "Пустой ответ от AI" }, { status: 500 });
     }
 
-    const parsed = JSON.parse(content) as { recipes: Recipe[] };
+    const parsed = JSON.parse(content) as { recipes: Recipe[]; intent?: string };
 
     parsed.recipes = parsed.recipes.map((r, i) => ({
       ...r,

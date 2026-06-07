@@ -42,7 +42,7 @@ export interface Recipe {
 }
 
 export interface GenerateRecipesRequest {
-  ingredients: string[];
+  query: string;
   cuisine: CuisineType;
   category: MealCategory;
 }

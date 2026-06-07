@@ -1,18 +1,24 @@
 "use client";
 
-import { useState } from "react";
-import IngredientsInput from "@/components/recipe-finder/IngredientsInput";
+import { useState, useRef, useCallback, useEffect, KeyboardEvent } from "react";
 import PhotoCapture from "@/components/recipe-finder/PhotoCapture";
 import FiltersBar from "@/components/recipe-finder/FiltersBar";
 import RecipeCard from "@/components/recipe-finder/RecipeCard";
 import RecipeModal from "@/components/recipe-finder/RecipeModal";
 import { Recipe, CuisineType, MealCategory } from "@/lib/recipe-finder/types";
 
-type InputTab = "text" | "photo";
+const PLACEHOLDERS = [
+  "яйца, картошка, лук, сыр...",
+  "хочу что-то на ужин за 30 минут",
+  "борщ",
+  "лёгкий завтрак без глютена",
+  "паста карбонара",
+  "что приготовить из куриного филе?",
+  "быстрый перекус из того, что есть",
+];
 
 export default function RecipeFinderClient() {
-  const [tab, setTab] = useState<InputTab>("text");
-  const [ingredients, setIngredients] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
   const [cuisine, setCuisine] = useState<CuisineType>("any");
   const [category, setCategory] = useState<MealCategory>("any");
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -21,98 +27,158 @@ export default function RecipeFinderClient() {
   const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showPhoto, setShowPhoto] = useState(false);
+  const [intentLabel, setIntentLabel] = useState<string | null>(null);
+  const [placeholderIdx, setPlaceholderIdx] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  async function handleGenerate() {
-    if (ingredients.length === 0) return;
+  useEffect(() => {
+    const id = setInterval(() => {
+      setPlaceholderIdx((i) => (i + 1) % PLACEHOLDERS.length);
+    }, 2800);
+    return () => clearInterval(id);
+  }, []);
+
+  const handleGenerate = useCallback(async () => {
+    if (!query.trim()) return;
     setError(null);
     setIsGenerating(true);
     setRecipes([]);
+    setIntentLabel(null);
 
     try {
       const res = await fetch("/api/recipes/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ingredients, cuisine, category }),
+        body: JSON.stringify({ query: query.trim(), cuisine, category }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Не удалось сгенерировать рецепты");
+        setError(data.error || "Не удалось подобрать рецепты");
         return;
       }
       setRecipes(data.recipes || []);
+      if (data.intent) {
+        const labels: Record<string, string> = {
+          ingredients: "По ингредиентам",
+          dish: "По названию блюда",
+          wish: "По пожеланию",
+          mixed: "Комбинированный запрос",
+        };
+        setIntentLabel(labels[data.intent] ?? null);
+      }
     } catch {
       setError("Ошибка соединения. Проверьте интернет и попробуйте снова.");
     } finally {
       setIsGenerating(false);
     }
+  }, [query, cuisine, category]);
+
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleGenerate();
+    }
   }
 
   function handlePhotoIngredients(found: string[]) {
-    setIngredients((prev) => {
-      const merged = [...prev];
-      found.forEach((ing) => {
-        if (!merged.includes(ing)) merged.push(ing);
-      });
-      return merged;
-    });
-    setTab("text");
+    setQuery(found.join(", "));
+    setShowPhoto(false);
+    setTimeout(() => textareaRef.current?.focus(), 100);
   }
 
-  const canGenerate = ingredients.length > 0 && !isGenerating && !isAnalyzingPhoto;
+  const canGenerate = query.trim().length > 0 && !isGenerating && !isAnalyzingPhoto;
 
   return (
     <div className="flex flex-col flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto w-full px-4 py-6 space-y-6">
+      <div className="max-w-2xl mx-auto w-full px-4 py-6 space-y-4">
 
+        {/* Smart input card */}
         <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-          <div className="flex border-b border-gray-100">
-            {(["text", "photo"] as InputTab[]).map((t) => (
+          <div className="p-4 pb-3">
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={3}
+                placeholder={PLACEHOLDERS[placeholderIdx]}
+                className="w-full resize-none text-sm text-gray-800 placeholder-gray-300 bg-transparent outline-none leading-relaxed pr-10"
+              />
+              {/* photo button inside textarea */}
               <button
-                key={t}
-                onClick={() => setTab(t)}
+                onClick={() => setShowPhoto((v) => !v)}
+                title="Сфотографировать холодильник"
                 className={[
-                  "flex-1 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2",
-                  tab === t
-                    ? "text-gray-900 border-b-2 border-gray-900 -mb-px bg-white"
-                    : "text-gray-500 hover:text-gray-700",
+                  "absolute top-0 right-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors text-base",
+                  showPhoto
+                    ? "bg-gray-900 text-white"
+                    : "text-gray-300 hover:text-gray-600 hover:bg-gray-50",
                 ].join(" ")}
               >
-                {t === "text" ? (
-                  <><span>📝</span> Список продуктов</>
-                ) : (
-                  <><span>📸</span> Фото холодильника</>
-                )}
+                📸
               </button>
-            ))}
+              {query.length > 0 && (
+                <button
+                  onClick={() => setQuery("")}
+                  className="absolute bottom-0 right-0 w-6 h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 transition-colors text-lg"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            {/* Example chips */}
+            {query.length === 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {["яйца, картошка, лук", "борщ", "ужин за 30 минут", "лёгкий завтрак"].map((ex) => (
+                  <button
+                    key={ex}
+                    onClick={() => { setQuery(ex); textareaRef.current?.focus(); }}
+                    className="px-2.5 py-1 text-[11px] bg-gray-50 border border-gray-200 rounded-full text-gray-500 hover:border-gray-400 hover:text-gray-700 transition-colors"
+                  >
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div className="p-4">
-            {tab === "text" ? (
-              <IngredientsInput ingredients={ingredients} onChange={setIngredients} />
-            ) : (
+          {/* Photo capture panel */}
+          {showPhoto && (
+            <div className="px-4 pb-4 border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-400 mb-3">
+                Сфотографируйте холодильник — ИИ определит продукты и добавит в поиск
+              </p>
               <PhotoCapture
                 onIngredientsFound={handlePhotoIngredients}
                 onLoading={setIsAnalyzingPhoto}
                 isLoading={isAnalyzingPhoto}
               />
-            )}
-          </div>
+            </div>
+          )}
 
-          <div className="px-4 pb-2">
+          {/* Filters toggle */}
+          <div className="px-4 pb-2 flex items-center gap-3 border-t border-gray-50">
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors py-1"
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors py-2"
             >
-              <span className={`transition-transform ${showFilters ? "rotate-180" : ""}`}>▾</span>
-              {showFilters ? "Скрыть фильтры" : "Фильтры: кухня и категория"}
+              <span className={`transition-transform text-[10px] ${showFilters ? "rotate-180" : ""}`}>▾</span>
+              Фильтры
               {(cuisine !== "any" || category !== "any") && (
-                <span className="ml-1 w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
               )}
             </button>
+            <span className="text-gray-200 text-xs">|</span>
+            <p className="text-xs text-gray-400 italic">
+              Enter — найти · Shift+Enter — новая строка · 📸 — фото
+            </p>
           </div>
 
           {showFilters && (
-            <div className="px-4 pb-4 pt-2 border-t border-gray-100">
+            <div className="px-4 pb-4 border-t border-gray-100">
               <FiltersBar
                 cuisine={cuisine}
                 category={category}
@@ -139,12 +205,13 @@ export default function RecipeFinderClient() {
                   Подбираю рецепты...
                 </span>
               ) : (
-                `🍳 Подобрать блюда${ingredients.length > 0 ? ` (${ingredients.length} ингр.)` : ""}`
+                "🍳 Найти рецепты"
               )}
             </button>
           </div>
         </div>
 
+        {/* Error */}
         {error && (
           <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
             <span className="text-red-500 text-lg flex-shrink-0">⚠️</span>
@@ -155,23 +222,29 @@ export default function RecipeFinderClient() {
           </div>
         )}
 
+        {/* Skeletons */}
         {isGenerating && (
           <div className="space-y-3">
             {[...Array(5)].map((_, i) => (
-              <div
-                key={i}
-                className="h-36 bg-gray-50 border border-gray-100 rounded-2xl animate-pulse"
-              />
+              <div key={i} className="h-36 bg-gray-50 border border-gray-100 rounded-2xl animate-pulse" />
             ))}
           </div>
         )}
 
+        {/* Results */}
         {recipes.length > 0 && !isGenerating && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-700">
-                Найдено блюд: {recipes.length}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-700">
+                  Найдено: {recipes.length} блюд
+                </h2>
+                {intentLabel && (
+                  <span className="text-[10px] px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full border border-gray-200">
+                    {intentLabel}
+                  </span>
+                )}
+              </div>
               <button
                 onClick={handleGenerate}
                 className="text-xs text-gray-500 hover:text-gray-800 flex items-center gap-1 transition-colors"
@@ -191,15 +264,15 @@ export default function RecipeFinderClient() {
           </div>
         )}
 
+        {/* Empty state */}
         {recipes.length === 0 && !isGenerating && !error && (
           <div className="text-center py-12 space-y-3">
             <div className="text-5xl">🥗</div>
-            <p className="text-sm text-gray-500">
-              Введите ингредиенты или сфотографируйте холодильник
-            </p>
-            <p className="text-xs text-gray-400">
-              ИИ подберёт 5 блюд, которые можно приготовить
-            </p>
+            <p className="text-sm font-medium text-gray-600">Что хочешь приготовить?</p>
+            <div className="text-xs text-gray-400 space-y-1">
+              <p>Напиши название блюда, список продуктов</p>
+              <p>или просто пожелание — ИИ сам разберётся</p>
+            </div>
           </div>
         )}
       </div>
