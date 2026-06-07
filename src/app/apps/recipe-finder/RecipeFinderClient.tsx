@@ -207,9 +207,12 @@ export default function RecipeFinderClient() {
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
               )}
             </button>
-            <span className="text-gray-200 text-xs">|</span>
-            <p className="text-xs text-gray-400 italic">
+            <span className="text-gray-200 text-xs hidden sm:inline">|</span>
+            <p className="text-xs text-gray-400 italic hidden sm:block">
               Enter — найти · Shift+Enter — новая строка · 📸 — фото
+            </p>
+            <p className="text-xs text-gray-400 italic sm:hidden">
+              📸 — сфото холодильник
             </p>
           </div>
 
