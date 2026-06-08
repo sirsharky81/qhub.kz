@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import CreditCalculatorClient from "./CreditCalculatorClient";
 
 export const metadata: Metadata = {
   title: "Кредитный калькулятор — QHub.kz",
@@ -10,8 +11,7 @@ export const metadata: Metadata = {
 export default function CreditCalculatorPage() {
   return (
     <div className="flex flex-col h-screen bg-white">
-      {/* Thin top bar */}
-      <div className="flex-shrink-0 h-11 border-b border-gray-200 bg-white flex items-center px-4 gap-3">
+      <div className="flex-shrink-0 h-11 border-b border-gray-200 bg-white flex items-center px-4 gap-3 print:hidden">
         <Link
           href="/"
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors"
@@ -42,12 +42,7 @@ export default function CreditCalculatorPage() {
         </div>
       </div>
 
-      {/* Full-height iframe */}
-      <iframe
-        src="/apps/credit-calculator.html"
-        className="flex-1 w-full border-none"
-        title="Кредитный калькулятор"
-      />
+      <CreditCalculatorClient />
     </div>
   );
 }
