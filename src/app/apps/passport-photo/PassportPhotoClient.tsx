@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PixelCrop } from "react-image-crop";
 import { PhotoSize, BackgroundColor } from "@/lib/passport-photo/dimensions";
 import StepUpload from "@/components/passport-photo/StepUpload";
 import StepCrop from "@/components/passport-photo/StepCrop";
@@ -15,7 +14,6 @@ const STEP_LABELS = ["Загрузка", "Кадрирование", "Фон", "
 interface State {
   imageUrl: string | null;
   imageFile: File | null;
-  cropData: { crop: PixelCrop; imageEl: HTMLImageElement; photoSize: PhotoSize } | null;
   croppedBlob: Blob | null;
   processedBlob: Blob | null;
   bgColor: BackgroundColor;
@@ -27,7 +25,6 @@ export default function PassportPhotoClient() {
   const [state, setState] = useState<State>({
     imageUrl: null,
     imageFile: null,
-    cropData: null,
     croppedBlob: null,
     processedBlob: null,
     bgColor: "white",
@@ -39,45 +36,14 @@ export default function PassportPhotoClient() {
     setStep(1);
   }, []);
 
-  const handleCropComplete = useCallback(
-    async (crop: PixelCrop, imageEl: HTMLImageElement, photoSize: PhotoSize) => {
-      const scaleX = imageEl.naturalWidth / imageEl.width;
-      const scaleY = imageEl.naturalHeight / imageEl.height;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = photoSize.widthPx;
-      canvas.height = photoSize.heightPx;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(
-        imageEl,
-        crop.x * scaleX,
-        crop.y * scaleY,
-        crop.width * scaleX,
-        crop.height * scaleY,
-        0,
-        0,
-        photoSize.widthPx,
-        photoSize.heightPx
-      );
-
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
-          "image/jpeg",
-          0.97
-        );
-      });
-
-      setState((s) => ({
-        ...s,
-        cropData: { crop, imageEl, photoSize },
-        croppedBlob: blob,
-        selectedPhotoSize: photoSize,
-      }));
-      setStep(2);
-    },
-    []
-  );
+  const handleCropComplete = useCallback((croppedBlob: Blob, photoSize: PhotoSize) => {
+    setState((s) => ({
+      ...s,
+      croppedBlob,
+      selectedPhotoSize: photoSize,
+    }));
+    setStep(2);
+  }, []);
 
   const handleBackgroundComplete = useCallback((blob: Blob, bgColor: BackgroundColor) => {
     setState((s) => ({ ...s, processedBlob: blob, bgColor }));
@@ -89,7 +55,6 @@ export default function PassportPhotoClient() {
     setState({
       imageUrl: null,
       imageFile: null,
-      cropData: null,
       croppedBlob: null,
       processedBlob: null,
       bgColor: "white",
@@ -149,6 +114,7 @@ export default function PassportPhotoClient() {
         )}
         {step === 1 && state.imageUrl && (
           <StepCrop
+            key={state.imageUrl}
             imageUrl={state.imageUrl}
             onCropComplete={handleCropComplete}
             onBack={() => setStep(0)}
