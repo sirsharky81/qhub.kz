@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { runCalculation, validateInputs, type FormValues } from "@/lib/credit-calculator/calculate";
 import { dayBasisLabel, interestSharePercent, paymentDate, round2, todayISODate } from "@/lib/credit-calculator/calculations";
 import { drawBreakdownChart } from "@/lib/credit-calculator/chart";
-import { exportLoanToExcel } from "@/lib/credit-calculator/export-excel";
-import { buildLoanShareText, buildLoanWordBlob, exportLoanToWord } from "@/lib/credit-calculator/export-word";
+import { buildLoanExcelBlob, exportLoanToExcel } from "@/lib/credit-calculator/export-excel";
+import { buildLoanShareText, exportLoanToWord } from "@/lib/credit-calculator/export-word";
 import {
   formatAmountInput,
   formatDate,
@@ -249,8 +249,10 @@ export default function CreditCalculatorClient() {
     setSharing(true);
     setError(null);
     try {
-      const { blob, filename } = buildLoanWordBlob(result, lang);
-      const file = new File([blob], filename, { type: "application/msword" });
+      const { blob, filename } = await buildLoanExcelBlob(result);
+      const file = new File([blob], filename, {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
       const text = buildLoanShareText(result, lang);
 
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
@@ -271,7 +273,7 @@ export default function CreditCalculatorClient() {
         return;
       }
 
-      exportLoanToWord(result, lang);
+      await exportLoanToExcel(result);
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         setError(t(lang, "err.shareFail"));

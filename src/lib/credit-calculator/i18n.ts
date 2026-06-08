@@ -22,8 +22,8 @@ const TRANSLATIONS: Record<Lang, Record<string, string>> = {
     "btn.word": "Word",
     "btn.pdf": "PDF",
     "btn.share": "Поделиться",
-    "share.hint": "Отправьте расчёт в WhatsApp, Telegram или сохраните файл.",
-    "err.shareFail": "Не удалось поделиться. Попробуйте выгрузить Word.",
+    "share.hint": "Отправьте Excel с расчётом в WhatsApp, Telegram или сохраните файл.",
+    "err.shareFail": "Не удалось поделиться. Попробуйте выгрузить Excel.",
     "hint.inputs":
       "Первый платёж — со следующего периода · Льготный: платежи отсутствуют, начисленные проценты равномерно распределяются по основному сроку · Комиссия включается в расчёт ГЭСВ",
     "card.annuity": "Аннуитет",
@@ -95,8 +95,8 @@ const TRANSLATIONS: Record<Lang, Record<string, string>> = {
     "btn.word": "Word",
     "btn.pdf": "PDF",
     "btn.share": "Бөлісу",
-    "share.hint": "Есептеуді WhatsApp, Telegram арқылы жіберіңіз немесе файлды сақтаңыз.",
-    "err.shareFail": "Бөлісу мүмкін болмады. Word-ке шығарып көріңіз.",
+    "share.hint": "Excel есебін WhatsApp, Telegram арқылы жіберіңіз немесе файлды сақтаңыз.",
+    "err.shareFail": "Бөлісу мүмкін болмады. Excel-ге шығарып көріңіз.",
     "hint.inputs":
       "Бірінші төлем — келесі кезеңнен · Жеңілдік: төлемдер жоқ, есептелген пайыздар негізгі мерзімге тең бөлінеді · Комиссия ЖЭТМ есебіне қосылады",
     "card.annuity": "Аннуитет",
@@ -168,8 +168,8 @@ const TRANSLATIONS: Record<Lang, Record<string, string>> = {
     "btn.word": "Word",
     "btn.pdf": "PDF",
     "btn.share": "Share",
-    "share.hint": "Send the calculation via WhatsApp, Telegram, or save the file.",
-    "err.shareFail": "Could not share. Try exporting to Word.",
+    "share.hint": "Share the Excel file via WhatsApp, Telegram, or save it.",
+    "err.shareFail": "Could not share. Try exporting to Excel.",
     "hint.inputs":
       "First payment — from the next period · Grace: no payments, accrued interest spread over main term · Commission included in EIR",
     "card.annuity": "Annuity",

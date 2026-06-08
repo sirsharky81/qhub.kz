@@ -198,13 +198,19 @@ function buildScheduleSheet(
   sheet.autoFilter = `A4:${lastCol}4`;
 }
 
-export async function exportLoanToExcel(data: {
+export type LoanExportData = {
   input: LoanInput;
   annuity: AnnuityResult;
   diff: DiffResult;
   annuityEIR: number | null;
   diffEIR: number | null;
-}): Promise<void> {
+};
+
+function loanExportFilename(): string {
+  return "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+}
+
+async function buildLoanWorkbook(data: LoanExportData) {
   const ExcelJS = (await import("exceljs")).default;
   const { input, annuity, diff, annuityEIR, diffEIR } = data;
   const { disbursement, dayBasis, freq } = input;
@@ -228,14 +234,28 @@ export async function exportLoanToExcel(data: {
     diff.rows
   );
 
+  return workbook;
+}
+
+export async function buildLoanExcelBlob(
+  data: LoanExportData
+): Promise<{ blob: Blob; filename: string }> {
+  const workbook = await buildLoanWorkbook(data);
   const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
+  return {
+    blob: new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    filename: loanExportFilename(),
+  };
+}
+
+export async function exportLoanToExcel(data: LoanExportData): Promise<void> {
+  const { blob, filename } = await buildLoanExcelBlob(data);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }
