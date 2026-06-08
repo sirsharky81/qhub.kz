@@ -6,13 +6,22 @@ declare module "face-api.js" {
   export class TinyFaceDetectorOptions {
     constructor(options?: { inputSize?: number; scoreThreshold?: number });
   }
+  type FaceLandmarksResult = {
+    detection: { box: { x: number; y: number; width: number; height: number } };
+    landmarks: { positions: Array<{ x: number; y: number }> };
+  };
+
   export function detectSingleFace(
     input: HTMLCanvasElement | HTMLImageElement,
     options: TinyFaceDetectorOptions
   ): {
-    withFaceLandmarks: (useTinyModel?: boolean) => Promise<{
-      detection: { box: { x: number; y: number; width: number; height: number } };
-      landmarks: { positions: Array<{ x: number; y: number }> };
-    } | undefined>;
+    withFaceLandmarks: (useTinyModel?: boolean) => Promise<FaceLandmarksResult | undefined>;
+  };
+
+  export function detectAllFaces(
+    input: HTMLCanvasElement | HTMLImageElement,
+    options: TinyFaceDetectorOptions
+  ): {
+    withFaceLandmarks: (useTinyModel?: boolean) => Promise<FaceLandmarksResult[]>;
   };
 }

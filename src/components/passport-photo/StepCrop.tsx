@@ -347,7 +347,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
         <p className="text-sm text-gray-500 mt-1">
           {faceDetected
             ? "Фото автоматически выровнено — проверьте овал"
-            : "Лицо не определено — настройте вручную"}
+            : "Совместите лицо с овалом — можно настроить вручную и продолжить"}
         </p>
       </div>
 
@@ -466,19 +466,32 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       </div>
 
       {showFaceToast && manualMode && (
-        <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-50 bg-gray-900 text-white rounded-xl px-4 py-3 text-sm shadow-lg flex items-center justify-between gap-3">
-          <span>Лицо не определено — настройте вручную</span>
-          <button
-            onClick={handleRetryDetection}
-            disabled={modelsLoading}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 whitespace-nowrap"
-          >
-            {modelsLoading ? "…" : "Попробовать снова"}
-          </button>
+        <div className="max-w-md mx-auto w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-2">
+          <p>
+            Автораспознавание не сработало. Совместите лицо с овалом пальцами и нажмите{" "}
+            <strong>«Далее»</strong> — это нормально.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleRetryDetection}
+              disabled={modelsLoading}
+              className="flex-1 px-3 py-2 rounded-lg border border-amber-300 text-xs font-medium hover:bg-amber-100 transition-colors"
+            >
+              {modelsLoading ? "Поиск…" : "Попробовать снова"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowFaceToast(false)}
+              className="flex-1 px-3 py-2 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-700 transition-colors"
+            >
+              Понятно, продолжу
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="flex justify-between gap-3 max-w-md mx-auto w-full">
+      <div className="flex justify-between gap-3 max-w-md mx-auto w-full pb-2">
         <button
           onClick={onBack}
           className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
