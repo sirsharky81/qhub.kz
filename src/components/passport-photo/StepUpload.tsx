@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState } from "react";
+import PhotoTips from "@/components/passport-photo/PhotoTips";
 
 interface Props {
   onImageSelected: (file: File, objectUrl: string) => void;
@@ -11,12 +12,6 @@ export default function StepUpload({ onImageSelected }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    // Detect touch/coarse-pointer devices (phones, tablets)
-    setIsMobile(window.matchMedia("(pointer: coarse)").matches);
-  }, []);
 
   function handleFile(file: File) {
     setError(null);
@@ -55,9 +50,8 @@ export default function StepUpload({ onImageSelected }: Props) {
         </p>
       </div>
 
-      {isMobile ? (
-        // ── Mobile: explicit camera / gallery buttons ──────────────────────
-        <div className="flex flex-col gap-3 w-full max-w-md">
+      {/* Mobile: camera / gallery */}
+      <div className="flex flex-col gap-3 w-full max-w-md md:hidden">
           <button
             type="button"
             onClick={() => cameraInputRef.current?.click()}
@@ -76,29 +70,28 @@ export default function StepUpload({ onImageSelected }: Props) {
             Выбрать из галереи
           </button>
         </div>
-      ) : (
-        // ── Desktop: drag-and-drop zone ────────────────────────────────────
-        <button
-          type="button"
-          onClick={() => galleryInputRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={handleDrop}
-          className={[
-            "w-full max-w-md border-2 border-dashed rounded-2xl p-12 transition-colors cursor-pointer",
-            "flex flex-col items-center gap-4 text-center",
-            dragging
-              ? "border-blue-400 bg-blue-50"
-              : "border-gray-200 bg-gray-50 hover:border-gray-300 hover:bg-gray-100",
-          ].join(" ")}
-        >
-          <span className="text-5xl select-none">📷</span>
-          <div>
-            <p className="text-sm font-medium text-gray-700">Перетащите фото сюда</p>
-            <p className="text-xs text-gray-400 mt-0.5">или нажмите для выбора файла</p>
-          </div>
-        </button>
-      )}
+
+      {/* Desktop: drag-and-drop */}
+      <button
+        type="button"
+        onClick={() => galleryInputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        className={[
+          "hidden md:flex w-full max-w-md border-2 border-dashed rounded-2xl p-12 transition-colors cursor-pointer",
+          "flex-col items-center gap-4 text-center",
+          dragging
+            ? "border-blue-400 bg-blue-50"
+            : "border-gray-200 bg-gray-50 hover:border-gray-300 hover:bg-gray-100",
+        ].join(" ")}
+      >
+        <span className="text-5xl select-none">📷</span>
+        <div>
+          <p className="text-sm font-medium text-gray-700">Перетащите фото сюда</p>
+          <p className="text-xs text-gray-400 mt-0.5">или нажмите для выбора файла</p>
+        </div>
+      </button>
 
       {/* Camera input — opens camera directly on Android */}
       <input
@@ -117,6 +110,8 @@ export default function StepUpload({ onImageSelected }: Props) {
         className="hidden"
         onChange={handleInputChange}
       />
+
+      <PhotoTips />
 
       {error && (
         <p className="text-sm text-red-500 text-center">{error}</p>

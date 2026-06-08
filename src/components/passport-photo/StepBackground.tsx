@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import PhotoTips from "@/components/passport-photo/PhotoTips";
 import { BACKGROUND_COLORS, BackgroundColor, PhotoSize } from "@/lib/passport-photo/dimensions";
 import { applyBackground } from "@/lib/passport-photo/canvas-utils";
 
@@ -11,7 +12,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Mode = "ai" | "none";
+type Mode = "ai" | "original";
 type Status = "idle" | "loading" | "done" | "error";
 
 export default function StepBackground({ croppedBlob, photoSize, onComplete, onBack }: Props) {
@@ -47,7 +48,7 @@ export default function StepBackground({ croppedBlob, photoSize, onComplete, onB
         });
         outputBlob = await applyBackground(removedBlob, BACKGROUND_COLORS[bgColor].value, photoSize);
       } else {
-        outputBlob = await applyBackground(croppedBlob, BACKGROUND_COLORS[bgColor].value, photoSize);
+        outputBlob = croppedBlob;
       }
 
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -60,7 +61,7 @@ export default function StepBackground({ croppedBlob, photoSize, onComplete, onB
       setStatus("error");
       setErrorMsg(
         mode === "ai"
-          ? "Не удалось удалить фон. Попробуйте режим «Без AI» или другой браузер."
+          ? "Не удалось удалить фон. Попробуйте режим «Без замены фона» или другой браузер."
           : "Ошибка обработки. Попробуйте ещё раз."
       );
     }
@@ -81,7 +82,7 @@ export default function StepBackground({ croppedBlob, photoSize, onComplete, onB
         <div>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Способ</p>
           <div className="grid grid-cols-2 gap-2">
-            {(["ai", "none"] as Mode[]).map((m) => (
+            {(["ai", "original"] as Mode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => { setMode(m); prevParams.current = ""; setStatus("idle"); setResultBlob(null); }}
@@ -91,48 +92,60 @@ export default function StepBackground({ croppedBlob, photoSize, onComplete, onB
                 ].join(" ")}
               >
                 <span className="text-sm font-medium text-gray-800">
-                  {m === "ai" ? "🤖 ИИ удаление фона" : "🎨 Только цвет поверх"}
+                  {m === "ai" ? "🤖 ИИ удаление фона" : "📷 Без замены фона"}
                 </span>
                 <span className="text-xs text-gray-400">
                   {m === "ai"
-                    ? "Точное вырезание силуэта (загрузка ~40 МБ)"
-                    : "Быстро, без загрузки модели"}
+                    ? "Вырезает силуэт и ставит белый/голубой фон (~40 МБ)"
+                    : "Исходный фон остаётся — фото не меняется"}
                 </span>
               </button>
             ))}
           </div>
         </div>
 
-        <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Цвет фона</p>
-          <div className="flex gap-3">
-            {(Object.entries(BACKGROUND_COLORS) as [BackgroundColor, typeof BACKGROUND_COLORS[BackgroundColor]][]).map(
-              ([key, cfg]) => (
-                <button
-                  key={key}
-                  onClick={() => { setBgColor(key); prevParams.current = ""; setStatus("idle"); setResultBlob(null); }}
-                  className={[
-                    "flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-colors",
-                    bgColor === key ? "border-gray-900 bg-gray-50" : "border-gray-200 hover:border-gray-300",
-                  ].join(" ")}
-                >
-                  <span
-                    className="w-5 h-5 rounded-full border border-gray-200 flex-shrink-0"
-                    style={{ background: cfg.value }}
-                  />
-                  {cfg.label}
-                </button>
-              )
-            )}
+        {mode === "ai" && (
+          <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
+            <PhotoTips compact />
           </div>
-        </div>
+        )}
+
+        {mode === "ai" && (
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Цвет фона</p>
+            <div className="flex gap-3">
+              {(Object.entries(BACKGROUND_COLORS) as [BackgroundColor, typeof BACKGROUND_COLORS[BackgroundColor]][]).map(
+                ([key, cfg]) => (
+                  <button
+                    key={key}
+                    onClick={() => { setBgColor(key); prevParams.current = ""; setStatus("idle"); setResultBlob(null); }}
+                    className={[
+                      "flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-colors",
+                      bgColor === key ? "border-gray-900 bg-gray-50" : "border-gray-200 hover:border-gray-300",
+                    ].join(" ")}
+                  >
+                    <span
+                      className="w-5 h-5 rounded-full border border-gray-200 flex-shrink-0"
+                      style={{ background: cfg.value }}
+                    />
+                    {cfg.label}
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        )}
 
         <button
           onClick={processBackground}
           disabled={status === "loading"}
           className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-wait"
         >
-          {status === "loading" ? "Обработка…" : "Применить фон"}
+          {status === "loading"
+            ? "Обработка…"
+            : mode === "ai"
+            ? "Применить фон"
+            : "Использовать фото как есть"}
         </button>
 
         {errorMsg && (
