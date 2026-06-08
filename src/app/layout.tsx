@@ -13,6 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-icon.svg", type: "image/svg+xml" }],
+  },
   title: "QHub.kz — Первый казахский хаб полезных приложений",
   description:
     "QHub.kz — платформа с умными веб-приложениями для жизни, работы и бизнеса. Кредитный калькулятор, финансовые инструменты и другие vibe-coded решения.",
