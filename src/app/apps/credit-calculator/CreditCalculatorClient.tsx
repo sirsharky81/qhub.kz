@@ -5,7 +5,7 @@ import { runCalculation, validateInputs, type FormValues } from "@/lib/credit-ca
 import { dayBasisLabel, interestSharePercent, paymentDate, round2, todayISODate } from "@/lib/credit-calculator/calculations";
 import { drawBreakdownChart } from "@/lib/credit-calculator/chart";
 import { exportLoanToExcel } from "@/lib/credit-calculator/export-excel";
-import { exportLoanToWord } from "@/lib/credit-calculator/export-word";
+import { buildLoanShareText, buildLoanWordBlob, exportLoanToWord } from "@/lib/credit-calculator/export-word";
 import {
   formatAmountInput,
   formatDate,
@@ -152,6 +152,9 @@ export default function CreditCalculatorClient() {
   const [chartView, setChartView] = useState<ChartView>("both");
   const [chartType, setChartType] = useState<ChartType>("annuity");
   const [exporting, setExporting] = useState(false);
+  const [sharing, setSharing] = useState(false);
+
+  const canShare = typeof navigator !== "undefined" && "share" in navigator;
 
   const chartAnnuityRef = useRef<HTMLCanvasElement>(null);
   const chartDiffRef = useRef<HTMLCanvasElement>(null);
@@ -236,6 +239,46 @@ export default function CreditCalculatorClient() {
       return;
     }
     exportLoanToWord(result, lang);
+  }
+
+  async function handleShare() {
+    if (!result) {
+      setError(t(lang, "err.noCalc"));
+      return;
+    }
+    setSharing(true);
+    setError(null);
+    try {
+      const { blob, filename } = buildLoanWordBlob(result, lang);
+      const file = new File([blob], filename, { type: "application/msword" });
+      const text = buildLoanShareText(result, lang);
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: t(lang, "title"),
+          text,
+        });
+        return;
+      }
+
+      if (navigator.share) {
+        await navigator.share({
+          title: t(lang, "title"),
+          text,
+          url: "https://qhub.kz/apps/credit-calculator",
+        });
+        return;
+      }
+
+      exportLoanToWord(result, lang);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setError(t(lang, "err.shareFail"));
+      }
+    } finally {
+      setSharing(false);
+    }
   }
 
   const annNonGrace = result?.annuity.rows.filter((r) => !r.isGrace) ?? [];
@@ -464,6 +507,14 @@ export default function CreditCalculatorClient() {
             </button>
             <button
               type="button"
+              onClick={handleShare}
+              disabled={sharing || !result}
+              className={[btnSecondary, "md:hidden"].join(" ")}
+            >
+              {sharing ? t(lang, "exporting") : "↗ " + t(lang, "btn.share")}
+            </button>
+            <button
+              type="button"
               onClick={handleExcelExport}
               disabled={exporting}
               className={btnSecondary}
@@ -477,6 +528,9 @@ export default function CreditCalculatorClient() {
               🖨 {t(lang, "btn.pdf")}
             </button>
           </div>
+          {canShare && (
+            <p className="text-xs text-gray-400 mt-3 md:hidden">{t(lang, "share.hint")}</p>
+          )}
         </section>
 
         {/* Summary */}
@@ -575,7 +629,7 @@ export default function CreditCalculatorClient() {
                   aria-selected={activeTab === tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={[
-                    "px-3 py-2 rounded-lg text-sm font-medium border transition-colors",
+                    "px-2.5 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium border transition-colors",
                     activeTab === tab.id
                       ? "bg-gray-900 text-white border-gray-900"
                       : "bg-white text-gray-500 border-gray-200 hover:border-gray-400 hover:text-gray-800",
@@ -598,9 +652,9 @@ export default function CreditCalculatorClient() {
             )}
 
             {activeTab === "breakdown" && (
-              <section className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 sm:p-5 print:hidden">
-                <p className="text-sm text-gray-500 mb-4">{t(lang, "chart.hint")}</p>
-                <div className="flex flex-wrap items-center gap-4 mb-5">
+              <section className="bg-white border border-gray-200 rounded-2xl shadow-sm p-3 sm:p-5 print:hidden">
+                <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">{t(lang, "chart.hint")}</p>
+                <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-4 mb-4 sm:mb-5">
                   <div className="flex flex-wrap gap-4">
                     {(["both", "single"] as ChartView[]).map((v) => (
                       <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -636,16 +690,16 @@ export default function CreditCalculatorClient() {
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
                   {(chartView === "both" || chartType === "annuity") && (
                     <figure>
-                      <figcaption className="text-sm font-semibold text-gray-800 mb-2">
+                      <figcaption className="text-xs sm:text-sm font-semibold text-gray-800 mb-1.5 sm:mb-2">
                         {t(lang, "chart.capAnnuity")}
                       </figcaption>
-                      <div className="overflow-x-auto rounded-xl border border-gray-100 bg-gray-50/50 min-h-[200px]">
-                        <canvas ref={chartAnnuityRef} className="block h-[200px]" />
+                      <div className="w-full overflow-hidden rounded-xl border border-gray-100 bg-gray-50/50 min-h-[168px] sm:min-h-[200px]">
+                        <canvas ref={chartAnnuityRef} className="block w-full h-[168px] sm:h-[200px]" />
                       </div>
-                      <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-500">
+                      <div className="flex flex-wrap gap-2 sm:gap-3 mt-1.5 sm:mt-2 text-[10px] sm:text-xs text-gray-500">
                         <span className="flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded-sm bg-emerald-600" />
                           {t(lang, "leg.principal")}
@@ -665,13 +719,13 @@ export default function CreditCalculatorClient() {
                   )}
                   {(chartView === "both" || chartType === "diff") && (
                     <figure>
-                      <figcaption className="text-sm font-semibold text-gray-800 mb-2">
+                      <figcaption className="text-xs sm:text-sm font-semibold text-gray-800 mb-1.5 sm:mb-2">
                         {t(lang, "chart.capDiff")}
                       </figcaption>
-                      <div className="overflow-x-auto rounded-xl border border-gray-100 bg-gray-50/50 min-h-[200px]">
-                        <canvas ref={chartDiffRef} className="block h-[200px]" />
+                      <div className="w-full overflow-hidden rounded-xl border border-gray-100 bg-gray-50/50 min-h-[168px] sm:min-h-[200px]">
+                        <canvas ref={chartDiffRef} className="block w-full h-[168px] sm:h-[200px]" />
                       </div>
-                      <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-500">
+                      <div className="flex flex-wrap gap-2 sm:gap-3 mt-1.5 sm:mt-2 text-[10px] sm:text-xs text-gray-500">
                         <span className="flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded-sm bg-emerald-600" />
                           {t(lang, "leg.principal")}

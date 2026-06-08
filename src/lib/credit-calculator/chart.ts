@@ -1,9 +1,6 @@
 import type { ScheduleRow } from "./types";
 import { formatShort } from "./format";
 
-const CHART_HEIGHT = 200;
-const CHART_BAR_W = 12;
-const CHART_BAR_GAP = 3;
 const CHART_MAX_BARS = 24;
 
 const COLORS = {
@@ -18,6 +15,27 @@ function maxPayment(sampled: ScheduleRow[]): number {
     if (row.payment > maxPay) maxPay = row.payment;
   }
   return maxPay;
+}
+
+function getLayout(containerW: number, barCount: number) {
+  const compact = containerW < 640;
+  const h = compact ? 168 : 200;
+  const pad = {
+    top: compact ? 10 : 14,
+    right: compact ? 4 : 12,
+    bottom: compact ? 20 : 26,
+    left: compact ? 30 : 46,
+  };
+  const plotAreaW = Math.max(40, containerW - pad.left - pad.right);
+  const gap = barCount > 1 ? (compact ? 1 : 3) : 0;
+  const minBarW = compact ? 3 : 6;
+  const barW = Math.max(minBarW, Math.floor((plotAreaW - gap * (barCount - 1)) / barCount));
+  const plotW = barCount * barW + gap * Math.max(0, barCount - 1);
+  const plotLeft = pad.left + Math.max(0, (plotAreaW - plotW) / 2);
+  const font = compact ? 9 : 10;
+  const labelFont = compact ? 8 : 9;
+
+  return { compact, h, pad, barW, gap, plotW, plotLeft, plotRight: plotLeft + plotW, font, labelFont, w: containerW };
 }
 
 export function drawBreakdownChart(
@@ -36,19 +54,16 @@ export function drawBreakdownChart(
   const sampled = rows.filter((_, i) => i % step === 0 || i === rows.length - 1);
   if (!sampled.length) return;
 
+  const containerW = wrap && wrap.clientWidth > 0 ? wrap.clientWidth : 320;
   const maxPay = maxPayment(sampled);
   const n = sampled.length;
-  const pad = { top: 14, right: 12, bottom: 26, left: 46 };
-  const plotW = n * CHART_BAR_W + Math.max(0, n - 1) * CHART_BAR_GAP;
-  const containerW = wrap && wrap.clientWidth > 0 ? wrap.clientWidth : 600;
-  const w = Math.max(pad.left + pad.right + plotW, containerW);
-  const h = CHART_HEIGHT;
+  const layout = getLayout(containerW, n);
+  const { h, pad, barW, gap, plotLeft, plotRight, font, labelFont, w } = layout;
   const chartH = h - pad.top - pad.bottom;
-  const plotLeft = pad.left + Math.max(0, (w - pad.left - pad.right - plotW) / 2);
-  const plotRight = plotLeft + plotW;
 
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
+  canvas.style.width = "100%";
+  canvas.style.height = `${h}px`;
+  canvas.style.maxWidth = "100%";
   if (w < 50 || h < 50) return;
 
   canvas.width = Math.round(w * dpr);
@@ -59,21 +74,29 @@ export function drawBreakdownChart(
 
   ctx.strokeStyle = "#e5e7eb";
   ctx.fillStyle = "#6b7280";
-  ctx.font = "10px var(--font-geist-sans), system-ui, sans-serif";
+  ctx.font = `${font}px var(--font-geist-sans), system-ui, sans-serif`;
 
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.top + (chartH * i) / 4;
+  const gridLines = layout.compact ? 3 : 4;
+  for (let i = 0; i <= gridLines; i++) {
+    const y = pad.top + (chartH * i) / gridLines;
     ctx.beginPath();
     ctx.moveTo(plotLeft, y);
     ctx.lineTo(plotRight, y);
     ctx.stroke();
     ctx.textAlign = "right";
-    ctx.fillText(formatShort(maxPay * (1 - i / 4)), plotLeft - 5, y + 3);
+    ctx.fillText(formatShort(maxPay * (1 - i / gridLines)), plotLeft - 4, y + 3);
   }
 
-  const labelEvery = n <= 12 ? 1 : Math.ceil(n / 12);
+  const labelEvery = layout.compact
+    ? n <= 8
+      ? 1
+      : Math.ceil(n / 6)
+    : n <= 12
+      ? 1
+      : Math.ceil(n / 12);
+
   sampled.forEach((row, i) => {
-    const x = plotLeft + i * (CHART_BAR_W + CHART_BAR_GAP);
+    const x = plotLeft + i * (barW + gap);
     const totalH = (row.payment / maxPay) * chartH;
     const principalH = (row.principal / maxPay) * chartH;
     const deferAmt = row.deferred || 0;
@@ -82,23 +105,23 @@ export function drawBreakdownChart(
     const deferredH = (deferAmt / maxPay) * chartH;
 
     ctx.fillStyle = COLORS.principal;
-    ctx.fillRect(x, pad.top + chartH - principalH, CHART_BAR_W, principalH);
+    ctx.fillRect(x, pad.top + chartH - principalH, barW, principalH);
     ctx.fillStyle = COLORS.interest;
-    ctx.fillRect(x, pad.top + chartH - principalH - pureInterestH, CHART_BAR_W, pureInterestH);
+    ctx.fillRect(x, pad.top + chartH - principalH - pureInterestH, barW, pureInterestH);
     if (deferredH > 0.5) {
       ctx.fillStyle = COLORS.deferred;
-      ctx.fillRect(x, pad.top + chartH - totalH, CHART_BAR_W, deferredH);
+      ctx.fillRect(x, pad.top + chartH - totalH, barW, deferredH);
     }
     if (i % labelEvery === 0 || i === n - 1) {
       ctx.textAlign = "center";
-      ctx.font = "9px var(--font-geist-sans), system-ui, sans-serif";
+      ctx.font = `${labelFont}px var(--font-geist-sans), system-ui, sans-serif`;
       ctx.fillStyle = "#6b7280";
-      ctx.fillText(String(row.month), x + CHART_BAR_W / 2, h - 6);
+      ctx.fillText(String(row.month), x + barW / 2, h - 5);
     }
   });
 
   ctx.textAlign = "left";
-  ctx.font = "10px var(--font-geist-sans), system-ui, sans-serif";
+  ctx.font = `${font}px var(--font-geist-sans), system-ui, sans-serif`;
   ctx.fillStyle = "#6b7280";
-  ctx.fillText("₸", 6, pad.top + 8);
+  ctx.fillText("₸", 4, pad.top + 8);
 }

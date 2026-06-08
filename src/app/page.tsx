@@ -102,11 +102,6 @@ export default function Home() {
             const inner = (
               <>
                 <div className={`absolute inset-0 bg-gradient-to-br ${app.color} pointer-events-none`} />
-                {app.featured && (
-                  <span className="absolute top-4 right-4 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border border-blue-200 text-blue-600 bg-blue-50">
-                    Запущено
-                  </span>
-                )}
                 {app.comingSoon && (
                   <span className="absolute top-4 right-4 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border border-gray-200 text-gray-400 bg-gray-50">
                     Скоро

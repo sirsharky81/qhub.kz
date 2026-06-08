@@ -4,7 +4,53 @@ import { formatDate, formatMoney, formatNum } from "./format";
 import { t } from "./i18n";
 import type { Lang } from "./types";
 
+export function buildLoanShareText(result: CalculationResult, lang: Lang): string {
+  const { input, annuity, diff, annuityEIR, diffEIR } = result;
+  const pmtLabel = input.freq === 3 ? t(lang, "lbl.quarterlyPmt") : t(lang, "lbl.monthlyPmt");
+  const lines = [
+    t(lang, "title") + " — QHub.kz",
+    "",
+    t(lang, "lbl.amount") + ": " + formatMoney(input.principal),
+    t(lang, "lbl.rate") + ": " + input.rate + "% · " + t(lang, "lbl.term") + ": " + input.months + " мес.",
+    "",
+    t(lang, "card.annuity") + ":",
+    pmtLabel + ": " + formatMoney(annuity.payment),
+    t(lang, "lbl.overpay") + ": " + formatMoney(annuity.totalPaid - input.principal),
+    t(lang, "lbl.eir") + ": " + (annuityEIR !== null ? annuityEIR.toFixed(3) + " %" : "—"),
+    "",
+    t(lang, "card.diff") + ":",
+    t(lang, "lbl.firstPmt") + ": " + formatMoney(diff.firstPayment),
+    t(lang, "lbl.lastPmt") + ": " + formatMoney(diff.lastPayment),
+    t(lang, "lbl.overpay") + ": " + formatMoney(diff.totalPaid - input.principal),
+    t(lang, "lbl.eir") + ": " + (diffEIR !== null ? diffEIR.toFixed(3) + " %" : "—"),
+    "",
+    "https://qhub.kz/apps/credit-calculator",
+  ];
+  return lines.join("\n");
+}
+
+export function buildLoanWordBlob(
+  result: CalculationResult,
+  lang: Lang
+): { blob: Blob; filename: string } {
+  const html = buildLoanWordHtml(result, lang);
+  return {
+    blob: new Blob(["\ufeff" + html], { type: "application/msword" }),
+    filename: "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".doc",
+  };
+}
+
 export function exportLoanToWord(result: CalculationResult, lang: Lang): void {
+  const { blob, filename } = buildLoanWordBlob(result, lang);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function buildLoanWordHtml(result: CalculationResult, lang: Lang): string {
   const { input, annuity, diff, annuityEIR, diffEIR } = result;
   const commAmt = input.commissionAmt || 0;
   const freqLabel = input.freq === 3 ? t(lang, "opt.quarterly") : t(lang, "opt.monthly");
@@ -374,7 +420,7 @@ export function exportLoanToWord(result: CalculationResult, lang: Lang): void {
     );
   }
 
-  const html =
+  return (
     "<!DOCTYPE html><html><head><meta charset='UTF-8'/><style>" +
     CSS +
     "</style></head><body>" +
@@ -392,13 +438,6 @@ export function exportLoanToWord(result: CalculationResult, lang: Lang): void {
       t(lang, "word.diffSchedule"),
       freqLabel + " · " + dayBasisLabel(input.dayBasis)
     ) +
-    "</body></html>";
-
-  const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".doc";
-  a.click();
-  URL.revokeObjectURL(url);
+    "</body></html>"
+  );
 }
