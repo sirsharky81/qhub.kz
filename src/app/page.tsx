@@ -2,10 +2,10 @@ import Link from "next/link";
 import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import TestingBadge from "@/components/TestingBadge";
-import { apps, TAG_LABELS } from "@/data/apps";
+import { sortedApps, TAG_LABELS } from "@/data/apps";
 
-const liveCount = apps.filter((a) => !a.comingSoon).length;
-const comingSoonCount = apps.filter((a) => a.comingSoon).length;
+const liveCount = sortedApps.filter((a) => !a.comingSoon).length;
+const comingSoonCount = sortedApps.filter((a) => a.comingSoon).length;
 
 export default function Home() {
   return (
@@ -95,7 +95,7 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {apps.map((app) => {
+          {sortedApps.map((app) => {
             const cardClass = `app-card relative rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4 overflow-hidden shadow-sm ${
               app.comingSoon ? "opacity-50 cursor-default" : "cursor-pointer"
             }`;

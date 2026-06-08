@@ -15,6 +15,8 @@ export interface App {
   comingSoon?: boolean;
   /** Сервис доступен, но расчёты ещё проверяются */
   beta?: boolean;
+  /** Порядок на главной: меньше = раньше запущен. «Скоро» — в конце */
+  sortOrder: number;
 }
 
 export const TAG_LABELS: Record<AppTag, string> = {
@@ -41,6 +43,7 @@ export const apps: App[] = [
     author: "QHub",
     authorType: "qhub",
     featured: true,
+    sortOrder: 1,
   },
   {
     id: "passport-photo",
@@ -55,6 +58,7 @@ export const apps: App[] = [
     author: "QHub",
     authorType: "qhub",
     featured: false,
+    sortOrder: 2,
   },
   {
     id: "recipe-finder",
@@ -69,34 +73,7 @@ export const apps: App[] = [
     author: "QHub",
     authorType: "qhub",
     featured: false,
-  },
-  {
-    id: "deposit-calculator",
-    title: "Калькулятор депозита",
-    description: "Считайте доходность депозитов с учётом ГФСС и капитализации.",
-    longDescription:
-      "Калькулятор для сравнения депозитных предложений банков Казахстана с учётом государственного страхования вкладов.",
-    href: "/apps/deposit-calculator",
-    tags: ["finance"],
-    icon: "🏦",
-    color: "from-emerald-500/10 to-emerald-600/5",
-    author: "QHub",
-    authorType: "qhub",
-    comingSoon: true,
-  },
-  {
-    id: "currency-converter",
-    title: "Конвертер валют",
-    description: "Актуальные курсы Нацбанка РК. Быстро и без рекламы.",
-    longDescription:
-      "Конвертер валют с курсами Национального банка Казахстана, историей курсов и удобным интерфейсом.",
-    href: "/apps/currency-converter",
-    tags: ["finance", "tools"],
-    icon: "💱",
-    color: "from-amber-500/10 to-amber-600/5",
-    author: "QHub",
-    authorType: "qhub",
-    comingSoon: true,
+    sortOrder: 3,
   },
   {
     id: "tax-calculator",
@@ -111,8 +88,48 @@ export const apps: App[] = [
     author: "QHub",
     authorType: "qhub",
     beta: true,
+    sortOrder: 4,
+  },
+  {
+    id: "deposit-calculator",
+    title: "Калькулятор депозита",
+    description: "Считайте доходность депозитов с учётом ГФСС и капитализации.",
+    longDescription:
+      "Калькулятор для сравнения депозитных предложений банков Казахстана с учётом государственного страхования вкладов.",
+    href: "/apps/deposit-calculator",
+    tags: ["finance"],
+    icon: "🏦",
+    color: "from-emerald-500/10 to-emerald-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    comingSoon: true,
+    sortOrder: 100,
+  },
+  {
+    id: "currency-converter",
+    title: "Конвертер валют",
+    description: "Актуальные курсы Нацбанка РК. Быстро и без рекламы.",
+    longDescription:
+      "Конвертер валют с курсами Национального банка Казахстана, историей курсов и удобным интерфейсом.",
+    href: "/apps/currency-converter",
+    tags: ["finance", "tools"],
+    icon: "💱",
+    color: "from-amber-500/10 to-amber-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    comingSoon: true,
+    sortOrder: 101,
   },
 ];
 
+/** Сортировка: запущенные по дате ввода, «Скоро» — в конце */
+export function sortApps(list: App[]): App[] {
+  return [...list].sort((a, b) => {
+    if (a.comingSoon !== b.comingSoon) return a.comingSoon ? 1 : -1;
+    return a.sortOrder - b.sortOrder;
+  });
+}
+
+export const sortedApps = sortApps(apps);
 export const featuredApp = apps.find((a) => a.featured);
-export const allApps = apps;
+export const allApps = sortedApps;
