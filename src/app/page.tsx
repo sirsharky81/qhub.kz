@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import Navbar from "@/components/Navbar";
+import TestingBadge from "@/components/TestingBadge";
 import { apps, TAG_LABELS } from "@/data/apps";
 
 const liveCount = apps.filter((a) => !a.comingSoon).length;
@@ -105,6 +106,11 @@ export default function Home() {
                 {app.comingSoon && (
                   <span className="absolute top-4 right-4 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border border-gray-200 text-gray-400 bg-gray-50">
                     Скоро
+                  </span>
+                )}
+                {!app.comingSoon && app.beta && (
+                  <span className="absolute top-4 right-4">
+                    <TestingBadge />
                   </span>
                 )}
                 <div className="relative text-3xl">

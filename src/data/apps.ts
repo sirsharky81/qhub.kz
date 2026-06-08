@@ -13,6 +13,8 @@ export interface App {
   authorType: "qhub" | "community";
   featured?: boolean;
   comingSoon?: boolean;
+  /** Сервис доступен, но расчёты ещё проверяются */
+  beta?: boolean;
 }
 
 export const TAG_LABELS: Record<AppTag, string> = {
@@ -99,16 +101,16 @@ export const apps: App[] = [
   {
     id: "tax-calculator",
     title: "Налоговый калькулятор ИП",
-    description: "ИПН, СН, ОПВ, ОСМС — рассчитайте всё за 30 секунд.",
+    description: "Узнайте, сколько налогов заплатите и сколько останется на руки — за 30 секунд.",
     longDescription:
-      "Калькулятор налогов для индивидуальных предпринимателей Казахстана с учётом всех обязательных платежей.",
+      "Расчёт ИПН, соцплатежей и чистого дохода для ИП Казахстана. 4 налоговых режима, льготы для пенсионеров и инвалидов, сравнение упрощёнки и ОУР. Актуально на 2026 год.",
     href: "/apps/tax-calculator",
     tags: ["business", "finance"],
     icon: "🧾",
     color: "from-purple-500/10 to-purple-600/5",
     author: "QHub",
     authorType: "qhub",
-    comingSoon: true,
+    beta: true,
   },
 ];
 
