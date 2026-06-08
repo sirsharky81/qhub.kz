@@ -9,6 +9,7 @@ import {
   computeHeuristicAdjust,
   cropToBlob,
   drawCropPreview,
+  drawFitPreview,
   fromView,
   isDebugMode,
   landmarksToFrameEllipse,
@@ -150,6 +151,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
         sourceCanvasRef.current = normalized.canvas;
         setNatural({ w: normalized.width, h: normalized.height });
         setOrientation(normalized.orientation);
+        setContainerW((prev) => prev || Math.min(window.innerWidth - 32, 448));
         setLoading(false);
       } catch {
         if (!cancelled) {
@@ -191,13 +193,20 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     };
   }, []);
 
-  // Canvas-превью вместо <img>+transform (iOS Safari не рисует img с scale)
+  // Canvas-превью (iOS Safari не рисует <img> с CSS scale)
   useEffect(() => {
     const preview = previewCanvasRef.current;
     const source = sourceCanvasRef.current;
-    if (!preview || !source || !geom || !view) return;
-    drawCropPreview(preview, source, geom, view);
-  }, [geom, view, natural]);
+    if (!preview || !source || !natural) return;
+
+    if (geom && view) {
+      drawCropPreview(preview, source, geom, view);
+    } else {
+      const fw = containerW || Math.min(window.innerWidth - 32, 448);
+      const fh = fw / aspect;
+      drawFitPreview(preview, source, fw, fh);
+    }
+  }, [geom, view, natural, containerW, aspect]);
 
   function handleSizeChange(sizeId: string) {
     setSelectedSizeId(sizeId);

@@ -38,6 +38,15 @@ export interface FaceEllipse {
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+const MAX_DIMENSION = 2048;
+
+function isAppleDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
 
 function loadViaImageElement(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -55,54 +64,135 @@ function loadViaImageElement(file: File): Promise<HTMLImageElement> {
   });
 }
 
-/** Декодирование файла: createImageBitmap с fallback на Image() для iOS HEIC */
-async function decodeImageSource(
-  file: File
-): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup?: () => void }> {
-  if (typeof createImageBitmap === "function") {
-    try {
-      const bitmap = await createImageBitmap(file);
-      return {
-        source: bitmap,
-        width: bitmap.width,
-        height: bitmap.height,
-        cleanup: () => bitmap.close(),
-      };
-    } catch {
-      // iOS HEIC и др. — fallback ниже
-    }
-  }
+function canvasHasContent(canvas: HTMLCanvasElement): boolean {
+  if (canvas.width === 0 || canvas.height === 0) return false;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return false;
+  const x = Math.floor(canvas.width / 2);
+  const y = Math.floor(canvas.height / 2);
+  const [r, g, b, a] = ctx.getImageData(x, y, 1, 1).data;
+  return a > 0 && r + g + b > 15;
+}
 
-  const img = await loadViaImageElement(file);
-  return { source: img, width: img.naturalWidth, height: img.naturalHeight };
+/** Рисует источник на canvas с даунскейлом для iOS memory limits */
+function drawSourceToCanvas(source: CanvasImageSource, srcW: number, srcH: number): HTMLCanvasElement {
+  const maxDim = Math.max(srcW, srcH);
+  const scale = maxDim > MAX_DIMENSION ? MAX_DIMENSION / maxDim : 1;
+  const w = Math.max(1, Math.round(srcW * scale));
+  const h = Math.max(1, Math.round(srcH * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, 0, 0, w, h);
+  return canvas;
 }
 
 /**
- * Читает EXIF orientation и рисует изображение на canvas с корректным поворотом.
- * URL — data: (надёжнее blob: на iOS Safari).
+ * Читает EXIF и нормализует ориентацию.
+ * iOS Safari: Image() уже oriented — ручной поворот даёт пустой/чёрный canvas.
  */
 export async function normalizeImageOrientation(file: File): Promise<NormalizedImage> {
-  const orientation = (await exifr.parse(file, { pick: ["Orientation"] }).catch(() => null))?.Orientation ?? 1;
-  const decoded = await decodeImageSource(file);
-  const { width, height } = orientedDimensions(decoded.width, decoded.height, orientation);
+  const orientation =
+    (await exifr.parse(file, { pick: ["Orientation"] }).catch(() => null))?.Orientation ?? 1;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
-  applyOrientationTransform(ctx, decoded.width, decoded.height, orientation);
-  ctx.drawImage(decoded.source, 0, 0);
-  decoded.cleanup?.();
+  const attempts: Array<() => Promise<HTMLCanvasElement>> = [
+    // 1) Современный API — EXIF применяется автоматически
+    async () => {
+      if (typeof createImageBitmap !== "function") throw new Error("skip");
+      const bitmap = await createImageBitmap(file, {
+        imageOrientation: "from-image",
+      } as ImageBitmapOptions);
+      const canvas = drawSourceToCanvas(bitmap, bitmap.width, bitmap.height);
+      bitmap.close();
+      return canvas;
+    },
+    // 2) Apple: Image() с нативной ориентацией, без ручного поворота
+    async () => {
+      if (!isAppleDevice()) throw new Error("skip");
+      const img = await loadViaImageElement(file);
+      return drawSourceToCanvas(img, img.naturalWidth, img.naturalHeight);
+    },
+    // 3) Ручной EXIF для Android/desktop
+    async () => {
+      const bitmap = await createImageBitmap(file);
+      const { width, height } = orientedDimensions(bitmap.width, bitmap.height, orientation);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      applyOrientationTransform(ctx, bitmap.width, bitmap.height, orientation);
+      ctx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      return drawSourceToCanvas(canvas, width, height);
+    },
+    // 4) Последний шанс — Image() без EXIF
+    async () => {
+      const img = await loadViaImageElement(file);
+      return drawSourceToCanvas(img, img.naturalWidth, img.naturalHeight);
+    },
+  ];
 
-  const url = canvas.toDataURL("image/jpeg", 0.92);
+  let canvas: HTMLCanvasElement | null = null;
+  for (const attempt of attempts) {
+    try {
+      const result = await attempt();
+      if (canvasHasContent(result)) {
+        canvas = result;
+        break;
+      }
+    } catch {
+      // пробуем следующий способ
+    }
+  }
+
+  if (!canvas) {
+    throw new Error("Could not decode image");
+  }
 
   return {
     canvas,
-    url,
-    width,
-    height,
+    url: canvas.toDataURL("image/jpeg", 0.92),
+    width: canvas.width,
+    height: canvas.height,
     orientation,
   };
+}
+
+/** Вписывает всё фото в кадр (пока geom/view не готовы) */
+export function drawFitPreview(
+  target: HTMLCanvasElement,
+  source: CanvasImageSource,
+  fw: number,
+  fh: number
+): void {
+  const src = source as HTMLCanvasElement;
+  const nw = src.width ?? (source as HTMLImageElement).naturalWidth;
+  const nh = src.height ?? (source as HTMLImageElement).naturalHeight;
+  if (!nw || !nh) return;
+
+  const dpr = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2);
+  target.width = Math.round(fw * dpr);
+  target.height = Math.round(fh * dpr);
+  target.style.width = `${fw}px`;
+  target.style.height = `${fh}px`;
+
+  const ctx = target.getContext("2d")!;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#1f2937";
+  ctx.fillRect(0, 0, fw, fh);
+
+  const scale = Math.min(fw / nw, fh / nh);
+  const dw = nw * scale;
+  const dh = nh * scale;
+  const dx = (fw - dw) / 2;
+  const dy = (fh - dh) / 2;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, 0, 0, nw, nh, dx, dy, dw, dh);
 }
 
 /** Рисует видимую область кадрирования на canvas (без CSS transform — надёжно на iOS) */
@@ -112,7 +202,7 @@ export function drawCropPreview(
   geom: Geom,
   view: { scale: number; tx: number; ty: number }
 ): void {
-  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  const dpr = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2);
   target.width = Math.round(geom.fw * dpr);
   target.height = Math.round(geom.fh * dpr);
   target.style.width = `${geom.fw}px`;
