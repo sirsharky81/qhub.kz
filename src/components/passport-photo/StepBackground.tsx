@@ -61,7 +61,7 @@ export default function StepBackground({ croppedBlob, photoSize, onComplete, onB
       setStatus("error");
       setErrorMsg(
         mode === "ai"
-          ? "Не удалось удалить фон. Попробуйте режим «Без замены фона» или другой браузер."
+          ? "Не удалось удалить фон. Попробуйте режим «Не менять фон» или другой браузер."
           : "Ошибка обработки. Попробуйте ещё раз."
       );
     }
@@ -92,12 +92,12 @@ export default function StepBackground({ croppedBlob, photoSize, onComplete, onB
                 ].join(" ")}
               >
                 <span className="text-sm font-medium text-gray-800">
-                  {m === "ai" ? "🤖 ИИ удаление фона" : "📷 Без замены фона"}
+                  {m === "ai" ? "🤖 ИИ удаление фона" : "📷 Не менять фон"}
                 </span>
                 <span className="text-xs text-gray-400">
                   {m === "ai"
                     ? "Вырезает силуэт и ставит белый/голубой фон (~40 МБ)"
-                    : "Исходный фон остаётся — фото не меняется"}
+                    : "Фото остаётся без изменений"}
                 </span>
               </button>
             ))}
@@ -105,7 +105,7 @@ export default function StepBackground({ croppedBlob, photoSize, onComplete, onB
         </div>
 
         {mode === "ai" && (
-          <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
             <PhotoTips compact />
           </div>
         )}

@@ -16,25 +16,25 @@ export default function PhotoTips({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <p className="text-xs text-blue-700 leading-relaxed">
+      <p className="text-xs text-gray-600 leading-relaxed">
         Для точной замены фона ИИ: однотонный светлый фон, контрастная одежда, без теней и лишних предметов.
       </p>
     );
   }
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-amber-100 bg-amber-50/80 p-4 text-left">
-      <p className="text-sm font-semibold text-amber-900 mb-3">
+    <div className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-left">
+      <p className="text-sm font-semibold text-gray-900 mb-3">
         Советы для лучшего результата
       </p>
       <ul className="flex flex-col gap-2.5">
         {tips.map((tip) => (
-          <li key={tip.title} className="text-xs text-amber-900/90 leading-relaxed">
-            <span className="font-semibold">{tip.title}:</span> {tip.text}
+          <li key={tip.title} className="text-xs text-gray-600 leading-relaxed">
+            <span className="font-semibold text-gray-900">{tip.title}:</span> {tip.text}
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs text-amber-800/70">
+      <p className="mt-3 text-xs text-gray-500 border-t border-gray-200 pt-3">
         Чем проще фон и контрастнее одежда — тем точнее ИИ заменит фон на белый или голубой.
       </p>
     </div>
