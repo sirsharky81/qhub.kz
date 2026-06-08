@@ -1,86 +1,61 @@
 "use client";
 
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import { PHOTO_SIZES, PhotoSize } from "@/lib/passport-photo/dimensions";
+import { detectFace } from "@/lib/passport-photo/face-detector";
+import type { Landmarks68 } from "@/lib/passport-photo/landmarkAdapter";
 import {
-  computeAutoAdjust,
-  buildSilhouettePaths,
-  detectFaceBox,
-  type FaceBox,
-} from "@/lib/passport-photo/passport-guide";
+  computeAutoAdjustFromLandmarks,
+  computeHeuristicAdjust,
+  fromView,
+  isDebugMode,
+  landmarksToFrameEllipse,
+  normalizeImageOrientation,
+  toView,
+  type Adjust,
+  type FaceEllipse,
+  type Geom,
+} from "@/lib/passport-photo/faceProcessing";
+import { buildSilhouettePaths } from "@/lib/passport-photo/passport-guide";
+import { validateFacePosition, validatePhotoQuality } from "@/lib/passport-photo/photoValidation";
 
 interface Props {
-  imageUrl: string;
+  imageFile: File;
   onCropComplete: (croppedBlob: Blob, selectedSize: PhotoSize) => void;
   onBack: () => void;
 }
 
-interface View {
-  scale: number; // CSS-px scale relative to the image's natural size
-  tx: number; // image top-left X within the frame (frame px)
-  ty: number; // image top-left Y within the frame (frame px)
-}
-
-interface Geom {
-  fw: number; // frame width (px)
-  fh: number; // frame height (px)
-  nw: number; // image natural width
-  nh: number; // image natural height
-  cover: number; // minimum scale so the image fully covers the frame
-}
-
-// Geometry-independent crop state: zoom is a multiplier over the "cover" scale,
-// and (cxN, cyN) is the normalized image point that sits at the frame centre.
-interface Adjust {
-  zoom: number;
-  cxN: number;
-  cyN: number;
-}
-
-// Builds the concrete on-screen transform from the geometry + adjustment,
-// clamped so the image always fully covers the frame.
-function toView(g: Geom, a: Adjust): View {
-  const scale = g.cover * a.zoom;
-  const iw = g.nw * scale;
-  const ih = g.nh * scale;
-  const tx = clamp(g.fw / 2 - a.cxN * g.nw * scale, g.fw - iw, 0);
-  const ty = clamp(g.fh / 2 - a.cyN * g.nh * scale, g.fh - ih, 0);
-  return { scale, tx, ty };
-}
-
-// Inverse of toView: converts a concrete transform back to normalized state.
-function fromView(g: Geom, v: View): Adjust {
-  return {
-    zoom: v.scale / g.cover,
-    cxN: (g.fw / 2 - v.tx) / (g.nw * v.scale),
-    cyN: (g.fh / 2 - v.ty) / (g.nh * v.scale),
-  };
-}
-
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
-const MAX_ZOOM = 4; // relative to the "cover" scale
+const MAX_ZOOM = 4;
 
-export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
-  const wrapRef = useRef<HTMLDivElement>(null); // measures available width
-  const frameRef = useRef<HTMLDivElement>(null); // the fixed crop viewport
-  const imgRef = useRef<HTMLImageElement>(null); // displayed (and source) image
+export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchRef = useRef<{ dist: number; fx: number; fy: number } | null>(null);
 
   const [selectedSizeId, setSelectedSizeId] = useState(PHOTO_SIZES[0].id);
   const [userAdjust, setUserAdjust] = useState<Adjust | null>(null);
   const [containerW, setContainerW] = useState(0);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-  const [faceBox, setFaceBox] = useState<FaceBox | null>(null);
+  const [orientation, setOrientation] = useState(1);
+  const [landmarks, setLandmarks] = useState<Landmarks68 | null>(null);
+  const [faceDetected, setFaceDetected] = useState<boolean | null>(null);
   const [faceChecked, setFaceChecked] = useState(false);
-  const [faceOk, setFaceOk] = useState<boolean | null>(null);
-  const [showFaceWarning, setShowFaceWarning] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [showFaceToast, setShowFaceToast] = useState(false);
   const [working, setWorking] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const debug = isDebugMode();
 
   const selectedSize = PHOTO_SIZES.find((s) => s.id === selectedSizeId) ?? PHOTO_SIZES[0];
   const aspect = selectedSize.widthCm / selectedSize.heightCm;
 
-  // Frame geometry is a pure function of measured width + format + image size
   const geom = useMemo<Geom | null>(() => {
     if (!natural || containerW <= 0) return null;
     const maxH = Math.min(typeof window !== "undefined" ? window.innerHeight * 0.6 : 460, 460);
@@ -94,33 +69,113 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
     return { fw, fh, nw: natural.w, nh: natural.h, cover };
   }, [natural, containerW, aspect]);
 
-  // Auto-align derived from image + frame + face (recomputes when deps change)
   const autoAdjust = useMemo<Adjust>(() => {
     if (!natural || !geom || !faceChecked) {
       return { zoom: 1, cxN: 0.5, cyN: 0.5 };
     }
-    return computeAutoAdjust(
-      natural.w,
-      natural.h,
-      geom.fw,
-      geom.fh,
-      geom.cover,
-      faceBox
-    );
-  }, [natural, geom, faceChecked, faceBox]);
+    if (landmarks && !manualMode) {
+      return computeAutoAdjustFromLandmarks(
+        natural.w,
+        natural.h,
+        geom.fw,
+        geom.fh,
+        geom.cover,
+        landmarks,
+        selectedSizeId
+      );
+    }
+    return computeHeuristicAdjust(natural.w, natural.h, geom.fw, geom.fh, geom.cover);
+  }, [natural, geom, faceChecked, landmarks, manualMode, selectedSizeId]);
 
   const adjust = userAdjust ?? autoAdjust;
+  const view = geom ? toView(geom, adjust) : null;
 
-  // Concrete on-screen transform derived from geometry + adjustment
-  const view: View | null = geom ? toView(geom, adjust) : null;
+  const faceEllipse: FaceEllipse | null = useMemo(() => {
+    if (!landmarks || !view) return null;
+    return landmarksToFrameEllipse(landmarks, view, natural!.w, natural!.h);
+  }, [landmarks, view, natural]);
 
-  // Latest values for the imperatively-attached wheel listener
+  const positionValidation = useMemo(() => {
+    if (!landmarks || !view || !geom) return null;
+    return validateFacePosition(landmarks, view, geom.fw, geom.fh, selectedSizeId);
+  }, [landmarks, view, geom, selectedSizeId]);
+
+  const qualityValidation = useMemo(() => {
+    if (!sourceCanvasRef.current) return null;
+    return validatePhotoQuality(sourceCanvasRef.current);
+  }, [natural, faceChecked]);
+
   const latest = useRef<{ geom: Geom | null; adjust: Adjust }>({ geom, adjust });
   useEffect(() => {
     latest.current = { geom, adjust };
   });
 
-  // Measure available container width; read immediately + on resize
+  const runDetection = useCallback(async () => {
+    const canvas = sourceCanvasRef.current;
+    if (!canvas) return;
+    setModelsLoading(true);
+    try {
+      const result = await detectFace(canvas);
+      if (result) {
+        setLandmarks(result.landmarks);
+        setFaceDetected(true);
+        setManualMode(false);
+        setShowFaceToast(false);
+      } else {
+        setLandmarks(null);
+        setFaceDetected(false);
+        setManualMode(true);
+        setShowFaceToast(true);
+      }
+    } catch {
+      setLandmarks(null);
+      setFaceDetected(false);
+      setManualMode(true);
+      setShowFaceToast(true);
+    } finally {
+      setModelsLoading(false);
+      setFaceChecked(true);
+    }
+  }, []);
+
+  // EXIF normalization on mount
+  useEffect(() => {
+    let revoked: string | null = null;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const normalized = await normalizeImageOrientation(imageFile);
+        if (cancelled) {
+          URL.revokeObjectURL(normalized.url);
+          return;
+        }
+        revoked = normalized.url;
+        sourceCanvasRef.current = normalized.canvas;
+        setImageUrl(normalized.url);
+        setNatural({ w: normalized.width, h: normalized.height });
+        setOrientation(normalized.orientation);
+        setLoading(false);
+      } catch {
+        if (!cancelled) {
+          setLoadError("Не удалось обработать фото. Попробуйте другое изображение.");
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [imageFile]);
+
+  // Face detection after image is ready
+  useEffect(() => {
+    if (!natural || !sourceCanvasRef.current) return;
+    runDetection();
+  }, [natural, runDetection]);
+
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -137,40 +192,15 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // Detect face once the image element is ready (incl. cached images)
-  useEffect(() => {
-    const img = imgRef.current;
-    if (!img || !natural) return;
-
-    let cancelled = false;
-    (async () => {
-      const hasFaceApi = !!(window as unknown as { FaceDetector?: unknown }).FaceDetector;
-      const face = await detectFaceBox(img);
-      if (cancelled) return;
-      setFaceBox(face);
-      setFaceOk(!hasFaceApi || face !== null);
-      setFaceChecked(true);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [natural]);
-
-  function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
-    const el = e.currentTarget;
-    setNatural({ w: el.naturalWidth, h: el.naturalHeight });
-  }
-
   function handleSizeChange(sizeId: string) {
     setSelectedSizeId(sizeId);
     setUserAdjust(null);
   }
 
-  // ── Transform updates (always recomputed from latest geom + adjust) ──────────
   function panBy(g: Geom, a: Adjust, dx: number, dy: number) {
     const v = toView(g, a);
     setUserAdjust(fromView(g, { scale: v.scale, tx: v.tx + dx, ty: v.ty + dy }));
+    setManualMode(true);
   }
 
   function zoomTo(g: Geom, a: Adjust, rawZoom: number, fx: number, fy: number) {
@@ -184,9 +214,9 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
         ty: fy - (fy - v.ty) * f,
       })
     );
+    setManualMode(true);
   }
 
-  // Native wheel listener (non-passive) so we can preventDefault page scroll
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame) return;
@@ -202,7 +232,6 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
     return () => frame.removeEventListener("wheel", onWheel);
   }, []);
 
-  // ── Pointer (drag + pinch) handlers ─────────────────────────────────────────
   function onPointerDown(e: React.PointerEvent) {
     (e.target as Element).setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -221,18 +250,16 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
     if (!geom || !pointers.current.has(e.pointerId)) return;
     const prev = pointers.current.get(e.pointerId)!;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const pts = [...pointers.current.values()];
 
     if (pointers.current.size === 1) {
       panBy(geom, adjust, e.clientX - prev.x, e.clientY - prev.y);
     } else if (pointers.current.size === 2 && pinchRef.current && frameRef.current) {
-      const [a, b] = pts;
+      const [a, b] = [...pointers.current.values()];
       const rect = frameRef.current.getBoundingClientRect();
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
       const fx = (a.x + b.x) / 2 - rect.left;
       const fy = (a.y + b.y) / 2 - rect.top;
       const factor = dist / pinchRef.current.dist;
-      // Pan by the midpoint movement, then zoom around the new midpoint
       const v = toView(geom, adjust);
       const panned = fromView(geom, {
         scale: v.scale,
@@ -249,12 +276,10 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
     if (pointers.current.size < 2) pinchRef.current = null;
   }
 
-  // ── Produce the cropped blob from the current view ──────────────────────────
   async function generateBlob(): Promise<Blob | null> {
     const img = imgRef.current;
     if (!geom || !view || !img) return null;
     const { scale, tx, ty } = view;
-    // Visible region in the image's natural pixel coordinates
     const sx = -tx / scale;
     const sy = -ty / scale;
     const sw = geom.fw / scale;
@@ -279,29 +304,52 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
     if (blob) onCropComplete(blob, selectedSize);
   }
 
-  function handleNext() {
-    if (faceOk === false && !showFaceWarning) {
-      setShowFaceWarning(true);
-      return;
-    }
-    proceed();
-  }
-
   function setZoomFromSlider(value: number) {
     if (!geom) return;
     zoomTo(geom, adjust, value, geom.fw / 2, geom.fh / 2);
   }
+
+  async function handleRetryDetection() {
+    setFaceChecked(false);
+    setUserAdjust(null);
+    await runDetection();
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-16 px-4">
+        <p className="text-sm text-gray-500">Обработка фото…</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-16 px-4">
+        <p className="text-sm text-red-500">{loadError}</p>
+        <button onClick={onBack} className="text-sm text-gray-600 underline">
+          ← Назад
+        </button>
+      </div>
+    );
+  }
+
+  const allOk =
+    faceDetected &&
+    positionValidation?.ok !== false &&
+    qualityValidation?.ok !== false;
 
   return (
     <div className="flex flex-col gap-5 py-6 px-4">
       <div className="text-center">
         <h2 className="text-xl font-semibold text-gray-900">Кадрирование</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Совместите лицо с овалом — это главный ориентир. Плечи должны быть видны внизу кадра
+          {faceDetected
+            ? "Фото автоматически выровнено — проверьте овал"
+            : "Лицо не определено — настройте вручную"}
         </p>
       </div>
 
-      {/* Photo-size format selector */}
       <div className="flex flex-wrap justify-center gap-2">
         {PHOTO_SIZES.map((size) => (
           <button
@@ -319,7 +367,41 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
         ))}
       </div>
 
-      {/* Fixed crop viewport — the silhouette stays put, the photo moves */}
+      {/* Validation badges */}
+      {faceChecked && (
+        <div className="flex flex-col gap-2 max-w-md mx-auto w-full">
+          {positionValidation && (
+            <div
+              className={[
+                "rounded-lg px-3 py-2 text-sm",
+                positionValidation.ok
+                  ? "bg-emerald-50 text-emerald-800 border border-emerald-100"
+                  : "bg-amber-50 text-amber-800 border border-amber-100",
+              ].join(" ")}
+            >
+              {positionValidation.ok ? "✓ Позиция лица подходит" : `⚠ ${positionValidation.message}`}
+            </div>
+          )}
+          {qualityValidation && (
+            <div
+              className={[
+                "rounded-lg px-3 py-2 text-sm",
+                qualityValidation.ok
+                  ? "bg-emerald-50 text-emerald-800 border border-emerald-100"
+                  : "bg-amber-50 text-amber-800 border border-amber-100",
+              ].join(" ")}
+            >
+              {qualityValidation.ok ? "✓ Качество фото подходит" : `⚠ ${qualityValidation.message}`}
+            </div>
+          )}
+          {allOk && (
+            <div className="rounded-lg px-3 py-2 text-sm bg-emerald-600 text-white text-center font-medium">
+              ✓ Фото подходит
+            </div>
+          )}
+        </div>
+      )}
+
       <div ref={wrapRef} className="w-full max-w-md mx-auto flex flex-col items-center gap-3">
         <div
           ref={frameRef}
@@ -334,32 +416,45 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
             touchAction: "none",
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imgRef}
-            src={imageUrl}
-            alt="Исходное фото"
-            onLoad={onImageLoad}
-            draggable={false}
-            className="absolute top-0 left-0 max-w-none select-none"
-            style={{
-              width: natural ? natural.w : undefined,
-              height: natural ? natural.h : undefined,
-              transformOrigin: "0 0",
-              transform: view
-                ? `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`
-                : undefined,
-              visibility: view ? "visible" : "hidden",
-            }}
-          />
+          {imageUrl && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              ref={imgRef}
+              src={imageUrl}
+              alt="Исходное фото"
+              draggable={false}
+              className="absolute top-0 left-0 max-w-none select-none"
+              style={{
+                width: natural?.w,
+                height: natural?.h,
+                transformOrigin: "0 0",
+                transform: view
+                  ? `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`
+                  : undefined,
+                visibility: view ? "visible" : "hidden",
+              }}
+            />
+          )}
 
-          {/* Fixed portrait silhouette guide */}
           <div className="absolute inset-0 pointer-events-none">
-            <PortraitSilhouette aspect={aspect} />
+            {faceEllipse && faceDetected ? (
+              <DynamicOval ellipse={faceEllipse} />
+            ) : (
+              <StaticSilhouette aspect={aspect} />
+            )}
           </div>
+
+          {debug && landmarks && view && geom && (
+            <DebugOverlay
+              landmarks={landmarks}
+              view={view}
+              geom={geom}
+              orientation={orientation}
+              quality={qualityValidation}
+            />
+          )}
         </div>
 
-        {/* Zoom control */}
         {geom && (
           <div className="flex flex-col items-center gap-1 w-full max-w-sm">
             <div className="flex items-center gap-3 w-full">
@@ -377,38 +472,25 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
               <span className="text-gray-400 text-lg leading-none select-none">+</span>
             </div>
             <p className="text-xs text-gray-400 text-center">
-              Овал — голова с волосами · Верхняя пунктирная линия — отступ от края
+              Овал — голова с волосами · Пунктир сверху — отступ от края
             </p>
           </div>
         )}
       </div>
 
-      {/* Face-not-detected warning (non-blocking) */}
-      {showFaceWarning && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm max-w-md mx-auto w-full">
-          <p className="font-semibold text-amber-800">⚠ Лицо не обнаружено</p>
-          <p className="text-amber-700 mt-1">
-            На фотографии не найдено лицо человека. Убедитесь, что фото является
-            портретным и лицо хорошо видно. Если всё верно — можно продолжить.
-          </p>
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={() => setShowFaceWarning(false)}
-              className="flex-1 px-3 py-2 rounded-lg border border-amber-300 text-amber-800 text-xs font-medium hover:bg-amber-100 transition-colors"
-            >
-              ← Изменить фото
-            </button>
-            <button
-              onClick={proceed}
-              className="flex-1 px-3 py-2 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 transition-colors"
-            >
-              Продолжить всё равно
-            </button>
-          </div>
+      {showFaceToast && manualMode && (
+        <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-50 bg-gray-900 text-white rounded-xl px-4 py-3 text-sm shadow-lg flex items-center justify-between gap-3">
+          <span>Лицо не определено — настройте вручную</span>
+          <button
+            onClick={handleRetryDetection}
+            disabled={modelsLoading}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 whitespace-nowrap"
+          >
+            {modelsLoading ? "…" : "Попробовать снова"}
+          </button>
         </div>
       )}
 
-      {/* Navigation buttons */}
       <div className="flex justify-between gap-3 max-w-md mx-auto w-full">
         <button
           onClick={onBack}
@@ -417,7 +499,7 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
           ← Назад
         </button>
         <button
-          onClick={handleNext}
+          onClick={proceed}
           disabled={!geom || working}
           className="flex-1 px-4 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-medium hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
@@ -428,61 +510,135 @@ export default function StepCrop({ imageUrl, onCropComplete, onBack }: Props) {
   );
 }
 
-/**
- * Fixed passport-photo overlay guide.
- * Oval = primary target (align face/head). Shoulder arcs = secondary bottom guide.
- */
-function PortraitSilhouette({ aspect }: { aspect: number }) {
+function DynamicOval({ ellipse }: { ellipse: FaceEllipse }) {
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full"
+      style={{ filter: "drop-shadow(0 0 4px rgba(0,0,0,0.9))" }}
+      aria-hidden="true"
+    >
+      <ellipse
+        cx={ellipse.cx}
+        cy={ellipse.cy}
+        rx={ellipse.rx}
+        ry={ellipse.ry}
+        fill="none"
+        stroke="white"
+        strokeWidth="3"
+        strokeDasharray="12 8"
+      />
+      <line
+        x1={ellipse.cx - ellipse.rx}
+        y1={ellipse.topMarginY}
+        x2={ellipse.cx + ellipse.rx}
+        y2={ellipse.topMarginY}
+        stroke="white"
+        strokeWidth="1.5"
+        strokeDasharray="4 6"
+        opacity="0.6"
+      />
+    </svg>
+  );
+}
+
+function StaticSilhouette({ aspect }: { aspect: number }) {
   const paths = buildSilhouettePaths(aspect);
-  const dash = {
-    strokeDasharray: "6 4",
-    strokeLinecap: "round" as const,
-    fill: "none",
-  } as const;
+  const dash = { strokeDasharray: "12 8", strokeLinecap: "round" as const, fill: "none" };
 
   return (
     <svg
       viewBox={`0 0 ${paths.W} ${paths.H}`}
       className="w-full h-full"
       preserveAspectRatio="none"
-      style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,0.9))" }}
+      style={{ filter: "drop-shadow(0 0 4px rgba(0,0,0,0.9))" }}
       aria-hidden="true"
     >
-      {/* Head oval — primary alignment target (includes hair) */}
       <ellipse
         cx={paths.head.cx}
         cy={paths.head.cy}
         rx={paths.head.rx}
         ry={paths.head.ry}
         stroke="white"
-        strokeWidth="2.2"
+        strokeWidth="2.5"
         {...dash}
       />
-      {/* Top margin — hair must stay below this line */}
       <line
         x1={paths.head.cx - paths.head.rx}
         y1={paths.topMarginLine}
         x2={paths.head.cx + paths.head.rx}
         y2={paths.topMarginLine}
         stroke="white"
-        strokeWidth="1"
-        strokeDasharray="2 4"
-        opacity="0.45"
+        strokeWidth="1.5"
+        strokeDasharray="4 6"
+        opacity="0.5"
       />
-      {/* Eye-line helper */}
-      <line
-        x1={paths.eyeLine.x1}
-        y1={paths.eyeLine.y}
-        x2={paths.eyeLine.x2}
-        y2={paths.eyeLine.y}
-        stroke="white"
-        strokeWidth="1.2"
-        strokeDasharray="3 5"
-        opacity="0.55"
+    </svg>
+  );
+}
+
+function DebugOverlay({
+  landmarks,
+  view,
+  geom,
+  orientation,
+  quality,
+}: {
+  landmarks: Landmarks68;
+  view: { scale: number; tx: number; ty: number };
+  geom: Geom;
+  orientation: number;
+  quality: ReturnType<typeof validatePhotoQuality> | null;
+}) {
+  const toFrame = (p: { x: number; y: number }) => ({
+    x: p.x * view.scale + view.tx,
+    y: p.y * view.scale + view.ty,
+  });
+
+  const xs = landmarks.map((p) => p.x);
+  const ys = landmarks.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const bbox = {
+    x: minX * view.scale + view.tx,
+    y: minY * view.scale + view.ty,
+    w: (maxX - minX) * view.scale,
+    h: (maxY - minY) * view.scale,
+  };
+
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
+      {landmarks.map((p, i) => {
+        const f = toFrame(p);
+        return <circle key={i} cx={f.x} cy={f.y} r={2} fill="red" />;
+      })}
+      <rect
+        x={bbox.x}
+        y={bbox.y}
+        width={bbox.w}
+        height={bbox.h}
+        fill="none"
+        stroke="blue"
+        strokeWidth="1.5"
       />
-      {/* Shoulder guides — wide, gentle arcs at the bottom */}
-      <path d={paths.leftShoulder} stroke="white" strokeWidth="1.8" {...dash} opacity="0.85" />
-      <path d={paths.rightShoulder} stroke="white" strokeWidth="1.8" {...dash} opacity="0.85" />
+      <rect
+        x={0}
+        y={0}
+        width={geom.fw}
+        height={geom.fh}
+        fill="none"
+        stroke="lime"
+        strokeWidth="2"
+      />
+      <text x={4} y={14} fill="lime" fontSize="10" fontFamily="monospace">
+        {geom.nw}x{geom.nh} | EXIF:{orientation} | scale:{view.scale.toFixed(2)}
+      </text>
+      {quality && (
+        <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
+          lap:{quality.laplacianVariance?.toFixed(0)} bri:{quality.avgBrightness?.toFixed(0)}
+        </text>
+      )}
     </svg>
   );
 }

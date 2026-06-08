@@ -112,10 +112,10 @@ export default function PassportPhotoClient() {
         {step === 0 && (
           <StepUpload onImageSelected={handleImageSelected} />
         )}
-        {step === 1 && state.imageUrl && (
+        {step === 1 && state.imageFile && (
           <StepCrop
-            key={state.imageUrl}
-            imageUrl={state.imageUrl}
+            key={state.imageUrl ?? state.imageFile.name}
+            imageFile={state.imageFile}
             onCropComplete={handleCropComplete}
             onBack={() => setStep(0)}
           />

@@ -96,28 +96,6 @@ export interface FaceBox {
   height: number;
 }
 
-/** Detect the largest face in the image, if FaceDetector is available. */
-export async function detectFaceBox(img: HTMLImageElement): Promise<FaceBox | null> {
-  type FDConstructor = new (opts?: { fastMode?: boolean }) => {
-    detect(img: HTMLImageElement): Promise<Array<{ boundingBox: FaceBox }>>;
-  };
-  const FD = (window as unknown as { FaceDetector?: FDConstructor }).FaceDetector;
-  if (!FD) return null;
-  try {
-    const detector = new FD({ fastMode: true });
-    const faces = await detector.detect(img);
-    if (faces.length === 0) return null;
-    return faces.reduce((best, f) =>
-      f.boundingBox.width * f.boundingBox.height >
-      best.boundingBox.width * best.boundingBox.height
-        ? f
-        : best
-    ).boundingBox;
-  } catch {
-    return null;
-  }
-}
-
 export interface HeadEstimate {
   centerX: number;
   crownYN: number;
