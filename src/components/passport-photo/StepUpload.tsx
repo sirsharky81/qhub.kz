@@ -13,10 +13,15 @@ export default function StepUpload({ onImageSelected }: Props) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function isImageFile(file: File): boolean {
+    if (file.type.startsWith("image/")) return true;
+    return /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name);
+  }
+
   function handleFile(file: File) {
     setError(null);
-    if (!file.type.startsWith("image/")) {
-      setError("Пожалуйста, загрузите файл изображения (JPEG, PNG, WebP).");
+    if (!isImageFile(file)) {
+      setError("Пожалуйста, загрузите файл изображения (JPEG, PNG, HEIC, WebP).");
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
@@ -106,7 +111,7 @@ export default function StepUpload({ onImageSelected }: Props) {
       <input
         ref={galleryInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
         className="hidden"
         onChange={handleInputChange}
       />

@@ -39,33 +39,122 @@ export interface FaceEllipse {
 
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 
+function loadViaImageElement(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Image decode failed"));
+    };
+    img.src = url;
+  });
+}
+
+/** Декодирование файла: createImageBitmap с fallback на Image() для iOS HEIC */
+async function decodeImageSource(
+  file: File
+): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup?: () => void }> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: () => bitmap.close(),
+      };
+    } catch {
+      // iOS HEIC и др. — fallback ниже
+    }
+  }
+
+  const img = await loadViaImageElement(file);
+  return { source: img, width: img.naturalWidth, height: img.naturalHeight };
+}
+
 /**
  * Читает EXIF orientation и рисует изображение на canvas с корректным поворотом.
+ * URL — data: (надёжнее blob: на iOS Safari).
  */
 export async function normalizeImageOrientation(file: File): Promise<NormalizedImage> {
   const orientation = (await exifr.parse(file, { pick: ["Orientation"] }).catch(() => null))?.Orientation ?? 1;
-  const bitmap = await createImageBitmap(file);
-  const { width, height } = orientedDimensions(bitmap.width, bitmap.height, orientation);
+  const decoded = await decodeImageSource(file);
+  const { width, height } = orientedDimensions(decoded.width, decoded.height, orientation);
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d")!;
-  applyOrientationTransform(ctx, bitmap.width, bitmap.height, orientation);
-  ctx.drawImage(bitmap, 0, 0);
-  bitmap.close();
+  applyOrientationTransform(ctx, decoded.width, decoded.height, orientation);
+  ctx.drawImage(decoded.source, 0, 0);
+  decoded.cleanup?.();
 
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/jpeg", 0.98);
-  });
+  const url = canvas.toDataURL("image/jpeg", 0.92);
 
   return {
     canvas,
-    url: URL.createObjectURL(blob),
+    url,
     width,
     height,
     orientation,
   };
+}
+
+/** Рисует видимую область кадрирования на canvas (без CSS transform — надёжно на iOS) */
+export function drawCropPreview(
+  target: HTMLCanvasElement,
+  source: CanvasImageSource,
+  geom: Geom,
+  view: { scale: number; tx: number; ty: number }
+): void {
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  target.width = Math.round(geom.fw * dpr);
+  target.height = Math.round(geom.fh * dpr);
+  target.style.width = `${geom.fw}px`;
+  target.style.height = `${geom.fh}px`;
+
+  const ctx = target.getContext("2d")!;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  const { scale, tx, ty } = view;
+  const sx = -tx / scale;
+  const sy = -ty / scale;
+  const sw = geom.fw / scale;
+  const sh = geom.fh / scale;
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, geom.fw, geom.fh);
+}
+
+/** Экспорт кадра в blob из исходного canvas */
+export function cropToBlob(
+  source: CanvasImageSource,
+  geom: Geom,
+  view: { scale: number; tx: number; ty: number },
+  outW: number,
+  outH: number
+): Promise<Blob | null> {
+  const { scale, tx, ty } = view;
+  const sx = -tx / scale;
+  const sy = -ty / scale;
+  const sw = geom.fw / scale;
+  const sh = geom.fh / scale;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, outW, outH);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((b) => resolve(b), "image/jpeg", 0.97);
+  });
 }
 
 function orientedDimensions(w: number, h: number, orientation: number): { width: number; height: number } {

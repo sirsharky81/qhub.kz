@@ -7,6 +7,8 @@ import type { Landmarks68 } from "@/lib/passport-photo/landmarkAdapter";
 import {
   computeAutoAdjustFromLandmarks,
   computeHeuristicAdjust,
+  cropToBlob,
+  drawCropPreview,
   fromView,
   isDebugMode,
   landmarksToFrameEllipse,
@@ -31,7 +33,7 @@ const MAX_ZOOM = 4;
 export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchRef = useRef<{ dist: number; fx: number; fy: number } | null>(null);
@@ -39,7 +41,6 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   const [selectedSizeId, setSelectedSizeId] = useState(PHOTO_SIZES[0].id);
   const [userAdjust, setUserAdjust] = useState<Adjust | null>(null);
   const [containerW, setContainerW] = useState(0);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [orientation, setOrientation] = useState(1);
   const [landmarks, setLandmarks] = useState<Landmarks68 | null>(null);
@@ -140,19 +141,13 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
 
   // EXIF normalization on mount
   useEffect(() => {
-    let revoked: string | null = null;
     let cancelled = false;
 
     (async () => {
       try {
         const normalized = await normalizeImageOrientation(imageFile);
-        if (cancelled) {
-          URL.revokeObjectURL(normalized.url);
-          return;
-        }
-        revoked = normalized.url;
+        if (cancelled) return;
         sourceCanvasRef.current = normalized.canvas;
-        setImageUrl(normalized.url);
         setNatural({ w: normalized.width, h: normalized.height });
         setOrientation(normalized.orientation);
         setLoading(false);
@@ -166,7 +161,6 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
 
     return () => {
       cancelled = true;
-      if (revoked) URL.revokeObjectURL(revoked);
     };
   }, [imageFile]);
 
@@ -180,17 +174,30 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     const el = wrapRef.current;
     if (!el) return;
     const update = () => {
-      const w = el.clientWidth;
+      const w = el.clientWidth || Math.min(window.innerWidth - 32, 448);
       if (w > 0) setContainerW(w);
     };
     update();
+    requestAnimationFrame(update);
+    const t = window.setTimeout(update, 150);
     const ro = new ResizeObserver((entries) => {
       const w = entries[0].contentRect.width;
       if (w > 0) setContainerW(w);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(t);
+    };
   }, []);
+
+  // Canvas-превью вместо <img>+transform (iOS Safari не рисует img с scale)
+  useEffect(() => {
+    const preview = previewCanvasRef.current;
+    const source = sourceCanvasRef.current;
+    if (!preview || !source || !geom || !view) return;
+    drawCropPreview(preview, source, geom, view);
+  }, [geom, view, natural]);
 
   function handleSizeChange(sizeId: string) {
     setSelectedSizeId(sizeId);
@@ -277,24 +284,9 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   }
 
   async function generateBlob(): Promise<Blob | null> {
-    const img = imgRef.current;
-    if (!geom || !view || !img) return null;
-    const { scale, tx, ty } = view;
-    const sx = -tx / scale;
-    const sy = -ty / scale;
-    const sw = geom.fw / scale;
-    const sh = geom.fh / scale;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = selectedSize.widthPx;
-    canvas.height = selectedSize.heightPx;
-    const ctx = canvas.getContext("2d")!;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, selectedSize.widthPx, selectedSize.heightPx);
-
-    return new Promise((resolve) => {
-      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.97);
-    });
+    const source = sourceCanvasRef.current;
+    if (!geom || !view || !source) return null;
+    return cropToBlob(source, geom, view, selectedSize.widthPx, selectedSize.heightPx);
   }
 
   async function proceed() {
@@ -416,25 +408,11 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
             touchAction: "none",
           }}
         >
-          {imageUrl && (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              ref={imgRef}
-              src={imageUrl}
-              alt="Исходное фото"
-              draggable={false}
-              className="absolute top-0 left-0 max-w-none select-none"
-              style={{
-                width: natural?.w,
-                height: natural?.h,
-                transformOrigin: "0 0",
-                transform: view
-                  ? `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`
-                  : undefined,
-                visibility: view ? "visible" : "hidden",
-              }}
-            />
-          )}
+          <canvas
+            ref={previewCanvasRef}
+            className="absolute top-0 left-0 max-w-none select-none"
+            aria-label="Предпросмотр фото"
+          />
 
           <div className="absolute inset-0 pointer-events-none">
             {faceEllipse && faceDetected ? (
