@@ -1,6 +1,8 @@
 import type { TaxRuleSet } from "../rules/schema";
-import type { AppliedBenefit, BenefitId, RegimeId, SocialPaymentId } from "../types";
+import type { AppliedBenefit, BenefitId, Period, RegimeId, SocialPaymentId } from "../types";
 import { roundTenge } from "../format";
+import { calculateSocialPaymentAmount } from "./social-contributions";
+import { annualToDisplay } from "./utils";
 
 export function getExemptedPayments(
   benefits: BenefitId[],
@@ -54,6 +56,70 @@ export function calculateIpnDeductions(
   }
 
   return { total, applied };
+}
+
+export interface CollectAppliedBenefitsInput {
+  benefits: BenefitId[];
+  rules: TaxRuleSet;
+  regimeId: RegimeId;
+  period: Period;
+  monthlyIncome: number;
+  monthlyEmployeePayroll: number;
+  hasEmployees: boolean;
+  periodMultiplier: number;
+  disabledChildrenCount: number;
+}
+
+/** Собирает все применённые льготы: вычеты по ИПН и освобождения от соцплатежей */
+export function collectAppliedBenefits(input: CollectAppliedBenefitsInput): AppliedBenefit[] {
+  const applied: AppliedBenefit[] = [];
+
+  for (const benefitId of input.benefits) {
+    const rule = input.rules.benefits.find((b) => b.id === benefitId);
+    if (!rule || !rule.applicableRegimes.includes(input.regimeId)) continue;
+
+    const hasIpn = Boolean(rule.ipnDeduction);
+    const hasSocial = rule.exemptions.length > 0;
+    if (!hasIpn && !hasSocial) continue;
+
+    let savings = 0;
+
+    if (hasIpn) {
+      const { applied: ipnApplied } = calculateIpnDeductions(
+        [benefitId],
+        input.rules,
+        input.regimeId,
+        12,
+        input.disabledChildrenCount
+      );
+      savings += annualToDisplay(
+        ipnApplied.reduce((sum, b) => sum + b.savings, 0),
+        input.period
+      );
+    }
+
+    if (hasSocial) {
+      for (const paymentId of rule.exemptions) {
+        savings += calculateSocialPaymentAmount(
+          paymentId,
+          input.rules,
+          input.monthlyIncome,
+          input.monthlyEmployeePayroll,
+          input.hasEmployees,
+          input.periodMultiplier
+        );
+      }
+    }
+
+    applied.push({
+      id: benefitId,
+      labelKey: rule.labelKey,
+      savings,
+      descriptionKey: rule.descriptionKey,
+    });
+  }
+
+  return applied;
 }
 
 export function resolveBenefitConflicts(benefits: BenefitId[], rules: TaxRuleSet): BenefitId[] {

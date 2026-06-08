@@ -23,14 +23,21 @@ export default function NetIncomeHero({ result, lang, isBest }: NetIncomeHeroPro
       </div>
       <p className="text-3xl sm:text-4xl font-bold text-gray-900 tabular-nums tracking-tight">
         {formatMoney(result.netIncome)}
+        <span className="text-base font-medium text-gray-400 ml-2">
+          {t(lang, result.period === "monthly" ? "per.month" : "per.year")}
+        </span>
       </p>
       <div className="mt-4 grid grid-cols-3 gap-3 text-center sm:text-left sm:grid-cols-3">
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400">{t(lang, "hero.gross")}</p>
+          <p className="text-[10px] uppercase tracking-wider text-gray-400">
+            {t(lang, "hero.gross")} {t(lang, result.period === "monthly" ? "per.month_short" : "per.year_short")}
+          </p>
           <p className="text-sm font-semibold text-gray-800 tabular-nums">{formatMoney(result.grossIncome)}</p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400">{t(lang, "hero.payments")}</p>
+          <p className="text-[10px] uppercase tracking-wider text-gray-400">
+            {t(lang, "hero.payments")} {t(lang, result.period === "monthly" ? "per.month_short" : "per.year_short")}
+          </p>
           <p className="text-sm font-semibold text-gray-800 tabular-nums">{formatMoney(result.totalPayments)}</p>
         </div>
         <div>

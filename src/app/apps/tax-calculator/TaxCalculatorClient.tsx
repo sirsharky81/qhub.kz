@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import BenefitsApplied from "@/components/tax-calculator/BenefitsApplied";
 import BenefitsChips from "@/components/tax-calculator/BenefitsChips";
 import CalculationExplainer from "@/components/tax-calculator/CalculationExplainer";
+import EmploymentToggle from "@/components/tax-calculator/EmploymentToggle";
 import ExpenseInputs from "@/components/tax-calculator/ExpenseInputs";
 import IncomeInput from "@/components/tax-calculator/IncomeInput";
 import RegimeConditions from "@/components/tax-calculator/RegimeConditions";
@@ -153,10 +154,23 @@ export default function TaxCalculatorClient() {
 
           <RegimeConditions regime={values.regime} year={values.year} lang={lang} />
 
+          <EmploymentToggle
+            hasEmployees={values.hasEmployees}
+            employeePayroll={values.employeePayroll}
+            period={values.period}
+            year={values.year}
+            lang={lang}
+            inputClass={inputClass}
+            labelClass={labelClass}
+            onHasEmployeesChange={(v) => updateField("hasEmployees", v)}
+            onEmployeePayrollChange={(v) => updateField("employeePayroll", v)}
+          />
+
           <ExpenseInputs
             businessExpenses={values.businessExpenses}
             payrollExpenses={values.payrollExpenses}
             regime={values.regime}
+            period={values.period}
             year={values.year}
             lang={lang}
             inputClass={inputClass}

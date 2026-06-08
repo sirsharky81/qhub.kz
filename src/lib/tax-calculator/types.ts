@@ -25,8 +25,12 @@ export interface TaxInput {
   disabledChildrenCount?: number;
   /** Подтверждённые расходы для вычета на ОУР (в том же периоде, что и доход) */
   businessExpenses?: number;
-  /** Расходы на оплату труда (ФОТ) для вычета на упрощёнке */
+  /** Расходы на оплату труда (gross, начисленный ФОТ) для вычета на упрощёнке */
   payrollExpenses?: number;
+  /** Используется наёмный труд работников */
+  hasEmployees: boolean;
+  /** Начисленная зарплата работников gross (до ОПВ/ИПН/ВОСМС) — база для ОПВР */
+  employeePayroll?: number;
 }
 
 export interface PaymentLineItem {

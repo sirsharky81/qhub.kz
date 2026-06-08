@@ -23,6 +23,8 @@ export interface FormValues {
   disabledChildrenCount: string;
   businessExpenses: string;
   payrollExpenses: string;
+  hasEmployees: boolean;
+  employeePayroll: string;
 }
 
 export const DEFAULT_VALUES: FormValues = {
@@ -35,6 +37,8 @@ export const DEFAULT_VALUES: FormValues = {
   disabledChildrenCount: "1",
   businessExpenses: "0",
   payrollExpenses: "0",
+  hasEmployees: false,
+  employeePayroll: "0",
 };
 
 const VALID_REGIMES: RegimeSelection[] = [
@@ -93,6 +97,15 @@ export function validateInputs(
     return { error: t(lang, "err.payroll") };
   }
 
+  const employeePayroll = parseAmountInput(values.employeePayroll);
+  if (!Number.isFinite(employeePayroll) || employeePayroll < 0) {
+    return { error: t(lang, "err.employee_payroll") };
+  }
+
+  if (values.hasEmployees && employeePayroll <= 0) {
+    return { error: t(lang, "err.employee_payroll_required") };
+  }
+
   return {
     input: {
       income,
@@ -104,6 +117,8 @@ export function validateInputs(
       disabledChildrenCount,
       businessExpenses: businessExpenses > 0 ? businessExpenses : undefined,
       payrollExpenses: payrollExpenses > 0 ? payrollExpenses : undefined,
+      hasEmployees: values.hasEmployees,
+      employeePayroll: values.hasEmployees && employeePayroll > 0 ? employeePayroll : undefined,
     },
   };
 }

@@ -1,13 +1,15 @@
 "use client";
 
+import PayrollNetEstimate from "@/components/tax-calculator/PayrollNetEstimate";
 import { formatAmountInput, parseAmountInput } from "@/lib/tax-calculator/format";
 import { t } from "@/lib/tax-calculator/i18n";
-import type { Lang, RegimeSelection } from "@/lib/tax-calculator/types";
+import type { Lang, Period, RegimeSelection } from "@/lib/tax-calculator/types";
 
 interface ExpenseInputsProps {
   businessExpenses: string;
   payrollExpenses: string;
   regime: RegimeSelection;
+  period: Period;
   year: string;
   lang: Lang;
   inputClass: string;
@@ -63,6 +65,7 @@ export default function ExpenseInputs({
   businessExpenses,
   payrollExpenses,
   regime,
+  period,
   year,
   lang,
   inputClass,
@@ -94,14 +97,17 @@ export default function ExpenseInputs({
           />
         )}
         {showPayroll && (
-          <AmountField
-            value={payrollExpenses}
-            label={t(lang, "lbl.payroll_expenses")}
-            hint={t(lang, "hint.payroll_expenses")}
-            inputClass={inputClass}
-            labelClass={labelClass}
-            onChange={onPayrollExpensesChange}
-          />
+          <div>
+            <AmountField
+              value={payrollExpenses}
+              label={t(lang, "lbl.payroll_expenses")}
+              hint={t(lang, "hint.payroll_expenses")}
+              inputClass={inputClass}
+              labelClass={labelClass}
+              onChange={onPayrollExpensesChange}
+            />
+            <PayrollNetEstimate gross={payrollExpenses} period={period} year={year} lang={lang} />
+          </div>
         )}
       </div>
     </div>

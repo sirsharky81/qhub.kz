@@ -44,6 +44,13 @@ export function checkEligibility(
   }
 
   if (regimeId === "self_employed") {
+    if (input.hasEmployees) {
+      return {
+        isEligible: false,
+        reasonKey: "ineligible.self_employed_employees",
+        warnings,
+      };
+    }
     warnings.push({ id: "not_ip", messageKey: "warning.self_employed_not_ip", severity: "info" });
   }
 

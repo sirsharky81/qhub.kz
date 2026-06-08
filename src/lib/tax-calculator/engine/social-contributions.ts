@@ -1,13 +1,16 @@
 import type { TaxRuleSet } from "../rules/schema";
-import type { BenefitId, PaymentLineItem, SocialPaymentId } from "../types";
+import type { BenefitId, PaymentLineItem, RegimeId, SocialPaymentId } from "../types";
 import { roundTenge } from "../format";
 import { getExemptedPayments } from "./deductions";
 
 export interface SocialCalcInput {
   monthlyIncome: number;
+  monthlyEmployeePayroll: number;
+  hasEmployees: boolean;
   benefits: BenefitId[];
   rules: TaxRuleSet;
   periodMultiplier: number;
+  regimeId: RegimeId;
 }
 
 function calcBase(
@@ -22,16 +25,74 @@ function calcBase(
   return Math.min(incomeBase, maxMzp * mzp);
 }
 
+/** Сумма одного соцплатежа без учёта льгот (в периоде отображения) */
+export function calculateSocialPaymentAmount(
+  paymentId: SocialPaymentId,
+  rules: TaxRuleSet,
+  monthlyIncome: number,
+  monthlyEmployeePayroll: number,
+  hasEmployees: boolean,
+  periodMultiplier: number
+): number {
+  const rule = rules.socialContributions.find((r) => r.id === paymentId);
+  if (!rule) return 0;
+
+  if (rule.id === "opvr") {
+    if (!hasEmployees) return 0;
+    const base = calcBase(monthlyEmployeePayroll, rule.minBaseMzp, rule.maxBaseMzp, rules.mzp);
+    return roundTenge(base * rule.rate * periodMultiplier);
+  }
+
+  let base: number;
+  if (rule.fixedBaseMzp !== undefined) {
+    base = rule.fixedBaseMzp * rules.mzp;
+  } else {
+    base = calcBase(monthlyIncome, rule.minBaseMzp, rule.maxBaseMzp, rules.mzp);
+  }
+
+  return roundTenge(base * rule.rate * periodMultiplier);
+}
+
 export function calculateSocialContributions(input: SocialCalcInput): {
   lineItems: PaymentLineItem[];
   total: number;
 } {
-  const { monthlyIncome, benefits, rules, periodMultiplier } = input;
-  const exempted = getExemptedPayments(benefits, rules, "simplified");
+  const {
+    monthlyIncome,
+    monthlyEmployeePayroll,
+    hasEmployees,
+    benefits,
+    rules,
+    periodMultiplier,
+    regimeId,
+  } = input;
+  const exempted = getExemptedPayments(benefits, rules, regimeId);
   const lineItems: PaymentLineItem[] = [];
   let total = 0;
 
   for (const rule of rules.socialContributions) {
+    if (rule.id === "opvr") {
+      if (!hasEmployees) continue;
+
+      const base = calcBase(monthlyEmployeePayroll, rule.minBaseMzp, rule.maxBaseMzp, rules.mzp);
+      const monthlyAmount = roundTenge(base * rule.rate);
+      const amount = roundTenge(monthlyAmount * periodMultiplier);
+      const isExempted = exempted.has(rule.id);
+
+      lineItems.push({
+        id: rule.id,
+        labelKey: "payment.opvr",
+        amount: isExempted ? 0 : amount,
+        formula: `${(rule.rate * 100).toFixed(1)}% × ФОТ ${roundTenge(base).toLocaleString("ru-RU")} ₸`,
+        category: "social",
+        exempted: isExempted,
+        exemptionReasonKey: isExempted ? "exemption.benefit" : undefined,
+      });
+
+      if (!isExempted) total += amount;
+      continue;
+    }
+
     let base: number;
     if (rule.fixedBaseMzp !== undefined) {
       base = rule.fixedBaseMzp * rules.mzp;

@@ -1,16 +1,19 @@
 import type { TaxRuleSet } from "../../rules/schema";
 import type { TaxInput, TaxResult } from "../../types";
 import { roundTenge } from "../../format";
-import { calculateIpnDeductions } from "../deductions";
+import { calculateIpnDeductions, collectAppliedBenefits } from "../deductions";
 import { checkEligibility } from "../eligibility";
 import { calculateSocialContributions } from "../social-contributions";
-import { effectiveRate, toPeriodAmounts } from "../utils";
+import { annualToDisplay, effectiveRate, toPeriodAmounts } from "../utils";
 
 export function calculateKfh(input: TaxInput, rules: TaxRuleSet): TaxResult {
   const { isEligible, reasonKey, warnings } = checkEligibility(input, "kfh", rules);
   const { monthly, annual } = toPeriodAmounts(input.income, input.period);
   const periodMultiplier = input.period === "monthly" ? 1 : 12;
   const grossIncome = input.period === "monthly" ? monthly : annual;
+  const monthlyEmployeePayroll = input.hasEmployees
+    ? toPeriodAmounts(input.employeePayroll ?? 0, input.period).monthly
+    : 0;
 
   if (!isEligible) {
     return {
@@ -32,34 +35,39 @@ export function calculateKfh(input: TaxInput, rules: TaxRuleSet): TaxResult {
   }
 
   const rate = rules.regimes.kfh.incomeTaxRate ?? 0.03;
-  let incomeTax = roundTenge(annual * rate);
+  let incomeTaxAnnual = roundTenge(annual * rate);
 
   const { total: benefitDeductionTotal, applied: benefitDeductions } = calculateIpnDeductions(
     input.benefits,
     rules,
     "kfh",
-    periodMultiplier,
+    12,
     input.disabledChildrenCount ?? 1
   );
 
-  incomeTax = Math.max(0, incomeTax - benefitDeductionTotal);
+  incomeTaxAnnual = Math.max(0, incomeTaxAnnual - benefitDeductionTotal);
 
   const social = calculateSocialContributions({
     monthlyIncome: monthly,
+    monthlyEmployeePayroll,
+    hasEmployees: input.hasEmployees,
     benefits: input.benefits,
     rules,
     periodMultiplier,
+    regimeId: "kfh",
   });
 
-  const totalPayments = incomeTax + social.total;
+  const totalTaxes = annualToDisplay(incomeTaxAnnual, input.period);
+  const totalSocial = social.total;
+  const totalPayments = totalTaxes + totalSocial;
   const netIncome = Math.max(0, grossIncome - totalPayments);
 
   const lineItems = [
     {
       id: "kfh_tax",
       labelKey: "payment.kfh_tax",
-      amount: incomeTax,
-      formula: `${(rate * 100).toFixed(0)}% × ${roundTenge(annual).toLocaleString("ru-RU")} ₸`,
+      amount: totalTaxes,
+      formula: `${(rate * 100).toFixed(0)}% × ${roundTenge(annual).toLocaleString("ru-RU")} ₸/год`,
       category: "tax" as const,
     },
     ...social.lineItems,
@@ -69,14 +77,24 @@ export function calculateKfh(input: TaxInput, rules: TaxRuleSet): TaxResult {
     regime: "kfh",
     grossIncome,
     period: input.period,
-    totalTaxes: incomeTax,
-    totalSocial: social.total,
+    totalTaxes,
+    totalSocial,
     totalPayments,
     netIncome,
     effectiveRate: effectiveRate(totalPayments, grossIncome),
     lineItems,
     deductions: [],
-    appliedBenefits: benefitDeductions,
+    appliedBenefits: collectAppliedBenefits({
+      benefits: input.benefits,
+      rules,
+      regimeId: "kfh",
+      period: input.period,
+      monthlyIncome: monthly,
+      monthlyEmployeePayroll,
+      hasEmployees: input.hasEmployees,
+      periodMultiplier,
+      disabledChildrenCount: input.disabledChildrenCount ?? 1,
+    }),
     warnings,
     isEligible: true,
   };

@@ -34,3 +34,17 @@ export function effectiveRate(totalPayments: number, grossIncome: number): numbe
   if (grossIncome <= 0) return 0;
   return Math.round((totalPayments / grossIncome) * 1000) / 10;
 }
+
+/** Перевод годовой суммы в выбранный пользователем период отображения */
+export function annualToDisplay(annualAmount: number, period: Period): number {
+  return period === "monthly" ? roundTenge(annualAmount / 12) : roundTenge(annualAmount);
+}
+
+/** Масштабирует суммы в lineItems и deductions к периоду отображения */
+export function scaleAnnualItemsToPeriod<T extends { amount: number }>(
+  items: T[],
+  period: Period
+): T[] {
+  if (period === "annual") return items;
+  return items.map((item) => ({ ...item, amount: annualToDisplay(item.amount, period) }));
+}

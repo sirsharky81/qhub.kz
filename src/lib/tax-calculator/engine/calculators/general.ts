@@ -1,11 +1,11 @@
 import type { TaxRuleSet } from "../../rules/schema";
 import type { TaxInput, TaxResult } from "../../types";
 import { roundTenge } from "../../format";
-import { calculateIpnDeductions } from "../deductions";
+import { calculateIpnDeductions, collectAppliedBenefits } from "../deductions";
 import { calcGeneralExpenseDeduction, normalizeExpenseInputs } from "../expense-deductions";
 import { checkEligibility } from "../eligibility";
 import { calculateSocialContributions, getOpvDeductionAmount } from "../social-contributions";
-import { calcProgressiveTax, effectiveRate, toPeriodAmounts } from "../utils";
+import { annualToDisplay, calcProgressiveTax, effectiveRate, scaleAnnualItemsToPeriod, toPeriodAmounts } from "../utils";
 
 function emptyResult(
   input: TaxInput,
@@ -40,6 +40,9 @@ export function calculateGeneral(input: TaxInput, rules: TaxRuleSet): TaxResult 
   const { monthly, annual } = toPeriodAmounts(input.income, input.period);
   const periodMultiplier = input.period === "monthly" ? 1 : 12;
   const grossIncome = input.period === "monthly" ? monthly : annual;
+  const monthlyEmployeePayroll = input.hasEmployees
+    ? toPeriodAmounts(input.employeePayroll ?? 0, input.period).monthly
+    : 0;
 
   if (!isEligible) {
     return emptyResult(input, grossIncome, eligibilityWarnings, reasonKey);
@@ -49,7 +52,7 @@ export function calculateGeneral(input: TaxInput, rules: TaxRuleSet): TaxResult 
   const expenseResult = calcGeneralExpenseDeduction(annual, annualBusinessExpenses, rules);
 
   const warnings = [...eligibilityWarnings, ...expenseResult.warnings];
-  const deductions = expenseResult.deduction ? [expenseResult.deduction] : [];
+  const deductionsRaw = expenseResult.deduction ? [expenseResult.deduction] : [];
 
   const regime = rules.regimes.general;
   const brackets = regime.incomeTaxBrackets ?? rules.ipnBrackets;
@@ -92,18 +95,26 @@ export function calculateGeneral(input: TaxInput, rules: TaxRuleSet): TaxResult 
   }
 
   taxableAnnual = Math.max(0, taxableAnnual);
-  const ipn = calcProgressiveTax(taxableAnnual, brackets, rules.mrp);
+  const ipnAnnual = calcProgressiveTax(taxableAnnual, brackets, rules.mrp);
 
   const social = calculateSocialContributions({
     monthlyIncome: monthly,
+    monthlyEmployeePayroll,
+    hasEmployees: input.hasEmployees,
     benefits: input.benefits,
     rules,
     periodMultiplier,
+    regimeId: "general",
   });
 
-  const totalPayments = ipn + social.total;
-  const totalOutflow = totalPayments + annualBusinessExpenses;
+  const expensesDisplay = annualToDisplay(annualBusinessExpenses, input.period);
+  const totalTaxes = annualToDisplay(ipnAnnual, input.period);
+  const totalSocial = social.total;
+  const totalPayments = totalTaxes + totalSocial;
+  const totalOutflow = totalPayments + expensesDisplay;
   const netIncome = Math.max(0, grossIncome - totalOutflow);
+
+  const deductions = scaleAnnualItemsToPeriod(deductionsRaw, input.period);
 
   const lineItems = [
     ...(expenseResult.deduction
@@ -111,7 +122,7 @@ export function calculateGeneral(input: TaxInput, rules: TaxRuleSet): TaxResult 
           {
             id: "business_expenses",
             labelKey: "deduction.business_expenses",
-            amount: expenseResult.deduction.amount,
+            amount: expensesDisplay,
             formula: expenseResult.deduction.formula ?? "",
             category: "deduction" as const,
           },
@@ -120,32 +131,41 @@ export function calculateGeneral(input: TaxInput, rules: TaxRuleSet): TaxResult 
     {
       id: "ipn",
       labelKey: "payment.ipn",
-      amount: ipn,
+      amount: totalTaxes,
       formula:
         ipnDeductions.length > 0
-          ? `База ${roundTenge(expenseResult.taxableIncome).toLocaleString("ru-RU")} ₸, вычеты: ${ipnDeductions.map((d) => roundTenge(d.amount).toLocaleString("ru-RU")).join(" + ")} ₸`
+          ? `База ${roundTenge(expenseResult.taxableIncome).toLocaleString("ru-RU")} ₸/год, вычеты применены`
           : "Прогрессивная шкала 10% / 15%",
       category: "tax" as const,
     },
     ...social.lineItems,
   ];
 
-  const taxableIncome =
-    input.period === "monthly" ? roundTenge(taxableAnnual / 12) : taxableAnnual;
+  const taxableIncome = annualToDisplay(taxableAnnual, input.period);
 
   return {
     regime: "general",
     grossIncome,
     period: input.period,
     taxableIncome,
-    totalTaxes: ipn,
-    totalSocial: social.total,
+    totalTaxes,
+    totalSocial,
     totalPayments,
     netIncome,
     effectiveRate: effectiveRate(totalOutflow, grossIncome),
     lineItems,
     deductions,
-    appliedBenefits: benefitDeductions,
+    appliedBenefits: collectAppliedBenefits({
+      benefits: input.benefits,
+      rules,
+      regimeId: "general",
+      period: input.period,
+      monthlyIncome: monthly,
+      monthlyEmployeePayroll,
+      hasEmployees: input.hasEmployees,
+      periodMultiplier,
+      disabledChildrenCount: input.disabledChildrenCount ?? 1,
+    }),
     warnings,
     isEligible: true,
   };
