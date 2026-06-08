@@ -50,10 +50,6 @@ export default function StepUpload({ onImageSelected }: Props) {
         </p>
       </div>
 
-      <div className="w-full max-w-md">
-        <PhotoTips />
-      </div>
-
       {/* Mobile: camera / gallery */}
       <div className="flex flex-col gap-3 w-full max-w-md md:hidden">
           <button
@@ -114,6 +110,10 @@ export default function StepUpload({ onImageSelected }: Props) {
         className="hidden"
         onChange={handleInputChange}
       />
+
+      <div className="w-full max-w-md">
+        <PhotoTips />
+      </div>
 
       {error && (
         <p className="text-sm text-red-500 text-center">{error}</p>
