@@ -63,3 +63,69 @@ export function durationToInput(seconds: number): string {
 export function clampTime(time: number, duration: number): number {
   return Math.max(0, Math.min(time, duration));
 }
+
+/** Allow only MM:SS.s characters while typing; block invalid second values. */
+export function sanitizeTimeInput(raw: string): string {
+  const filtered = raw.replace(/[^\d:.]/g, "");
+  let result = "";
+  let hasColon = false;
+  let hasDot = false;
+
+  for (const ch of filtered) {
+    if (ch >= "0" && ch <= "9") {
+      if (!hasColon) {
+        result += ch;
+        continue;
+      }
+
+      const colonPos = result.indexOf(":");
+      const dotPos = result.indexOf(".");
+
+      if (dotPos < 0) {
+        const secPart = result.slice(colonPos + 1);
+        if (secPart.length >= 2) continue;
+        const next = secPart + ch;
+        if (next.length === 2 && Number(next) > 59) continue;
+        result += ch;
+      } else if (result.length - dotPos <= 1) {
+        result += ch;
+      }
+    } else if (ch === ":" && !hasColon && result.length > 0) {
+      hasColon = true;
+      result += ch;
+    } else if (ch === "." && hasColon && !hasDot) {
+      hasDot = true;
+      result += ch;
+    }
+  }
+
+  return result;
+}
+
+/** Decimal seconds field — digits and one dot only. */
+export function sanitizeSecondsInput(raw: string, maxDecimals = 1): string {
+  let s = raw.replace(/[^\d.]/g, "");
+  const dot = s.indexOf(".");
+  if (dot >= 0) {
+    s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, "").slice(0, maxDecimals);
+  }
+  return s;
+}
+
+export function parseBoundedSeconds(
+  raw: string,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === ".") return fallback;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+export function snapToStep(value: number, step: number): number {
+  if (step <= 0) return value;
+  return Math.round(value / step) * step;
+}

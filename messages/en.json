@@ -4,6 +4,7 @@
     "hint": "Delete, reorder, rotate, merge and split PDFs right in your browser",
     "security": "Your files are processed only in the browser and are never uploaded to a server.",
     "dropHint": "Drop a PDF here or click the button below",
+    "dropHintMobile": "Tap «Choose file» to pick a PDF from your device",
     "selectFile": "Choose file",
     "addMore": "Add pages from another PDF"
   },

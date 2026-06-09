@@ -126,7 +126,10 @@ export function SharedUploadZone({
             className="hidden"
             onChange={(e) => handleFiles(e.target.files)}
           />
-          <p className="text-sm text-gray-500 mb-4">{t("upload.dropHint")}</p>
+          <p className="text-sm text-gray-500 mb-4">
+            <span className="hidden sm:inline">{t("upload.dropHint")}</span>
+            <span className="sm:hidden">{t("upload.dropHintMobile")}</span>
+          </p>
           <button
             type="button"
             disabled={disabled}

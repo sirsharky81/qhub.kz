@@ -6,6 +6,7 @@ import { PlaybackControls } from "./AudioPlayer";
 import { ExportPanel } from "./ExportPanel";
 import { HistoryToolbar } from "./HistoryToolbar";
 import { ProgramPanel } from "./ProgramPanel";
+import { TimeField, SecondsField } from "./EditorInputs";
 import {
   formatTimePrecise,
   parseTimePrecise,
@@ -124,6 +125,8 @@ export function ManualEditorPanel({
 }: ManualEditorPanelProps) {
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
+  const [startFocused, setStartFocused] = useState(false);
+  const [endFocused, setEndFocused] = useState(false);
   const [timeError, setTimeError] = useState<string | null>(null);
 
   const isTrackActive = activeObject.type === "track" && activeObject.trackId === track.id;
@@ -150,9 +153,12 @@ export function ManualEditorPanel({
   );
 
   useEffect(() => {
-    setStartInput(formatTimePrecise(settings.trimStart));
-    setEndInput(formatTimePrecise(effEnd));
-  }, [settings.trimStart, effEnd, track.id]);
+    if (!startFocused) setStartInput(formatTimePrecise(settings.trimStart));
+  }, [settings.trimStart, track.id, startFocused]);
+
+  useEffect(() => {
+    if (!endFocused) setEndInput(formatTimePrecise(effEnd));
+  }, [effEnd, track.id, endFocused]);
 
   const seekFromSourceTime = (sourceTime: number) => {
     const resultTime = mapSourceTimeToResult(sourceTime, track.duration, settings);
@@ -166,6 +172,10 @@ export function ManualEditorPanel({
   const playheadSource = getPlayheadSourceTime(player.currentTime, track.duration, settings);
 
   const applyStartInput = () => {
+    if (!startInput.trim()) {
+      setStartInput(formatTimePrecise(settings.trimStart));
+      return;
+    }
     const parsed = parseTimePrecise(startInput);
     if (parsed === null) {
       setTimeError("Формат: 00:00.0");
@@ -181,6 +191,10 @@ export function ManualEditorPanel({
   };
 
   const applyEndInput = () => {
+    if (!endInput.trim()) {
+      setEndInput(formatTimePrecise(effEnd));
+      return;
+    }
     const parsed = parseTimePrecise(endInput);
     if (parsed === null) {
       setTimeError("Формат: 00:00.0");
@@ -309,29 +323,25 @@ export function ManualEditorPanel({
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] text-gray-500 w-12 shrink-0">Начало</span>
-                  <input
-                    type="text"
+                  <TimeField
                     value={startInput}
-                    onChange={(e) => setStartInput(e.target.value)}
-                    onBlur={applyStartInput}
-                    onKeyDown={(e) => e.key === "Enter" && applyStartInput()}
+                    onChange={setStartInput}
+                    onCommit={applyStartInput}
+                    onFocus={() => setStartFocused(true)}
+                    onBlurExtra={() => setStartFocused(false)}
                     className={inputClass}
-                    placeholder="00:00.0"
                   />
                 </div>
                 <div>
                   <label className="text-[11px] text-gray-500">Плавный старт (сек)</label>
-                  <input
-                    type="number"
+                  <SecondsField
+                    value={settings.fadeIn}
+                    onChange={(fadeIn) => onSettingsChange({ fadeIn }, { skipHistory: true })}
                     min={0}
                     max={30}
                     step={0.5}
-                    value={settings.fadeIn}
-                    onChange={(e) =>
-                      onSettingsChange({ fadeIn: Number(e.target.value) }, { skipHistory: true })
-                    }
-                    onBlur={onEndGesture}
-                    onPointerDown={onBeginGesture}
+                    onBeginGesture={onBeginGesture}
+                    onEndGesture={onEndGesture}
                     className={`${inputClass} mt-0.5`}
                   />
                 </div>
@@ -339,29 +349,25 @@ export function ManualEditorPanel({
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] text-gray-500 w-12 shrink-0">Конец</span>
-                  <input
-                    type="text"
+                  <TimeField
                     value={endInput}
-                    onChange={(e) => setEndInput(e.target.value)}
-                    onBlur={applyEndInput}
-                    onKeyDown={(e) => e.key === "Enter" && applyEndInput()}
+                    onChange={setEndInput}
+                    onCommit={applyEndInput}
+                    onFocus={() => setEndFocused(true)}
+                    onBlurExtra={() => setEndFocused(false)}
                     className={inputClass}
-                    placeholder="00:00.0"
                   />
                 </div>
                 <div>
                   <label className="text-[11px] text-gray-500">Плавный финиш (сек)</label>
-                  <input
-                    type="number"
+                  <SecondsField
+                    value={settings.fadeOut}
+                    onChange={(fadeOut) => onSettingsChange({ fadeOut }, { skipHistory: true })}
                     min={0}
                     max={30}
                     step={0.5}
-                    value={settings.fadeOut}
-                    onChange={(e) =>
-                      onSettingsChange({ fadeOut: Number(e.target.value) }, { skipHistory: true })
-                    }
-                    onBlur={onEndGesture}
-                    onPointerDown={onBeginGesture}
+                    onBeginGesture={onBeginGesture}
+                    onEndGesture={onEndGesture}
                     className={`${inputClass} mt-0.5`}
                   />
                 </div>

@@ -114,7 +114,10 @@ export function UploadZone({
             onChange={(e) => handleFiles(e.target.files)}
           />
           <p className="text-xs text-gray-500 mb-0.5">MP3, WAV, M4A</p>
-          <p className="text-[11px] text-gray-400 mb-3">Перетащите файлы или выберите на устройстве</p>
+          <p className="text-[11px] text-gray-400 mb-3">
+            <span className="hidden sm:inline">Перетащите файлы или выберите на устройстве</span>
+            <span className="sm:hidden">Нажмите «Выбрать файлы» — MP3, WAV или M4A с устройства</span>
+          </p>
           <button
             type="button"
             disabled={disabled}

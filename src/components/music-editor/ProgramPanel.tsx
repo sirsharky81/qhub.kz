@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { PlaybackControls } from "./AudioPlayer";
 import { ProgramTimeline } from "./ProgramTimeline";
 import { HistoryToolbar } from "./HistoryToolbar";
+import { TimeField, SecondsField } from "./EditorInputs";
 import {
   formatTimePrecise,
   parseTimePrecise,
@@ -183,17 +184,16 @@ function TransitionControl({ index, transition, onChange, onPreview }: Transitio
       </select>
       {transition.type === "crossfade" && (
         <>
-          <input
-            type="number"
-            min={0.5}
-            max={15}
-            step={0.5}
-            value={transition.duration}
-            onChange={(e) => onChange({ ...transition, duration: Number(e.target.value) })}
-            className={transitionInputClass}
-            onClick={(e) => e.stopPropagation()}
-            title="Длительность crossfade (сек)"
-          />
+          <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+            <SecondsField
+              value={transition.duration}
+              onChange={(duration) => onChange({ ...transition, duration })}
+              min={0.5}
+              max={15}
+              step={0.5}
+              className={transitionInputClass}
+            />
+          </div>
           <button
             type="button"
             onClick={(e) => {
@@ -235,6 +235,8 @@ export function ProgramPanel({
 }: ProgramPanelProps) {
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
+  const [startFocused, setStartFocused] = useState(false);
+  const [endFocused, setEndFocused] = useState(false);
   const [timeError, setTimeError] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -285,9 +287,12 @@ export function ProgramPanel({
   );
 
   useEffect(() => {
-    setStartInput(formatTimePrecise(programSettings.trimStart));
-    setEndInput(formatTimePrecise(effEnd));
-  }, [programSettings.trimStart, effEnd, sourceDuration]);
+    if (!startFocused) setStartInput(formatTimePrecise(programSettings.trimStart));
+  }, [programSettings.trimStart, sourceDuration, startFocused]);
+
+  useEffect(() => {
+    if (!endFocused) setEndInput(formatTimePrecise(effEnd));
+  }, [effEnd, sourceDuration, endFocused]);
 
   const seekFromSourceTime = (sourceTime: number) => {
     const resultTime = mapSourceTimeToResult(sourceTime, sourceDuration, programSettings);
@@ -301,6 +306,10 @@ export function ProgramPanel({
   );
 
   const applyStartInput = () => {
+    if (!startInput.trim()) {
+      setStartInput(formatTimePrecise(programSettings.trimStart));
+      return;
+    }
     const parsed = parseTimePrecise(startInput);
     if (parsed === null) {
       setTimeError("Формат: 00:00.0");
@@ -316,6 +325,10 @@ export function ProgramPanel({
   };
 
   const applyEndInput = () => {
+    if (!endInput.trim()) {
+      setEndInput(formatTimePrecise(effEnd));
+      return;
+    }
     const parsed = parseTimePrecise(endInput);
     if (parsed === null) {
       setTimeError("Формат: 00:00.0");
@@ -520,32 +533,27 @@ export function ProgramPanel({
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] text-gray-500 w-12 shrink-0">Начало</span>
-                  <input
-                    type="text"
+                  <TimeField
                     value={startInput}
-                    onChange={(e) => setStartInput(e.target.value)}
-                    onBlur={applyStartInput}
-                    onKeyDown={(e) => e.key === "Enter" && applyStartInput()}
+                    onChange={setStartInput}
+                    onCommit={applyStartInput}
+                    onFocus={() => setStartFocused(true)}
+                    onBlurExtra={() => setStartFocused(false)}
                     className={inputClass}
-                    placeholder="00:00.0"
                   />
                 </div>
                 <div>
                   <label className="text-[11px] text-gray-500">Плавный старт (сек)</label>
-                  <input
-                    type="number"
+                  <SecondsField
+                    value={programSettings.fadeIn}
+                    onChange={(fadeIn) =>
+                      onProgramSettingsChange({ fadeIn }, { skipHistory: true })
+                    }
                     min={0}
                     max={30}
                     step={0.5}
-                    value={programSettings.fadeIn}
-                    onChange={(e) =>
-                      onProgramSettingsChange(
-                        { fadeIn: Number(e.target.value) },
-                        { skipHistory: true },
-                      )
-                    }
-                    onBlur={onEndGesture}
-                    onPointerDown={onBeginGesture}
+                    onBeginGesture={onBeginGesture}
+                    onEndGesture={onEndGesture}
                     className={`${inputClass} mt-0.5`}
                   />
                 </div>
@@ -553,32 +561,27 @@ export function ProgramPanel({
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] text-gray-500 w-12 shrink-0">Конец</span>
-                  <input
-                    type="text"
+                  <TimeField
                     value={endInput}
-                    onChange={(e) => setEndInput(e.target.value)}
-                    onBlur={applyEndInput}
-                    onKeyDown={(e) => e.key === "Enter" && applyEndInput()}
+                    onChange={setEndInput}
+                    onCommit={applyEndInput}
+                    onFocus={() => setEndFocused(true)}
+                    onBlurExtra={() => setEndFocused(false)}
                     className={inputClass}
-                    placeholder="00:00.0"
                   />
                 </div>
                 <div>
                   <label className="text-[11px] text-gray-500">Плавный финиш (сек)</label>
-                  <input
-                    type="number"
+                  <SecondsField
+                    value={programSettings.fadeOut}
+                    onChange={(fadeOut) =>
+                      onProgramSettingsChange({ fadeOut }, { skipHistory: true })
+                    }
                     min={0}
                     max={30}
                     step={0.5}
-                    value={programSettings.fadeOut}
-                    onChange={(e) =>
-                      onProgramSettingsChange(
-                        { fadeOut: Number(e.target.value) },
-                        { skipHistory: true },
-                      )
-                    }
-                    onBlur={onEndGesture}
-                    onPointerDown={onBeginGesture}
+                    onBeginGesture={onBeginGesture}
+                    onEndGesture={onEndGesture}
                     className={`${inputClass} mt-0.5`}
                   />
                 </div>
