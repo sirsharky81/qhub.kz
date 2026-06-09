@@ -76,6 +76,36 @@ export const apps: App[] = [
     sortOrder: 3,
   },
   {
+    id: "music-editor",
+    title: "Music Editor",
+    description:
+      "Подготовка музыки для фигурного катания, танцев и выступлений.",
+    longDescription:
+      "Браузерный редактор музыки: обрезка и склейка треков, fade in/out, crossfade, автоматическое сокращение до нужной длины и подготовка программ для фигурного катания. Экспорт MP3 и WAV. Вся обработка в браузере.",
+    href: "/tools/music-editor",
+    tags: ["tools", "lifestyle"],
+    icon: "🎵",
+    color: "from-indigo-500/10 to-indigo-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 6,
+  },
+  {
+    id: "pdf-pages",
+    title: "PDF Pages",
+    description:
+      "Удаляйте, переставляйте, поворачивайте, объединяйте и разделяйте PDF прямо в браузере.",
+    longDescription:
+      "Онлайн-редактор страниц PDF: удаление лишних листов, drag-and-drop сортировка, поворот сканов, объединение нескольких файлов и разделение на части. Вся обработка в браузере — файлы не загружаются на сервер.",
+    href: "/tools/pdf-pages",
+    tags: ["tools"],
+    icon: "📄",
+    color: "from-rose-500/10 to-rose-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 5,
+  },
+  {
     id: "tax-calculator",
     title: "Налоговый калькулятор ИП",
     description: "Узнайте, сколько налогов заплатите и сколько останется на руки — за 30 секунд.",

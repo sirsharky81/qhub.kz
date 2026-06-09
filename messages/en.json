@@ -1,0 +1,105 @@
+{
+  "upload": {
+    "title": "PDF Pages — PDF page editor",
+    "hint": "Delete, reorder, rotate, merge and split PDFs right in your browser",
+    "security": "Your files are processed only in the browser and are never uploaded to a server.",
+    "dropHint": "Drop a PDF here or click the button below",
+    "selectFile": "Choose file",
+    "addMore": "Add pages from another PDF"
+  },
+  "emptyState": {
+    "title": "PDF page editor",
+    "subtitle": "Free online tool for working with PDF pages",
+    "feature1": "Remove unwanted pages from a document",
+    "feature2": "Reorder pages by drag and drop",
+    "feature3": "Merge multiple PDFs into one file",
+    "feature4": "Split a PDF into separate parts",
+    "feature5": "Extract selected pages into a new PDF"
+  },
+  "toolbar": {
+    "delete": "Delete",
+    "rotate": "Rotate 90°",
+    "extract": "Extract",
+    "merge": "Merge",
+    "split": "Split",
+    "download": "Download",
+    "reset": "Reset",
+    "addPages": "Add pages",
+    "pages": "p.",
+    "selected": "selected: {count}",
+    "mergeHint": "Select multiple PDF files to merge into one document.",
+    "mergeSelect": "Choose PDF files",
+    "splitEach": "Each page separately",
+    "splitByRange": "Split by range",
+    "splitApply": "Split and download",
+    "deleteRange": "Delete by range",
+    "deleteRangeApply": "Delete pages",
+    "extractHint": "Select pages by clicking. Hold Shift for a range, Ctrl for multiple."
+  },
+  "errors": {
+    "invalidFile": "Invalid file format. Please upload a PDF document.",
+    "fileTooBig": "File is too large. Reduce the size or split the document.",
+    "corruptedFile": "Could not open PDF. The file may be corrupted or password-protected.",
+    "tooManyPages": "Too many pages in the document.",
+    "tooManyFiles": "Maximum number of files exceeded.",
+    "noPagesLeft": "Cannot delete all pages. Upload a new document.",
+    "processingFailed": "Processing error. Please try again."
+  },
+  "confirm": {
+    "deleteMany": "Delete {count} pages? This cannot be undone.",
+    "reset": "Reset all changes and upload a new file?"
+  },
+  "range": {
+    "placeholder": "1-3, 7, 10-15",
+    "hint": "Examples: 1-5, 8, 10-15, 1-3,7,9-12",
+    "errors": {
+      "empty": "Enter a page range",
+      "invalid_format": "Invalid range format",
+      "out_of_bounds": "Page number is out of document bounds"
+    }
+  },
+  "processing": {
+    "default": "Processing document…"
+  },
+  "faq": {
+    "title": "Frequently asked questions",
+    "q1": "How do I delete a page from a PDF?",
+    "a1": "Upload your PDF, select unwanted pages (Shift for range, Ctrl for multiple) and click Delete. You can also enter a range like 1-3,7 in the delete field.",
+    "q2": "Is it safe to upload documents?",
+    "a2": "Yes. The entire PDF is processed locally in your browser. Files are not sent to QHub servers or stored in the cloud.",
+    "q3": "Are there file size limits?",
+    "a3": "The service is designed for documents up to 500 pages and 100 MB. For very large files, split the PDF first.",
+    "q4": "How do I merge multiple PDFs?",
+    "a4": "Click Merge, select multiple PDF files — they will be combined in order. Reorder pages if needed and download the result.",
+    "q5": "How do I split a PDF?",
+    "a5": "Open Split mode. Download each page separately or enter a range such as 1-5 to export only the needed section.",
+    "q6": "Does it work on mobile?",
+    "a6": "Yes. The interface is mobile-friendly: 2-column grid and a bottom action bar.",
+    "q7": "Do I need to register?",
+    "a7": "No. PDF Pages is free and requires no account or software installation.",
+    "q8": "Is the service free?",
+    "a8": "Yes, all features are free. A Pro tier with higher limits may appear later, but basic operations will remain available."
+  },
+  "seo": {
+    "introTitle": "Online PDF page editor",
+    "intro": "PDF Pages by QHub is a free web tool for working with PDF pages without installing software. Remove extra sheets, reorder by drag and drop, rotate scans, merge multiple files into one, and split large documents into parts. Everything runs in your browser: files never leave your device, which matters for contracts, bank statements, and personal documents. The service suits students, entrepreneurs, accountants, and anyone who needs to tidy a PDF before sending or printing.",
+    "howToDeleteTitle": "How to delete a page from a PDF",
+    "howToDelete": "Deleting pages is one of the most common PDF tasks. Scans may include blank sheets, duplicates, or confidential data you should not forward. In PDF Pages, upload the file, select unwanted thumbnails, and click delete. For bulk removal, use range input: for example, 2-4 removes pages 2 through 4, and 1,5,8-10 targets only those numbers.",
+    "howToDeleteStep1": "Upload a PDF via drag-and-drop or Choose file",
+    "howToDeleteStep2": "Select pages with click, Shift+click for range, or Ctrl+click for a custom set",
+    "howToDeleteStep3": "Click Delete and download the updated document",
+    "howToReorderTitle": "How to reorder pages",
+    "howToReorder": "If pages are in the wrong order after scanning a stack of documents, drag thumbnails into the correct sequence. Drag-and-drop works on desktop and tablet. After reordering, click Download for a PDF with the new page order. A 90° rotation fixes landscape scans without rescanning.",
+    "howToMergeTitle": "How to merge multiple PDFs into one",
+    "howToMerge": "Merging is useful when you need a contract, attachments, and signed scans in one file for a counterparty or government agency. In Merge mode, select multiple PDFs — they are appended in order. Then remove extra pages, reorder if needed, and download the final document.",
+    "howToMergeStep1": "Click Merge on the toolbar",
+    "howToMergeStep2": "Select two or more PDF files on your computer",
+    "howToMergeStep3": "Edit page order and download the result",
+    "howToSplitTitle": "How to split a PDF into parts",
+    "howToSplit": "Splitting helps when one large PDF contains several logical documents or is too heavy for email. PDF Pages offers two options: export each page as a separate file or specify ranges — e.g. 1-10 and 11-20 — for two PDFs. All parts download automatically after processing.",
+    "howToSplitStep1": "Open Split mode and choose Each page separately for a full split",
+    "howToSplitStep2": "Or enter a page range and click Split and download",
+    "securityTitle": "Security: why local processing beats the cloud",
+    "security": "Many online PDF services upload files to remote servers where they may be stored indefinitely. PDF Pages uses pdf-lib and pdf.js entirely in browser memory. The document is not sent over the network, does not land in server logs, and is gone when you close the tab. That lowers the risk of personal data leaks and fits confidential material. QHub runs on Vercel, but the server only serves the app page — PDF processing is fully client-side."
+  }
+}
