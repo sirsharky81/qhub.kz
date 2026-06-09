@@ -426,7 +426,7 @@ export default function MusicEditorClient() {
       )}
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto w-full px-4 py-3 space-y-3">
+        <div className="max-w-2xl mx-auto w-full min-w-0 px-4 py-3 space-y-3">
           <div className="space-y-1.5">
             {tracks.map((track, idx) => {
               const inProgram = programTrackIds.includes(track.id);

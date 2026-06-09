@@ -1,4 +1,14 @@
-export type AppTag = "finance" | "productivity" | "tools" | "lifestyle" | "business" | "photo" | "food";
+export type AppTag =
+  | "finance"
+  | "productivity"
+  | "tools"
+  | "lifestyle"
+  | "business"
+  | "photo"
+  | "food"
+  | "music"
+  | "editor"
+  | "taxes";
 
 export interface App {
   id: string;
@@ -27,6 +37,9 @@ export const TAG_LABELS: Record<AppTag, string> = {
   business: "Бизнес",
   photo: "Фото",
   food: "Кулинария",
+  music: "Музыка",
+  editor: "Редактор",
+  taxes: "Налоги",
 };
 
 export const apps: App[] = [
@@ -83,7 +96,7 @@ export const apps: App[] = [
     longDescription:
       "Браузерный редактор музыки: обрезка и склейка треков, fade in/out, crossfade, автоматическое сокращение до нужной длины и подготовка программ для фигурного катания. Экспорт MP3 и WAV. Вся обработка в браузере.",
     href: "/tools/music-editor",
-    tags: ["tools", "lifestyle"],
+    tags: ["tools", "music", "editor"],
     icon: "🎵",
     color: "from-indigo-500/10 to-indigo-600/5",
     author: "QHub",
@@ -98,7 +111,7 @@ export const apps: App[] = [
     longDescription:
       "Онлайн-редактор страниц PDF: удаление лишних листов, drag-and-drop сортировка, поворот сканов, объединение нескольких файлов и разделение на части. Вся обработка в браузере — файлы не загружаются на сервер.",
     href: "/tools/pdf-pages",
-    tags: ["tools"],
+    tags: ["tools", "editor"],
     icon: "📄",
     color: "from-rose-500/10 to-rose-600/5",
     author: "QHub",
@@ -112,7 +125,7 @@ export const apps: App[] = [
     longDescription:
       "Расчёт ИПН, соцплатежей и чистого дохода для ИП Казахстана. 4 налоговых режима, льготы для пенсионеров и инвалидов, сравнение упрощёнки и ОУР. Актуально на 2026 год.",
     href: "/apps/tax-calculator",
-    tags: ["business", "finance"],
+    tags: ["taxes", "business", "finance"],
     icon: "🧾",
     color: "from-purple-500/10 to-purple-600/5",
     author: "QHub",

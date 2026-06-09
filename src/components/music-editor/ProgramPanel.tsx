@@ -14,6 +14,7 @@ import {
   SortableContext,
   sortableKeyboardCoordinates,
   horizontalListSortingStrategy,
+  verticalListSortingStrategy,
   useSortable,
   arrayMove,
 } from "@dnd-kit/sortable";
@@ -94,7 +95,22 @@ const btnClass =
 const transitionInputClass =
   "w-14 px-1.5 py-0.5 text-[11px] font-mono text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400";
 
+function useIsMobileLayout() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  return isMobile;
+}
+
 interface SortableSegmentProps {
+  compact?: boolean;
   trackId: string;
   trackName: string;
   duration: number;
@@ -110,6 +126,7 @@ function SortableSegment({
   colorIndex,
   index,
   onRemove,
+  compact = false,
 }: SortableSegmentProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: trackId,
@@ -129,7 +146,10 @@ function SortableSegment({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border-2 min-w-0 flex-shrink-0 max-w-[200px]"
+      className={[
+        "flex items-center gap-1.5 px-2 py-1.5 rounded-lg border-2 min-w-0",
+        compact ? "w-full" : "flex-shrink-0 max-w-[200px]",
+      ].join(" ")}
     >
       <button
         type="button"
@@ -165,9 +185,57 @@ interface TransitionControlProps {
   transition: ProgramTransition;
   onChange: (t: ProgramTransition) => void;
   onPreview: () => void;
+  compact?: boolean;
 }
 
-function TransitionControl({ index, transition, onChange, onPreview }: TransitionControlProps) {
+function TransitionControl({
+  index,
+  transition,
+  onChange,
+  onPreview,
+  compact = false,
+}: TransitionControlProps) {
+  if (compact) {
+    return (
+      <div
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 w-full rounded-lg border border-purple-100 bg-purple-50/60 px-2 py-1.5"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <span className="text-[10px] text-purple-600 font-medium shrink-0">↔ #{index + 1}</span>
+        <select
+          value={transition.type}
+          onChange={(e) =>
+            onChange({ ...transition, type: e.target.value as ProgramTransition["type"] })
+          }
+          className="flex-1 min-w-[7rem] text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
+        >
+          <option value="crossfade">Crossfade</option>
+          <option value="none">Без перехода</option>
+        </select>
+        {transition.type === "crossfade" && (
+          <>
+            <SecondsField
+              value={transition.duration}
+              onChange={(duration) => onChange({ ...transition, duration })}
+              min={0.5}
+              max={15}
+              step={0.5}
+              className="w-12 px-1.5 py-0.5 text-[11px] font-mono text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400"
+            />
+            <button
+              type="button"
+              onClick={onPreview}
+              className="text-[10px] text-purple-700 hover:underline whitespace-nowrap"
+            >
+              Слушать
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center gap-0.5 shrink-0 px-1">
       <span className="text-[9px] text-purple-600 font-medium whitespace-nowrap">↔</span>
@@ -238,6 +306,7 @@ export function ProgramPanel({
   const [startFocused, setStartFocused] = useState(false);
   const [endFocused, setEndFocused] = useState(false);
   const [timeError, setTimeError] = useState<string | null>(null);
+  const isMobileLayout = useIsMobileLayout();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -373,7 +442,7 @@ export function ProgramPanel({
   return (
     <section
       className={[
-        "bg-white border rounded-2xl p-3 shadow-sm space-y-2 transition-all cursor-pointer",
+        "bg-white border rounded-2xl p-3 shadow-sm space-y-2 transition-all cursor-pointer min-w-0 overflow-hidden",
         isActive ? "border-gray-900 ring-2 ring-gray-900/10" : "border-gray-200 hover:border-gray-300",
       ].join(" ")}
       onClick={onActivate}
@@ -396,20 +465,37 @@ export function ProgramPanel({
           onPointerDown={(e) => e.stopPropagation()}
         >
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <div className="flex items-center gap-0 overflow-x-auto pb-1 mb-2">
-              <SortableContext items={programTrackIds} strategy={horizontalListSortingStrategy}>
+            <div
+              className={
+                isMobileLayout
+                  ? "flex flex-col gap-2 mb-2 min-w-0"
+                  : "flex items-center gap-0 overflow-x-auto pb-1 mb-2 min-w-0"
+              }
+            >
+              <SortableContext
+                items={programTrackIds}
+                strategy={
+                  isMobileLayout ? verticalListSortingStrategy : horizontalListSortingStrategy
+                }
+              >
                 {programTrackIds.map((id, i) => {
                   const idx = getTrackIndexById(tracks, id);
                   const track = idx >= 0 ? tracks[idx] : null;
                   const seg = timeline.segments.find((s) => s.trackId === id);
                   return (
-                    <div key={id} className="flex items-center">
+                    <div
+                      key={id}
+                      className={
+                        isMobileLayout ? "flex flex-col gap-1.5 w-full min-w-0" : "flex items-center"
+                      }
+                    >
                       {i > 0 && transitions[i - 1] && (
                         <TransitionControl
                           index={i - 1}
                           transition={transitions[i - 1]}
                           onChange={(t) => onTransitionChange(i - 1, t)}
                           onPreview={() => previewTransition(i - 1)}
+                          compact={isMobileLayout}
                         />
                       )}
                       {track && seg && (
@@ -420,6 +506,7 @@ export function ProgramPanel({
                           colorIndex={seg.colorIndex}
                           index={i}
                           onRemove={() => onRemoveFromProgram(id)}
+                          compact={isMobileLayout}
                         />
                       )}
                     </div>
