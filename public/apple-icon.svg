@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-label="QHub">
-  <rect width="180" height="180" rx="40" fill="#111827"/>
+  <defs>
+    <linearGradient id="bg" x1="90" y1="0" x2="90" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1e293b"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="180" height="180" rx="40" fill="url(#bg)"/>
   <text
     x="90"
     y="128"
