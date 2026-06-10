@@ -26,7 +26,22 @@ export interface Geom {
   fh: number;
   nw: number;
   nh: number;
+  /** object-fit: cover — минимальный масштаб заполнения кадра */
   cover: number;
+  /** object-fit: contain — масштаб, при котором видно всё фото */
+  fit: number;
+  /** Нижняя граница pinch/slider: чуть ниже contain, чтобы можно было отдалить от autoZoom */
+  minZoom: number;
+}
+
+export const MAX_ZOOM = 4;
+
+/** zoom=1 → cover; zoom=fit/cover → contain; zoom=minZoom → чуть шире contain */
+export function buildGeom(fw: number, fh: number, nw: number, nh: number): Geom {
+  const cover = Math.max(fw / nw, fh / nh);
+  const fit = Math.min(fw / nw, fh / nh);
+  const fitZoom = fit / cover;
+  return { fw, fh, nw, nh, cover, fit, minZoom: fitZoom * 0.88 };
 }
 
 export interface FaceEllipse {
@@ -91,6 +106,31 @@ function drawSourceToCanvas(source: CanvasImageSource, srcW: number, srcH: numbe
   return canvas;
 }
 
+function orientationSwapsDimensions(orientation: number): boolean {
+  return orientation >= 5 && orientation <= 8;
+}
+
+function orientedSizeMatches(
+  resultW: number,
+  resultH: number,
+  rawW: number,
+  rawH: number,
+  orientation: number
+): boolean {
+  if (orientationSwapsDimensions(orientation)) {
+    return resultW === rawH && resultH === rawW;
+  }
+  return resultW === rawW && resultH === rawH;
+}
+
+async function readRawDimensions(file: File): Promise<{ w: number; h: number } | null> {
+  if (typeof createImageBitmap !== "function") return null;
+  const bitmap = await createImageBitmap(file);
+  const dims = { w: bitmap.width, h: bitmap.height };
+  bitmap.close();
+  return dims;
+}
+
 /**
  * Читает EXIF и нормализует ориентацию.
  * iOS Safari: Image() уже oriented — ручной поворот даёт пустой/чёрный canvas.
@@ -98,6 +138,7 @@ function drawSourceToCanvas(source: CanvasImageSource, srcW: number, srcH: numbe
 export async function normalizeImageOrientation(file: File): Promise<NormalizedImage> {
   const orientation =
     (await exifr.parse(file, { pick: ["Orientation"] }).catch(() => null))?.Orientation ?? 1;
+  const rawDims = await readRawDimensions(file);
 
   const attempts: Array<() => Promise<HTMLCanvasElement>> = [
     // 1) Современный API — EXIF применяется автоматически
@@ -106,6 +147,14 @@ export async function normalizeImageOrientation(file: File): Promise<NormalizedI
       const bitmap = await createImageBitmap(file, {
         imageOrientation: "from-image",
       } as ImageBitmapOptions);
+      if (
+        rawDims &&
+        orientation !== 1 &&
+        !orientedSizeMatches(bitmap.width, bitmap.height, rawDims.w, rawDims.h, orientation)
+      ) {
+        bitmap.close();
+        throw new Error("from-image dimensions mismatch");
+      }
       const canvas = drawSourceToCanvas(bitmap, bitmap.width, bitmap.height);
       bitmap.close();
       return canvas;
@@ -210,15 +259,15 @@ export function drawCropPreview(
 
   const ctx = target.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#1f2937";
+  ctx.fillRect(0, 0, geom.fw, geom.fh);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
   const { scale, tx, ty } = view;
-  const sx = -tx / scale;
-  const sy = -ty / scale;
-  const sw = geom.fw / scale;
-  const sh = geom.fh / scale;
-  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, geom.fw, geom.fh);
+  const iw = geom.nw * scale;
+  const ih = geom.nh * scale;
+  ctx.drawImage(source, 0, 0, geom.nw, geom.nh, tx, ty, iw, ih);
 }
 
 /** Экспорт кадра в blob из исходного canvas */
@@ -300,18 +349,17 @@ function applyOrientationTransform(
 export function computeAutoAdjustFromLandmarks(
   imgW: number,
   imgH: number,
-  fw: number,
-  fh: number,
-  cover: number,
+  geom: Geom,
   landmarks: Landmarks68,
   formatId: string
 ): Adjust {
+  const { fw, fh, cover, minZoom } = geom;
   const rules = getFormatRule(formatId);
   const head = getHeadBounds(landmarks);
   const targetHeadRatio = (rules.headHeightMin + rules.headHeightMax) / 2;
 
   let zoom = (targetHeadRatio * fh) / (head.height * cover);
-  zoom = clamp(zoom, 1, 4);
+  zoom = clamp(zoom, minZoom, MAX_ZOOM);
   let scale = cover * zoom;
 
   const chinTargetY = fh * 0.79;
@@ -319,8 +367,8 @@ export function computeAutoAdjustFromLandmarks(
   let tx = fw / 2 - head.centerX * scale;
 
   let crownFrameY = head.top * scale + ty;
-  while (crownFrameY < fh * 0.04 && zoom > 1) {
-    zoom = Math.max(1, zoom * 0.96);
+  while (crownFrameY < fh * 0.04 && zoom > minZoom) {
+    zoom = Math.max(minZoom, zoom * 0.96);
     scale = cover * zoom;
     ty = chinTargetY - head.bottom * scale;
     crownFrameY = head.top * scale + ty;
@@ -334,17 +382,13 @@ export function computeAutoAdjustFromLandmarks(
 }
 
 /** Эвристика при отсутствии лица */
-export function computeHeuristicAdjust(imgW: number, imgH: number, fw: number, fh: number, cover: number): Adjust {
-  const portrait = imgH > imgW * 1.05;
+export function computeHeuristicAdjust(geom: Geom): Adjust {
+  const { minZoom } = geom;
+  const portrait = geom.nh > geom.nw * 1.05;
   const cxN = 0.5;
   const cyN = portrait ? 0.42 : 0.45;
   const zoom = portrait ? 1.15 : 1.05;
-  void fw;
-  void fh;
-  void cover;
-  void imgW;
-  void imgH;
-  return { zoom: clamp(zoom, 1, 4), cxN, cyN };
+  return { zoom: clamp(zoom, minZoom, MAX_ZOOM), cxN, cyN };
 }
 
 export function toView(g: Geom, a: Adjust): { scale: number; tx: number; ty: number } {

@@ -5,6 +5,7 @@ import { PHOTO_SIZES, PhotoSize } from "@/lib/passport-photo/dimensions";
 import { detectFace } from "@/lib/passport-photo/face-detector";
 import type { Landmarks68 } from "@/lib/passport-photo/landmarkAdapter";
 import {
+  buildGeom,
   computeAutoAdjustFromLandmarks,
   computeHeuristicAdjust,
   cropToBlob,
@@ -13,6 +14,7 @@ import {
   fromView,
   isDebugMode,
   landmarksToFrameEllipse,
+  MAX_ZOOM,
   normalizeImageOrientation,
   toView,
   type Adjust,
@@ -29,7 +31,6 @@ interface Props {
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
-const MAX_ZOOM = 4;
 
 export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -67,8 +68,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       fh = maxH;
       fw = fh * aspect;
     }
-    const cover = Math.max(fw / natural.w, fh / natural.h);
-    return { fw, fh, nw: natural.w, nh: natural.h, cover };
+    return buildGeom(fw, fh, natural.w, natural.h);
   }, [natural, containerW, aspect]);
 
   const autoAdjust = useMemo<Adjust>(() => {
@@ -76,17 +76,9 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       return { zoom: 1, cxN: 0.5, cyN: 0.5 };
     }
     if (landmarks && !manualMode) {
-      return computeAutoAdjustFromLandmarks(
-        natural.w,
-        natural.h,
-        geom.fw,
-        geom.fh,
-        geom.cover,
-        landmarks,
-        selectedSizeId
-      );
+      return computeAutoAdjustFromLandmarks(natural.w, natural.h, geom, landmarks, selectedSizeId);
     }
-    return computeHeuristicAdjust(natural.w, natural.h, geom.fw, geom.fh, geom.cover);
+    return computeHeuristicAdjust(geom);
   }, [natural, geom, faceChecked, landmarks, manualMode, selectedSizeId]);
 
   const adjust = userAdjust ?? autoAdjust;
@@ -220,7 +212,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   }
 
   function zoomTo(g: Geom, a: Adjust, rawZoom: number, fx: number, fy: number) {
-    const newZoom = clamp(rawZoom, 1, MAX_ZOOM);
+    const newZoom = clamp(rawZoom, g.minZoom, MAX_ZOOM);
     const v = toView(g, a);
     const f = (g.cover * newZoom) / v.scale;
     setUserAdjust(
@@ -448,10 +440,10 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
               <span className="text-gray-400 text-lg leading-none select-none">−</span>
               <input
                 type="range"
-                min={1}
+                min={geom.minZoom}
                 max={MAX_ZOOM}
                 step={0.01}
-                value={adjust.zoom}
+                value={clamp(adjust.zoom, geom.minZoom, MAX_ZOOM)}
                 onChange={(e) => setZoomFromSlider(parseFloat(e.target.value))}
                 className="flex-1 accent-gray-900 cursor-pointer"
                 aria-label="Масштаб"
