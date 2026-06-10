@@ -10,6 +10,8 @@ import {
   containCenteredAdjust,
   cropToBlob,
   fullPhotoAdjust,
+  getDeviceKind,
+  passportDebugLog,
   drawCropPreview,
   drawFitPreview,
   fromView,
@@ -57,6 +59,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const debug = isDebugMode();
+  const deviceKind = useMemo(() => getDeviceKind(), []);
 
   const selectedSize = PHOTO_SIZES.find((s) => s.id === selectedSizeId) ?? PHOTO_SIZES[0];
   const aspect = selectedSize.widthCm / selectedSize.heightCm;
@@ -75,8 +78,9 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
 
   const baseAdjust = useMemo<Adjust>(() => {
     if (!geom) return { zoom: 1, cxN: 0.5, cyN: 0.5 };
+    if (deviceKind === "android") return fullPhotoAdjust(geom);
     return fullPhotoAdjust(geom);
-  }, [geom]);
+  }, [geom, deviceKind]);
 
   const suggestedAdjust = useMemo<Adjust | null>(() => {
     if (!natural || !geom || !faceChecked || !landmarks) return null;
@@ -85,6 +89,38 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
 
   const adjust = userAdjust ?? baseAdjust;
   const view = geom ? toView(geom, adjust) : null;
+
+  useEffect(() => {
+    if (!geom || !view || !faceChecked) return;
+    const ih = geom.nh * view.scale;
+    passportDebugLog(
+      "StepCrop.tsx:adjustState",
+      "active crop view",
+      {
+        deviceKind,
+        adjustSource: userAdjust ? "user" : "base",
+        autoAligned,
+        activeZoom: adjust.zoom,
+        baseZoom: baseAdjust.zoom,
+        suggestedZoom: suggestedAdjust?.zoom ?? null,
+        containZoom: geom.containZoom,
+        ih: Math.round(ih),
+        fh: Math.round(geom.fh),
+        letterbox: ih < geom.fh,
+      },
+      "H1"
+    );
+  }, [
+    geom,
+    view,
+    faceChecked,
+    deviceKind,
+    adjust.zoom,
+    baseAdjust.zoom,
+    suggestedAdjust?.zoom,
+    userAdjust,
+    autoAligned,
+  ]);
 
   const faceEllipse: FaceEllipse | null = useMemo(() => {
     if (!landmarks || !view) return null;
@@ -222,6 +258,23 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     setAutoAligned(false);
   }
 
+  useEffect(() => {
+    if (deviceKind !== "apple") return;
+    if (!suggestedAdjust || userAdjust !== null) return;
+    passportDebugLog(
+      "StepCrop.tsx:iosAutoApply",
+      "auto-applying suggestedAdjust on iPhone",
+      {
+        suggestedZoom: suggestedAdjust.zoom,
+        baseZoom: baseAdjust.zoom,
+        containZoom: geom?.containZoom,
+      },
+      "H2"
+    );
+    applyAdjust(suggestedAdjust);
+    setAutoAligned(true);
+  }, [deviceKind, suggestedAdjust, userAdjust, baseAdjust.zoom, geom?.containZoom]);
+
   function panBy(g: Geom, a: Adjust, dx: number, dy: number) {
     const v = toView(g, a);
     applyAdjust(fromView(g, { scale: v.scale, tx: v.tx + dx, ty: v.ty + dy }));
@@ -358,11 +411,15 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       <div className="text-center">
         <h2 className="text-xl font-semibold text-gray-900">Кадрирование</h2>
         <p className="text-sm text-gray-500 mt-1">
-          {autoAligned
-            ? "Лицо выровнено — проверьте овал и при необходимости подстройте"
-            : faceDetected
-              ? "Показано всё фото — нажмите «Автовыравнивание» или настройте вручную"
-              : "Совместите лицо с овалом вручную или продолжите"}
+          {deviceKind === "apple" && autoAligned
+            ? "Фото автоматически выровнено — проверьте овал"
+            : autoAligned
+              ? "Лицо выровнено — проверьте овал и при необходимости подстройте"
+              : faceDetected
+                ? deviceKind === "android"
+                  ? "Показано всё фото — нажмите «Автовыравнивание» или настройте вручную"
+                  : "Совместите лицо с овалом вручную или продолжите"
+                : "Совместите лицо с овалом вручную или продолжите"}
         </p>
       </div>
 
@@ -479,7 +536,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
           </div>
         )}
 
-        {geom && faceDetected && suggestedAdjust && (
+        {geom && faceDetected && suggestedAdjust && deviceKind === "android" && (
           <div className="flex gap-2 w-full max-w-sm">
             <button
               type="button"
@@ -497,6 +554,15 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
               Всё фото
             </button>
           </div>
+        )}
+        {geom && faceDetected && deviceKind === "apple" && (
+          <button
+            type="button"
+            onClick={resetToFullPhoto}
+            className="w-full max-w-sm px-3 py-2 rounded-xl border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            Показать всё фото
+          </button>
         )}
       </div>
 
@@ -670,7 +736,7 @@ function DebugOverlay({
         {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.cover).toFixed(2)}
       </text>
       <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
-        cnt:{geom.containZoom.toFixed(2)} min:{geom.minZoom.toFixed(2)} tx:{view.tx.toFixed(0)}
+        dev:{typeof navigator !== "undefined" ? (/(iPhone|iPad)/i.test(navigator.userAgent) ? "apple" : /Android/i.test(navigator.userAgent) ? "android" : "?") : "?"} cnt:{geom.containZoom.toFixed(2)}
       </text>
       {quality && (
         <text x={4} y={42} fill="lime" fontSize="10" fontFamily="monospace">

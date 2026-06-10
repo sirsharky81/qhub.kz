@@ -104,6 +104,37 @@ function isAndroidDevice(): boolean {
   return /Android/i.test(navigator.userAgent);
 }
 
+export function getDeviceKind(): "apple" | "android" | "other" {
+  if (isAppleDevice()) return "apple";
+  if (isAndroidDevice()) return "android";
+  return "other";
+}
+
+/** @internal debug session 10ddbd */
+export function passportDebugLog(
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+  hypothesisId: string,
+  runId = "pre-fix"
+): void {
+  // #region agent log
+  fetch("http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "10ddbd" },
+    body: JSON.stringify({
+      sessionId: "10ddbd",
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+      hypothesisId,
+      runId,
+    }),
+  }).catch(() => {});
+  // #endregion
+}
+
 function loadViaImageElement(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -244,13 +275,30 @@ export async function normalizeImageOrientation(file: File): Promise<NormalizedI
     throw new Error("Could not decode image");
   }
 
-  return {
+  const result = {
     canvas,
     url: canvas.toDataURL("image/jpeg", 0.92),
     width: canvas.width,
     height: canvas.height,
     orientation,
   };
+
+  // #region agent log
+  passportDebugLog(
+    "faceProcessing.ts:normalizeImageOrientation",
+    "image normalized",
+    {
+      device: getDeviceKind(),
+      width: result.width,
+      height: result.height,
+      orientation: result.orientation,
+      aspect: +(result.width / result.height).toFixed(3),
+    },
+    "H4"
+  );
+  // #endregion
+
+  return result;
 }
 
 /** Вписывает всё фото в кадр (пока geom/view не готовы) */
