@@ -42,6 +42,8 @@ export interface Geom {
 export const MAX_ZOOM = 4;
 /** autoZoom всегда >= AUTO_ZOOM_MIN */
 export const AUTO_ZOOM_MIN = 1;
+/** Android: насколько можно «отдалить» уже загруженное фото (лицо меньше овала) */
+export const ANDROID_MIN_ZOOM = 0.35;
 
 /**
  * cover-база: zoom=1 → cover; zoom=containZoom → contain.
@@ -68,8 +70,31 @@ export function buildGeom(
     containZoom,
     baseline,
     baseScale: useFit ? fit : cover,
-    minZoom: useFit ? 1 : containZoom,
+    minZoom: useFit ? ANDROID_MIN_ZOOM : containZoom,
   };
+}
+
+/**
+ * Android: если лицо в исходнике уже крупное (типичный Samsung-кроп),
+ * уменьшаем отображение до целевой доли кадра, не приближая.
+ */
+export function computeAndroidLooseFitAdjust(
+  geom: Geom,
+  landmarks: Landmarks68,
+  formatId: string
+): Adjust {
+  const head = getHeadBounds(landmarks);
+  const rules = getFormatRule(formatId);
+  const targetHeadRatio = (rules.headHeightMin + rules.headHeightMax) / 2;
+  const headHAtZoom1 = head.height * geom.baseScale;
+  const targetHeadH = geom.fh * targetHeadRatio;
+
+  if (headHAtZoom1 <= targetHeadH * 1.08) {
+    return fullPhotoAdjust(geom);
+  }
+
+  const zoom = clamp(targetHeadH / headHAtZoom1, geom.minZoom, 1);
+  return containCenteredAdjust(geom, zoom);
 }
 
 /** Всё фото по центру — стартовый вид Android и нижняя граница слайдера */
@@ -581,12 +606,14 @@ export function logScaleDiagnostics(
   const head = extras?.faceBox as
     | { width: number; height: number; centerX: number; top: number; bottom: number }
     | undefined;
+  const headRatioInImage = head ? +(head.height / geom.nh).toFixed(3) : null;
   const payload = {
     imageWidth: geom.nw,
     imageHeight: geom.nh,
     containerWidth: geom.fw,
     containerHeight: geom.fh,
     faceBox: head ?? null,
+    headRatioInImage,
     coverScale: geom.cover,
     fitScale: geom.fit,
     baseline: geom.baseline,

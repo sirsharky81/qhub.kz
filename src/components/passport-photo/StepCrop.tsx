@@ -6,6 +6,7 @@ import { detectFace } from "@/lib/passport-photo/face-detector";
 import type { Landmarks68 } from "@/lib/passport-photo/landmarkAdapter";
 import {
   buildGeom,
+  computeAndroidLooseFitAdjust,
   computeAutoAdjustFromLandmarks,
   computeHeuristicAdjust,
   containCenteredAdjust,
@@ -81,9 +82,14 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
 
   const baseAdjust = useMemo<Adjust>(() => {
     if (!geom) return { zoom: 1, cxN: 0.5, cyN: 0.5 };
-    if (deviceKind === "android") return fullPhotoAdjust(geom);
+    if (deviceKind === "android") {
+      if (faceChecked && landmarks) {
+        return computeAndroidLooseFitAdjust(geom, landmarks, selectedSizeId);
+      }
+      return fullPhotoAdjust(geom);
+    }
     return { zoom: 1, cxN: 0.5, cyN: 0.5 };
-  }, [geom, deviceKind]);
+  }, [geom, deviceKind, faceChecked, landmarks, selectedSizeId]);
 
   const autoAdjust = useMemo<Adjust | null>(() => {
     if (deviceKind === "android") return null;
@@ -135,7 +141,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
         letterbox: ih < geom.fh,
       },
       "H1",
-      "fit-baseline"
+      "android-shrink"
     );
   }, [
     geom,
@@ -547,8 +553,19 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
               <span className="text-gray-400 text-lg leading-none select-none">+</span>
             </div>
             <p className="text-xs text-gray-400 text-center">
-              Влево — всё фото · Вправо — приблизить · Овал — голова с волосами
+              {deviceKind === "android"
+                ? "Влево — отдалить · Вправо — приблизить · Овал — голова с волосами"
+                : "Влево — всё фото · Вправо — приблизить · Овал — голова с волосами"}
             </p>
+            {debug && view && (
+              <p className="text-[10px] font-mono text-gray-500 text-center leading-tight">
+                z:{adjust.zoom.toFixed(2)} min:{geom.minZoom.toFixed(2)} scale:{view.scale.toFixed(4)}{" "}
+                src:{adjustSource}
+                {landmarks && natural
+                  ? ` head:${((getHeadBounds(landmarks).height / natural.h) * 100).toFixed(0)}%`
+                  : ""}
+              </p>
+            )}
           </div>
         )}
 

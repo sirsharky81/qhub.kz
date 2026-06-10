@@ -28,6 +28,18 @@ export default function CameraCapture({ onCapture, onClose }: Props) {
           return;
         }
         streamRef.current = stream;
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities?.() as MediaTrackCapabilities | undefined;
+        if (caps?.width?.max && caps?.height?.max) {
+          try {
+            await track.applyConstraints({
+              width: { ideal: caps.width.max },
+              height: { ideal: caps.height.max },
+            });
+          } catch {
+            // Samsung может отклонить — оставляем дефолтный поток
+          }
+        }
         const video = videoRef.current;
         if (video) {
           video.srcObject = stream;
@@ -40,10 +52,12 @@ export default function CameraCapture({ onCapture, onClose }: Props) {
               device: getDeviceKind(),
               videoWidth: video.videoWidth,
               videoHeight: video.videoHeight,
+              capMaxW: caps?.width?.max ?? null,
+              capMaxH: caps?.height?.max ?? null,
               devicePixelRatio: window.devicePixelRatio,
             },
             "H6",
-            "fit-baseline"
+            "android-shrink"
           );
           // #endregion
           setReady(true);
