@@ -1,5 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import InstallBanner from "@/components/InstallBanner";
+import PWAProvider from "@/components/PWAProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,6 +15,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "QHub",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
+    "msapplication-tap-highlight": "no",
+  },
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
     apple: [{ url: "/apple-icon.svg", type: "image/svg+xml" }],
@@ -31,6 +43,12 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#0f172a",
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -41,7 +59,11 @@ export default function RootLayout({
       lang="ru"
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
-      <body className="min-h-full flex flex-col bg-white text-gray-900">{children}</body>
+      <body className="min-h-full flex flex-col bg-white text-gray-900">
+        <PWAProvider />
+        {children}
+        <InstallBanner />
+      </body>
     </html>
   );
 }
