@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import CameraCapture from "@/components/passport-photo/CameraCapture";
 import PhotoTips from "@/components/passport-photo/PhotoTips";
+import { getDeviceKind } from "@/lib/passport-photo/faceProcessing";
 
 interface Props {
   onImageSelected: (file: File, objectUrl: string) => void;
@@ -14,6 +15,8 @@ export default function StepUpload({ onImageSelected }: Props) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const deviceKind = useMemo(() => getDeviceKind(), []);
+  const useInBrowserCamera = deviceKind === "android";
 
   function isImageFile(file: File): boolean {
     if (file.type.startsWith("image/")) return true;
@@ -62,7 +65,11 @@ export default function StepUpload({ onImageSelected }: Props) {
           <button
             type="button"
             onClick={() => {
-              if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+              if (
+                useInBrowserCamera &&
+                typeof navigator !== "undefined" &&
+                navigator.mediaDevices
+              ) {
                 setShowCamera(true);
               } else {
                 cameraInputRef.current?.click();
@@ -106,16 +113,17 @@ export default function StepUpload({ onImageSelected }: Props) {
         </div>
       </button>
 
-      {/* Fallback camera input (без capture=user — Samsung иначе отдаёт обрезанный JPEG) */}
+      {/* iPhone: нативная камера (портретный превью). Android fallback: без capture. */}
       <input
         ref={cameraInputRef}
         type="file"
         accept="image/*"
+        {...(useInBrowserCamera ? {} : { capture: "user" })}
         className="hidden"
         onChange={handleInputChange}
       />
 
-      {showCamera && (
+      {showCamera && useInBrowserCamera && (
         <CameraCapture
           onCapture={(file) => {
             setShowCamera(false);
