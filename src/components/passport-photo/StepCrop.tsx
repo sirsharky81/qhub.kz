@@ -7,6 +7,7 @@ import type { Landmarks68 } from "@/lib/passport-photo/landmarkAdapter";
 import {
   buildGeom,
   computeAutoAdjustFromLandmarks,
+  computeHeuristicAdjust,
   containCenteredAdjust,
   cropToBlob,
   fullPhotoAdjust,
@@ -79,16 +80,28 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   const baseAdjust = useMemo<Adjust>(() => {
     if (!geom) return { zoom: 1, cxN: 0.5, cyN: 0.5 };
     if (deviceKind === "android") return fullPhotoAdjust(geom);
-    return fullPhotoAdjust(geom);
+    return { zoom: 1, cxN: 0.5, cyN: 0.5 };
   }, [geom, deviceKind]);
+
+  const autoAdjust = useMemo<Adjust | null>(() => {
+    if (deviceKind === "android") return null;
+    if (!natural || !geom || !faceChecked) return null;
+    if (landmarks) {
+      return computeAutoAdjustFromLandmarks(natural.w, natural.h, geom, landmarks, selectedSizeId);
+    }
+    return computeHeuristicAdjust(geom);
+  }, [deviceKind, natural, geom, faceChecked, landmarks, selectedSizeId]);
 
   const suggestedAdjust = useMemo<Adjust | null>(() => {
     if (!natural || !geom || !faceChecked || !landmarks) return null;
     return computeAutoAdjustFromLandmarks(natural.w, natural.h, geom, landmarks, selectedSizeId);
   }, [natural, geom, faceChecked, landmarks, selectedSizeId]);
 
-  const adjust = userAdjust ?? baseAdjust;
+  const adjust = userAdjust ?? autoAdjust ?? baseAdjust;
   const view = geom ? toView(geom, adjust) : null;
+  const adjustSource = userAdjust ? "user" : autoAdjust ? "auto" : "base";
+  const isAutoFramed =
+    deviceKind !== "android" && userAdjust === null && autoAdjust !== null && faceChecked;
 
   useEffect(() => {
     if (!geom || !view || !faceChecked) return;
@@ -98,17 +111,19 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       "active crop view",
       {
         deviceKind,
-        adjustSource: userAdjust ? "user" : "base",
-        autoAligned,
+        adjustSource,
+        autoAligned: isAutoFramed || autoAligned,
         activeZoom: adjust.zoom,
         baseZoom: baseAdjust.zoom,
+        autoZoom: autoAdjust?.zoom ?? null,
         suggestedZoom: suggestedAdjust?.zoom ?? null,
         containZoom: geom.containZoom,
         ih: Math.round(ih),
         fh: Math.round(geom.fh),
         letterbox: ih < geom.fh,
       },
-      "H1"
+      "H1",
+      "post-fix"
     );
   }, [
     geom,
@@ -117,9 +132,12 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     deviceKind,
     adjust.zoom,
     baseAdjust.zoom,
+    autoAdjust?.zoom,
     suggestedAdjust?.zoom,
     userAdjust,
+    isAutoFramed,
     autoAligned,
+    adjustSource,
   ]);
 
   const faceEllipse: FaceEllipse | null = useMemo(() => {
@@ -258,23 +276,6 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     setAutoAligned(false);
   }
 
-  useEffect(() => {
-    if (deviceKind !== "apple") return;
-    if (!suggestedAdjust || userAdjust !== null) return;
-    passportDebugLog(
-      "StepCrop.tsx:iosAutoApply",
-      "auto-applying suggestedAdjust on iPhone",
-      {
-        suggestedZoom: suggestedAdjust.zoom,
-        baseZoom: baseAdjust.zoom,
-        containZoom: geom?.containZoom,
-      },
-      "H2"
-    );
-    applyAdjust(suggestedAdjust);
-    setAutoAligned(true);
-  }, [deviceKind, suggestedAdjust, userAdjust, baseAdjust.zoom, geom?.containZoom]);
-
   function panBy(g: Geom, a: Adjust, dx: number, dy: number) {
     const v = toView(g, a);
     applyAdjust(fromView(g, { scale: v.scale, tx: v.tx + dx, ty: v.ty + dy }));
@@ -411,7 +412,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       <div className="text-center">
         <h2 className="text-xl font-semibold text-gray-900">Кадрирование</h2>
         <p className="text-sm text-gray-500 mt-1">
-          {deviceKind === "apple" && autoAligned
+          {deviceKind === "apple" && isAutoFramed
             ? "Фото автоматически выровнено — проверьте овал"
             : autoAligned
               ? "Лицо выровнено — проверьте овал и при необходимости подстройте"
@@ -510,6 +511,8 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
               geom={geom}
               orientation={orientation}
               quality={qualityValidation}
+              deviceKind={deviceKind}
+              adjustSource={adjustSource}
             />
           )}
         </div>
@@ -683,13 +686,19 @@ function DebugOverlay({
   geom,
   orientation,
   quality,
+  deviceKind,
+  adjustSource,
 }: {
   landmarks: Landmarks68;
   view: { scale: number; tx: number; ty: number };
   geom: Geom;
   orientation: number;
   quality: ReturnType<typeof validatePhotoQuality> | null;
+  deviceKind: string;
+  adjustSource: string;
 }) {
+  const ih = geom.nh * view.scale;
+  const letterbox = ih < geom.fh;
   const toFrame = (p: { x: number; y: number }) => ({
     x: p.x * view.scale + view.tx,
     y: p.y * view.scale + view.ty,
@@ -736,7 +745,7 @@ function DebugOverlay({
         {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.cover).toFixed(2)}
       </text>
       <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
-        dev:{typeof navigator !== "undefined" ? (/(iPhone|iPad)/i.test(navigator.userAgent) ? "apple" : /Android/i.test(navigator.userAgent) ? "android" : "?") : "?"} cnt:{geom.containZoom.toFixed(2)}
+        dev:{deviceKind} src:{adjustSource} cnt:{geom.containZoom.toFixed(2)} lb:{letterbox ? 1 : 0}
       </text>
       {quality && (
         <text x={4} y={42} fill="lime" fontSize="10" fontFamily="monospace">

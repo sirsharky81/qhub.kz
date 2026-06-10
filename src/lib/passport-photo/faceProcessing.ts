@@ -110,6 +110,24 @@ export function getDeviceKind(): "apple" | "android" | "other" {
   return "other";
 }
 
+const DEBUG_STORAGE_KEY = "passport-debug-10ddbd";
+
+export function getPassportDebugLogs(): Array<{
+  location: string;
+  message: string;
+  data: Record<string, unknown>;
+  hypothesisId: string;
+  runId: string;
+  timestamp: number;
+}> {
+  if (typeof sessionStorage === "undefined") return [];
+  try {
+    return JSON.parse(sessionStorage.getItem(DEBUG_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
 /** @internal debug session 10ddbd */
 export function passportDebugLog(
   location: string,
@@ -118,19 +136,28 @@ export function passportDebugLog(
   hypothesisId: string,
   runId = "pre-fix"
 ): void {
+  const entry = {
+    sessionId: "10ddbd",
+    location,
+    message,
+    data,
+    timestamp: Date.now(),
+    hypothesisId,
+    runId,
+  };
   // #region agent log
+  try {
+    const prev = getPassportDebugLogs();
+    prev.push(entry);
+    if (prev.length > 24) prev.splice(0, prev.length - 24);
+    sessionStorage.setItem(DEBUG_STORAGE_KEY, JSON.stringify(prev));
+  } catch {
+    // ignore quota / private mode
+  }
   fetch("http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "10ddbd" },
-    body: JSON.stringify({
-      sessionId: "10ddbd",
-      location,
-      message,
-      data,
-      timestamp: Date.now(),
-      hypothesisId,
-      runId,
-    }),
+    body: JSON.stringify(entry),
   }).catch(() => {});
   // #endregion
 }
