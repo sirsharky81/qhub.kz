@@ -8,11 +8,13 @@ import {
   buildGeom,
   computeAutoAdjustFromLandmarks,
   computeHeuristicAdjust,
+  containCenteredAdjust,
   cropToBlob,
   drawCropPreview,
   drawFitPreview,
   fromView,
   isDebugMode,
+  isNearMinZoom,
   landmarksToFrameEllipse,
   MAX_ZOOM,
   normalizeImageOrientation,
@@ -218,6 +220,10 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
 
   function zoomTo(g: Geom, a: Adjust, rawZoom: number, fx: number, fy: number) {
     const newZoom = clamp(rawZoom, g.minZoom, MAX_ZOOM);
+    if (isNearMinZoom(g, newZoom)) {
+      applyAdjust(containCenteredAdjust(g, newZoom));
+      return;
+    }
     const v = toView(g, a);
     const f = (g.cover * newZoom) / v.scale;
     applyAdjust(

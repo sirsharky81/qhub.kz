@@ -36,11 +36,22 @@ export const MAX_ZOOM = 4;
 /** autoZoom всегда >= AUTO_ZOOM_MIN; пользователь может ниже через minZoom */
 export const AUTO_ZOOM_MIN = 1;
 
-/** zoom=1 → cover (автокадр); zoom<1 → contain (ручное отдаление) */
+const CONTAIN_MARGIN = 0.75;
+
+/** zoom=1 → cover (автокадр); zoom=minZoom → всё фото по центру */
 export function buildGeom(fw: number, fh: number, nw: number, nh: number): Geom {
   const cover = Math.max(fw / nw, fh / nh);
   const fit = Math.min(fw / nw, fh / nh);
-  return { fw, fh, nw, nh, cover, fit, minZoom: fit / cover };
+  return { fw, fh, nw, nh, cover, fit, minZoom: (fit / cover) * CONTAIN_MARGIN };
+}
+
+/** Полное фото по центру — для ручного отдаления до minZoom */
+export function containCenteredAdjust(geom: Geom, zoom = geom.minZoom): Adjust {
+  return { zoom: clamp(zoom, geom.minZoom, MAX_ZOOM), cxN: 0.5, cyN: 0.5 };
+}
+
+export function isNearMinZoom(geom: Geom, zoom: number): boolean {
+  return zoom <= geom.minZoom * 1.02;
 }
 
 function resolvePan(
@@ -49,22 +60,20 @@ function resolvePan(
   iw: number,
   ih: number,
   tx: number,
-  ty: number
+  ty: number,
+  centered = false
 ): { tx: number; ty: number } {
   const letterbox = zoom < AUTO_ZOOM_MIN;
-  let x = tx;
-  let y = ty;
-  if (letterbox && iw < g.fw) {
-    x = (g.fw - iw) / 2;
-  } else {
-    x = clamp(tx, g.fw - iw, 0);
+  if (letterbox || centered) {
+    return {
+      tx: (g.fw - iw) / 2,
+      ty: (g.fh - ih) / 2,
+    };
   }
-  if (letterbox && ih < g.fh) {
-    y = (g.fh - ih) / 2;
-  } else {
-    y = clamp(ty, g.fh - ih, 0);
-  }
-  return { tx: x, ty: y };
+  return {
+    tx: clamp(tx, g.fw - iw, 0),
+    ty: clamp(ty, g.fh - ih, 0),
+  };
 }
 
 export interface FaceEllipse {
@@ -429,7 +438,9 @@ export function toView(g: Geom, a: Adjust): { scale: number; tx: number; ty: num
   const ih = g.nh * scale;
   const rawTx = g.fw / 2 - a.cxN * g.nw * scale;
   const rawTy = g.fh / 2 - a.cyN * g.nh * scale;
-  const pan = resolvePan(g, a.zoom, iw, ih, rawTx, rawTy);
+  const centered =
+    isNearMinZoom(g, a.zoom) || (a.cxN === 0.5 && a.cyN === 0.5 && a.zoom < AUTO_ZOOM_MIN);
+  const pan = resolvePan(g, a.zoom, iw, ih, rawTx, rawTy, centered);
   return { scale, tx: pan.tx, ty: pan.ty };
 }
 
