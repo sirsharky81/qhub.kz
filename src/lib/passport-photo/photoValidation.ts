@@ -54,21 +54,21 @@ export function validateFacePosition(
   const faceHeightRatio = faceHeight / fh;
 
   if (faceHeightRatio < rules.headHeightMin - 0.1) {
-    return { ok: false, message: "Подойдите ближе к камере" };
+    return { ok: false, message: "Приблизьте фото" };
   }
   if (faceHeightRatio > rules.headHeightMax + 0.05) {
-    return { ok: false, message: "Отойдите дальше от камеры" };
+    return { ok: false, message: "Отдалите фото" };
   }
 
   const eyeFrameX = toFrameX(eyeCenter.x, scale, tx);
   const horizontalOffset = Math.abs(eyeFrameX - fw / 2) / fw;
   if (horizontalOffset > 0.15) {
-    return { ok: false, message: "Держите голову прямо" };
+    return { ok: false, message: "Отцентрируйте лицо" };
   }
 
   const topMargin = faceTop / fh;
   if (topMargin < 0.05) {
-    return { ok: false, message: "Поднимите камеру выше" };
+    return { ok: false, message: "Сдвиньте фото вниз" };
   }
 
   const leftEye = getLeftEye(landmarks);
@@ -77,7 +77,7 @@ export function validateFacePosition(
     Math.abs(toFrameY(leftEye.y, scale, ty) - toFrameY(rightEye.y, scale, ty)) /
     (getFaceWidth(landmarks) * scale);
   if (eyeTilt > 0.08) {
-    return { ok: false, message: "Выровняйте голову" };
+    return { ok: false, message: "Голова наклонена — загрузите другое фото" };
   }
 
   return { ok: true };
@@ -151,7 +151,7 @@ export function validatePhotoQuality(canvas: HTMLCanvasElement): QualityResult {
   if (variance < threshold) {
     return {
       ok: false,
-      message: "Фото размыто — сделайте чёткий снимок",
+      message: "Фото размыто — загрузите более чёткое",
       laplacianVariance: variance,
       avgBrightness: brightness,
     };
@@ -159,7 +159,7 @@ export function validatePhotoQuality(canvas: HTMLCanvasElement): QualityResult {
   if (brightness < 60) {
     return {
       ok: false,
-      message: "Недостаточно света",
+      message: "Фото слишком тёмное — загрузите другое",
       laplacianVariance: variance,
       avgBrightness: brightness,
     };
@@ -167,7 +167,7 @@ export function validatePhotoQuality(canvas: HTMLCanvasElement): QualityResult {
   if (brightness > 220) {
     return {
       ok: false,
-      message: "Лицо пересвечено",
+      message: "Лицо пересвечено — загрузите другое",
       laplacianVariance: variance,
       avgBrightness: brightness,
     };
