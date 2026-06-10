@@ -1,8 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import type { PdfPage } from "../types";
-import { renderThumbnail } from "../lib/pdfOperations";
+import { renderPageThumbnail } from "../lib/pdfOperations";
+import { RenderQueue } from "../lib/renderQueue";
+import { createPdfLoadingTask } from "../../_pdf-shared/pdfWorker";
+
+const RENDER_CONCURRENCY = 2;
 
 interface UseThumbnailsOptions {
   pdfBytes: Uint8Array | null;
@@ -11,58 +16,114 @@ interface UseThumbnailsOptions {
 }
 
 /**
- * Lazily generates thumbnails for visible pages as they enter the viewport.
+ * Lazily generates thumbnails for visible pages via IntersectionObserver callbacks.
+ * Uses a bounded render queue and a shared pdf.js document instance.
  */
 export function useThumbnails({
   pdfBytes,
   pages,
   onThumbnailReady,
 }: UseThumbnailsOptions) {
-  const queueRef = useRef<Set<string>>(new Set());
-  const activeRef = useRef(false);
+  const queueRef = useRef(new RenderQueue(RENDER_CONCURRENCY));
+  const docRef = useRef<PDFDocumentProxy | null>(null);
+  const loadingTaskRef = useRef<PDFDocumentLoadingTask | null>(null);
+  const docLoadRef = useRef<Promise<PDFDocumentProxy> | null>(null);
+  const renderedIdsRef = useRef(new Set<string>());
+  const pdfGenerationRef = useRef(0);
+  const pagesRef = useRef(pages);
   const onThumbnailReadyRef = useRef(onThumbnailReady);
+
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
 
   useEffect(() => {
     onThumbnailReadyRef.current = onThumbnailReady;
   }, [onThumbnailReady]);
 
+  const cleanupDocument = useCallback(() => {
+    queueRef.current.clear();
+    queueRef.current.reset();
+
+    if (loadingTaskRef.current) {
+      void loadingTaskRef.current.destroy();
+      loadingTaskRef.current = null;
+    }
+    docRef.current = null;
+    docLoadRef.current = null;
+    renderedIdsRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    pdfGenerationRef.current += 1;
+    cleanupDocument();
+  }, [pdfBytes, cleanupDocument]);
+
+  useEffect(() => {
+    return () => {
+      cleanupDocument();
+    };
+  }, [cleanupDocument]);
+
+  const getDocument = useCallback(async (): Promise<PDFDocumentProxy | null> => {
+    if (!pdfBytes) return null;
+    if (docRef.current) return docRef.current;
+    if (!docLoadRef.current) {
+      docLoadRef.current = (async () => {
+        const task = await createPdfLoadingTask(pdfBytes);
+        loadingTaskRef.current = task;
+        const doc = await task.promise;
+        docRef.current = doc;
+        return doc;
+      })();
+    }
+    return docLoadRef.current;
+  }, [pdfBytes]);
+
   const requestThumbnail = useCallback(
     (pageId: string) => {
       if (!pdfBytes) return;
-      const page = pages.find((p) => p.id === pageId);
-      if (!page || page.thumbnail) return;
-      queueRef.current.add(pageId);
-    },
-    [pdfBytes, pages],
-  );
 
-  useEffect(() => {
-    if (!pdfBytes || queueRef.current.size === 0 || activeRef.current) return;
+      const page = pagesRef.current.find((p) => p.id === pageId);
+      if (!page || page.thumbnail || renderedIdsRef.current.has(pageId)) return;
 
-    const processQueue = async () => {
-      activeRef.current = true;
+      renderedIdsRef.current.add(pageId);
+      const generation = pdfGenerationRef.current;
 
-      while (queueRef.current.size > 0) {
-        const pageId = queueRef.current.values().next().value;
-        if (!pageId) break;
-        queueRef.current.delete(pageId);
+      void queueRef.current.enqueue(
+        pageId,
+        async () => {
+          const doc = await getDocument();
+          if (!doc) {
+            throw new Error("document_unavailable");
+          }
 
-        const page = pages.find((p) => p.id === pageId);
-        if (!page || page.thumbnail) continue;
+          const currentPage = pagesRef.current.find((p) => p.id === pageId);
+          if (!currentPage || currentPage.thumbnail) {
+            return "";
+          }
 
-        try {
-          const thumbnail = await renderThumbnail(pdfBytes, page.pageIndex);
+          return renderPageThumbnail(doc, currentPage.pageIndex, undefined, (cancel) => {
+            queueRef.current.registerCancel(pageId, cancel);
+          });
+        },
+      ).then(
+        (thumbnail) => {
+          if (generation !== pdfGenerationRef.current || !thumbnail) return;
           onThumbnailReadyRef.current(pageId, thumbnail);
-        } catch {
-          // Thumbnail failure is non-fatal
-        }
-      }
-
-      activeRef.current = false;
-    };
-
-    void processQueue();
-  }, [pdfBytes, pages]);
+        },
+        (error: unknown) => {
+          if (generation !== pdfGenerationRef.current) return;
+          if (error instanceof Error && error.message === "queue_cleared") {
+            renderedIdsRef.current.delete(pageId);
+            return;
+          }
+          renderedIdsRef.current.delete(pageId);
+        },
+      );
+    },
+    [getDocument, pdfBytes],
+  );
 
   return { requestThumbnail };
 }

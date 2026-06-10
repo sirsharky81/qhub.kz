@@ -183,30 +183,57 @@ export async function syncBytesWithPages(
   return buildPdfFromPages(originalBytes, pages);
 }
 
+const THUMBNAIL_SCALE = 0.35;
+
+/**
+ * Renders a single page thumbnail from an already-loaded pdf.js document.
+ * Cleans up page references and supports render task cancellation.
+ */
+export async function renderPageThumbnail(
+  doc: import("pdfjs-dist").PDFDocumentProxy,
+  pageIndex: number,
+  scale = THUMBNAIL_SCALE,
+  registerCancel?: (cancel: () => void) => void,
+): Promise<string> {
+  const page = await doc.getPage(pageIndex + 1);
+
+  try {
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("canvas_unavailable");
+    }
+
+    const renderTask = page.render({ canvasContext: context, viewport, canvas });
+    registerCancel?.(() => renderTask.cancel());
+
+    await renderTask.promise;
+    return canvas.toDataURL("image/jpeg", 0.75);
+  } finally {
+    page.cleanup();
+  }
+}
+
 /**
  * Renders a single page thumbnail as a data URL via canvas.
  */
 export async function renderThumbnail(
   pdfData: Uint8Array,
   pageIndex: number,
-  scale = 0.3,
+  scale = THUMBNAIL_SCALE,
 ): Promise<string> {
-  const { loadPdfDocument } = await import("../../_pdf-shared/pdfWorker");
-  const doc = await loadPdfDocument(pdfData);
-  const page = await doc.getPage(pageIndex + 1);
-  const viewport = page.getViewport({ scale });
-
-  const canvas = document.createElement("canvas");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("canvas_unavailable");
+  const { createPdfLoadingTask } = await import("../../_pdf-shared/pdfWorker");
+  const loadingTask = await createPdfLoadingTask(pdfData);
+  try {
+    const doc = await loadingTask.promise;
+    return await renderPageThumbnail(doc, pageIndex, scale);
+  } finally {
+    await loadingTask.destroy();
   }
-
-  await page.render({ canvasContext: context, viewport, canvas }).promise;
-  return canvas.toDataURL("image/jpeg", 0.75);
 }
 
 /**

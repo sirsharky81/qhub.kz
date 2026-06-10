@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
 let workerInitialized = false;
 
@@ -18,11 +18,18 @@ export async function initPdfWorker(): Promise<void> {
 }
 
 /**
+ * Creates a pdf.js loading task for thumbnail rendering.
+ */
+export async function createPdfLoadingTask(data: Uint8Array): Promise<PDFDocumentLoadingTask> {
+  await initPdfWorker();
+  const pdfjs = await import("pdfjs-dist");
+  return pdfjs.getDocument({ data: data.slice() });
+}
+
+/**
  * Loads a PDF document via pdfjs for thumbnail rendering.
  */
 export async function loadPdfDocument(data: Uint8Array): Promise<PDFDocumentProxy> {
-  await initPdfWorker();
-  const pdfjs = await import("pdfjs-dist");
-  const loadingTask = pdfjs.getDocument({ data: data.slice() });
+  const loadingTask = await createPdfLoadingTask(data);
   return loadingTask.promise;
 }
