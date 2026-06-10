@@ -12,6 +12,7 @@ import {
   cropToBlob,
   fullPhotoAdjust,
   getDeviceKind,
+  logScaleDiagnostics,
   passportDebugLog,
   drawCropPreview,
   drawFitPreview,
@@ -27,6 +28,7 @@ import {
   type Geom,
 } from "@/lib/passport-photo/faceProcessing";
 import { buildSilhouettePaths } from "@/lib/passport-photo/passport-guide";
+import { getHeadBounds } from "@/lib/passport-photo/landmarkAdapter";
 import { validateFacePosition, validatePhotoQuality } from "@/lib/passport-photo/photoValidation";
 
 interface Props {
@@ -74,8 +76,8 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       fh = maxH;
       fw = fh * aspect;
     }
-    return buildGeom(fw, fh, natural.w, natural.h);
-  }, [natural, containerW, aspect]);
+    return buildGeom(fw, fh, natural.w, natural.h, deviceKind === "android" ? "fit" : "cover");
+  }, [natural, containerW, aspect, deviceKind]);
 
   const baseAdjust = useMemo<Adjust>(() => {
     if (!geom) return { zoom: 1, cxN: 0.5, cyN: 0.5 };
@@ -106,12 +108,22 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   useEffect(() => {
     if (!geom || !view || !faceChecked) return;
     const ih = geom.nh * view.scale;
+    const iw = geom.nw * view.scale;
+    const faceBox = landmarks ? getHeadBounds(landmarks) : null;
+    logScaleDiagnostics(geom, adjust, view, {
+      adjustSource,
+      suggestedZoom: suggestedAdjust?.zoom ?? null,
+      letterboxH: ih < geom.fh,
+      letterboxW: iw < geom.fw,
+      faceBox,
+    });
     passportDebugLog(
       "StepCrop.tsx:adjustState",
       "active crop view",
       {
         deviceKind,
         adjustSource,
+        baseline: geom.baseline,
         autoAligned: isAutoFramed || autoAligned,
         activeZoom: adjust.zoom,
         baseZoom: baseAdjust.zoom,
@@ -123,7 +135,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
         letterbox: ih < geom.fh,
       },
       "H1",
-      "post-fix"
+      "fit-baseline"
     );
   }, [
     geom,
@@ -138,6 +150,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     isAutoFramed,
     autoAligned,
     adjustSource,
+    landmarks,
   ]);
 
   const faceEllipse: FaceEllipse | null = useMemo(() => {
@@ -288,10 +301,10 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       return;
     }
     const v = toView(g, a);
-    const f = (g.cover * newZoom) / v.scale;
+    const f = (g.baseScale * newZoom) / v.scale;
     applyAdjust(
       fromView(g, {
-        scale: g.cover * newZoom,
+        scale: g.baseScale * newZoom,
         tx: fx - (fx - v.tx) * f,
         ty: fy - (fy - v.ty) * f,
       })
@@ -742,10 +755,10 @@ function DebugOverlay({
         strokeWidth="2"
       />
       <text x={4} y={14} fill="lime" fontSize="10" fontFamily="monospace">
-        {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.cover).toFixed(2)}
+        {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.baseScale).toFixed(2)}
       </text>
       <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
-        dev:{deviceKind} src:{adjustSource} cnt:{geom.containZoom.toFixed(2)} lb:{letterbox ? 1 : 0}
+        dev:{deviceKind} base:{geom.baseline} src:{adjustSource} min:{geom.minZoom.toFixed(2)} lb:{letterbox ? 1 : 0}
       </text>
       {quality && (
         <text x={4} y={42} fill="lime" fontSize="10" fontFamily="monospace">

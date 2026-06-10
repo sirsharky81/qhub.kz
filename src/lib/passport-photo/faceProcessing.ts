@@ -21,6 +21,8 @@ export interface Adjust {
   cyN: number;
 }
 
+export type ZoomBaseline = "fit" | "cover";
+
 export interface Geom {
   fw: number;
   fh: number;
@@ -28,34 +30,64 @@ export interface Geom {
   nh: number;
   cover: number;
   fit: number;
-  /** zoom, при котором видно всё фото (contain) */
+  /** zoom, при котором видно всё фото (contain) относительно cover-базы */
   containZoom: number;
+  /** fit = contain-first (Android); cover = auto-framing-first (iPhone) */
+  baseline: ZoomBaseline;
+  /** Масштаб при zoom=1: fit или cover */
+  baseScale: number;
   minZoom: number;
 }
 
 export const MAX_ZOOM = 4;
-/** autoZoom всегда >= AUTO_ZOOM_MIN (cover) */
+/** autoZoom всегда >= AUTO_ZOOM_MIN */
 export const AUTO_ZOOM_MIN = 1;
 
-/** zoom=1 → cover; zoom=containZoom → всё фото; zoom>1 → приближение */
-export function buildGeom(fw: number, fh: number, nw: number, nh: number): Geom {
+/**
+ * cover-база: zoom=1 → cover; zoom=containZoom → contain.
+ * fit-база (Android): zoom=1 → contain (всё фото); zoom>1 → приближение.
+ */
+export function buildGeom(
+  fw: number,
+  fh: number,
+  nw: number,
+  nh: number,
+  baseline: ZoomBaseline = "cover"
+): Geom {
   const cover = Math.max(fw / nw, fh / nh);
   const fit = Math.min(fw / nw, fh / nh);
   const containZoom = fit / cover;
-  return { fw, fh, nw, nh, cover, fit, containZoom, minZoom: containZoom };
+  const useFit = baseline === "fit";
+  return {
+    fw,
+    fh,
+    nw,
+    nh,
+    cover,
+    fit,
+    containZoom,
+    baseline,
+    baseScale: useFit ? fit : cover,
+    minZoom: useFit ? 1 : containZoom,
+  };
 }
 
-/** Всё фото по центру — стартовый вид и нижняя граница слайдера */
+/** Всё фото по центру — стартовый вид Android и нижняя граница слайдера */
 export function fullPhotoAdjust(geom: Geom): Adjust {
+  if (geom.baseline === "fit") return { zoom: 1, cxN: 0.5, cyN: 0.5 };
   return containCenteredAdjust(geom, geom.containZoom);
 }
 
-export function containCenteredAdjust(geom: Geom, zoom = geom.containZoom): Adjust {
+export function containCenteredAdjust(geom: Geom, zoom = geom.minZoom): Adjust {
   return { zoom: clamp(zoom, geom.minZoom, MAX_ZOOM), cxN: 0.5, cyN: 0.5 };
 }
 
 export function isNearMinZoom(geom: Geom, zoom: number): boolean {
   return zoom <= geom.minZoom * 1.02;
+}
+
+function letterboxZoomThreshold(g: Geom): number {
+  return g.baseline === "fit" ? 1 : AUTO_ZOOM_MIN;
 }
 
 function resolvePan(
@@ -67,7 +99,7 @@ function resolvePan(
   ty: number,
   centered = false
 ): { tx: number; ty: number } {
-  const letterbox = zoom < AUTO_ZOOM_MIN;
+  const letterbox = zoom < letterboxZoomThreshold(g);
   if (letterbox || centered) {
     return {
       tx: (g.fw - iw) / 2,
@@ -318,8 +350,12 @@ export async function normalizeImageOrientation(file: File): Promise<NormalizedI
       device: getDeviceKind(),
       width: result.width,
       height: result.height,
+      naturalWidth: result.width,
+      naturalHeight: result.height,
       orientation: result.orientation,
       aspect: +(result.width / result.height).toFixed(3),
+      devicePixelRatio:
+        typeof window !== "undefined" ? window.devicePixelRatio : null,
     },
     "H4"
   );
@@ -470,14 +506,14 @@ export function computeAutoAdjustFromLandmarks(
   landmarks: Landmarks68,
   formatId: string
 ): Adjust {
-  const { fw, fh, cover } = geom;
+  const { fw, fh, baseScale } = geom;
   const rules = getFormatRule(formatId);
   const head = getHeadBounds(landmarks);
   const targetHeadRatio = (rules.headHeightMin + rules.headHeightMax) / 2;
 
-  let zoom = (targetHeadRatio * fh) / (head.height * cover);
+  let zoom = (targetHeadRatio * fh) / (head.height * baseScale);
   zoom = clamp(zoom, AUTO_ZOOM_MIN, MAX_ZOOM);
-  let scale = cover * zoom;
+  let scale = baseScale * zoom;
 
   const chinTargetY = fh * 0.79;
   let ty = chinTargetY - head.bottom * scale;
@@ -486,7 +522,7 @@ export function computeAutoAdjustFromLandmarks(
   let crownFrameY = head.top * scale + ty;
   while (crownFrameY < fh * 0.04 && zoom > AUTO_ZOOM_MIN) {
     zoom = Math.max(AUTO_ZOOM_MIN, zoom * 0.96);
-    scale = cover * zoom;
+    scale = baseScale * zoom;
     ty = chinTargetY - head.bottom * scale;
     crownFrameY = head.top * scale + ty;
   }
@@ -512,13 +548,14 @@ export function computeHeuristicAdjust(geom: Geom): Adjust {
 }
 
 export function toView(g: Geom, a: Adjust): { scale: number; tx: number; ty: number } {
-  const scale = g.cover * a.zoom;
+  const scale = g.baseScale * a.zoom;
   const iw = g.nw * scale;
   const ih = g.nh * scale;
   const rawTx = g.fw / 2 - a.cxN * g.nw * scale;
   const rawTy = g.fh / 2 - a.cyN * g.nh * scale;
   const centered =
-    isNearMinZoom(g, a.zoom) || (a.cxN === 0.5 && a.cyN === 0.5 && a.zoom < AUTO_ZOOM_MIN);
+    isNearMinZoom(g, a.zoom) ||
+    (a.cxN === 0.5 && a.cyN === 0.5 && a.zoom < letterboxZoomThreshold(g));
   const pan = resolvePan(g, a.zoom, iw, ih, rawTx, rawTy, centered);
   return { scale, tx: pan.tx, ty: pan.ty };
 }
@@ -528,10 +565,49 @@ export function fromView(
   v: { scale: number; tx: number; ty: number }
 ): Adjust {
   return {
-    zoom: v.scale / g.cover,
+    zoom: v.scale / g.baseScale,
     cxN: (g.fw / 2 - v.tx) / (g.nw * v.scale),
     cyN: (g.fh / 2 - v.ty) / (g.nh * v.scale),
   };
+}
+
+/** Диагностика масштабов для отладки Samsung/Android */
+export function logScaleDiagnostics(
+  geom: Geom,
+  adjust: Adjust,
+  view: { scale: number; tx: number; ty: number },
+  extras?: Record<string, unknown>
+): Record<string, unknown> {
+  const head = extras?.faceBox as
+    | { width: number; height: number; centerX: number; top: number; bottom: number }
+    | undefined;
+  const payload = {
+    imageWidth: geom.nw,
+    imageHeight: geom.nh,
+    containerWidth: geom.fw,
+    containerHeight: geom.fh,
+    faceBox: head ?? null,
+    coverScale: geom.cover,
+    fitScale: geom.fit,
+    baseline: geom.baseline,
+    baseScale: geom.baseScale,
+    initialZoom: adjust.zoom,
+    activeScale: view.scale,
+    minZoom: geom.minZoom,
+    maxZoom: MAX_ZOOM,
+    containZoom: geom.containZoom,
+    devicePixelRatio:
+      typeof window !== "undefined" ? window.devicePixelRatio : null,
+    device: getDeviceKind(),
+    ...extras,
+  };
+  // #region agent log
+  passportDebugLog("faceProcessing.ts:scaleDiagnostics", "scale diagnostics", payload, "H5", "fit-baseline");
+  if (isDebugMode()) {
+    console.log("[passport-photo scale]", payload);
+  }
+  // #endregion
+  return payload;
 }
 
 /** Перевод landmarks в координаты кадра для динамического овала */

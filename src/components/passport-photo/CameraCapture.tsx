@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { getDeviceKind, passportDebugLog } from "@/lib/passport-photo/faceProcessing";
 
 interface Props {
   onCapture: (file: File) => void;
@@ -19,11 +20,7 @@ export default function CameraCapture({ onCapture, onClose }: Props) {
     (async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "user",
-            width: { ideal: 1920 },
-            height: { ideal: 2560 },
-          },
+          video: { facingMode: "user" },
           audio: false,
         });
         if (cancelled) {
@@ -35,6 +32,20 @@ export default function CameraCapture({ onCapture, onClose }: Props) {
         if (video) {
           video.srcObject = stream;
           await video.play();
+          // #region agent log
+          passportDebugLog(
+            "CameraCapture.tsx:streamReady",
+            "camera stream dimensions",
+            {
+              device: getDeviceKind(),
+              videoWidth: video.videoWidth,
+              videoHeight: video.videoHeight,
+              devicePixelRatio: window.devicePixelRatio,
+            },
+            "H6",
+            "fit-baseline"
+          );
+          // #endregion
           setReady(true);
         }
       } catch {
@@ -59,7 +70,23 @@ export default function CameraCapture({ onCapture, onClose }: Props) {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(video, 0, 0);
+    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+    // #region agent log
+    passportDebugLog(
+      "CameraCapture.tsx:takePhoto",
+      "captured frame as-is",
+      {
+        device: getDeviceKind(),
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        devicePixelRatio: window.devicePixelRatio,
+      },
+      "H6",
+      "fit-baseline"
+    );
+    // #endregion
 
     canvas.toBlob(
       (blob) => {
