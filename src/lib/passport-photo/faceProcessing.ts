@@ -33,47 +33,38 @@ export interface Geom {
 }
 
 export const MAX_ZOOM = 4;
-const MIN_ZOOM = 1;
+/** autoZoom всегда >= AUTO_ZOOM_MIN; пользователь может ниже через minZoom */
+export const AUTO_ZOOM_MIN = 1;
 
-/** zoom=1 → contain (всё фото по центру); zoom>1 → приближение */
+/** zoom=1 → cover (автокадр); zoom<1 → contain (ручное отдаление) */
 export function buildGeom(fw: number, fh: number, nw: number, nh: number): Geom {
   const cover = Math.max(fw / nw, fh / nh);
   const fit = Math.min(fw / nw, fh / nh);
-  return { fw, fh, nw, nh, cover, fit, minZoom: MIN_ZOOM };
+  return { fw, fh, nw, nh, cover, fit, minZoom: fit / cover };
 }
 
-function clampPan(
-  fw: number,
-  fh: number,
+function resolvePan(
+  g: Geom,
+  zoom: number,
   iw: number,
   ih: number,
   tx: number,
   ty: number
 ): { tx: number; ty: number } {
+  const letterbox = zoom < AUTO_ZOOM_MIN;
   let x = tx;
   let y = ty;
-  if (iw <= fw) {
-    x = (fw - iw) / 2;
+  if (letterbox && iw < g.fw) {
+    x = (g.fw - iw) / 2;
   } else {
-    x = clamp(x, fw - iw, 0);
+    x = clamp(tx, g.fw - iw, 0);
   }
-  if (ih < fh) {
-    y = (fh - ih) / 2;
+  if (letterbox && ih < g.fh) {
+    y = (g.fh - ih) / 2;
   } else {
-    y = clamp(y, fh - ih, 0);
+    y = clamp(ty, g.fh - ih, 0);
   }
   return { tx: x, ty: y };
-}
-
-function adjustFromPan(geom: Geom, scale: number, tx: number, ty: number): Adjust {
-  const iw = geom.nw * scale;
-  const ih = geom.nh * scale;
-  const pan = clampPan(geom.fw, geom.fh, iw, ih, tx, ty);
-  return {
-    zoom: scale / geom.fit,
-    cxN: (geom.fw / 2 - pan.tx) / (geom.nw * scale),
-    cyN: (geom.fh / 2 - pan.ty) / (geom.nh * scale),
-  };
 }
 
 export interface FaceEllipse {
@@ -220,7 +211,7 @@ export async function normalizeImageOrientation(file: File): Promise<NormalizedI
   };
 
   const attempts: Array<() => Promise<HTMLCanvasElement>> = isAndroidDevice()
-    ? [manualExif, fromImageExif, imageFallback]
+    ? [fromImageExif, manualExif, imageFallback]
     : [fromImageExif, appleNative, manualExif, imageFallback];
 
   let canvas: HTMLCanvasElement | null = null;
@@ -391,47 +382,54 @@ export function computeAutoAdjustFromLandmarks(
   landmarks: Landmarks68,
   formatId: string
 ): Adjust {
-  const { fw, fh, fit, minZoom } = geom;
+  const { fw, fh, cover } = geom;
   const rules = getFormatRule(formatId);
   const head = getHeadBounds(landmarks);
   const targetHeadRatio = (rules.headHeightMin + rules.headHeightMax) / 2;
 
-  let zoom = (targetHeadRatio * fh) / (head.height * fit);
-  zoom = clamp(zoom, minZoom, MAX_ZOOM);
-  let scale = fit * zoom;
+  let zoom = (targetHeadRatio * fh) / (head.height * cover);
+  zoom = clamp(zoom, AUTO_ZOOM_MIN, MAX_ZOOM);
+  let scale = cover * zoom;
 
   const chinTargetY = fh * 0.79;
   let ty = chinTargetY - head.bottom * scale;
   let tx = fw / 2 - head.centerX * scale;
 
   let crownFrameY = head.top * scale + ty;
-  while (crownFrameY < fh * 0.04 && zoom > minZoom) {
-    zoom = Math.max(minZoom, zoom * 0.96);
-    scale = fit * zoom;
+  while (crownFrameY < fh * 0.04 && zoom > AUTO_ZOOM_MIN) {
+    zoom = Math.max(AUTO_ZOOM_MIN, zoom * 0.96);
+    scale = cover * zoom;
     ty = chinTargetY - head.bottom * scale;
     crownFrameY = head.top * scale + ty;
   }
 
-  return adjustFromPan(geom, scale, tx, ty);
+  const iw = imgW * scale;
+  const ih = imgH * scale;
+  const pan = resolvePan(geom, zoom, iw, ih, tx, ty);
+
+  return {
+    zoom,
+    cxN: (fw / 2 - pan.tx) / (imgW * scale),
+    cyN: (fh / 2 - pan.ty) / (imgH * scale),
+  };
 }
 
 /** Эвристика при отсутствии лица */
 export function computeHeuristicAdjust(geom: Geom): Adjust {
-  const { minZoom } = geom;
   const portrait = geom.nh > geom.nw * 1.05;
   const cxN = 0.5;
   const cyN = portrait ? 0.42 : 0.45;
   const zoom = portrait ? 1.15 : 1.05;
-  return { zoom: clamp(zoom, minZoom, MAX_ZOOM), cxN, cyN };
+  return { zoom: clamp(zoom, AUTO_ZOOM_MIN, MAX_ZOOM), cxN, cyN };
 }
 
 export function toView(g: Geom, a: Adjust): { scale: number; tx: number; ty: number } {
-  const scale = g.fit * a.zoom;
+  const scale = g.cover * a.zoom;
   const iw = g.nw * scale;
   const ih = g.nh * scale;
   const rawTx = g.fw / 2 - a.cxN * g.nw * scale;
   const rawTy = g.fh / 2 - a.cyN * g.nh * scale;
-  const pan = clampPan(g.fw, g.fh, iw, ih, rawTx, rawTy);
+  const pan = resolvePan(g, a.zoom, iw, ih, rawTx, rawTy);
   return { scale, tx: pan.tx, ty: pan.ty };
 }
 
@@ -440,7 +438,7 @@ export function fromView(
   v: { scale: number; tx: number; ty: number }
 ): Adjust {
   return {
-    zoom: v.scale / g.fit,
+    zoom: v.scale / g.cover,
     cxN: (g.fw / 2 - v.tx) / (g.nw * v.scale),
     cyN: (g.fh / 2 - v.ty) / (g.nh * v.scale),
   };

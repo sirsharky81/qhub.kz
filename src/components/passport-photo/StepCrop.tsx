@@ -205,24 +205,28 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     setUserAdjust(null);
   }
 
+  function applyAdjust(next: Adjust) {
+    latest.current.adjust = next;
+    setUserAdjust(next);
+    setManualMode(true);
+  }
+
   function panBy(g: Geom, a: Adjust, dx: number, dy: number) {
     const v = toView(g, a);
-    setUserAdjust(fromView(g, { scale: v.scale, tx: v.tx + dx, ty: v.ty + dy }));
-    setManualMode(true);
+    applyAdjust(fromView(g, { scale: v.scale, tx: v.tx + dx, ty: v.ty + dy }));
   }
 
   function zoomTo(g: Geom, a: Adjust, rawZoom: number, fx: number, fy: number) {
     const newZoom = clamp(rawZoom, g.minZoom, MAX_ZOOM);
     const v = toView(g, a);
-    const f = (g.fit * newZoom) / v.scale;
-    setUserAdjust(
+    const f = (g.cover * newZoom) / v.scale;
+    applyAdjust(
       fromView(g, {
-        scale: g.fit * newZoom,
+        scale: g.cover * newZoom,
         tx: fx - (fx - v.tx) * f,
         ty: fy - (fy - v.ty) * f,
       })
     );
-    setManualMode(true);
   }
 
   useEffect(() => {
@@ -300,7 +304,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
 
   function setZoomFromSlider(value: number) {
     if (!geom) return;
-    zoomTo(geom, adjust, value, geom.fw / 2, geom.fh / 2);
+    zoomTo(geom, latest.current.adjust, value, geom.fw / 2, geom.fh / 2);
   }
 
   async function handleRetryDetection() {
@@ -625,10 +629,10 @@ function DebugOverlay({
         strokeWidth="2"
       />
       <text x={4} y={14} fill="lime" fontSize="10" fontFamily="monospace">
-        {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.fit).toFixed(2)}
+        {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.cover).toFixed(2)}
       </text>
       <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
-        tx:{view.tx.toFixed(0)} ty:{view.ty.toFixed(0)} fit:{geom.fit.toFixed(3)}
+        min:{geom.minZoom.toFixed(2)} tx:{view.tx.toFixed(0)} ty:{view.ty.toFixed(0)}
       </text>
       {quality && (
         <text x={4} y={42} fill="lime" fontSize="10" fontFamily="monospace">
