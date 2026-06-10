@@ -87,13 +87,13 @@ interface ProgramPanelProps {
 }
 
 const inputClass =
-  "w-full px-2 py-1 text-xs font-mono text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-900/5";
+  "w-full px-2 py-1 font-mono text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-900/5";
 
 const btnClass =
   "px-2 py-1 rounded-lg text-[11px] font-medium border border-gray-200 hover:bg-gray-50 transition-colors whitespace-nowrap";
 
 const transitionInputClass =
-  "w-14 px-1.5 py-0.5 text-[11px] font-mono text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400";
+  "w-14 px-1.5 py-0.5 font-mono text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400";
 
 function useIsMobileLayout() {
   const [isMobile, setIsMobile] = useState(false);

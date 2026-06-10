@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatTimePrecise, clampTime } from "@/lib/music-editor/format";
 import type { TrimRegion } from "@/lib/music-editor/types";
+import { WaveformLegend } from "./WaveformLegend";
 
 type DragTarget = "playhead" | "trimStart" | "trimEnd" | "pendingCutStart" | "pendingCutEnd" | null;
 
@@ -368,17 +369,7 @@ export function WaveformEditor({
             +
           </button>
         </div>
-        <div className="flex gap-2 text-[9px] text-gray-500">
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-white shadow-sm" /> Сейчас играет
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-300" /> Останется
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-sm bg-red-100 border border-red-300" /> Удалится
-          </span>
-        </div>
+        <WaveformLegend />
       </div>
 
       <div

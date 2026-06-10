@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatTimePrecise } from "@/lib/music-editor/format";
 import { effectiveTrimEnd } from "@/lib/music-editor/selection";
-import type { ManualEditSettings, ProgramTimeline as ProgramTimelineData } from "@/lib/music-editor/types";
+import type { ProgramTimeline as ProgramTimelineData } from "@/lib/music-editor/types";
 import { PROGRAM_SEGMENT_COLORS } from "@/lib/music-editor/types";
+import { WaveformLegend } from "./WaveformLegend";
 
 interface SegmentPeaks {
   trackId: string;
@@ -44,6 +45,11 @@ export function ProgramTimeline({
   const { segments, transitions, totalDuration } = timeline;
   const duration = durationProp ?? totalDuration;
   const effTrimEnd = trimEnd ?? duration;
+
+  const isInKeep = useCallback(
+    (time: number) => time >= trimStart && time <= effTrimEnd,
+    [trimStart, effTrimEnd],
+  );
 
   const resolvePlayheadTime = useCallback(() => {
     if (dragPlayheadTime !== null) return dragPlayheadTime;
@@ -96,12 +102,8 @@ export function ProgramTimeline({
       }
     };
 
-    ctx.fillStyle = "#f3f4f6";
+    ctx.fillStyle = "rgba(229, 231, 235, 0.6)";
     ctx.fillRect(0, pad, width, height - pad * 2);
-
-    if (trimStart > 0) drawRegion(0, trimStart, "rgba(254, 226, 226, 0.75)");
-    if (effTrimEnd < duration) drawRegion(effTrimEnd, duration, "rgba(254, 226, 226, 0.75)");
-    drawRegion(trimStart, effTrimEnd, "rgba(16, 185, 129, 0.08)");
 
     for (const seg of segments) {
       const x1 = timeToX(seg.programStart, width);
@@ -128,13 +130,20 @@ export function ProgramTimeline({
           const bx = x1 + i * barWidth + 0.5;
           const bw = Math.max(1, barWidth - 1.5);
           const radius = Math.min(2, bw / 2);
+          const barTime =
+            seg.programStart + ((i + 0.5) / peaks.length) * (seg.programEnd - seg.programStart);
+          const inTrim = isInKeep(barTime);
 
-          const barGrad = ctx.createLinearGradient(0, mid - barH, 0, mid + barH);
-          barGrad.addColorStop(0, color.wave);
-          barGrad.addColorStop(0.5, color.label);
-          barGrad.addColorStop(1, color.wave);
+          if (inTrim) {
+            const barGrad = ctx.createLinearGradient(0, mid - barH, 0, mid + barH);
+            barGrad.addColorStop(0, color.wave);
+            barGrad.addColorStop(0.5, color.label);
+            barGrad.addColorStop(1, color.wave);
+            ctx.fillStyle = barGrad;
+          } else {
+            ctx.fillStyle = "#fca5a5";
+          }
 
-          ctx.fillStyle = barGrad;
           ctx.globalAlpha = 0.88;
           ctx.beginPath();
           ctx.roundRect(bx, mid - barH, bw, barH, radius);
@@ -198,6 +207,10 @@ export function ProgramTimeline({
       }
     }
 
+    if (trimStart > 0) drawRegion(0, trimStart, "rgba(254, 226, 226, 0.75)");
+    if (effTrimEnd < duration) drawRegion(effTrimEnd, duration, "rgba(254, 226, 226, 0.75)");
+    drawRegion(trimStart, effTrimEnd, "rgba(16, 185, 129, 0.12)");
+
     for (const seg of segments) {
       const px = timeToX(seg.programStart, width);
       if (px > 1) {
@@ -210,19 +223,28 @@ export function ProgramTimeline({
       }
     }
 
-    const drawMarker = (time: number, color: string) => {
+    const drawMarker = (time: number, color: string, label: string) => {
       const px = timeToX(time, width);
       if (px < -4 || px > width + 4) return;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(px, pad);
-      ctx.lineTo(px, height - pad);
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, height);
       ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(px - 6, 0);
+      ctx.lineTo(px + 6, 0);
+      ctx.lineTo(px, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.font = "9px monospace";
+      ctx.fillText(label, px + 4, 12);
     };
 
-    drawMarker(trimStart, "#059669");
-    drawMarker(effTrimEnd, "#dc2626");
+    drawMarker(trimStart, "#059669", "▶");
+    drawMarker(effTrimEnd, "#dc2626", "◼");
 
     const playTime = resolvePlayheadTime();
     const playX = timeToX(playTime, width);
@@ -240,11 +262,6 @@ export function ProgramTimeline({
     ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = "9px monospace";
-    ctx.fillText(formatTimePrecise(0), 4, height - 2);
-    const endLabel = formatTimePrecise(duration);
-    ctx.fillText(endLabel, width - ctx.measureText(endLabel).width - 4, height - 2);
   }, [
     segments,
     transitions,
@@ -255,6 +272,7 @@ export function ProgramTimeline({
     resolvePlayheadTime,
     trimStart,
     effTrimEnd,
+    isInKeep,
   ]);
 
   useEffect(() => {
@@ -310,16 +328,23 @@ export function ProgramTimeline({
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="relative rounded-xl border border-gray-200 bg-gradient-to-b from-gray-50 to-white overflow-hidden cursor-crosshair touch-none shadow-inner"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerUp}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <canvas ref={canvasRef} className="block w-full" />
+    <div className="space-y-1.5 min-w-0">
+      <WaveformLegend />
+      <div
+        ref={containerRef}
+        className="relative rounded-xl border border-gray-200 bg-gray-50 overflow-hidden cursor-crosshair touch-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <canvas ref={canvasRef} className="block w-full" />
+      </div>
+      <div className="flex justify-between text-[10px] font-mono text-gray-400 px-1">
+        <span>{formatTimePrecise(0)}</span>
+        <span>{formatTimePrecise(duration)}</span>
+      </div>
     </div>
   );
 }

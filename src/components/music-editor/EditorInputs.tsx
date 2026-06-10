@@ -7,6 +7,18 @@ import {
   parseBoundedSeconds,
   snapToStep,
 } from "@/lib/music-editor/format";
+import { resetMobileViewport } from "@/lib/music-editor/mobile-viewport";
+
+const mobileInputSize = "text-base sm:text-xs";
+
+function mergeInputClass(className?: string): string {
+  return [className, mobileInputSize].filter(Boolean).join(" ");
+}
+
+function afterInputBlur(extra?: () => void): void {
+  extra?.();
+  resetMobileViewport();
+}
 
 interface TimeFieldProps {
   value: string;
@@ -41,12 +53,12 @@ export function TimeField({
       }}
       onBlur={() => {
         onCommit();
-        onBlurExtra?.();
+        afterInputBlur(onBlurExtra);
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}
-      className={className}
+      className={mergeInputClass(className)}
       placeholder={placeholder}
     />
   );
@@ -101,11 +113,14 @@ export function SecondsField({
         setDraft(value === 0 ? "" : formatSecondsDisplay(value));
         requestAnimationFrame(() => e.target.select());
       }}
-      onBlur={commit}
+      onBlur={() => {
+        commit();
+        resetMobileViewport();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}
-      className={className}
+      className={mergeInputClass(className)}
     />
   );
 }

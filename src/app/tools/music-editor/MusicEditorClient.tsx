@@ -415,7 +415,7 @@ export default function MusicEditorClient() {
     activeObject.type === "track" && activeObject.trackId === trackId;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden max-w-[100vw]">
       {loading && <ProgressOverlay message={loadingMsg} progress={loadingProgress} />}
       {exportError && (
         <div className="flex-shrink-0 px-4 pt-2">
@@ -425,7 +425,7 @@ export default function MusicEditorClient() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none">
         <div className="max-w-2xl mx-auto w-full min-w-0 px-4 py-3 space-y-3">
           <div className="space-y-1.5">
             {tracks.map((track, idx) => {
