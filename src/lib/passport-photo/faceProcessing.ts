@@ -26,22 +26,54 @@ export interface Geom {
   fh: number;
   nw: number;
   nh: number;
-  /** object-fit: cover — минимальный масштаб заполнения кадра */
   cover: number;
-  /** object-fit: contain — масштаб, при котором видно всё фото */
+  /** contain — базовый масштаб при zoom=1 */
   fit: number;
-  /** Нижняя граница pinch/slider: чуть ниже contain, чтобы можно было отдалить от autoZoom */
   minZoom: number;
 }
 
 export const MAX_ZOOM = 4;
+const MIN_ZOOM = 1;
 
-/** zoom=1 → cover; zoom=fit/cover → contain; zoom=minZoom → чуть шире contain */
+/** zoom=1 → contain (всё фото по центру); zoom>1 → приближение */
 export function buildGeom(fw: number, fh: number, nw: number, nh: number): Geom {
   const cover = Math.max(fw / nw, fh / nh);
   const fit = Math.min(fw / nw, fh / nh);
-  const fitZoom = fit / cover;
-  return { fw, fh, nw, nh, cover, fit, minZoom: fitZoom * 0.88 };
+  return { fw, fh, nw, nh, cover, fit, minZoom: MIN_ZOOM };
+}
+
+function clampPan(
+  fw: number,
+  fh: number,
+  iw: number,
+  ih: number,
+  tx: number,
+  ty: number
+): { tx: number; ty: number } {
+  let x = tx;
+  let y = ty;
+  if (iw <= fw) {
+    x = (fw - iw) / 2;
+  } else {
+    x = clamp(x, fw - iw, 0);
+  }
+  if (ih < fh) {
+    y = (fh - ih) / 2;
+  } else {
+    y = clamp(y, fh - ih, 0);
+  }
+  return { tx: x, ty: y };
+}
+
+function adjustFromPan(geom: Geom, scale: number, tx: number, ty: number): Adjust {
+  const iw = geom.nw * scale;
+  const ih = geom.nh * scale;
+  const pan = clampPan(geom.fw, geom.fh, iw, ih, tx, ty);
+  return {
+    zoom: scale / geom.fit,
+    cxN: (geom.fw / 2 - pan.tx) / (geom.nw * scale),
+    cyN: (geom.fh / 2 - pan.ty) / (geom.nh * scale),
+  };
 }
 
 export interface FaceEllipse {
@@ -61,6 +93,11 @@ function isAppleDevice(): boolean {
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
   );
+}
+
+function isAndroidDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android/i.test(navigator.userAgent);
 }
 
 function loadViaImageElement(file: File): Promise<HTMLImageElement> {
@@ -140,50 +177,51 @@ export async function normalizeImageOrientation(file: File): Promise<NormalizedI
     (await exifr.parse(file, { pick: ["Orientation"] }).catch(() => null))?.Orientation ?? 1;
   const rawDims = await readRawDimensions(file);
 
-  const attempts: Array<() => Promise<HTMLCanvasElement>> = [
-    // 1) Современный API — EXIF применяется автоматически
-    async () => {
-      if (typeof createImageBitmap !== "function") throw new Error("skip");
-      const bitmap = await createImageBitmap(file, {
-        imageOrientation: "from-image",
-      } as ImageBitmapOptions);
-      if (
-        rawDims &&
-        orientation !== 1 &&
-        !orientedSizeMatches(bitmap.width, bitmap.height, rawDims.w, rawDims.h, orientation)
-      ) {
-        bitmap.close();
-        throw new Error("from-image dimensions mismatch");
-      }
-      const canvas = drawSourceToCanvas(bitmap, bitmap.width, bitmap.height);
+  const manualExif = async () => {
+    const bitmap = await createImageBitmap(file);
+    const { width, height } = orientedDimensions(bitmap.width, bitmap.height, orientation);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d")!;
+    applyOrientationTransform(ctx, bitmap.width, bitmap.height, orientation);
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return drawSourceToCanvas(canvas, width, height);
+  };
+
+  const fromImageExif = async () => {
+    if (typeof createImageBitmap !== "function") throw new Error("skip");
+    const bitmap = await createImageBitmap(file, {
+      imageOrientation: "from-image",
+    } as ImageBitmapOptions);
+    if (
+      rawDims &&
+      orientation !== 1 &&
+      !orientedSizeMatches(bitmap.width, bitmap.height, rawDims.w, rawDims.h, orientation)
+    ) {
       bitmap.close();
-      return canvas;
-    },
-    // 2) Apple: Image() с нативной ориентацией, без ручного поворота
-    async () => {
-      if (!isAppleDevice()) throw new Error("skip");
-      const img = await loadViaImageElement(file);
-      return drawSourceToCanvas(img, img.naturalWidth, img.naturalHeight);
-    },
-    // 3) Ручной EXIF для Android/desktop
-    async () => {
-      const bitmap = await createImageBitmap(file);
-      const { width, height } = orientedDimensions(bitmap.width, bitmap.height, orientation);
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d")!;
-      applyOrientationTransform(ctx, bitmap.width, bitmap.height, orientation);
-      ctx.drawImage(bitmap, 0, 0);
-      bitmap.close();
-      return drawSourceToCanvas(canvas, width, height);
-    },
-    // 4) Последний шанс — Image() без EXIF
-    async () => {
-      const img = await loadViaImageElement(file);
-      return drawSourceToCanvas(img, img.naturalWidth, img.naturalHeight);
-    },
-  ];
+      throw new Error("from-image dimensions mismatch");
+    }
+    const canvas = drawSourceToCanvas(bitmap, bitmap.width, bitmap.height);
+    bitmap.close();
+    return canvas;
+  };
+
+  const appleNative = async () => {
+    if (!isAppleDevice()) throw new Error("skip");
+    const img = await loadViaImageElement(file);
+    return drawSourceToCanvas(img, img.naturalWidth, img.naturalHeight);
+  };
+
+  const imageFallback = async () => {
+    const img = await loadViaImageElement(file);
+    return drawSourceToCanvas(img, img.naturalWidth, img.naturalHeight);
+  };
+
+  const attempts: Array<() => Promise<HTMLCanvasElement>> = isAndroidDevice()
+    ? [manualExif, fromImageExif, imageFallback]
+    : [fromImageExif, appleNative, manualExif, imageFallback];
 
   let canvas: HTMLCanvasElement | null = null;
   for (const attempt of attempts) {
@@ -353,14 +391,14 @@ export function computeAutoAdjustFromLandmarks(
   landmarks: Landmarks68,
   formatId: string
 ): Adjust {
-  const { fw, fh, cover, minZoom } = geom;
+  const { fw, fh, fit, minZoom } = geom;
   const rules = getFormatRule(formatId);
   const head = getHeadBounds(landmarks);
   const targetHeadRatio = (rules.headHeightMin + rules.headHeightMax) / 2;
 
-  let zoom = (targetHeadRatio * fh) / (head.height * cover);
+  let zoom = (targetHeadRatio * fh) / (head.height * fit);
   zoom = clamp(zoom, minZoom, MAX_ZOOM);
-  let scale = cover * zoom;
+  let scale = fit * zoom;
 
   const chinTargetY = fh * 0.79;
   let ty = chinTargetY - head.bottom * scale;
@@ -369,16 +407,12 @@ export function computeAutoAdjustFromLandmarks(
   let crownFrameY = head.top * scale + ty;
   while (crownFrameY < fh * 0.04 && zoom > minZoom) {
     zoom = Math.max(minZoom, zoom * 0.96);
-    scale = cover * zoom;
+    scale = fit * zoom;
     ty = chinTargetY - head.bottom * scale;
     crownFrameY = head.top * scale + ty;
   }
 
-  return {
-    zoom,
-    cxN: (fw / 2 - tx) / (imgW * scale),
-    cyN: (fh / 2 - ty) / (imgH * scale),
-  };
+  return adjustFromPan(geom, scale, tx, ty);
 }
 
 /** Эвристика при отсутствии лица */
@@ -392,12 +426,13 @@ export function computeHeuristicAdjust(geom: Geom): Adjust {
 }
 
 export function toView(g: Geom, a: Adjust): { scale: number; tx: number; ty: number } {
-  const scale = g.cover * a.zoom;
+  const scale = g.fit * a.zoom;
   const iw = g.nw * scale;
   const ih = g.nh * scale;
-  const tx = clamp(g.fw / 2 - a.cxN * g.nw * scale, g.fw - iw, 0);
-  const ty = clamp(g.fh / 2 - a.cyN * g.nh * scale, g.fh - ih, 0);
-  return { scale, tx, ty };
+  const rawTx = g.fw / 2 - a.cxN * g.nw * scale;
+  const rawTy = g.fh / 2 - a.cyN * g.nh * scale;
+  const pan = clampPan(g.fw, g.fh, iw, ih, rawTx, rawTy);
+  return { scale, tx: pan.tx, ty: pan.ty };
 }
 
 export function fromView(
@@ -405,7 +440,7 @@ export function fromView(
   v: { scale: number; tx: number; ty: number }
 ): Adjust {
   return {
-    zoom: v.scale / g.cover,
+    zoom: v.scale / g.fit,
     cxN: (g.fw / 2 - v.tx) / (g.nw * v.scale),
     cyN: (g.fh / 2 - v.ty) / (g.nh * v.scale),
   };

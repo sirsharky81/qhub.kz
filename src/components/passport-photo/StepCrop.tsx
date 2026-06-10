@@ -214,10 +214,10 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   function zoomTo(g: Geom, a: Adjust, rawZoom: number, fx: number, fy: number) {
     const newZoom = clamp(rawZoom, g.minZoom, MAX_ZOOM);
     const v = toView(g, a);
-    const f = (g.cover * newZoom) / v.scale;
+    const f = (g.fit * newZoom) / v.scale;
     setUserAdjust(
       fromView(g, {
-        scale: g.cover * newZoom,
+        scale: g.fit * newZoom,
         tx: fx - (fx - v.tx) * f,
         ty: fy - (fy - v.ty) * f,
       })
@@ -258,9 +258,10 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     if (!geom || !pointers.current.has(e.pointerId)) return;
     const prev = pointers.current.get(e.pointerId)!;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const currentAdjust = latest.current.adjust;
 
     if (pointers.current.size === 1) {
-      panBy(geom, adjust, e.clientX - prev.x, e.clientY - prev.y);
+      panBy(geom, currentAdjust, e.clientX - prev.x, e.clientY - prev.y);
     } else if (pointers.current.size === 2 && pinchRef.current && frameRef.current) {
       const [a, b] = [...pointers.current.values()];
       const rect = frameRef.current.getBoundingClientRect();
@@ -268,7 +269,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       const fx = (a.x + b.x) / 2 - rect.left;
       const fy = (a.y + b.y) / 2 - rect.top;
       const factor = dist / pinchRef.current.dist;
-      const v = toView(geom, adjust);
+      const v = toView(geom, currentAdjust);
       const panned = fromView(geom, {
         scale: v.scale,
         tx: v.tx + (fx - pinchRef.current.fx),
@@ -624,10 +625,13 @@ function DebugOverlay({
         strokeWidth="2"
       />
       <text x={4} y={14} fill="lime" fontSize="10" fontFamily="monospace">
-        {geom.nw}x{geom.nh} | EXIF:{orientation} | scale:{view.scale.toFixed(2)}
+        {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.fit).toFixed(2)}
+      </text>
+      <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
+        tx:{view.tx.toFixed(0)} ty:{view.ty.toFixed(0)} fit:{geom.fit.toFixed(3)}
       </text>
       {quality && (
-        <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
+        <text x={4} y={42} fill="lime" fontSize="10" fontFamily="monospace">
           lap:{quality.laplacianVariance?.toFixed(0)} bri:{quality.avgBrightness?.toFixed(0)}
         </text>
       )}
