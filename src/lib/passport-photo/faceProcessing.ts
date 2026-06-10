@@ -27,26 +27,30 @@ export interface Geom {
   nw: number;
   nh: number;
   cover: number;
-  /** contain — базовый масштаб при zoom=1 */
   fit: number;
+  /** zoom, при котором видно всё фото (contain) */
+  containZoom: number;
   minZoom: number;
 }
 
 export const MAX_ZOOM = 4;
-/** autoZoom всегда >= AUTO_ZOOM_MIN; пользователь может ниже через minZoom */
+/** autoZoom всегда >= AUTO_ZOOM_MIN (cover) */
 export const AUTO_ZOOM_MIN = 1;
 
-const CONTAIN_MARGIN = 0.75;
-
-/** zoom=1 → cover (автокадр); zoom=minZoom → всё фото по центру */
+/** zoom=1 → cover; zoom=containZoom → всё фото; zoom>1 → приближение */
 export function buildGeom(fw: number, fh: number, nw: number, nh: number): Geom {
   const cover = Math.max(fw / nw, fh / nh);
   const fit = Math.min(fw / nw, fh / nh);
-  return { fw, fh, nw, nh, cover, fit, minZoom: (fit / cover) * CONTAIN_MARGIN };
+  const containZoom = fit / cover;
+  return { fw, fh, nw, nh, cover, fit, containZoom, minZoom: containZoom };
 }
 
-/** Полное фото по центру — для ручного отдаления до minZoom */
-export function containCenteredAdjust(geom: Geom, zoom = geom.minZoom): Adjust {
+/** Всё фото по центру — стартовый вид и нижняя граница слайдера */
+export function fullPhotoAdjust(geom: Geom): Adjust {
+  return containCenteredAdjust(geom, geom.containZoom);
+}
+
+export function containCenteredAdjust(geom: Geom, zoom = geom.containZoom): Adjust {
   return { zoom: clamp(zoom, geom.minZoom, MAX_ZOOM), cxN: 0.5, cyN: 0.5 };
 }
 

@@ -7,9 +7,9 @@ import type { Landmarks68 } from "@/lib/passport-photo/landmarkAdapter";
 import {
   buildGeom,
   computeAutoAdjustFromLandmarks,
-  computeHeuristicAdjust,
   containCenteredAdjust,
   cropToBlob,
+  fullPhotoAdjust,
   drawCropPreview,
   drawFitPreview,
   fromView,
@@ -50,7 +50,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   const [landmarks, setLandmarks] = useState<Landmarks68 | null>(null);
   const [faceDetected, setFaceDetected] = useState<boolean | null>(null);
   const [faceChecked, setFaceChecked] = useState(false);
-  const [manualMode, setManualMode] = useState(false);
+  const [autoAligned, setAutoAligned] = useState(false);
   const [showFaceToast, setShowFaceToast] = useState(false);
   const [working, setWorking] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -73,17 +73,17 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
     return buildGeom(fw, fh, natural.w, natural.h);
   }, [natural, containerW, aspect]);
 
-  const autoAdjust = useMemo<Adjust>(() => {
-    if (!natural || !geom || !faceChecked) {
-      return { zoom: 1, cxN: 0.5, cyN: 0.5 };
-    }
-    if (landmarks && !manualMode) {
-      return computeAutoAdjustFromLandmarks(natural.w, natural.h, geom, landmarks, selectedSizeId);
-    }
-    return computeHeuristicAdjust(geom);
-  }, [natural, geom, faceChecked, landmarks, manualMode, selectedSizeId]);
+  const baseAdjust = useMemo<Adjust>(() => {
+    if (!geom) return { zoom: 1, cxN: 0.5, cyN: 0.5 };
+    return fullPhotoAdjust(geom);
+  }, [geom]);
 
-  const adjust = userAdjust ?? autoAdjust;
+  const suggestedAdjust = useMemo<Adjust | null>(() => {
+    if (!natural || !geom || !faceChecked || !landmarks) return null;
+    return computeAutoAdjustFromLandmarks(natural.w, natural.h, geom, landmarks, selectedSizeId);
+  }, [natural, geom, faceChecked, landmarks, selectedSizeId]);
+
+  const adjust = userAdjust ?? baseAdjust;
   const view = geom ? toView(geom, adjust) : null;
 
   const faceEllipse: FaceEllipse | null = useMemo(() => {
@@ -115,18 +115,15 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       if (result) {
         setLandmarks(result.landmarks);
         setFaceDetected(true);
-        setManualMode(false);
         setShowFaceToast(false);
       } else {
         setLandmarks(null);
         setFaceDetected(false);
-        setManualMode(true);
         setShowFaceToast(true);
       }
     } catch {
       setLandmarks(null);
       setFaceDetected(false);
-      setManualMode(true);
       setShowFaceToast(true);
     } finally {
       setModelsLoading(false);
@@ -205,12 +202,24 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   function handleSizeChange(sizeId: string) {
     setSelectedSizeId(sizeId);
     setUserAdjust(null);
+    setAutoAligned(false);
   }
 
   function applyAdjust(next: Adjust) {
     latest.current.adjust = next;
     setUserAdjust(next);
-    setManualMode(true);
+  }
+
+  function applyAutoAlign() {
+    if (!suggestedAdjust) return;
+    applyAdjust(suggestedAdjust);
+    setAutoAligned(true);
+  }
+
+  function resetToFullPhoto() {
+    if (!geom) return;
+    applyAdjust(fullPhotoAdjust(geom));
+    setAutoAligned(false);
   }
 
   function panBy(g: Geom, a: Adjust, dx: number, dy: number) {
@@ -316,6 +325,7 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
   async function handleRetryDetection() {
     setFaceChecked(false);
     setUserAdjust(null);
+    setAutoAligned(false);
     await runDetection();
   }
 
@@ -348,9 +358,11 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
       <div className="text-center">
         <h2 className="text-xl font-semibold text-gray-900">Кадрирование</h2>
         <p className="text-sm text-gray-500 mt-1">
-          {faceDetected
-            ? "Фото автоматически выровнено — проверьте овал"
-            : "Совместите лицо с овалом — можно настроить вручную и продолжить"}
+          {autoAligned
+            ? "Лицо выровнено — проверьте овал и при необходимости подстройте"
+            : faceDetected
+              ? "Показано всё фото — нажмите «Автовыравнивание» или настройте вручную"
+              : "Совместите лицо с овалом вручную или продолжите"}
         </p>
       </div>
 
@@ -462,13 +474,33 @@ export default function StepCrop({ imageFile, onCropComplete, onBack }: Props) {
               <span className="text-gray-400 text-lg leading-none select-none">+</span>
             </div>
             <p className="text-xs text-gray-400 text-center">
-              Овал — голова с волосами · Пунктир сверху — отступ от края
+              Влево — всё фото · Вправо — приблизить · Овал — голова с волосами
             </p>
+          </div>
+        )}
+
+        {geom && faceDetected && suggestedAdjust && (
+          <div className="flex gap-2 w-full max-w-sm">
+            <button
+              type="button"
+              onClick={applyAutoAlign}
+              disabled={autoAligned}
+              className="flex-1 px-3 py-2 rounded-xl bg-gray-900 text-white text-xs font-medium hover:bg-gray-700 transition-colors disabled:opacity-40"
+            >
+              {autoAligned ? "✓ Выровнено" : "Автовыравнивание"}
+            </button>
+            <button
+              type="button"
+              onClick={resetToFullPhoto}
+              className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              Всё фото
+            </button>
           </div>
         )}
       </div>
 
-      {showFaceToast && manualMode && (
+      {showFaceToast && (
         <div className="max-w-md mx-auto w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-2">
           <p>
             Автораспознавание не сработало. Совместите лицо с овалом пальцами и нажмите{" "}
@@ -638,7 +670,7 @@ function DebugOverlay({
         {geom.nw}x{geom.nh} | EXIF:{orientation} | zoom:{(view.scale / geom.cover).toFixed(2)}
       </text>
       <text x={4} y={28} fill="lime" fontSize="10" fontFamily="monospace">
-        min:{geom.minZoom.toFixed(2)} tx:{view.tx.toFixed(0)} ty:{view.ty.toFixed(0)}
+        cnt:{geom.containZoom.toFixed(2)} min:{geom.minZoom.toFixed(2)} tx:{view.tx.toFixed(0)}
       </text>
       {quality && (
         <text x={4} y={42} fill="lime" fontSize="10" fontFamily="monospace">

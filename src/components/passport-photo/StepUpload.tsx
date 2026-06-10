@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import CameraCapture from "@/components/passport-photo/CameraCapture";
 import PhotoTips from "@/components/passport-photo/PhotoTips";
 
 interface Props {
@@ -12,6 +13,7 @@ export default function StepUpload({ onImageSelected }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCamera, setShowCamera] = useState(false);
 
   function isImageFile(file: File): boolean {
     if (file.type.startsWith("image/")) return true;
@@ -59,7 +61,13 @@ export default function StepUpload({ onImageSelected }: Props) {
       <div className="flex flex-col gap-3 w-full max-w-md md:hidden">
           <button
             type="button"
-            onClick={() => cameraInputRef.current?.click()}
+            onClick={() => {
+              if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+                setShowCamera(true);
+              } else {
+                cameraInputRef.current?.click();
+              }
+            }}
             className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-gray-900 text-white font-medium text-sm transition-colors hover:bg-gray-700 active:scale-[0.98]"
           >
             <CameraIcon />
@@ -98,15 +106,24 @@ export default function StepUpload({ onImageSelected }: Props) {
         </div>
       </button>
 
-      {/* Camera input — opens camera directly on Android */}
+      {/* Fallback camera input (без capture=user — Samsung иначе отдаёт обрезанный JPEG) */}
       <input
         ref={cameraInputRef}
         type="file"
         accept="image/*"
-        capture="user"
         className="hidden"
         onChange={handleInputChange}
       />
+
+      {showCamera && (
+        <CameraCapture
+          onCapture={(file) => {
+            setShowCamera(false);
+            handleFile(file);
+          }}
+          onClose={() => setShowCamera(false)}
+        />
+      )}
       {/* Gallery / file-picker input — no capture attribute */}
       <input
         ref={galleryInputRef}
