@@ -1,6 +1,14 @@
 import exifr from "exifr";
 import { getFormatRule, type PhotoFormatId } from "./format-rules";
-import { getHeadBounds, type Landmarks68 } from "./landmarkAdapter";
+import {
+  getChinPoint,
+  getFaceOvalBounds,
+  getForeheadPoint,
+  getEyeCenter,
+  getHeadBounds,
+  type Landmarks68,
+} from "./landmarkAdapter";
+import { PASSPORT_GUIDE } from "./passport-guide";
 
 export interface Point {
   x: number;
@@ -83,10 +91,11 @@ export function computeAndroidLooseFitAdjust(
   landmarks: Landmarks68,
   formatId: string
 ): Adjust {
-  const head = getHeadBounds(landmarks);
+  const forehead = getForeheadPoint(landmarks);
+  const chin = getChinPoint(landmarks);
   const rules = getFormatRule(formatId);
   const targetHeadRatio = (rules.headHeightMin + rules.headHeightMax) / 2;
-  const headHAtZoom1 = head.height * geom.baseScale;
+  const headHAtZoom1 = (chin.y - forehead.y) * 1.1 * geom.baseScale;
   const targetHeadH = geom.fh * targetHeadRatio;
 
   if (headHAtZoom1 <= targetHeadH * 1.08) {
@@ -533,23 +542,27 @@ export function computeAutoAdjustFromLandmarks(
 ): Adjust {
   const { fw, fh, baseScale } = geom;
   const rules = getFormatRule(formatId);
-  const head = getHeadBounds(landmarks);
+  const forehead = getForeheadPoint(landmarks);
+  const chin = getChinPoint(landmarks);
+  const eyeCenter = getEyeCenter(landmarks);
   const targetHeadRatio = (rules.headHeightMin + rules.headHeightMax) / 2;
+  /** Высота «головы» для масштаба: лицо + ~10% на волосы (без плеч) */
+  const passportHeadH = (chin.y - forehead.y) * 1.1;
 
-  let zoom = (targetHeadRatio * fh) / (head.height * baseScale);
+  let zoom = (targetHeadRatio * fh) / (passportHeadH * baseScale);
   zoom = clamp(zoom, AUTO_ZOOM_MIN, MAX_ZOOM);
   let scale = baseScale * zoom;
 
-  const chinTargetY = fh * 0.79;
-  let ty = chinTargetY - head.bottom * scale;
-  let tx = fw / 2 - head.centerX * scale;
+  const chinTargetY = fh * PASSPORT_GUIDE.chinY;
+  let ty = chinTargetY - chin.y * scale;
+  let tx = fw / 2 - eyeCenter.x * scale;
 
-  let crownFrameY = head.top * scale + ty;
-  while (crownFrameY < fh * 0.04 && zoom > AUTO_ZOOM_MIN) {
+  let crownFrameY = forehead.y * scale + ty;
+  while (crownFrameY < fh * PASSPORT_GUIDE.topMargin && zoom > AUTO_ZOOM_MIN) {
     zoom = Math.max(AUTO_ZOOM_MIN, zoom * 0.96);
     scale = baseScale * zoom;
-    ty = chinTargetY - head.bottom * scale;
-    crownFrameY = head.top * scale + ty;
+    ty = chinTargetY - chin.y * scale;
+    crownFrameY = forehead.y * scale + ty;
   }
 
   const iw = imgW * scale;
@@ -644,7 +657,7 @@ export function landmarksToFrameEllipse(
   imgW: number,
   imgH: number
 ): FaceEllipse {
-  const head = getHeadBounds(landmarks);
+  const head = getFaceOvalBounds(landmarks);
   const toFrame = (p: Point) => ({
     x: p.x * view.scale + view.tx,
     y: p.y * view.scale + view.ty,

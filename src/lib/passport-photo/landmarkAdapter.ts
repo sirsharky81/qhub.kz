@@ -52,6 +52,35 @@ export interface HeadBounds {
 }
 
 /**
+ * Компактный овал лица для оверлея (без плеч/широких полей).
+ * Совпадает с видимым лицом + небольшой запас на волосы.
+ */
+export function getFaceOvalBounds(landmarks: Landmarks68): HeadBounds {
+  const forehead = getForeheadPoint(landmarks);
+  const chin = getChinPoint(landmarks);
+  const faceW = getFaceWidth(landmarks);
+  const eyeCenter = getEyeCenter(landmarks);
+
+  const faceHeight = chin.y - forehead.y;
+  const top = forehead.y - faceHeight * 0.06;
+  const bottom = chin.y + faceHeight * 0.05;
+  const hPad = faceW * 0.05;
+  const left = eyeCenter.x - faceW / 2 - hPad;
+  const right = eyeCenter.x + faceW / 2 + hPad;
+
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+/**
  * Bounding box головы с padding для плеч и волос.
  * Низ = подбородок + 25% высоты лица, бока ±15% ширины.
  */
