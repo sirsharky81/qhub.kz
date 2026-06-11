@@ -1,20 +1,5 @@
 @import "tailwindcss";
 
-@custom-variant dark (@media (prefers-color-scheme: dark));
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #030712;
-    --foreground: #f9fafb;
-    --muted: #9ca3af;
-    --muted-light: #6b7280;
-    --border: #1f2937;
-    --border-light: #111827;
-    --surface: #111827;
-    --surface-hover: #1f2937;
-  }
-}
-
 :root {
   --background: #ffffff;
   --foreground: #0a0a0a;
@@ -38,6 +23,7 @@
 }
 
 html {
+  color-scheme: light;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -124,50 +110,6 @@ body {
   );
 }
 
-@media (prefers-color-scheme: dark) {
-  .app-card-surface {
-    background-color: #0e1219;
-    background-image: radial-gradient(
-      ellipse 85% 65% at 50% 0%,
-      rgba(31, 41, 55, 0.45) 0%,
-      transparent 72%
-    );
-  }
-
-  .app-card-standard {
-    background-color: #0e1219;
-    border-color: #374151;
-  }
-
-  .music-card-surface {
-    background-color: #111827;
-    background-image: radial-gradient(
-      ellipse 85% 65% at 50% 0%,
-      rgba(31, 41, 55, 0.9) 0%,
-      transparent 72%
-    );
-  }
-
-  .music-card-active {
-    background-color: #111827;
-    border-color: #374151;
-  }
-
-  .music-card-active.music-card-playing {
-    box-shadow:
-      0 4px 24px rgba(0, 0, 0, 0.25),
-      0 1px 4px rgba(0, 0, 0, 0.15);
-  }
-
-  .music-card-glow {
-    background: radial-gradient(
-      ellipse 90% 70% at 50% 110%,
-      rgba(255, 255, 255, 0.04) 0%,
-      transparent 65%
-    );
-  }
-}
-
 @keyframes music-status-pulse {
   0%,
   100% {
@@ -218,13 +160,3 @@ body {
   cursor: pointer;
 }
 
-@media (prefers-color-scheme: dark) {
-  .music-volume-slider::-webkit-slider-runnable-track {
-    background: linear-gradient(to right, #f9fafb var(--vol-pct, 50%), #374151 var(--vol-pct, 50%));
-  }
-
-  .music-volume-slider::-webkit-slider-thumb {
-    background: #f9fafb;
-    border-color: #111827;
-  }
-}

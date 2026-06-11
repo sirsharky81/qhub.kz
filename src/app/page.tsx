@@ -9,11 +9,11 @@ const comingSoonCount = sortedApps.filter((a) => a.comingSoon).length;
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 pb-16">
+    <div className="flex flex-col min-h-screen bg-white text-gray-900 pb-16">
       <Navbar />
 
       {/* ── HERO ─────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden pt-32 pb-24 px-4 sm:px-6 flex flex-col items-center text-center bg-dot-grid">
+      <section className="relative overflow-hidden pt-32 pb-24 px-4 sm:px-6 flex flex-col items-center text-center bg-white bg-dot-grid">
         {/* Subtle top gradient fade */}
         <div
           aria-hidden
