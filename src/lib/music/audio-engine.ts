@@ -54,6 +54,10 @@ export class AudioEngine {
 
     this.audio.addEventListener("timeupdate", () => {
       this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+      this.updatePositionState();
+    });
+    this.audio.addEventListener("durationchange", () => {
+      this.updatePositionState();
     });
     this.audio.addEventListener("ended", () => {
       this.setStatus("stopped");
@@ -215,6 +219,47 @@ export class AudioEngine {
     this.callbacks.onStatusChange(status);
   }
 
+  /** Позиция для бегунка на экране блокировки iOS (Media Session API) */
+  private updatePositionState(): void {
+    if (!("mediaSession" in navigator)) return;
+    if (typeof navigator.mediaSession.setPositionState !== "function") return;
+
+    const duration = this.audio.duration;
+    const position = this.audio.currentTime;
+    if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(position)) return;
+
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: this.audio.playbackRate > 0 ? this.audio.playbackRate : 1,
+        position: Math.max(0, Math.min(position, duration)),
+      });
+    } catch {
+      /* Safari отклоняет невалидное состояние */
+    }
+  }
+
+  private clearMediaSessionHandlers(): void {
+    if (!("mediaSession" in navigator)) return;
+    const actions = [
+      "play",
+      "pause",
+      "previoustrack",
+      "nexttrack",
+      "stop",
+      "seekto",
+      "seekbackward",
+      "seekforward",
+    ] as const;
+    for (const action of actions) {
+      try {
+        navigator.mediaSession.setActionHandler(action, null);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   async load(file: File, startPosition = 0): Promise<void> {
     this.setStatus("loading");
     this.teardownAnalyser();
@@ -245,18 +290,21 @@ export class AudioEngine {
       this.audio.currentTime = startPosition;
     }
     this.setStatus("paused");
+    this.updatePositionState();
   }
 
   async play(): Promise<void> {
     this.audio.playbackRate = 1;
     await this.audio.play();
     await this.ensureAnalyser();
+    this.updatePositionState();
   }
 
   pause(): void {
     this.audio.pause();
     this.setStatus("paused");
     this.onSavePosition?.(this.audio.currentTime);
+    this.updatePositionState();
   }
 
   stop(): void {
@@ -264,12 +312,18 @@ export class AudioEngine {
     this.audio.currentTime = 0;
     this.setStatus("stopped");
     this.onSavePosition?.(0);
+    this.updatePositionState();
   }
 
   seek(time: number): void {
-    if (Number.isFinite(time)) {
-      this.audio.currentTime = Math.max(0, Math.min(time, this.audio.duration || time));
-    }
+    if (!Number.isFinite(time)) return;
+    const duration = this.audio.duration;
+    const clamped =
+      duration > 0 && Number.isFinite(duration)
+        ? Math.max(0, Math.min(time, duration))
+        : Math.max(0, time);
+    this.audio.currentTime = clamped;
+    this.updatePositionState();
   }
 
   updateMediaSession(
@@ -285,6 +339,7 @@ export class AudioEngine {
 
     if (!track) {
       navigator.mediaSession.metadata = null;
+      this.clearMediaSessionHandlers();
       return;
     }
 
@@ -305,6 +360,26 @@ export class AudioEngine {
       this.stop();
       handlers.onPause();
     });
+
+    navigator.mediaSession.setActionHandler("seekto", (details) => {
+      if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
+      this.seek(details.seekTime);
+      this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+    });
+
+    navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+      const offset = details.seekOffset ?? 10;
+      this.seek(this.audio.currentTime - offset);
+      this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+    });
+
+    navigator.mediaSession.setActionHandler("seekforward", (details) => {
+      const offset = details.seekOffset ?? 10;
+      this.seek(this.audio.currentTime + offset);
+      this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+    });
+
+    this.updatePositionState();
   }
 
   setMediaSessionPlaybackState(state: "playing" | "paused" | "none"): void {
@@ -315,6 +390,7 @@ export class AudioEngine {
 
   destroy(): void {
     this.stop();
+    this.clearMediaSessionHandlers();
     this.revokeUrl();
     this.teardownAnalyser();
     if (this.savePositionTimer) clearInterval(this.savePositionTimer);
