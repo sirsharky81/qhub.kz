@@ -48,7 +48,9 @@ export function SeekBar({
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isPlaying, isDragging, getLiveTime, currentTime]);
+    // currentTime намеренно не в deps — RAF читает live time, лишние перезапуски дают рывки UI
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, isDragging, getLiveTime]);
 
   const handleChange = useCallback(
     (value: number) => {

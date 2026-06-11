@@ -10,23 +10,47 @@ export interface AudioEngineCallbacks {
   onGraphReady?: (analyser: AnalyserNode) => void;
 }
 
+type CapturableAudio = HTMLAudioElement & {
+  captureStream?: () => MediaStream;
+  mozCaptureStream?: () => MediaStream;
+};
+
 export class AudioEngine {
-  private audio: HTMLAudioElement;
+  private audio: CapturableAudio;
+  /** Только для визуализации — не в цепочке воспроизведения */
   private context: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
-  private gainNode: GainNode | null = null;
-  private source: MediaElementAudioSourceNode | null = null;
-  private connected = false;
+  private streamSource: MediaStreamAudioSourceNode | null = null;
+  private analyserTrackKey: string | null = null;
   private objectUrl: string | null = null;
   private status: PlaybackStatus = "idle";
   private callbacks: AudioEngineCallbacks;
   private savePositionTimer: ReturnType<typeof setInterval> | null = null;
   private onSavePosition: ((position: number) => void) | null = null;
+  private lifecycleAttached = false;
+
+  private readonly onPlayingForAnalyser = () => {
+    void this.ensureAnalyser();
+  };
+
+  private readonly onVisibilityResume = () => {
+    if (document.visibilityState !== "visible") return;
+    void this.resumePlaybackIfNeeded();
+  };
 
   constructor(callbacks: AudioEngineCallbacks) {
     this.callbacks = callbacks;
-    this.audio = new Audio();
+    this.audio = new Audio() as CapturableAudio;
     this.audio.preload = "auto";
+    this.audio.playbackRate = 1;
+    this.audio.setAttribute("playsinline", "true");
+    this.audio.setAttribute("webkit-playsinline", "true");
+
+    if (typeof document !== "undefined") {
+      this.audio.style.display = "none";
+      document.body.appendChild(this.audio);
+      this.attachLifecycleHandlers();
+    }
 
     this.audio.addEventListener("timeupdate", () => {
       this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
@@ -39,11 +63,19 @@ export class AudioEngine {
       this.callbacks.onError("Ошибка воспроизведения");
       this.setStatus("stopped");
     });
-    this.audio.addEventListener("playing", () => this.setStatus("playing"));
+    this.audio.addEventListener("playing", () => {
+      this.setStatus("playing");
+      this.onPlayingForAnalyser();
+    });
     this.audio.addEventListener("pause", () => {
       if (this.status !== "stopped") this.setStatus("paused");
     });
     this.audio.addEventListener("waiting", () => this.setStatus("loading"));
+    this.audio.addEventListener("ratechange", () => {
+      if (this.audio.playbackRate !== 1) {
+        this.audio.playbackRate = 1;
+      }
+    });
   }
 
   getAnalyser(): AnalyserNode | null {
@@ -59,13 +91,7 @@ export class AudioEngine {
   }
 
   setVolume(volume: number): void {
-    const v = Math.max(0, Math.min(1, volume));
-    if (this.gainNode) {
-      this.gainNode.gain.value = v;
-      this.audio.volume = 1;
-    } else {
-      this.audio.volume = v;
-    }
+    this.audio.volume = Math.max(0, Math.min(1, volume));
   }
 
   setSavePositionHandler(handler: (position: number) => void): void {
@@ -78,28 +104,102 @@ export class AudioEngine {
     }, 3000);
   }
 
-  private ensureAudioGraph(): void {
-    if (this.connected) return;
-    try {
-      this.context = new AudioContext();
-      this.analyser = this.context.createAnalyser();
-      this.analyser.fftSize = 512;
-      this.analyser.smoothingTimeConstant = 0.75;
-      this.analyser.minDecibels = -90;
-      this.analyser.maxDecibels = -10;
-      this.gainNode = this.context.createGain();
-      this.gainNode.gain.value = this.audio.volume;
-      this.source = this.context.createMediaElementSource(this.audio);
-      this.source.connect(this.analyser);
-      this.analyser.connect(this.gainNode);
-      this.gainNode.connect(this.context.destination);
-      this.audio.volume = 1;
-      this.connected = true;
-      if (this.analyser) {
-        this.callbacks.onGraphReady?.(this.analyser);
+  private attachLifecycleHandlers(): void {
+    if (this.lifecycleAttached || typeof document === "undefined") return;
+    this.lifecycleAttached = true;
+
+    document.addEventListener("visibilitychange", this.onVisibilityResume);
+    window.addEventListener("pageshow", this.onVisibilityResume);
+    window.addEventListener("focus", this.onVisibilityResume);
+  }
+
+  private detachLifecycleHandlers(): void {
+    if (!this.lifecycleAttached || typeof document === "undefined") return;
+    document.removeEventListener("visibilitychange", this.onVisibilityResume);
+    window.removeEventListener("pageshow", this.onVisibilityResume);
+    window.removeEventListener("focus", this.onVisibilityResume);
+    this.lifecycleAttached = false;
+  }
+
+  private async resumePlaybackIfNeeded(): Promise<void> {
+    if (this.context?.state === "suspended") {
+      try {
+        await this.context.resume();
+      } catch {
+        /* ignore */
       }
+    }
+
+    if (this.status === "playing" && this.audio.paused && this.audio.src) {
+      this.audio.playbackRate = 1;
+      try {
+        await this.audio.play();
+      } catch {
+        /* gesture / policy */
+      }
+    }
+  }
+
+  private captureStream(): MediaStream | null {
+    if (typeof this.audio.captureStream === "function") {
+      return this.audio.captureStream();
+    }
+    if (typeof this.audio.mozCaptureStream === "function") {
+      return this.audio.mozCaptureStream();
+    }
+    return null;
+  }
+
+  private teardownAnalyser(): void {
+    if (this.streamSource) {
+      try {
+        this.streamSource.disconnect();
+      } catch {
+        /* ignore */
+      }
+      this.streamSource = null;
+    }
+    this.analyserTrackKey = null;
+  }
+
+  /** Визуализатор через captureStream — не перехватывает вывод <audio> */
+  private async ensureAnalyser(): Promise<void> {
+    const trackKey = this.audio.src;
+    if (!trackKey || this.analyserTrackKey === trackKey) return;
+
+    const stream = this.captureStream();
+    if (!stream) return;
+
+    try {
+      if (!this.context) {
+        this.context = new AudioContext();
+        this.context.addEventListener("statechange", () => {
+          if (this.context?.state === "suspended" && this.status === "playing") {
+            void this.context.resume();
+          }
+        });
+      }
+
+      if (this.context.state === "suspended") {
+        await this.context.resume();
+      }
+
+      this.teardownAnalyser();
+
+      if (!this.analyser) {
+        this.analyser = this.context.createAnalyser();
+        this.analyser.fftSize = 512;
+        this.analyser.smoothingTimeConstant = 0.75;
+        this.analyser.minDecibels = -90;
+        this.analyser.maxDecibels = -10;
+      }
+
+      this.streamSource = this.context.createMediaStreamSource(stream);
+      this.streamSource.connect(this.analyser);
+      this.analyserTrackKey = trackKey;
+      this.callbacks.onGraphReady?.(this.analyser);
     } catch {
-      // Web Audio API unavailable — playback still works via <audio>
+      this.teardownAnalyser();
     }
   }
 
@@ -117,8 +217,10 @@ export class AudioEngine {
 
   async load(file: File, startPosition = 0): Promise<void> {
     this.setStatus("loading");
+    this.teardownAnalyser();
     this.revokeUrl();
     this.objectUrl = URL.createObjectURL(file);
+    this.audio.playbackRate = 1;
     this.audio.src = this.objectUrl;
 
     await new Promise<void>((resolve, reject) => {
@@ -142,19 +244,13 @@ export class AudioEngine {
     if (startPosition > 0) {
       this.audio.currentTime = startPosition;
     }
-    this.ensureAudioGraph();
-    if (this.context?.state === "suspended") {
-      await this.context.resume();
-    }
     this.setStatus("paused");
   }
 
   async play(): Promise<void> {
-    this.ensureAudioGraph();
-    if (this.context?.state === "suspended") {
-      await this.context.resume();
-    }
+    this.audio.playbackRate = 1;
     await this.audio.play();
+    await this.ensureAnalyser();
   }
 
   pause(): void {
@@ -176,12 +272,15 @@ export class AudioEngine {
     }
   }
 
-  updateMediaSession(track: Track | null, handlers: {
-    onPlay: () => void;
-    onPause: () => void;
-    onPrevious: () => void;
-    onNext: () => void;
-  }): void {
+  updateMediaSession(
+    track: Track | null,
+    handlers: {
+      onPlay: () => void;
+      onPause: () => void;
+      onPrevious: () => void;
+      onNext: () => void;
+    },
+  ): void {
     if (!("mediaSession" in navigator)) return;
 
     if (!track) {
@@ -217,23 +316,16 @@ export class AudioEngine {
   destroy(): void {
     this.stop();
     this.revokeUrl();
+    this.teardownAnalyser();
     if (this.savePositionTimer) clearInterval(this.savePositionTimer);
-    if (this.source) {
-      try {
-        this.source.disconnect();
-      } catch {
-        /* ignore */
-      }
-    }
-    if (this.gainNode) {
-      try {
-        this.gainNode.disconnect();
-      } catch {
-        /* ignore */
-      }
+    this.detachLifecycleHandlers();
+    this.audio.removeEventListener("playing", this.onPlayingForAnalyser);
+    if (this.audio.parentNode) {
+      this.audio.parentNode.removeChild(this.audio);
     }
     if (this.context) {
       void this.context.close();
+      this.context = null;
     }
   }
 }
