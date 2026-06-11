@@ -131,10 +131,15 @@ export default function MusicEditorClient() {
   const handleFilesSelect = useCallback(
     async (files: File[]) => {
       const remaining = MAX_TRACKS - tracks.length;
+      if (remaining <= 0) {
+        setLoadError(`Можно загрузить не более ${MAX_TRACKS} треков`);
+        return;
+      }
       const toLoad = files.slice(0, remaining);
       if (toLoad.length === 0) return;
 
       setLoadError(null);
+      setExportError(null);
       setLoading(true);
       setLoadingMsg("Загрузка аудио...");
       setLoadingProgress(0);
@@ -417,11 +422,18 @@ export default function MusicEditorClient() {
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden max-w-[100vw]">
       {loading && <ProgressOverlay message={loadingMsg} progress={loadingProgress} />}
-      {exportError && (
-        <div className="flex-shrink-0 px-4 pt-2">
-          <div className="max-w-2xl mx-auto rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 whitespace-pre-wrap">
-            <strong>Ошибка экспорта:</strong> {exportError}
-          </div>
+      {(exportError || loadError) && (
+        <div className="flex-shrink-0 px-4 pt-2 space-y-2">
+          {loadError && (
+            <div className="max-w-2xl mx-auto rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {loadError}
+            </div>
+          )}
+          {exportError && (
+            <div className="max-w-2xl mx-auto rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 whitespace-pre-wrap">
+              <strong>Ошибка экспорта:</strong> {exportError}
+            </div>
+          )}
         </div>
       )}
 
