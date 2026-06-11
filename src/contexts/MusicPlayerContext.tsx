@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { agentDebugLog } from "@/lib/debug-agent-log";
 import { AudioEngine, type PlaybackStatus } from "@/lib/music/audio-engine";
 import * as storage from "@/lib/music/indexed-db-storage";
 import * as mediaLibrary from "@/lib/music/media-library";
@@ -24,6 +25,7 @@ import type {
   Track,
 } from "@/lib/music/types";
 import { formatTime } from "@/lib/music/types";
+import DebugLogPanel from "@/app/tools/music/DebugLogPanel";
 
 interface MusicPlayerContextValue {
   tracks: Track[];
@@ -192,12 +194,25 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const tryLockScreenTrackSwitch = useCallback(
     (trackId: string): boolean => {
       const file = mediaLibrary.getCachedTrackFile(trackId);
-      if (!file) return false;
-
       const track = tracksRef.current.find((t) => t.id === trackId);
-      if (!track) return false;
-
       const engine = engineRef.current;
+      // #region agent log
+      agentDebugLog(
+        "MusicPlayerContext.tsx:lock-switch",
+        "tryLockScreenTrackSwitch",
+        {
+          trackId,
+          hasFile: !!file,
+          hasTrack: !!track,
+          hasEngine: !!engine,
+          queueLen: queueRef.current.getQueue().length,
+          queueIndex: queueRef.current.getIndex(),
+        },
+        "H2-cache",
+      );
+      // #endregion
+      if (!file) return false;
+      if (!track) return false;
       if (!engine) return false;
 
       const url = mediaLibrary.getOrCreateObjectUrl(track.id, file);
@@ -270,6 +285,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const loadNext = useCallback(
     async (opts?: { lockScreen?: boolean }) => {
       const nextId = queueRef.current.next();
+      // #region agent log
+      agentDebugLog(
+        "MusicPlayerContext.tsx:loadNext",
+        "loadNext called",
+        { nextId, lockScreen: !!opts?.lockScreen },
+        "H5-navigation",
+      );
+      // #endregion
       if (!nextId) {
         engineRef.current?.stop();
         setStatus("stopped");
@@ -279,8 +302,24 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueueIndex(queueRef.current.getIndex());
 
       if (opts?.lockScreen && tryLockScreenTrackSwitch(nextId)) {
+        // #region agent log
+        agentDebugLog(
+          "MusicPlayerContext.tsx:loadNext",
+          "lock screen sync switch ok",
+          { nextId },
+          "H5-navigation",
+        );
+        // #endregion
         return;
       }
+      // #region agent log
+      agentDebugLog(
+        "MusicPlayerContext.tsx:loadNext",
+        "falling back to async loadAndPlay",
+        { nextId, lockScreen: !!opts?.lockScreen },
+        "H5-navigation",
+      );
+      // #endregion
       await loadAndPlay(nextId);
     },
     [loadAndPlay, tryLockScreenTrackSwitch],
@@ -290,6 +329,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     async (opts?: { lockScreen?: boolean }) => {
       const engine = engineRef.current;
       if (engine && engine.getAudioElement().currentTime > 3) {
+        // #region agent log
+        agentDebugLog(
+          "MusicPlayerContext.tsx:loadPrevious",
+          "seek to 0 (same track)",
+          { lockScreen: !!opts?.lockScreen },
+          "H5-navigation",
+        );
+        // #endregion
         engine.seek(0);
         if (opts?.lockScreen && engine.getStatus() === "playing") {
           engine.playFromLockScreen();
@@ -297,6 +344,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
       const prevId = queueRef.current.previous();
+      // #region agent log
+      agentDebugLog(
+        "MusicPlayerContext.tsx:loadPrevious",
+        "loadPrevious called",
+        { prevId, lockScreen: !!opts?.lockScreen },
+        "H5-navigation",
+      );
+      // #endregion
       if (!prevId) return;
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
@@ -817,6 +872,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         }}
       />
       {children}
+      <DebugLogPanel />
     </MusicPlayerContext.Provider>
   );
 }

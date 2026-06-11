@@ -1,3 +1,4 @@
+import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { Track } from "./types";
 
 export type PlaybackStatus = "idle" | "loading" | "playing" | "paused" | "stopped";
@@ -80,6 +81,8 @@ export class AudioEngine {
   private onSavePosition: ((position: number) => void) | null = null;
   private lifecycleAttached = false;
   private mediaSessionInstalled = false;
+  private lastPositionLogAt = 0;
+  private positionSkipLogged = false;
   private sessionCallbacks: MediaSessionCallbacks = {
     onSyncPlay: () => {},
     onSyncPause: () => {},
@@ -200,24 +203,62 @@ export class AudioEngine {
       {
         action: "play",
         handler: () => {
+          // #region agent log
+          agentDebugLog(
+            "audio-engine.ts:play-handler",
+            "mediaSession play handler fired",
+            {
+              paused: this.audio.paused,
+              muted: this.audio.muted,
+              volume: this.audio.volume,
+              readyState: this.audio.readyState,
+              hasSrc: !!this.audio.src,
+            },
+            "H1-handlers",
+          );
+          // #endregion
           this.handleMediaSessionPlay(() => this.sessionCallbacks.onSyncPlay());
         },
       },
       {
         action: "pause",
         handler: () => {
+          // #region agent log
+          agentDebugLog(
+            "audio-engine.ts:pause-handler",
+            "mediaSession pause handler fired",
+            { currentTime: this.audio.currentTime },
+            "H1-handlers",
+          );
+          // #endregion
           this.handleMediaSessionPause(() => this.sessionCallbacks.onSyncPause());
         },
       },
       {
         action: "previoustrack",
         handler: () => {
+          // #region agent log
+          agentDebugLog(
+            "audio-engine.ts:prev-handler",
+            "mediaSession previoustrack fired",
+            { queueViaCallback: true },
+            "H1-handlers",
+          );
+          // #endregion
           this.sessionCallbacks.onPrevious({ lockScreen: true });
         },
       },
       {
         action: "nexttrack",
         handler: () => {
+          // #region agent log
+          agentDebugLog(
+            "audio-engine.ts:next-handler",
+            "mediaSession nexttrack fired",
+            { queueViaCallback: true },
+            "H1-handlers",
+          );
+          // #endregion
           this.sessionCallbacks.onNext({ lockScreen: true });
         },
       },
@@ -234,6 +275,14 @@ export class AudioEngine {
       handlers.push({
         action: "seekto",
         handler: (details) => {
+          // #region agent log
+          agentDebugLog(
+            "audio-engine.ts:seekto-handler",
+            "mediaSession seekto fired",
+            { seekTime: details.seekTime },
+            "H6-seekto",
+          );
+          // #endregion
           if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
           this.seek(details.seekTime);
           this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
@@ -262,13 +311,23 @@ export class AudioEngine {
       );
     }
 
+    const installed: string[] = [];
     for (const { action, handler } of handlers) {
       try {
         navigator.mediaSession.setActionHandler(action, handler);
+        installed.push(action);
       } catch {
         /* Safari / PWA */
       }
     }
+    // #region agent log
+    agentDebugLog(
+      "audio-engine.ts:install-handlers",
+      "mediaSession handlers installed",
+      { installed, ios: isIOSDevice(), pwa: isStandalonePWA() },
+      "H1-handlers",
+    );
+    // #endregion
   }
 
   private ensureAudioInDom(): void {
@@ -355,6 +414,21 @@ export class AudioEngine {
     this.audio.playbackRate = 1;
 
     const onSuccess = () => {
+      // #region agent log
+      agentDebugLog(
+        "audio-engine.ts:play-success",
+        "audio.play resolved",
+        {
+          paused: this.audio.paused,
+          muted: this.audio.muted,
+          volume: this.audio.volume,
+          readyState: this.audio.readyState,
+          currentTime: this.audio.currentTime,
+          connected: this.audio.isConnected,
+        },
+        "H4-pwa-play",
+      );
+      // #endregion
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "playing";
       }
@@ -363,14 +437,35 @@ export class AudioEngine {
       onSync?.();
     };
 
+    const onFail = (label: string, err?: unknown) => {
+      // #region agent log
+      agentDebugLog(
+        "audio-engine.ts:play-fail",
+        label,
+        {
+          err: err instanceof Error ? err.message : String(err),
+          paused: this.audio.paused,
+          muted: this.audio.muted,
+          readyState: this.audio.readyState,
+          hasSrc: !!this.audio.src,
+          connected: this.audio.isConnected,
+        },
+        "H4-pwa-play",
+      );
+      // #endregion
+    };
+
     const retry = () => {
       const p = this.audio.play();
-      if (p !== undefined) p.then(onSuccess).catch(() => {});
+      if (p !== undefined) p.then(onSuccess).catch((e) => onFail("retry play rejected", e));
     };
 
     const promise = this.audio.play();
     if (promise !== undefined) {
-      promise.then(onSuccess).catch(retry);
+      promise.then(onSuccess).catch((e) => {
+        onFail("initial play rejected", e);
+        retry();
+      });
     } else {
       onSuccess();
     }
@@ -456,7 +551,27 @@ export class AudioEngine {
 
     const duration = this.getEffectiveDuration();
     const position = this.audio.currentTime;
-    if (duration <= 0 || !Number.isFinite(duration) || !Number.isFinite(position)) return;
+    if (duration <= 0 || !Number.isFinite(duration) || !Number.isFinite(position)) {
+      // #region agent log
+      if (!this.positionSkipLogged) {
+        this.positionSkipLogged = true;
+        agentDebugLog(
+          "audio-engine.ts:position-skip",
+          "setPositionState skipped — invalid duration",
+          {
+            duration,
+            position,
+            audioDuration: this.audio.duration,
+            mediaDuration: this.mediaDuration,
+            status: this.status,
+          },
+          "H3-position",
+        );
+      }
+      // #endregion
+      return;
+    }
+    this.positionSkipLogged = false;
 
     const playbackRate =
       this.status === "playing" && this.audio.playbackRate > 0 ? this.audio.playbackRate : 1;
@@ -467,8 +582,39 @@ export class AudioEngine {
         playbackRate,
         position: Math.max(0, Math.min(position, duration)),
       });
-    } catch {
-      /* Safari */
+      // #region agent log
+      const now = Date.now();
+      if (now - this.lastPositionLogAt > 15000) {
+        this.lastPositionLogAt = now;
+        agentDebugLog(
+          "audio-engine.ts:position-state",
+          "setPositionState ok",
+          {
+            duration,
+            position,
+            playbackRate,
+            audioDuration: this.audio.duration,
+            mediaDuration: this.mediaDuration,
+            status: this.status,
+          },
+          "H3-position",
+        );
+      }
+      // #endregion
+    } catch (err) {
+      // #region agent log
+      agentDebugLog(
+        "audio-engine.ts:position-state-fail",
+        "setPositionState threw",
+        {
+          err: err instanceof Error ? err.message : String(err),
+          duration,
+          position,
+          mediaDuration: this.mediaDuration,
+        },
+        "H3-position",
+      );
+      // #endregion
     }
   }
 
