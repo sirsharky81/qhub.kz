@@ -110,7 +110,16 @@ export async function importDirectory(
   return imported;
 }
 
+const fileCache = new Map<string, File>();
+
+export function cacheTrackFile(trackId: string, file: File): void {
+  fileCache.set(trackId, file);
+}
+
 export async function getTrackFile(track: Track): Promise<File | null> {
+  const cached = fileCache.get(track.id);
+  if (cached) return cached;
+
   const handle = track.hasHandle ? await storage.getHandle(track.id) : null;
   if (handle) {
     try {
@@ -119,7 +128,9 @@ export async function getTrackFile(track: Track): Promise<File | null> {
         const req = await handle.requestPermission({ mode: "read" });
         if (req !== "granted") return null;
       }
-      return handle.getFile();
+      const file = await handle.getFile();
+      fileCache.set(track.id, file);
+      return file;
     } catch {
       return null;
     }
@@ -127,10 +138,22 @@ export async function getTrackFile(track: Track): Promise<File | null> {
 
   const blob = track.hasBlob ? await storage.getBlob(track.id) : null;
   if (blob) {
-    return new File([blob], track.fileName, { type: track.mimeType });
+    const file = new File([blob], track.fileName, { type: track.mimeType });
+    fileCache.set(track.id, file);
+    return file;
   }
 
   return null;
+}
+
+export async function prefetchTrackFiles(trackIds: string[]): Promise<void> {
+  await Promise.all(
+    trackIds.map(async (id) => {
+      if (fileCache.has(id)) return;
+      const track = await storage.getTrack(id);
+      if (track) await getTrackFile(track);
+    }),
+  );
 }
 
 export function sortTracks(

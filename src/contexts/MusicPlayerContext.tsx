@@ -174,6 +174,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       const file = await mediaLibrary.getTrackFile(track);
       if (!file) return;
+      mediaLibrary.cacheTrackFile(track.id, file);
 
       const engine = engineRef.current;
       if (!engine) return;
@@ -186,6 +187,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       await engine.play();
       engine.setMediaSessionPlaybackState("playing");
       schedulePersist();
+
+      const q = queueRef.current.getQueue();
+      const idx = q.indexOf(trackId);
+      if (idx >= 0) {
+        const neighborIds = [q[idx - 1], q[idx + 1]].filter(
+          (id): id is string => typeof id === "string",
+        );
+        void mediaLibrary.prefetchTrackFiles(neighborIds);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tracks, volume, schedulePersist, bindMediaSession],
@@ -388,10 +398,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       onNext: loadNext,
     };
   }, [loadPrevious, loadNext]);
-
-  useEffect(() => {
-    if (currentTrack) bindMediaSession(currentTrack);
-  }, [currentTrack, bindMediaSession]);
 
   const seek = useCallback((time: number) => {
     engineRef.current?.seek(time);
