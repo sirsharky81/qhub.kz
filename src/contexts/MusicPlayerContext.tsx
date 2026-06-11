@@ -116,6 +116,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
+  const nativeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [nativeAudioReady, setNativeAudioReady] = useState(false);
   const engineRef = useRef<AudioEngine | null>(null);
   const volumeBeforeMuteRef = useRef(0.85);
   const queueRef = useRef(new QueueManager());
@@ -123,6 +125,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initializedRef = useRef(false);
   const tracksRef = useRef<Track[]>([]);
+  const navigationRef = useRef({
+    onNext: async (_opts?: { lockScreen?: boolean }) => {},
+    onPrevious: async (_opts?: { lockScreen?: boolean }) => {},
+  });
   const sessionActionsRef = useRef({
     onPrevious: (_opts?: { lockScreen?: boolean }) => {},
     onNext: (_opts?: { lockScreen?: boolean }) => {},
@@ -149,12 +155,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     persistTimerRef.current = setTimeout(() => void persistState(), 500);
   }, [persistState]);
 
-  const prefetchQueueNeighbors = useCallback((trackId: string) => {
+  const prefetchQueueForLockScreen = useCallback((trackId: string) => {
     const q = queueRef.current.getQueue();
-    const idx = q.indexOf(trackId);
-    if (idx < 0) return;
-    const neighborIds = q.slice(Math.max(0, idx - 2), Math.min(q.length, idx + 3));
-    void mediaLibrary.prefetchTrackFiles(neighborIds);
+    if (q.length === 0) return;
+    void mediaLibrary.prefetchTrackFiles(q.length > 1 ? q : [trackId]);
   }, []);
 
   const bindMediaSession = useCallback(
@@ -197,20 +201,23 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (!engine) return false;
 
       const url = mediaLibrary.getOrCreateObjectUrl(track.id, file);
-      engine.setSourceUrlSync(url, 0);
+      const trackDuration = track.duration || 0;
+      engine.setMediaDuration(trackDuration);
+      engine.setSourceUrlSync(url, 0, trackDuration);
       setCurrentTrack(track);
-      setDuration(track.duration || engine.getAudioElement().duration || 0);
+      setDuration(trackDuration || engine.getAudioElement().duration || 0);
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
       engine.setVolume(volume);
       bindMediaSession(track);
-      engine.playFromLockScreen();
-      engine.setMediaSessionPlaybackState("playing");
-      schedulePersist();
-      prefetchQueueNeighbors(trackId);
+      engine.playFromLockScreen(() => {
+        engine.setMediaSessionPlaybackState("playing");
+        schedulePersist();
+      });
+      prefetchQueueForLockScreen(trackId);
       return true;
     },
-    [volume, bindMediaSession, schedulePersist, prefetchQueueNeighbors],
+    [volume, bindMediaSession, schedulePersist, prefetchQueueForLockScreen],
   );
 
   useEffect(() => {
@@ -231,9 +238,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       const engine = engineRef.current;
       if (!engine) return;
 
-      await engine.load(file, startPosition);
+      const trackDuration = track.duration || 0;
+      engine.setMediaDuration(trackDuration);
+      await engine.load(file, startPosition, trackDuration);
       setCurrentTrack(track);
-      setDuration(track.duration || engine.getAudioElement().duration || 0);
+      setDuration(trackDuration || engine.getAudioElement().duration || 0);
       engine.setVolume(volume);
       bindMediaSession(track);
 
@@ -241,16 +250,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         typeof document !== "undefined" &&
         (document.hidden || document.visibilityState === "hidden");
       if (hidden) {
-        await new Promise<void>((resolve) => engine.playFromLockScreen(resolve));
+        await new Promise<void>((resolve) => {
+          engine.playFromLockScreen(() => {
+            engine.setMediaSessionPlaybackState("playing");
+            resolve();
+          });
+        });
       } else {
         await engine.play();
+        engine.setMediaSessionPlaybackState("playing");
       }
-      engine.setMediaSessionPlaybackState("playing");
       schedulePersist();
-      prefetchQueueNeighbors(trackId);
+      prefetchQueueForLockScreen(trackId);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tracks, volume, schedulePersist, bindMediaSession, prefetchQueueNeighbors],
+    [tracks, volume, schedulePersist, bindMediaSession, prefetchQueueForLockScreen],
   );
 
   const loadNext = useCallback(
@@ -296,19 +310,22 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (initializedRef.current) return;
+    if (!nativeAudioReady || initializedRef.current || !nativeAudioRef.current) return;
     initializedRef.current = true;
 
-    const engine = new AudioEngine({
-      onTimeUpdate: (t, d) => {
-        setCurrentTime(t);
-        if (d > 0) setDuration(d);
+    const engine = new AudioEngine(
+      {
+        onTimeUpdate: (t, d) => {
+          setCurrentTime(t);
+          if (d > 0) setDuration(d);
+        },
+        onStatusChange: setStatus,
+        onEnded: () => void navigationRef.current.onNext(),
+        onError: () => setStatus("stopped"),
+        onGraphReady: (node) => setAnalyser(node),
       },
-      onStatusChange: setStatus,
-      onEnded: () => void loadNext(),
-      onError: () => setStatus("stopped"),
-      onGraphReady: (node) => setAnalyser(node),
-    });
+      nativeAudioRef.current,
+    );
 
     engine.setSavePositionHandler((pos) => {
       void storage.savePlaybackState({
@@ -362,11 +379,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           if (file) {
             mediaLibrary.cacheTrackFile(track.id, file);
             mediaLibrary.getOrCreateObjectUrl(track.id, file);
-            await engine.load(file, state.lastPosition);
+            engine.setMediaDuration(track.duration || 0);
+            await engine.load(file, state.lastPosition, track.duration || 0);
             setDuration(track.duration || engine.getAudioElement().duration || 0);
             bindMediaSession(track);
             setStatus("paused");
-            void mediaLibrary.prefetchTrackFiles(state.queue);
+            void mediaLibrary.prefetchTrackFiles(
+              state.queue.length > 0 ? state.queue : [track.id],
+            );
           }
         } catch {
           /* restore without audio */
@@ -376,9 +396,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     return () => {
       engine.destroy();
+      engineRef.current = null;
+      initializedRef.current = false;
+      setIsPlayerReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [nativeAudioReady]);
 
   const importFilesHandler = useCallback(
     async (files: File[]) => {
@@ -432,7 +455,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const engine = engineRef.current;
     if (!engine) return;
     await engine.play();
-    engine.setMediaSessionPlaybackState("playing");
+    if (engine.getStatus() === "playing") {
+      engine.setMediaSessionPlaybackState("playing");
+    }
   }, [currentTrack]);
 
   const pause = useCallback(() => {
@@ -465,6 +490,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   }, [loadPrevious]);
 
   useEffect(() => {
+    navigationRef.current = {
+      onNext: loadNext,
+      onPrevious: loadPrevious,
+    };
     sessionActionsRef.current = {
       onPrevious: loadPrevious,
       onNext: loadNext,
@@ -738,6 +767,27 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   return (
     <MusicPlayerContext.Provider value={value}>
+      {/* Нативный <audio> в React-дереве — критично для iOS PWA Media Session */}
+      <audio
+        ref={(el) => {
+          nativeAudioRef.current = el;
+          setNativeAudioReady(el !== null);
+        }}
+        playsInline
+        preload="auto"
+        aria-hidden="true"
+        tabIndex={-1}
+        className="pointer-events-none"
+        style={{
+          position: "fixed",
+          left: 0,
+          bottom: 0,
+          width: 1,
+          height: 1,
+          opacity: 0.001,
+          zIndex: -1,
+        }}
+      />
       <input
         ref={fileInputRef}
         type="file"
