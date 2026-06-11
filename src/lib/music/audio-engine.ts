@@ -42,11 +42,17 @@ export class AudioEngine {
   private lifecycleAttached = false;
 
   private readonly onPlayingForAnalyser = () => {
-    if (!isPageHidden()) void this.ensureAnalyser();
+    if (!isIOSDevice() && !isPageHidden()) void this.ensureAnalyser();
   };
 
-  private readonly onVisibilityResume = () => {
-    if (document.visibilityState !== "visible") return;
+  private readonly onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") {
+      this.teardownAnalyser();
+      if (this.context?.state === "running") {
+        void this.context.suspend();
+      }
+      return;
+    }
     void this.resumePlaybackIfNeeded();
   };
 
@@ -124,16 +130,16 @@ export class AudioEngine {
     if (this.lifecycleAttached || typeof document === "undefined") return;
     this.lifecycleAttached = true;
 
-    document.addEventListener("visibilitychange", this.onVisibilityResume);
-    window.addEventListener("pageshow", this.onVisibilityResume);
-    window.addEventListener("focus", this.onVisibilityResume);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+    window.addEventListener("pageshow", this.onVisibilityChange);
+    window.addEventListener("focus", this.onVisibilityChange);
   }
 
   private detachLifecycleHandlers(): void {
     if (!this.lifecycleAttached || typeof document === "undefined") return;
-    document.removeEventListener("visibilitychange", this.onVisibilityResume);
-    window.removeEventListener("pageshow", this.onVisibilityResume);
-    window.removeEventListener("focus", this.onVisibilityResume);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    window.removeEventListener("pageshow", this.onVisibilityChange);
+    window.removeEventListener("focus", this.onVisibilityChange);
     this.lifecycleAttached = false;
   }
 
@@ -154,7 +160,7 @@ export class AudioEngine {
       } catch {
         /* gesture / policy */
       }
-    } else if (this.status === "playing" && !this.audio.paused) {
+    } else if (this.status === "playing" && !this.audio.paused && !isIOSDevice()) {
       void this.ensureAnalyser();
     }
   }
@@ -181,8 +187,10 @@ export class AudioEngine {
     this.analyserTrackKey = null;
   }
 
-  /** Визуализатор через captureStream — не перехватывает вывод <audio> */
+  /** Визуализатор через captureStream — на iOS ломает звук с lock screen */
   private async ensureAnalyser(): Promise<void> {
+    if (isIOSDevice() || isPageHidden()) return;
+
     const trackKey = this.audio.src;
     if (!trackKey || this.analyserTrackKey === trackKey) return;
 
@@ -193,7 +201,12 @@ export class AudioEngine {
       if (!this.context) {
         this.context = new AudioContext();
         this.context.addEventListener("statechange", () => {
-          if (this.context?.state === "suspended" && this.status === "playing") {
+          if (
+            this.context?.state === "suspended" &&
+            this.status === "playing" &&
+            !isPageHidden() &&
+            !isIOSDevice()
+          ) {
             void this.context.resume();
           }
         });
@@ -310,15 +323,18 @@ export class AudioEngine {
 
   async play(): Promise<void> {
     this.audio.playbackRate = 1;
+    if (isIOSDevice() || isPageHidden()) {
+      this.teardownAnalyser();
+    }
     await this.audio.play();
-    // captureStream() на заблокированном экране iOS глушит <audio>
-    if (!isPageHidden()) {
+    if (!isIOSDevice() && !isPageHidden()) {
       await this.ensureAnalyser();
     }
     this.updatePositionState();
   }
 
   pause(): void {
+    this.teardownAnalyser();
     this.audio.pause();
     this.setStatus("paused");
     this.onSavePosition?.(this.audio.currentTime);

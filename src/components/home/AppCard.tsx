@@ -24,7 +24,14 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
   const player = useMusicPlayerOptional();
   const isMusicApp = app.id === "music";
   const isMusicActive = isMusicApp && !!player?.currentTrack;
-  const isPlayingMusic = isMusicActive && player?.status === "playing";
+  const musicStatus = player?.status;
+  const isPlayingMusic = isMusicActive && musicStatus === "playing";
+  const musicStatusLabel =
+    musicStatus === "playing"
+      ? "Сейчас играет"
+      : musicStatus === "stopped"
+        ? "Остановлено"
+        : "На паузе";
 
   const cardClass = `app-card group relative rounded-2xl border border-gray-200 p-4 sm:p-5 flex flex-col gap-2 overflow-hidden shadow-sm ${APP_CARD_HEIGHT} ${
     app.comingSoon
@@ -98,7 +105,7 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
                     aria-hidden
                   />
                   <span className={isPlayingMusic ? "text-gray-700 font-medium" : ""}>
-                    {isPlayingMusic ? "Сейчас играет" : "На паузе"}
+                    {musicStatusLabel}
                   </span>
                 </p>
               </div>
