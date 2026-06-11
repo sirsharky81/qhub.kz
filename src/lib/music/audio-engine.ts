@@ -27,6 +27,14 @@ function isPageHidden(): boolean {
   return typeof document !== "undefined" && document.hidden;
 }
 
+function ensureNavigatorAudioSession(): void {
+  if (typeof navigator === "undefined") return;
+  const nav = navigator as Navigator & { audioSession?: { type: string } };
+  if (nav.audioSession) {
+    nav.audioSession.type = "playback";
+  }
+}
+
 export class AudioEngine {
   private audio: CapturableAudio;
   /** Только для визуализации — не в цепочке воспроизведения */
@@ -47,10 +55,7 @@ export class AudioEngine {
 
   private readonly onVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
-      this.teardownAnalyser();
-      if (this.context?.state === "running") {
-        void this.context.suspend();
-      }
+      this.releaseAudioGraph();
       return;
     }
     void this.resumePlaybackIfNeeded();
@@ -67,6 +72,7 @@ export class AudioEngine {
     if (typeof document !== "undefined") {
       this.audio.style.display = "none";
       document.body.appendChild(this.audio);
+      ensureNavigatorAudioSession();
       this.attachLifecycleHandlers();
     }
 
@@ -187,6 +193,54 @@ export class AudioEngine {
     this.analyserTrackKey = null;
   }
 
+  /** Полностью отключает Web Audio — иначе iOS глушит <audio> с lock screen */
+  private releaseAudioGraph(): void {
+    this.teardownAnalyser();
+    if (this.context) {
+      void this.context.close();
+      this.context = null;
+      this.analyser = null;
+    }
+  }
+
+  private async handleMediaSessionPlay(onSync?: () => void): Promise<void> {
+    this.releaseAudioGraph();
+    ensureNavigatorAudioSession();
+    this.audio.muted = false;
+    this.audio.playbackRate = 1;
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "playing";
+    }
+
+    try {
+      await this.audio.play();
+    } catch {
+      await new Promise((r) => setTimeout(r, 80));
+      try {
+        await this.audio.play();
+      } catch {
+        /* policy */
+      }
+    }
+
+    this.setStatus("playing");
+    this.updatePositionState();
+    onSync?.();
+  }
+
+  private handleMediaSessionPause(onSync?: () => void): void {
+    this.releaseAudioGraph();
+    this.audio.pause();
+    this.setStatus("paused");
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "paused";
+    }
+    this.onSavePosition?.(this.audio.currentTime);
+    this.updatePositionState();
+    onSync?.();
+  }
+
   /** Визуализатор через captureStream — на iOS ломает звук с lock screen */
   private async ensureAnalyser(): Promise<void> {
     if (isIOSDevice() || isPageHidden()) return;
@@ -290,7 +344,8 @@ export class AudioEngine {
 
   async load(file: File, startPosition = 0): Promise<void> {
     this.setStatus("loading");
-    this.teardownAnalyser();
+    this.releaseAudioGraph();
+    ensureNavigatorAudioSession();
     this.revokeUrl();
     this.objectUrl = URL.createObjectURL(file);
     this.audio.playbackRate = 1;
@@ -322,19 +377,24 @@ export class AudioEngine {
   }
 
   async play(): Promise<void> {
+    if (isPageHidden() || isIOSDevice()) {
+      await this.handleMediaSessionPlay();
+      return;
+    }
     this.audio.playbackRate = 1;
-    if (isIOSDevice() || isPageHidden()) {
-      this.teardownAnalyser();
-    }
+    this.audio.muted = false;
+    ensureNavigatorAudioSession();
     await this.audio.play();
-    if (!isIOSDevice() && !isPageHidden()) {
-      await this.ensureAnalyser();
-    }
+    await this.ensureAnalyser();
     this.updatePositionState();
   }
 
   pause(): void {
-    this.teardownAnalyser();
+    if (isPageHidden() || isIOSDevice()) {
+      this.handleMediaSessionPause();
+      return;
+    }
+    this.releaseAudioGraph();
     this.audio.pause();
     this.setStatus("paused");
     this.onSavePosition?.(this.audio.currentTime);
@@ -387,8 +447,12 @@ export class AudioEngine {
     });
 
     try {
-      navigator.mediaSession.setActionHandler("play", handlers.onPlay);
-      navigator.mediaSession.setActionHandler("pause", handlers.onPause);
+      navigator.mediaSession.setActionHandler("play", () => {
+        void this.handleMediaSessionPlay(handlers.onPlay);
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        this.handleMediaSessionPause(handlers.onPause);
+      });
       navigator.mediaSession.setActionHandler("previoustrack", handlers.onPrevious);
       navigator.mediaSession.setActionHandler("nexttrack", handlers.onNext);
       navigator.mediaSession.setActionHandler("stop", () => {
@@ -449,16 +513,12 @@ export class AudioEngine {
     this.stop();
     this.clearMediaSessionHandlers();
     this.revokeUrl();
-    this.teardownAnalyser();
+    this.releaseAudioGraph();
     if (this.savePositionTimer) clearInterval(this.savePositionTimer);
     this.detachLifecycleHandlers();
     this.audio.removeEventListener("playing", this.onPlayingForAnalyser);
     if (this.audio.parentNode) {
       this.audio.parentNode.removeChild(this.audio);
-    }
-    if (this.context) {
-      void this.context.close();
-      this.context = null;
     }
   }
 }

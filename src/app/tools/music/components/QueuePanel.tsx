@@ -170,7 +170,7 @@ function TouchQueueRow({
             id: "up",
             label: "▲",
             className: "bg-gray-700 text-white",
-            confirmTitle: `Переместить «${track.title}» выше?`,
+            confirm: false,
             onAction: onMoveUp,
           },
         ]
@@ -181,7 +181,7 @@ function TouchQueueRow({
             id: "down",
             label: "▼",
             className: "bg-gray-600 text-white",
-            confirmTitle: `Переместить «${track.title}» ниже?`,
+            confirm: false,
             onAction: onMoveDown,
           },
         ]
@@ -278,7 +278,7 @@ export function QueuePanel() {
         </div>
         {isTouch && queue.length > 1 ? (
           <p className="text-[10px] text-gray-400 mt-1 leading-snug">
-            Смахните трек влево → ▲ или ▼, затем подтвердите
+            Смахните влево → ▲/▼ для порядка, ✕ — убрать
           </p>
         ) : null}
       </div>

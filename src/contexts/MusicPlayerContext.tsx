@@ -123,20 +123,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initializedRef = useRef(false);
   const sessionActionsRef = useRef({
-    onPlay: async () => {},
-    onPause: () => {},
     onPrevious: async () => {},
     onNext: async () => {},
   });
-
-  const bindMediaSession = useCallback((track: Track) => {
-    engineRef.current?.updateMediaSession(track, {
-      onPlay: () => void sessionActionsRef.current.onPlay(),
-      onPause: () => sessionActionsRef.current.onPause(),
-      onPrevious: () => void sessionActionsRef.current.onPrevious(),
-      onNext: () => void sessionActionsRef.current.onNext(),
-    });
-  }, []);
 
   const persistState = useCallback(async () => {
     const qm = queueRef.current;
@@ -154,6 +143,24 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => void persistState(), 500);
   }, [persistState]);
+
+  const bindMediaSession = useCallback(
+    (track: Track) => {
+      engineRef.current?.updateMediaSession(track, {
+        onPlay: () => {
+          engineRef.current?.setMediaSessionPlaybackState("playing");
+          schedulePersist();
+        },
+        onPause: () => {
+          engineRef.current?.setMediaSessionPlaybackState("paused");
+          schedulePersist();
+        },
+        onPrevious: () => void sessionActionsRef.current.onPrevious(),
+        onNext: () => void sessionActionsRef.current.onNext(),
+      });
+    },
+    [schedulePersist],
+  );
 
   useEffect(() => {
     if (!isPlayerReady) return;
@@ -377,12 +384,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     sessionActionsRef.current = {
-      onPlay: play,
-      onPause: pause,
       onPrevious: loadPrevious,
       onNext: loadNext,
     };
-  }, [play, pause, loadPrevious, loadNext]);
+  }, [loadPrevious, loadNext]);
 
   useEffect(() => {
     if (currentTrack) bindMediaSession(currentTrack);

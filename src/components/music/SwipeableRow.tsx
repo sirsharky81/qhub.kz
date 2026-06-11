@@ -6,7 +6,9 @@ export interface SwipeAction {
   id: string;
   label: string;
   className?: string;
-  confirmTitle: string;
+  /** Если false — действие сразу, без диалога */
+  confirm?: boolean;
+  confirmTitle?: string;
   onAction: () => void;
 }
 
@@ -36,6 +38,19 @@ export function SwipeableRow({
   const isOpen = offset < 0;
 
   const closeSwipe = useCallback(() => setOffset(0), []);
+
+  const runAction = useCallback(
+    (action: SwipeAction) => {
+      const needsConfirm = action.confirm !== false;
+      if (needsConfirm && action.confirmTitle) {
+        setConfirmAction(action);
+        return;
+      }
+      action.onAction();
+      closeSwipe();
+    },
+    [closeSwipe],
+  );
 
   const onTouchStart = (e: React.TouchEvent) => {
     if (!enabled || actions.length === 0) return;
@@ -70,7 +85,7 @@ export function SwipeableRow({
             <button
               key={action.id}
               type="button"
-              onClick={() => setConfirmAction(action)}
+              onClick={() => runAction(action)}
               className={`w-[52px] h-full flex items-center justify-center text-[10px] font-medium ${
                 action.className ?? "bg-gray-800 text-white"
               }`}
