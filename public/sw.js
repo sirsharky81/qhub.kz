@@ -1,6 +1,5 @@
-const CACHE_NAME = "qhub-v2";
-const STATIC_ASSETS = [
-  "/",
+const CACHE_NAME = "qhub-v3";
+const PRECACHE = [
   "/manifest.json",
   "/icon.svg",
   "/icon-192.png",
@@ -11,7 +10,7 @@ const STATIC_ASSETS = [
 self.addEventListener("install", (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)),
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE)),
   );
 });
 
@@ -45,17 +44,31 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (pathname.startsWith("/apps/passport-photo")) {
+  if (request.headers.get("RSC") === "1" || url.searchParams.has("_rsc")) {
     event.respondWith(fetch(request));
     return;
   }
 
-  if (pathname.startsWith("/_next/static/")) {
+  if (
+    pathname.startsWith("/apps/") ||
+    pathname.startsWith("/tools/") ||
+    pathname.startsWith("/_next/")
+  ) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  if (request.mode === "navigate") {
+    event.respondWith(handleNavigate(request));
+    return;
+  }
+
+  if (PRECACHE.includes(pathname)) {
     event.respondWith(cacheFirst(request));
     return;
   }
 
-  event.respondWith(networkFirst(request));
+  event.respondWith(fetch(request));
 });
 
 async function cacheFirst(request) {
@@ -70,22 +83,20 @@ async function cacheFirst(request) {
   return response;
 }
 
-async function networkFirst(request) {
+async function handleNavigate(request) {
   try {
-    const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response.clone());
-    }
-    return response;
+    return await fetch(request);
   } catch {
-    const cached = await caches.match(request);
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(request);
     if (cached) return cached;
 
-    const fallback = await caches.match("/");
-    if (fallback) return fallback;
+    if (new URL(request.url).pathname === "/") {
+      const home = await cache.match("/");
+      if (home) return home;
+    }
 
-    return new Response("Offline", {
+    return new Response("Нет подключения к интернету", {
       status: 503,
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });

@@ -2,9 +2,27 @@
 
 import { useEffect } from "react";
 
+function isLocalhost(): boolean {
+  return (
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1"
+  );
+}
+
+async function unregisterServiceWorkers(): Promise<void> {
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(registrations.map((registration) => registration.unregister()));
+}
+
 export function usePWA() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
+      return;
+    }
+
+    // Service worker caches stale Next.js chunks and breaks client-side navigation in dev.
+    if (process.env.NODE_ENV !== "production" || isLocalhost()) {
+      void unregisterServiceWorkers();
       return;
     }
 
@@ -15,7 +33,9 @@ export function usePWA() {
         });
         await registration.update();
       } catch (error) {
-        console.error("Service worker registration failed:", error);
+        if (process.env.NODE_ENV === "development") {
+          console.error("Service worker registration failed:", error);
+        }
       }
     };
 

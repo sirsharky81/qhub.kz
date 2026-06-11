@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { arrayMove } from "@dnd-kit/sortable";
 import { NextIntlClientProvider, useTranslations } from "next-intl";
 import type { PdfActionMode } from "./types";
-import { usePdfDocument } from "./hooks/usePdfDocument";
+import { usePdfDocument } from "./hooks/useDocumentState";
 import { usePdfActions } from "./hooks/usePdfActions";
 import { useThumbnails } from "./hooks/useThumbnails";
 import { validateRanges } from "./lib/rangeParser";
-import { UploadZone } from "./components/UploadZone";
+import { SharedUploadZone as UploadZone } from "../_pdf-shared/UploadZone";
 import { PageGrid, useGridColumns } from "./components/PageGrid";
 import { Toolbar } from "./components/Toolbar";
 import { ProcessingOverlay } from "./components/ProcessingOverlay";
@@ -20,10 +21,44 @@ import enMessages from "../../../../messages/en.json";
 
 type Locale = "ru" | "kk" | "en";
 
+const TOOLBAR_FALLBACKS: Record<
+  Locale,
+  { reorderHint: string; movePrev: string; moveNext: string }
+> = {
+  ru: {
+    reorderHint: "Перетащите для сортировки. Клик — выбор. Кнопка ↻ на карточке — поворот.",
+    movePrev: "Назад",
+    moveNext: "Вперёд",
+  },
+  kk: {
+    reorderHint: "Ретті өзгерту — сүйреңіз. Таңдау — басып. ↻ — бұру.",
+    movePrev: "Артқа",
+    moveNext: "Алға",
+  },
+  en: {
+    reorderHint: "Drag to reorder. Click to select. ↻ on card rotates.",
+    movePrev: "Back",
+    moveNext: "Forward",
+  },
+};
+
+function withToolbarFallbacks(messages: typeof ruMessages, locale: Locale): typeof ruMessages {
+  const fb = TOOLBAR_FALLBACKS[locale];
+  return {
+    ...messages,
+    toolbar: {
+      ...messages.toolbar,
+      reorderHint: messages.toolbar.reorderHint ?? fb.reorderHint,
+      movePrev: messages.toolbar.movePrev ?? fb.movePrev,
+      moveNext: messages.toolbar.moveNext ?? fb.moveNext,
+    },
+  };
+}
+
 const MESSAGES: Record<Locale, typeof ruMessages> = {
-  ru: ruMessages,
-  kk: kkMessages,
-  en: enMessages,
+  ru: withToolbarFallbacks(ruMessages, "ru"),
+  kk: withToolbarFallbacks(kkMessages, "kk"),
+  en: withToolbarFallbacks(enMessages, "en"),
 };
 
 const LOCALE_OPTIONS: { id: Locale; label: string }[] = [
@@ -33,10 +68,10 @@ const LOCALE_OPTIONS: { id: Locale; label: string }[] = [
 ];
 
 interface PdfPagesClientProps {
-  initialAction?: PdfActionMode;
+  initialAction?: PdfActionMode | "merge";
 }
 
-function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
+function PdfPagesInner({ initialAction, reorderHint }: PdfPagesClientProps & { reorderHint: string }) {
   const t = useTranslations("errors");
   const tConfirm = useTranslations("confirm");
   const router = useRouter();
@@ -68,14 +103,15 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
     updatePages,
   });
 
-  const [localMode, setLocalMode] = useState<PdfActionMode>(initialAction ?? null);
+  const [localMode, setLocalMode] = useState<PdfActionMode>(
+    initialAction === "split" || initialAction === "extract" ? initialAction : null,
+  );
   const [rangeValue, setRangeValue] = useState("");
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [fileName, setFileName] = useState("document.pdf");
   const lastSelectedRef = useRef<string | null>(null);
 
-  const mergeInputRef = useRef<HTMLInputElement>(null);
-  const addInputRef = useRef<HTMLInputElement>(null);
+  const addPdfInputRef = useRef<HTMLInputElement>(null);
 
   const columns = useGridColumns();
   const selectedIds = useMemo(
@@ -84,11 +120,25 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
   );
   const selectedCount = selectedIds.size;
 
+  const selectedPageIndex = useMemo(() => {
+    if (selectedCount !== 1) return -1;
+    return pages.findIndex((p) => p.selected);
+  }, [pages, selectedCount]);
+
+  const handleMoveSelected = useCallback(
+    (direction: "prev" | "next") => {
+      if (selectedPageIndex < 0) return;
+      const newIndex =
+        direction === "prev" ? selectedPageIndex - 1 : selectedPageIndex + 1;
+      if (newIndex < 0 || newIndex >= pages.length) return;
+      actions.reorderPages(arrayMove(pages, selectedPageIndex, newIndex));
+    },
+    [actions, pages, selectedPageIndex],
+  );
+
   const urlAction = searchParams.get("action");
   const mode: PdfActionMode =
-    urlAction === "merge" || urlAction === "split" || urlAction === "extract"
-      ? urlAction
-      : localMode;
+    urlAction === "split" || urlAction === "extract" ? urlAction : localMode;
 
   const { requestThumbnail } = useThumbnails({
     pdfBytes: originalBytes,
@@ -125,12 +175,19 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
 
   const handleFileSelect = useCallback(
     async (files: FileList | File[]) => {
-      const file = Array.from(files)[0];
-      if (!file) return;
-      setFileName(file.name);
-      await loadPdf(file);
+      const list = Array.from(files);
+      if (list.length === 0) return;
+
+      if (list.length === 1) {
+        setFileName(list[0].name);
+        await loadPdf(list[0]);
+        return;
+      }
+
+      setFileName(`${list[0].name.replace(/\.pdf$/i, "")}_combined.pdf`);
+      await actions.importPdfFiles(list);
     },
-    [loadPdf],
+    [actions, loadPdf],
   );
 
   const handleSelect = useCallback(
@@ -216,56 +273,50 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
     [pages.length],
   );
 
-  const handleMergeSelect = useCallback(() => {
-    mergeInputRef.current?.click();
+  const handleAddPdf = useCallback(() => {
+    addPdfInputRef.current?.click();
   }, []);
 
-  const handleMergeFiles = useCallback(
+  const handleAddPdfFiles = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
-      await actions.mergeFiles(Array.from(files));
-      setLocalMode(null);
-      updateUrlMode(null);
-    },
-    [actions, updateUrlMode],
-  );
-
-  const handleAddPages = useCallback(() => {
-    addInputRef.current?.click();
-  }, []);
-
-  const handleAddFiles = useCallback(
-    async (files: FileList | null) => {
-      const file = files?.[0];
-      if (!file) return;
-      await actions.addPdfFile(file);
+      await actions.appendPdfFiles(Array.from(files));
+      if (addPdfInputRef.current) {
+        addPdfInputRef.current.value = "";
+      }
     },
     [actions],
   );
 
+  const handleRotatePage = useCallback(
+    (pageId: string) => {
+      actions.rotatePages(new Set([pageId]));
+    },
+    [actions],
+  );
+
+  useEffect(() => {
+    if (initialAction === "merge" && pages.length > 0) {
+      addPdfInputRef.current?.click();
+    }
+  }, [initialAction, pages.length]);
+
   const errorMessage = error ? t(error) : null;
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-2.75rem)]">
+    <div className="flex flex-col h-[calc(100vh-2.75rem)] overflow-hidden">
       <input
-        ref={mergeInputRef}
+        ref={addPdfInputRef}
         type="file"
         accept="application/pdf,.pdf"
         multiple
         className="hidden"
-        onChange={(e) => void handleMergeFiles(e.target.files)}
-      />
-      <input
-        ref={addInputRef}
-        type="file"
-        accept="application/pdf,.pdf"
-        className="hidden"
-        onChange={(e) => void handleAddFiles(e.target.files)}
+        onChange={(e) => void handleAddPdfFiles(e.target.files)}
       />
 
       {pages.length === 0 ? (
         <>
-          <UploadZone onFileSelect={handleFileSelect} disabled={isLoading} />
+          <UploadZone onFileSelect={handleFileSelect} disabled={isLoading} multiple />
           <FaqSection />
           <SeoContent />
         </>
@@ -281,13 +332,16 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
               onDeleteRange={(range) => void handleDeleteRange(range)}
               onRotate={() => actions.rotatePages(selectedIds)}
               onExtract={() => void actions.extractSelected(selectedIds, fileName)}
-              onMerge={handleMergeSelect}
+              onAddPdf={handleAddPdf}
               onSplit={(splitMode, range) =>
                 void actions.splitDocument(fileName, splitMode, range)
               }
               onDownload={() => void actions.downloadDocument(fileName)}
               onReset={handleReset}
-              onAddPages={handleAddPages}
+              onMovePrev={() => handleMoveSelected("prev")}
+              onMoveNext={() => handleMoveSelected("next")}
+              canMovePrev={selectedPageIndex > 0}
+              canMoveNext={selectedPageIndex >= 0 && selectedPageIndex < pages.length - 1}
               rangeValue={rangeValue}
               onRangeChange={handleRangeChange}
               rangeError={rangeError}
@@ -303,10 +357,12 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
 
           <PageGrid
             pages={pages}
-            onReorder={(reordered) => void actions.reorderPages(reordered)}
+            onReorder={(reordered) => actions.reorderPages(reordered)}
             onSelect={handleSelect}
+            onRotate={handleRotatePage}
             onRequestThumbnail={requestThumbnail}
             columns={columns}
+            reorderHint={reorderHint}
           />
 
           <div className="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 shadow-lg">
@@ -319,13 +375,16 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
               onDeleteRange={(range) => void handleDeleteRange(range)}
               onRotate={() => actions.rotatePages(selectedIds)}
               onExtract={() => void actions.extractSelected(selectedIds, fileName)}
-              onMerge={handleMergeSelect}
+              onAddPdf={handleAddPdf}
               onSplit={(splitMode, range) =>
                 void actions.splitDocument(fileName, splitMode, range)
               }
               onDownload={() => void actions.downloadDocument(fileName)}
               onReset={handleReset}
-              onAddPages={handleAddPages}
+              onMovePrev={() => handleMoveSelected("prev")}
+              onMoveNext={() => handleMoveSelected("next")}
+              canMovePrev={selectedPageIndex > 0}
+              canMoveNext={selectedPageIndex >= 0 && selectedPageIndex < pages.length - 1}
               rangeValue={rangeValue}
               onRangeChange={handleRangeChange}
               rangeError={rangeError}
@@ -342,9 +401,26 @@ function PdfPagesInner({ initialAction }: PdfPagesClientProps) {
 
 export default function PdfPagesClient({ initialAction }: PdfPagesClientProps) {
   const [locale, setLocale] = useState<Locale>("ru");
+  const reorderHint = TOOLBAR_FALLBACKS[locale].reorderHint;
 
   return (
-    <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]}>
+    <NextIntlClientProvider
+      locale={locale}
+      messages={MESSAGES[locale]}
+      onError={(error) => {
+        if (error.code === "MISSING_MESSAGE") return;
+        console.error(error);
+      }}
+      getMessageFallback={({ namespace, key }) => {
+        if (namespace === "toolbar") {
+          const fb = TOOLBAR_FALLBACKS[locale];
+          if (key === "reorderHint") return fb.reorderHint;
+          if (key === "movePrev") return fb.movePrev;
+          if (key === "moveNext") return fb.moveNext;
+        }
+        return key;
+      }}
+    >
       <div className="flex justify-end px-4 pt-2 gap-1 print:hidden">
         {LOCALE_OPTIONS.map((opt) => (
           <button
@@ -361,7 +437,7 @@ export default function PdfPagesClient({ initialAction }: PdfPagesClientProps) {
           </button>
         ))}
       </div>
-      <PdfPagesInner initialAction={initialAction} />
+      <PdfPagesInner initialAction={initialAction} reorderHint={reorderHint} />
     </NextIntlClientProvider>
   );
 }

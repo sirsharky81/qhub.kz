@@ -1,5 +1,6 @@
 import { PDFDocument, degrees, type PDFPage } from "pdf-lib";
 import type { PageRotation, PdfPage } from "../types";
+import { DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH } from "./pageLayout";
 import { parsePageRanges } from "./rangeParser";
 
 export interface LoadedPdf {
@@ -24,18 +25,24 @@ export async function readPdfFile(file: File): Promise<LoadedPdf> {
 /**
  * Creates PdfPage entries from a loaded PDF without thumbnails.
  */
-export function createPagesFromPdf(
+export async function createPagesFromPdf(
   loaded: LoadedPdf,
   idPrefix: string,
-): PdfPage[] {
-  return Array.from({ length: loaded.pageCount }, (_, index) => ({
-    id: `${idPrefix}-${index}`,
-    pageIndex: index,
-    rotation: 0 as PageRotation,
-    thumbnail: null,
-    selected: false,
-    sourceFile: loaded.fileName,
-  }));
+): Promise<PdfPage[]> {
+  const doc = await PDFDocument.load(loaded.bytes);
+  return doc.getPages().map((page, index) => {
+    const { width, height } = page.getSize();
+    return {
+      id: `${idPrefix}-${index}`,
+      pageIndex: index,
+      rotation: 0 as PageRotation,
+      thumbnail: null,
+      selected: false,
+      sourceFile: loaded.fileName,
+      width: width || DEFAULT_PAGE_WIDTH,
+      height: height || DEFAULT_PAGE_HEIGHT,
+    };
+  });
 }
 
 /**
@@ -152,17 +159,22 @@ export async function appendPdfPages(
 ): Promise<{ bytes: Uint8Array; pages: PdfPage[] }> {
   const merged = await mergePdfs([existingBytes, newFile]);
   const newDoc = await PDFDocument.load(newFile);
-  const newPageCount = newDoc.getPageCount();
+  const newPdfPages = newDoc.getPages();
   const startIndex = existingPages.length;
 
-  const addedPages: PdfPage[] = Array.from({ length: newPageCount }, (_, i) => ({
-    id: `${idPrefix}-${startIndex + i}`,
-    pageIndex: startIndex + i,
-    rotation: 0 as PageRotation,
-    thumbnail: null,
-    selected: false,
-    sourceFile: newFileName,
-  }));
+  const addedPages: PdfPage[] = newPdfPages.map((page, i) => {
+    const { width, height } = page.getSize();
+    return {
+      id: `${idPrefix}-${startIndex + i}`,
+      pageIndex: startIndex + i,
+      rotation: 0 as PageRotation,
+      thumbnail: null,
+      selected: false,
+      sourceFile: newFileName,
+      width: width || DEFAULT_PAGE_WIDTH,
+      height: height || DEFAULT_PAGE_HEIGHT,
+    };
+  });
 
   return {
     bytes: merged,
@@ -194,11 +206,12 @@ export async function renderPageThumbnail(
   pageIndex: number,
   scale = THUMBNAIL_SCALE,
   registerCancel?: (cancel: () => void) => void,
+  rotation = 0,
 ): Promise<string> {
   const page = await doc.getPage(pageIndex + 1);
 
   try {
-    const viewport = page.getViewport({ scale });
+    const viewport = page.getViewport({ scale, rotation });
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;

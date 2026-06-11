@@ -6,19 +6,23 @@ import { trackEvent } from "../lib/analytics";
 import { PLAN_LIMITS, currentPlan } from "../lib/limits";
 import {
   appendPdfPages,
+  createPagesFromPdf,
   downloadPdf,
   extractPages,
   getDeleteIndices,
   mergePdfs,
+  readPdfFile,
   rotateClockwise,
   splitPdf,
   syncBytesWithPages,
+  validatePdfBytes,
 } from "../lib/pdfOperations";
+import { ThumbnailCache } from "../lib/thumbnailCache";
 
 interface UsePdfActionsParams {
   pages: PdfPage[];
   originalBytes: Uint8Array | null;
-  setPages: (pages: PdfPage[]) => void;
+  setPages: (pages: PdfPage[], originalBytes?: Uint8Array) => void;
   setOriginalBytes: (bytes: Uint8Array | null) => void;
   setIsProcessing: (value: boolean) => void;
   setError: (error: string | null) => void;
@@ -51,7 +55,6 @@ export function usePdfActions({
         const remapped = remaining.map((p, i) => ({
           ...p,
           pageIndex: i,
-          thumbnail: null,
           selected: false,
         }));
 
@@ -80,9 +83,15 @@ export function usePdfActions({
     (ids: Set<string>) => {
       if (ids.size === 0) return;
       updatePages((prev) =>
-        prev.map((p) =>
-          ids.has(p.id) ? { ...p, rotation: rotateClockwise(p.rotation) } : p,
-        ),
+        prev.map((p) => {
+          if (!ids.has(p.id)) return p;
+          ThumbnailCache.delete(p.id);
+          return {
+            ...p,
+            rotation: rotateClockwise(p.rotation),
+            thumbnail: null,
+          };
+        }),
       );
       trackEvent("pdf_rotate_pages", { selectedCount: ids.size });
     },
@@ -90,27 +99,11 @@ export function usePdfActions({
   );
 
   const reorderPages = useCallback(
-    async (reordered: PdfPage[]) => {
-      if (!originalBytes) return;
-
-      setIsProcessing(true);
-      try {
-        const remapped = reordered.map((p, i) => ({
-          ...p,
-          pageIndex: i,
-          thumbnail: null,
-        }));
-        const newBytes = await syncBytesWithPages(originalBytes, remapped);
-        setOriginalBytes(newBytes);
-        setPages(remapped);
-        trackEvent("pdf_reorder_pages", { pageCount: remapped.length });
-      } catch {
-        setError("processingFailed");
-      } finally {
-        setIsProcessing(false);
-      }
+    (reordered: PdfPage[]) => {
+      setPages(reordered);
+      trackEvent("pdf_reorder_pages", { pageCount: reordered.length });
     },
-    [originalBytes, setError, setIsProcessing, setOriginalBytes, setPages],
+    [setPages],
   );
 
   const extractSelected = useCallback(
@@ -132,45 +125,60 @@ export function usePdfActions({
     [originalBytes, pages, setError, setIsProcessing],
   );
 
-  const addPdfFile = useCallback(
-    async (file: File) => {
-      if (!originalBytes) return;
+  /**
+   * Appends one or more PDF files to the end of the current document.
+   */
+  const appendPdfFiles = useCallback(
+    async (files: File[]) => {
+      if (!originalBytes || files.length === 0) return;
 
       const limits = PLAN_LIMITS[currentPlan];
-      const fileCount = new Set(pages.map((p) => p.sourceFile)).size;
-      if (fileCount >= limits.maxFiles) {
-        setError("tooManyFiles");
-        return;
-      }
-
       setIsProcessing(true);
-      try {
-        const newBytes = new Uint8Array(await file.arrayBuffer());
-        const currentBytes = await syncBytesWithPages(originalBytes, pages);
-        const result = await appendPdfPages(
-          currentBytes,
-          newBytes,
-          file.name,
-          pages,
-          `page-${Date.now()}`,
-        );
 
-        setOriginalBytes(result.bytes);
-        setPages(
-          result.pages.map((p) => ({ ...p, thumbnail: null, selected: false })),
-        );
-        trackEvent("pdf_merge", { pageCount: result.pages.length });
+      try {
+        let currentBytes = await syncBytesWithPages(originalBytes, pages);
+        let currentPages = [...pages];
+
+        for (const file of files) {
+          const newBytes = new Uint8Array(await file.arrayBuffer());
+          const result = await appendPdfPages(
+            currentBytes,
+            newBytes,
+            file.name,
+            currentPages,
+            `page-${Date.now()}`,
+          );
+          currentBytes = result.bytes;
+          currentPages = result.pages;
+        }
+
+        const nextPages = currentPages.map((p) => ({
+          ...p,
+          thumbnail: ThumbnailCache.get(p.id) ?? p.thumbnail,
+          selected: false,
+        }));
+
+        setPages(nextPages, currentBytes);
+        trackEvent("pdf_merge", {
+          pageCount: nextPages.length,
+          selectedCount: files.length,
+        });
       } catch {
         setError("corruptedFile");
       } finally {
         setIsProcessing(false);
       }
     },
-    [originalBytes, pages, setError, setIsProcessing, setOriginalBytes, setPages],
+    [originalBytes, pages, setError, setIsProcessing, setPages],
   );
 
-  const mergeFiles = useCallback(
+  /**
+   * Imports multiple PDFs as a new document (empty state / combine on upload).
+   */
+  const importPdfFiles = useCallback(
     async (files: File[]) => {
+      if (files.length === 0) return;
+
       const limits = PLAN_LIMITS[currentPlan];
       if (files.length > limits.maxFiles) {
         setError("tooManyFiles");
@@ -178,16 +186,22 @@ export function usePdfActions({
       }
 
       setIsProcessing(true);
+
       try {
         const allBytes: Uint8Array[] = [];
         let totalPages = 0;
 
         for (const file of files) {
           const bytes = new Uint8Array(await file.arrayBuffer());
+          const isValid = await validatePdfBytes(bytes);
+          if (!isValid) {
+            setError("corruptedFile");
+            setIsProcessing(false);
+            return;
+          }
           allBytes.push(bytes);
-          const { PDFDocument } = await import("pdf-lib");
-          const doc = await PDFDocument.load(bytes);
-          totalPages += doc.getPageCount();
+          const loaded = await readPdfFile(file);
+          totalPages += loaded.pageCount;
         }
 
         if (totalPages > limits.maxPages) {
@@ -197,35 +211,37 @@ export function usePdfActions({
         }
 
         const merged = await mergePdfs(allBytes);
-        const { PDFDocument } = await import("pdf-lib");
-        const doc = await PDFDocument.load(merged);
-        const mergedPages: PdfPage[] = Array.from({ length: doc.getPageCount() }, (_, i) => ({
-          id: `merged-${Date.now()}-${i}`,
-          pageIndex: i,
-          rotation: 0,
-          thumbnail: null,
-          selected: false,
-          sourceFile: files[Math.min(i, files.length - 1)]?.name ?? "merged.pdf",
-        }));
+        const prefix = `import-${Date.now()}`;
+        const allPages: PdfPage[] = [];
 
-        setOriginalBytes(merged);
-        setPages(mergedPages);
-        trackEvent("pdf_merge", { pageCount: mergedPages.length, fileSize: merged.byteLength });
+        for (let i = 0; i < files.length; i++) {
+          const loaded = await readPdfFile(files[i]);
+          const filePages = await createPagesFromPdf(loaded, `${prefix}-${i}`);
+          const offset = allPages.length;
+          allPages.push(
+            ...filePages.map((p, idx) => ({
+              ...p,
+              id: `${prefix}-${offset + idx}`,
+              pageIndex: offset + idx,
+            })),
+          );
+        }
+
+        ThumbnailCache.clear();
+        setPages(allPages, merged);
+        setError(null);
+        trackEvent("pdf_merge", { pageCount: allPages.length, fileSize: merged.byteLength });
       } catch {
         setError("corruptedFile");
       } finally {
         setIsProcessing(false);
       }
     },
-    [setError, setIsProcessing, setOriginalBytes, setPages],
+    [setError, setIsProcessing, setPages],
   );
 
   const splitDocument = useCallback(
-    async (
-      fileName: string,
-      mode: SplitMode,
-      rangeInput?: string,
-    ) => {
+    async (fileName: string, mode: SplitMode, rangeInput?: string) => {
       if (!originalBytes) return;
 
       setIsProcessing(true);
@@ -271,8 +287,8 @@ export function usePdfActions({
     rotatePages,
     reorderPages,
     extractSelected,
-    addPdfFile,
-    mergeFiles,
+    appendPdfFiles,
+    importPdfFiles,
     splitDocument,
     downloadDocument,
   };

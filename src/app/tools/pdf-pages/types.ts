@@ -7,6 +7,10 @@ export interface PdfPage {
   thumbnail: string | null;
   selected: boolean;
   sourceFile: string;
+  /** Page width in PDF points */
+  width: number;
+  /** Page height in PDF points */
+  height: number;
 }
 
 export interface AppState {
@@ -17,6 +21,6 @@ export interface AppState {
   error: string | null;
 }
 
-export type PdfActionMode = "merge" | "split" | "extract" | null;
+export type PdfActionMode = "split" | "extract" | null;
 
 export type SplitMode = "each" | "ranges";

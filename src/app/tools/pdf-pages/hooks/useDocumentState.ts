@@ -9,6 +9,7 @@ import {
   readPdfFile,
   validatePdfBytes,
 } from "../lib/pdfOperations";
+import { ThumbnailCache } from "../lib/thumbnailCache";
 
 const initialState: AppState = {
   pages: [],
@@ -25,8 +26,12 @@ export function usePdfDocument() {
     setState((prev) => ({ ...prev, error }));
   }, []);
 
-  const setPages = useCallback((pages: PdfPage[]) => {
-    setState((prev) => ({ ...prev, pages }));
+  const setPages = useCallback((pages: PdfPage[], originalBytes?: Uint8Array) => {
+    setState((prev) => ({
+      ...prev,
+      pages,
+      ...(originalBytes !== undefined ? { originalBytes } : {}),
+    }));
   }, []);
 
   const setOriginalBytes = useCallback((bytes: Uint8Array | null) => {
@@ -67,7 +72,8 @@ export function usePdfDocument() {
         return;
       }
 
-      const pages = createPagesFromPdf(loaded, `page-${Date.now()}`);
+      const pages = await createPagesFromPdf(loaded, `page-${Date.now()}`);
+      ThumbnailCache.clear();
 
       setState({
         pages,
@@ -87,6 +93,7 @@ export function usePdfDocument() {
   }, []);
 
   const reset = useCallback(() => {
+    ThumbnailCache.clear();
     setState(initialState);
   }, []);
 
@@ -101,8 +108,16 @@ export function usePdfDocument() {
     setState((prev) => ({ ...prev, pages: updater(prev.pages) }));
   }, []);
 
+  const commitDocument = useCallback((pages: PdfPage[], originalBytes: Uint8Array) => {
+    setPages(pages, originalBytes);
+  }, [setPages]);
+
   return {
-    ...state,
+    pages: state.pages,
+    originalBytes: state.originalBytes,
+    isLoading: state.isLoading,
+    isProcessing: state.isProcessing,
+    error: state.error,
     loadPdf,
     reset,
     setError,
@@ -111,5 +126,6 @@ export function usePdfDocument() {
     setIsProcessing,
     updatePage,
     updatePages,
+    commitDocument,
   };
 }

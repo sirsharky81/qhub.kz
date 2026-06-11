@@ -5,6 +5,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import type { PdfPage } from "../types";
 import { renderPageThumbnail } from "../lib/pdfOperations";
 import { RenderQueue } from "../lib/renderQueue";
+import { ThumbnailCache } from "../lib/thumbnailCache";
 import { createPdfLoadingTask } from "../../_pdf-shared/pdfWorker";
 
 const RENDER_CONCURRENCY = 2;
@@ -16,8 +17,8 @@ interface UseThumbnailsOptions {
 }
 
 /**
- * Lazily generates thumbnails for visible pages via IntersectionObserver callbacks.
- * Uses a bounded render queue and a shared pdf.js document instance.
+ * Lazily generates thumbnails for visible pages.
+ * Rendered images are stored in ThumbnailCache (module scope) so they survive pdfBytes updates.
  */
 export function useThumbnails({
   pdfBytes,
@@ -41,7 +42,7 @@ export function useThumbnails({
     onThumbnailReadyRef.current = onThumbnailReady;
   }, [onThumbnailReady]);
 
-  const cleanupDocument = useCallback(() => {
+  const resetDocument = useCallback(() => {
     queueRef.current.clear();
     queueRef.current.reset();
 
@@ -56,14 +57,14 @@ export function useThumbnails({
 
   useEffect(() => {
     pdfGenerationRef.current += 1;
-    cleanupDocument();
-  }, [pdfBytes, cleanupDocument]);
+    resetDocument();
+  }, [pdfBytes, resetDocument]);
 
   useEffect(() => {
     return () => {
-      cleanupDocument();
+      resetDocument();
     };
-  }, [cleanupDocument]);
+  }, [resetDocument]);
 
   const getDocument = useCallback(async (): Promise<PDFDocumentProxy | null> => {
     if (!pdfBytes) return null;
@@ -80,12 +81,31 @@ export function useThumbnails({
     return docLoadRef.current;
   }, [pdfBytes]);
 
+  const applyThumbnail = useCallback((pageId: string, thumbnail: string) => {
+    ThumbnailCache.set(pageId, thumbnail);
+    onThumbnailReadyRef.current(pageId, thumbnail);
+  }, []);
+
   const requestThumbnail = useCallback(
     (pageId: string) => {
       if (!pdfBytes) return;
 
       const page = pagesRef.current.find((p) => p.id === pageId);
-      if (!page || page.thumbnail || renderedIdsRef.current.has(pageId)) return;
+      const cached = ThumbnailCache.get(pageId);
+
+      if (cached) {
+        if (!page?.thumbnail) {
+          onThumbnailReadyRef.current(pageId, cached);
+        }
+        return;
+      }
+
+      if (!page || page.thumbnail) return;
+
+      if (!cached) {
+        renderedIdsRef.current.delete(pageId);
+      }
+      if (renderedIdsRef.current.has(pageId)) return;
 
       renderedIdsRef.current.add(pageId);
       const generation = pdfGenerationRef.current;
@@ -99,30 +119,34 @@ export function useThumbnails({
           }
 
           const currentPage = pagesRef.current.find((p) => p.id === pageId);
+          const cachedNow = ThumbnailCache.get(pageId);
+          if (cachedNow) return cachedNow;
           if (!currentPage || currentPage.thumbnail) {
             return "";
           }
 
-          return renderPageThumbnail(doc, currentPage.pageIndex, undefined, (cancel) => {
-            queueRef.current.registerCancel(pageId, cancel);
-          });
+          return renderPageThumbnail(
+            doc,
+            currentPage.pageIndex,
+            undefined,
+            (cancel) => {
+              queueRef.current.registerCancel(pageId, cancel);
+            },
+            currentPage.rotation,
+          );
         },
       ).then(
         (thumbnail) => {
           if (generation !== pdfGenerationRef.current || !thumbnail) return;
-          onThumbnailReadyRef.current(pageId, thumbnail);
+          applyThumbnail(pageId, thumbnail);
         },
-        (error: unknown) => {
+        () => {
           if (generation !== pdfGenerationRef.current) return;
-          if (error instanceof Error && error.message === "queue_cleared") {
-            renderedIdsRef.current.delete(pageId);
-            return;
-          }
           renderedIdsRef.current.delete(pageId);
         },
       );
     },
-    [getDocument, pdfBytes],
+    [applyThumbnail, getDocument, pdfBytes],
   );
 
   return { requestThumbnail };
