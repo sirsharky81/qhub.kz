@@ -111,9 +111,29 @@ export async function importDirectory(
 }
 
 const fileCache = new Map<string, File>();
+const objectUrlCache = new Map<string, string>();
 
 export function cacheTrackFile(trackId: string, file: File): void {
   fileCache.set(trackId, file);
+}
+
+export function getCachedTrackFile(trackId: string): File | undefined {
+  return fileCache.get(trackId);
+}
+
+export function getOrCreateObjectUrl(trackId: string, file: File): string {
+  const cached = objectUrlCache.get(trackId);
+  if (cached) return cached;
+  const url = URL.createObjectURL(file);
+  objectUrlCache.set(trackId, url);
+  return url;
+}
+
+export function releaseObjectUrl(trackId: string): void {
+  const url = objectUrlCache.get(trackId);
+  if (!url) return;
+  URL.revokeObjectURL(url);
+  objectUrlCache.delete(trackId);
 }
 
 export async function getTrackFile(track: Track): Promise<File | null> {
@@ -149,9 +169,15 @@ export async function getTrackFile(track: Track): Promise<File | null> {
 export async function prefetchTrackFiles(trackIds: string[]): Promise<void> {
   await Promise.all(
     trackIds.map(async (id) => {
-      if (fileCache.has(id)) return;
+      if (fileCache.has(id)) {
+        const file = fileCache.get(id)!;
+        getOrCreateObjectUrl(id, file);
+        return;
+      }
       const track = await storage.getTrack(id);
-      if (track) await getTrackFile(track);
+      if (!track) return;
+      const file = await getTrackFile(track);
+      if (file) getOrCreateObjectUrl(id, file);
     }),
   );
 }

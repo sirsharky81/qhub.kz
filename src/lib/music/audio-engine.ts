@@ -15,11 +15,13 @@ type CapturableAudio = HTMLAudioElement & {
   mozCaptureStream?: () => MediaStream;
 };
 
+type LockScreenActionOpts = { lockScreen?: boolean };
+
 type MediaSessionCallbacks = {
   onSyncPlay: () => void;
   onSyncPause: () => void;
-  onPrevious: () => void;
-  onNext: () => void;
+  onPrevious: (opts?: LockScreenActionOpts) => void;
+  onNext: (opts?: LockScreenActionOpts) => void;
 };
 
 function isIOSDevice(): boolean {
@@ -34,6 +36,14 @@ function isPageHidden(): boolean {
   return typeof document !== "undefined" && document.hidden;
 }
 
+function isStandalonePWA(): boolean {
+  if (typeof window === "undefined") return false;
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return (
+    window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true
+  );
+}
+
 function ensureNavigatorAudioSession(): void {
   if (typeof navigator === "undefined") return;
   const nav = navigator as Navigator & { audioSession?: { type: string } };
@@ -43,14 +53,17 @@ function ensureNavigatorAudioSession(): void {
 }
 
 function hideAudioElement(audio: HTMLAudioElement): void {
+  // PWA на iOS: элемент вне экрана (-9999px) ломает фоновый звук
+  const pwaIos = isIOSDevice() && isStandalonePWA();
   Object.assign(audio.style, {
     position: "fixed",
-    left: "-9999px",
+    left: pwaIos ? "0" : "-9999px",
     bottom: "0",
     width: "1px",
     height: "1px",
-    opacity: "0",
+    opacity: pwaIos ? "0.001" : "0",
     pointerEvents: "none",
+    zIndex: "-1",
   });
 }
 
@@ -107,7 +120,7 @@ export class AudioEngine {
       if (this.status === "playing") this.updatePositionState();
     });
     this.audio.addEventListener("durationchange", () => {
-      if (this.status === "playing") this.updatePositionState();
+      this.updatePositionState();
     });
     this.audio.addEventListener("ended", () => {
       this.setStatus("stopped");
@@ -158,31 +171,68 @@ export class AudioEngine {
     }, 3000);
   }
 
-  /** iOS ломает lock screen, если setActionHandler вызывать повторно */
+  /** На iOS seekbackward/seekforward заменяют кнопки пред./след. трек на ±10с */
+  private clearIOSSkipSeekHandlers(): void {
+    if (!isIOSDevice() || !("mediaSession" in navigator)) return;
+    for (const action of ["seekbackward", "seekforward"] as const) {
+      try {
+        navigator.mediaSession.setActionHandler(action, null);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private registerSeekToHandler(): void {
+    if (!("mediaSession" in navigator)) return;
+    if (typeof navigator.mediaSession.setPositionState !== "function") return;
+    try {
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
+        this.seek(details.seekTime);
+        this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+      });
+    } catch {
+      /* Safari */
+    }
+  }
+
+  private ensureAudioInDom(): void {
+    if (typeof document === "undefined") return;
+    hideAudioElement(this.audio);
+    if (!this.audio.isConnected) {
+      document.body.appendChild(this.audio);
+    }
+  }
+
+  /** Handlers регистрируем один раз; callbacks обновляем через sessionCallbacks */
   private registerMediaSessionHandlersOnce(): void {
     if (this.mediaSessionRegistered || !("mediaSession" in navigator)) return;
     this.mediaSessionRegistered = true;
 
     try {
       navigator.mediaSession.setActionHandler("play", () => {
-        void this.handleMediaSessionPlay(() => this.sessionCallbacks.onSyncPlay());
+        this.handleMediaSessionPlay(() => this.sessionCallbacks.onSyncPlay());
       });
       navigator.mediaSession.setActionHandler("pause", () => {
         this.handleMediaSessionPause(() => this.sessionCallbacks.onSyncPause());
       });
       navigator.mediaSession.setActionHandler("previoustrack", () => {
-        void this.sessionCallbacks.onPrevious();
+        this.sessionCallbacks.onPrevious({ lockScreen: true });
       });
       navigator.mediaSession.setActionHandler("nexttrack", () => {
-        void this.sessionCallbacks.onNext();
+        this.sessionCallbacks.onNext({ lockScreen: true });
       });
       navigator.mediaSession.setActionHandler("stop", () => {
         this.stop();
         this.sessionCallbacks.onSyncPause();
       });
     } catch {
-      /* Safari */
+      /* Safari / PWA */
     }
+
+    this.clearIOSSkipSeekHandlers();
+    this.registerSeekToHandler();
 
     if (!isIOSDevice()) {
       try {
@@ -198,18 +248,6 @@ export class AudioEngine {
         });
       } catch {
         /* ignore */
-      }
-
-      if (typeof navigator.mediaSession.setPositionState === "function") {
-        try {
-          navigator.mediaSession.setActionHandler("seekto", (details) => {
-            if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
-            this.seek(details.seekTime);
-            this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-          });
-        } catch {
-          /* ignore */
-        }
       }
     }
   }
@@ -283,36 +321,57 @@ export class AudioEngine {
     }
   }
 
-  private async handleMediaSessionPlay(onSync?: () => void): Promise<void> {
+  /**
+   * PWA/iOS: audio.play() должен вызываться синхронно внутри handler Media Session,
+   * иначе теряется user activation и звук пропадает после паузы на lock screen.
+   */
+  private handleMediaSessionPlay(onSync?: () => void): void {
     ensureNavigatorAudioSession();
+    this.ensureAudioInDom();
     this.audio.muted = false;
     this.audio.playbackRate = 1;
 
-    const resume = async () => {
-      await this.audio.play();
+    if (isIOSDevice() && isStandalonePWA() && this.audio.src) {
+      const position = this.audio.currentTime;
+      this.audio.currentTime = position;
+    }
+
+    const onSuccess = () => {
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "playing";
+      }
+      this.setStatus("playing");
+      this.updatePositionState();
+      onSync?.();
     };
 
-    try {
-      await resume();
-    } catch {
+    const retry = () => {
+      if (isIOSDevice() && isStandalonePWA()) {
+        const p = this.audio.play();
+        if (p !== undefined) p.then(onSuccess).catch(() => {});
+        return;
+      }
       const src = this.audio.currentSrc || this.audio.src;
       const position = this.audio.currentTime;
       if (!src) return;
       this.audio.src = src;
       this.audio.currentTime = position;
-      try {
-        await resume();
-      } catch {
-        return;
-      }
-    }
+      const p = this.audio.play();
+      if (p !== undefined) p.then(onSuccess).catch(() => {});
+      else onSuccess();
+    };
 
-    if ("mediaSession" in navigator) {
-      navigator.mediaSession.playbackState = "playing";
+    const promise = this.audio.play();
+    if (promise !== undefined) {
+      promise.then(onSuccess).catch(retry);
+    } else {
+      onSuccess();
     }
-    this.setStatus("playing");
-    this.updatePositionState();
-    onSync?.();
+  }
+
+  /** Публичный путь для play с lock screen / фона (PWA) */
+  playFromLockScreen(onDone?: () => void): void {
+    this.handleMediaSessionPlay(onDone);
   }
 
   private handleMediaSessionPause(onSync?: () => void): void {
@@ -321,6 +380,7 @@ export class AudioEngine {
       navigator.mediaSession.playbackState = "paused";
     }
     this.setStatus("paused");
+    this.updatePositionState();
     this.onSavePosition?.(this.audio.currentTime);
     onSync?.();
   }
@@ -377,21 +437,40 @@ export class AudioEngine {
   private updatePositionState(): void {
     if (!("mediaSession" in navigator)) return;
     if (typeof navigator.mediaSession.setPositionState !== "function") return;
-    if (this.status !== "playing") return;
+    if (this.status === "stopped" || this.status === "idle" || this.status === "loading") return;
 
     const duration = this.audio.duration;
     const position = this.audio.currentTime;
     if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(position)) return;
 
+    const playbackRate =
+      this.status === "playing" && this.audio.playbackRate > 0 ? this.audio.playbackRate : 1;
+
     try {
       navigator.mediaSession.setPositionState({
         duration,
-        playbackRate: this.audio.playbackRate > 0 ? this.audio.playbackRate : 1,
+        playbackRate,
         position: Math.max(0, Math.min(position, duration)),
       });
     } catch {
       /* Safari */
     }
+  }
+
+  /** Синхронная смена трека с lock screen (без await load/canplay) */
+  setSourceUrlSync(url: string, startPosition = 0): void {
+    ensureNavigatorAudioSession();
+    this.ensureAudioInDom();
+    if (this.objectUrl && this.objectUrl !== url) {
+      URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = null;
+    }
+    this.audio.playbackRate = 1;
+    this.audio.src = url;
+    if (startPosition > 0) {
+      this.audio.currentTime = startPosition;
+    }
+    this.setStatus("paused");
   }
 
   async load(file: File, startPosition = 0): Promise<void> {
@@ -434,8 +513,8 @@ export class AudioEngine {
     this.audio.muted = false;
     this.audio.playbackRate = 1;
 
-    if (isPageHidden()) {
-      await this.handleMediaSessionPlay();
+    if (isPageHidden() || (isIOSDevice() && isStandalonePWA() && this.audio.paused)) {
+      await new Promise<void>((resolve) => this.handleMediaSessionPlay(resolve));
       return;
     }
 
@@ -456,6 +535,7 @@ export class AudioEngine {
       navigator.mediaSession.playbackState = "paused";
     }
     this.setStatus("paused");
+    this.updatePositionState();
     this.onSavePosition?.(this.audio.currentTime);
     if (!isIOSDevice()) this.teardownAnalyser();
   }
@@ -486,9 +566,10 @@ export class AudioEngine {
     handlers: {
       onPlay: () => void;
       onPause: () => void;
-      onPrevious: () => void;
-      onNext: () => void;
+      onPrevious: (opts?: LockScreenActionOpts) => void;
+      onNext: (opts?: LockScreenActionOpts) => void;
     },
+    queueInfo?: { queueLength: number; queueIndex: number },
   ): void {
     if (!("mediaSession" in navigator)) return;
 
@@ -504,18 +585,24 @@ export class AudioEngine {
       return;
     }
 
+    const albumLabel =
+      track.album ||
+      (queueInfo && queueInfo.queueLength > 1
+        ? `Очередь · ${queueInfo.queueIndex + 1} из ${queueInfo.queueLength}`
+        : "QHub Music");
+
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist,
-      album: track.album,
+      album: albumLabel,
       artwork: track.coverArtUrl
         ? [{ src: track.coverArtUrl, sizes: "512x512", type: "image/jpeg" }]
         : [],
     });
 
-    if (this.status === "playing") {
-      this.updatePositionState();
-    }
+    this.clearIOSSkipSeekHandlers();
+    this.registerSeekToHandler();
+    this.updatePositionState();
   }
 
   setMediaSessionPlaybackState(state: "playing" | "paused" | "none"): void {

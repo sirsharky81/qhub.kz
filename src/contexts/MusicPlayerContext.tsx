@@ -122,10 +122,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initializedRef = useRef(false);
+  const tracksRef = useRef<Track[]>([]);
   const sessionActionsRef = useRef({
-    onPrevious: async () => {},
-    onNext: async () => {},
+    onPrevious: (_opts?: { lockScreen?: boolean }) => {},
+    onNext: (_opts?: { lockScreen?: boolean }) => {},
   });
+
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
 
   const persistState = useCallback(async () => {
     const qm = queueRef.current;
@@ -144,22 +149,68 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     persistTimerRef.current = setTimeout(() => void persistState(), 500);
   }, [persistState]);
 
+  const prefetchQueueNeighbors = useCallback((trackId: string) => {
+    const q = queueRef.current.getQueue();
+    const idx = q.indexOf(trackId);
+    if (idx < 0) return;
+    const neighborIds = q.slice(Math.max(0, idx - 2), Math.min(q.length, idx + 3));
+    void mediaLibrary.prefetchTrackFiles(neighborIds);
+  }, []);
+
   const bindMediaSession = useCallback(
     (track: Track) => {
-      engineRef.current?.updateMediaSession(track, {
-        onPlay: () => {
-          engineRef.current?.setMediaSessionPlaybackState("playing");
-          schedulePersist();
+      const q = queueRef.current.getQueue();
+      const idx = Math.max(0, queueRef.current.getIndex());
+      engineRef.current?.updateMediaSession(
+        track,
+        {
+          onPlay: () => {
+            engineRef.current?.setMediaSessionPlaybackState("playing");
+            schedulePersist();
+          },
+          onPause: () => {
+            engineRef.current?.setMediaSessionPlaybackState("paused");
+            schedulePersist();
+          },
+          onPrevious: (opts) => {
+            sessionActionsRef.current.onPrevious(opts);
+          },
+          onNext: (opts) => {
+            sessionActionsRef.current.onNext(opts);
+          },
         },
-        onPause: () => {
-          engineRef.current?.setMediaSessionPlaybackState("paused");
-          schedulePersist();
-        },
-        onPrevious: () => void sessionActionsRef.current.onPrevious(),
-        onNext: () => void sessionActionsRef.current.onNext(),
-      });
+        { queueLength: q.length, queueIndex: idx },
+      );
     },
     [schedulePersist],
+  );
+
+  const tryLockScreenTrackSwitch = useCallback(
+    (trackId: string): boolean => {
+      const file = mediaLibrary.getCachedTrackFile(trackId);
+      if (!file) return false;
+
+      const track = tracksRef.current.find((t) => t.id === trackId);
+      if (!track) return false;
+
+      const engine = engineRef.current;
+      if (!engine) return false;
+
+      const url = mediaLibrary.getOrCreateObjectUrl(track.id, file);
+      engine.setSourceUrlSync(url, 0);
+      setCurrentTrack(track);
+      setDuration(track.duration || engine.getAudioElement().duration || 0);
+      setQueue(queueRef.current.getQueue());
+      setQueueIndex(queueRef.current.getIndex());
+      engine.setVolume(volume);
+      bindMediaSession(track);
+      engine.playFromLockScreen();
+      engine.setMediaSessionPlaybackState("playing");
+      schedulePersist();
+      prefetchQueueNeighbors(trackId);
+      return true;
+    },
+    [volume, bindMediaSession, schedulePersist, prefetchQueueNeighbors],
   );
 
   useEffect(() => {
@@ -175,6 +226,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       const file = await mediaLibrary.getTrackFile(track);
       if (!file) return;
       mediaLibrary.cacheTrackFile(track.id, file);
+      mediaLibrary.getOrCreateObjectUrl(track.id, file);
 
       const engine = engineRef.current;
       if (!engine) return;
@@ -184,47 +236,64 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setDuration(track.duration || engine.getAudioElement().duration || 0);
       engine.setVolume(volume);
       bindMediaSession(track);
-      await engine.play();
+
+      const hidden =
+        typeof document !== "undefined" &&
+        (document.hidden || document.visibilityState === "hidden");
+      if (hidden) {
+        await new Promise<void>((resolve) => engine.playFromLockScreen(resolve));
+      } else {
+        await engine.play();
+      }
       engine.setMediaSessionPlaybackState("playing");
       schedulePersist();
-
-      const q = queueRef.current.getQueue();
-      const idx = q.indexOf(trackId);
-      if (idx >= 0) {
-        const neighborIds = [q[idx - 1], q[idx + 1]].filter(
-          (id): id is string => typeof id === "string",
-        );
-        void mediaLibrary.prefetchTrackFiles(neighborIds);
-      }
+      prefetchQueueNeighbors(trackId);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tracks, volume, schedulePersist, bindMediaSession],
+    [tracks, volume, schedulePersist, bindMediaSession, prefetchQueueNeighbors],
   );
 
-  const loadNext = useCallback(async () => {
-    const nextId = queueRef.current.next();
-    if (!nextId) {
-      engineRef.current?.stop();
-      setStatus("stopped");
-      return;
-    }
-    setQueue(queueRef.current.getQueue());
-    setQueueIndex(queueRef.current.getIndex());
-    await loadAndPlay(nextId);
-  }, [loadAndPlay]);
+  const loadNext = useCallback(
+    async (opts?: { lockScreen?: boolean }) => {
+      const nextId = queueRef.current.next();
+      if (!nextId) {
+        engineRef.current?.stop();
+        setStatus("stopped");
+        return;
+      }
+      setQueue(queueRef.current.getQueue());
+      setQueueIndex(queueRef.current.getIndex());
 
-  const loadPrevious = useCallback(async () => {
-    const engine = engineRef.current;
-    if (engine && engine.getAudioElement().currentTime > 3) {
-      engine.seek(0);
-      return;
-    }
-    const prevId = queueRef.current.previous();
-    if (!prevId) return;
-    setQueue(queueRef.current.getQueue());
-    setQueueIndex(queueRef.current.getIndex());
-    await loadAndPlay(prevId);
-  }, [loadAndPlay]);
+      if (opts?.lockScreen && tryLockScreenTrackSwitch(nextId)) {
+        return;
+      }
+      await loadAndPlay(nextId);
+    },
+    [loadAndPlay, tryLockScreenTrackSwitch],
+  );
+
+  const loadPrevious = useCallback(
+    async (opts?: { lockScreen?: boolean }) => {
+      const engine = engineRef.current;
+      if (engine && engine.getAudioElement().currentTime > 3) {
+        engine.seek(0);
+        if (opts?.lockScreen && engine.getStatus() === "playing") {
+          engine.playFromLockScreen();
+        }
+        return;
+      }
+      const prevId = queueRef.current.previous();
+      if (!prevId) return;
+      setQueue(queueRef.current.getQueue());
+      setQueueIndex(queueRef.current.getIndex());
+
+      if (opts?.lockScreen && tryLockScreenTrackSwitch(prevId)) {
+        return;
+      }
+      await loadAndPlay(prevId);
+    },
+    [loadAndPlay, tryLockScreenTrackSwitch],
+  );
 
   useEffect(() => {
     if (initializedRef.current) return;
@@ -291,10 +360,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         try {
           const file = await mediaLibrary.getTrackFile(track);
           if (file) {
+            mediaLibrary.cacheTrackFile(track.id, file);
+            mediaLibrary.getOrCreateObjectUrl(track.id, file);
             await engine.load(file, state.lastPosition);
             setDuration(track.duration || engine.getAudioElement().duration || 0);
             bindMediaSession(track);
             setStatus("paused");
+            void mediaLibrary.prefetchTrackFiles(state.queue);
           }
         } catch {
           /* restore without audio */
