@@ -11,6 +11,9 @@ import { TAG_LABELS, type App } from "@/data/apps";
 /** Единая высота всех карточек */
 export const APP_CARD_HEIGHT = "h-[252px] sm:h-[260px]";
 
+const iconBox =
+  "w-10 h-10 flex items-center justify-center shrink-0 border border-gray-200 bg-white shadow-sm overflow-hidden";
+
 interface AppCardProps {
   app: App;
   showPin?: boolean;
@@ -23,7 +26,7 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
   const isMusicActive = isMusicApp && !!player?.currentTrack;
   const isPlayingMusic = isMusicActive && player?.status === "playing";
 
-  const cardClass = `app-card group relative rounded-2xl border border-gray-200 dark:border-gray-700 p-4 sm:p-5 flex flex-col gap-2 overflow-hidden shadow-sm ${APP_CARD_HEIGHT} ${
+  const cardClass = `app-card group relative rounded-2xl border border-gray-200 p-4 sm:p-5 flex flex-col gap-2 overflow-hidden shadow-sm ${APP_CARD_HEIGHT} ${
     app.comingSoon
       ? "opacity-50 cursor-default app-card-standard"
       : isMusicActive
@@ -37,7 +40,7 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
         {app.tags.map((tag) => (
           <span
             key={tag}
-            className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700"
+            className="text-[10px] px-2 py-0.5 rounded-full bg-white text-gray-500 border border-gray-200"
           >
             {TAG_LABELS[tag]}
           </span>
@@ -61,7 +64,7 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
       />
 
       {app.comingSoon && (
-        <span className="absolute top-3 right-3 z-20 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-600 text-gray-400 bg-gray-50 dark:bg-gray-800">
+        <span className="absolute top-3 right-3 z-20 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border border-gray-200 text-gray-400 bg-gray-50">
           Скоро
         </span>
       )}
@@ -80,30 +83,21 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
           )}
           <div className="relative z-10 flex flex-col flex-1 min-h-0 gap-2 pointer-events-none">
             <div className="flex items-start gap-2.5 shrink-0">
-              <div
-                className={`w-10 h-10 rounded-xl bg-white dark:bg-gray-800 flex items-center justify-center text-2xl leading-none shrink-0 border transition-shadow ${
-                  isPlayingMusic
-                    ? "border-gray-300 dark:border-gray-600 shadow-sm"
-                    : "border-gray-200 dark:border-gray-700 shadow-sm"
-                }`}
-                aria-hidden
-              >
+              <div className={`${iconBox} rounded-xl text-2xl leading-none`} aria-hidden>
                 {app.icon}
               </div>
               <div className="flex-1 min-w-0 pt-0.5">
-                <h3 className="font-semibold text-base text-gray-900 dark:text-gray-100 leading-tight tracking-tight">
+                <h3 className="font-semibold text-base text-gray-900 leading-tight tracking-tight">
                   {app.title}
                 </h3>
-                <p className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                <p className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 mt-1">
                   <span
                     className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                      isPlayingMusic
-                        ? "bg-gray-900 dark:bg-gray-100 music-status-dot"
-                        : "bg-gray-300 dark:bg-gray-600"
+                      isPlayingMusic ? "bg-gray-900 music-status-dot" : "bg-gray-300"
                     }`}
                     aria-hidden
                   />
-                  <span className={isPlayingMusic ? "text-gray-700 dark:text-gray-300 font-medium" : ""}>
+                  <span className={isPlayingMusic ? "text-gray-700 font-medium" : ""}>
                     {isPlayingMusic ? "Сейчас играет" : "На паузе"}
                   </span>
                 </p>
@@ -116,10 +110,7 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
       ) : (
         <div className="relative z-10 flex flex-col flex-1 min-h-0 gap-2">
           <div className="flex items-center gap-2.5 shrink-0">
-            <div
-              className="w-10 h-10 rounded-[22%] bg-white dark:bg-gray-800 flex items-center justify-center shrink-0 border border-gray-200 dark:border-gray-700 shadow-[0_1px_3px_rgba(0,0,0,0.08)] overflow-hidden"
-              aria-hidden
-            >
+            <div className={`${iconBox} rounded-[22%] shadow-[0_1px_3px_rgba(0,0,0,0.08)]`} aria-hidden>
               {app.icon.startsWith("/") ? (
                 <Image
                   src={app.icon}
@@ -133,7 +124,7 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
               )}
             </div>
             <div className="flex-1 min-w-0 flex items-center gap-2 min-h-10">
-              <h3 className="font-semibold text-base text-gray-900 dark:text-gray-100 leading-tight tracking-tight">
+              <h3 className="font-semibold text-base text-gray-900 leading-tight tracking-tight">
                 {app.title}
               </h3>
               {app.beta && showPin && <TestingBadge />}
@@ -141,7 +132,7 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
           </div>
 
           <div className="flex-1 min-h-0 flex items-center">
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-snug line-clamp-4">
+            <p className="text-sm text-gray-500 leading-snug line-clamp-4">
               {app.description}
             </p>
           </div>
@@ -159,7 +150,6 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
   if (isMusicActive) {
     return (
       <div className={cardClass}>
-        {/* Клик по карточке → страница сервиса (кроме зоны управления) */}
         <Link
           href={app.href}
           className="absolute inset-0 z-[5] rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400/50"

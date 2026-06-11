@@ -85,12 +85,12 @@ export function SeekBar({
         <div className={`relative flex-1 ${trackH} flex items-center group`}>
           <div
             className={`absolute inset-x-0 ${barH} rounded-full ${
-              isEmbedded ? "bg-gray-200/90 dark:bg-gray-700/80" : "bg-gray-200 dark:bg-gray-700"
+              isEmbedded ? "bg-gray-200/90" : "bg-gray-200"
             }`}
           />
           <div
             className={`absolute left-0 ${barH} rounded-full transition-none ${
-              isEmbedded ? "bg-gray-900 dark:bg-gray-100" : "bg-violet-500"
+              isEmbedded ? "bg-gray-900" : "bg-violet-500"
             }`}
             style={{ width: `${pct}%` }}
           />
@@ -119,7 +119,7 @@ export function SeekBar({
           <div
             className={`absolute ${thumb} rounded-full shadow-sm pointer-events-none ${
               isEmbedded
-                ? "bg-gray-900 dark:bg-gray-100 ring-2 ring-white dark:ring-gray-900"
+                ? "bg-gray-900 ring-2 ring-white"
                 : "bg-violet-500"
             } ${isCard || isEmbedded ? "opacity-100" : "opacity-0 group-hover:opacity-100"} transition-opacity`}
             style={{ left: `calc(${pct}% - ${isEmbedded ? 4 : isCard ? 6 : 5}px)` }}
@@ -133,7 +133,7 @@ export function SeekBar({
   return (
     <div className={`space-y-1 ${className}`}>
       <div className="relative h-5 flex items-center group">
-        <div className="absolute inset-x-0 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700" />
+        <div className="absolute inset-x-0 h-1.5 rounded-full bg-gray-200" />
         <div
           className="absolute left-0 h-1.5 rounded-full bg-violet-500"
           style={{ width: `${pct}%` }}

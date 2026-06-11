@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Тёмная тема только по классу .dark — не от системных настроек iOS */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #0a0a0a;

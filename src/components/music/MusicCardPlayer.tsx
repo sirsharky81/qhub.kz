@@ -5,10 +5,10 @@ import { SeekBar } from "@/components/music/SeekBar";
 import { useMusicPlayerOptional } from "@/contexts/MusicPlayerContext";
 
 const btnSm =
-  "w-7 h-7 rounded-full border border-gray-200 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700 active:scale-95 transition-all shrink-0 touch-manipulation";
+  "w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 active:scale-95 transition-all shrink-0 touch-manipulation";
 
 const btnActive =
-  "w-7 h-7 rounded-full border border-gray-300 dark:border-gray-500 bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-gray-900 dark:text-gray-100 active:scale-95 transition-all shrink-0 touch-manipulation";
+  "w-7 h-7 rounded-full border border-gray-300 bg-gray-200 flex items-center justify-center text-gray-900 active:scale-95 transition-all shrink-0 touch-manipulation";
 
 function stopControlEvent(e: SyntheticEvent) {
   e.preventDefault();
@@ -63,36 +63,34 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
 
   const shell = embedded
     ? "flex flex-col gap-2 shrink-0"
-    : "rounded-xl border border-gray-200/80 dark:border-gray-700 bg-white/90 dark:bg-gray-900/80 shadow-sm p-3 space-y-3";
+    : "rounded-xl border border-gray-200/80 bg-white/90 shadow-sm p-3 space-y-3";
 
   const surface =
-    "rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-none";
+    "rounded-xl border border-gray-200 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]";
 
   return (
     <div className={shell}>
       <div className={`${surface} p-2 space-y-2`}>
         <div className="flex items-center gap-2.5 min-w-0">
           <div
-            className={`w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100 dark:bg-gray-700 transition-all border ${
-              isPlaying
-                ? "border-gray-400 dark:border-gray-500 shadow-sm"
-                : "border-gray-200 dark:border-gray-600"
+            className={`w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100 transition-all border ${
+              isPlaying ? "border-gray-400 shadow-sm" : "border-gray-200"
             }`}
           >
             {currentTrack.coverArtUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={currentTrack.coverArtUrl} alt="" className="w-full h-full object-cover" />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-sm bg-gray-100 dark:bg-gray-700">
+              <div className="w-full h-full flex items-center justify-center text-sm bg-gray-100">
                 🎵
               </div>
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate leading-snug tracking-tight">
+            <p className="text-xs font-semibold text-gray-900 truncate leading-snug tracking-tight">
               {currentTrack.title}
             </p>
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate mt-0.5">
+            <p className="text-[10px] text-gray-500 truncate mt-0.5">
               {currentTrack.artist}
             </p>
           </div>
@@ -111,7 +109,7 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
       </div>
 
       <div
-        className="pointer-events-auto relative z-20 w-full rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-1.5 shadow-sm"
+        className="pointer-events-auto relative z-20 w-full rounded-xl border border-gray-200 bg-white px-1.5 py-1.5 shadow-sm"
         onClick={stopControlEvent}
         onPointerDown={stopControlEvent}
       >
@@ -136,7 +134,7 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
             <button
               type="button"
               onClick={() => void togglePlay()}
-              className="w-8 h-8 rounded-full bg-gray-900 dark:bg-white text-white dark:text-gray-900 flex items-center justify-center hover:opacity-90 active:scale-95 shrink-0 touch-manipulation shadow-sm"
+              className="w-8 h-8 rounded-full bg-gray-900 text-white flex items-center justify-center hover:opacity-90 active:scale-95 shrink-0 touch-manipulation shadow-sm"
               aria-label={isPlaying ? "Пауза" : "Воспроизведение"}
             >
               {isPlaying ? (
@@ -173,7 +171,7 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
             </button>
           </div>
 
-          <span className="w-px h-5 bg-gray-200/90 dark:bg-gray-600 shrink-0 mx-0.5" aria-hidden />
+          <span className="w-px h-5 bg-gray-200 shrink-0 mx-0.5" aria-hidden />
 
           <div className="inline-flex items-center gap-1.5 shrink-0 pr-0.5">
             <button

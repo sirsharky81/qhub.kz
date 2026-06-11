@@ -78,13 +78,13 @@ export function FavoritesSection() {
       className="py-12 px-4 sm:px-6 max-w-6xl mx-auto w-full transition-opacity duration-300"
     >
       <div className="mb-8">
-        <p className="text-xs uppercase tracking-widest text-gray-900 dark:text-gray-100 mb-3 font-mono flex items-center gap-1.5">
-          <span className="text-gray-900 dark:text-gray-100">★</span> Избранное
+        <p className="text-xs uppercase tracking-widest text-gray-900 mb-3 font-mono flex items-center gap-1.5">
+          <span className="text-gray-900">★</span> Избранное
         </p>
-        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900">
           Ваши основные инструменты
         </h2>
-        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+        <p className="mt-2 text-sm text-gray-500">
           Перетащите карточки, чтобы изменить порядок
         </p>
       </div>

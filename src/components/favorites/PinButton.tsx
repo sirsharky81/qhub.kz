@@ -36,8 +36,8 @@ export function PinButton({
       }}
       className={`${dim} rounded-full flex items-center justify-center transition-all duration-200 ${visibility} ${
         pinned
-          ? "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-          : "bg-white/80 dark:bg-gray-800/80 text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+          ? "bg-white text-gray-900 border border-gray-200"
+          : "bg-white/90 text-gray-400 border border-gray-200 hover:text-gray-700 hover:bg-gray-50"
       } ${className}`}
       aria-label={pinned ? "Открепить" : "Закрепить"}
       aria-pressed={pinned}
