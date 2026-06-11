@@ -89,6 +89,21 @@ export const apps: App[] = [
     sortOrder: 3,
   },
   {
+    id: "music",
+    title: "QHub Music",
+    description: "Локальный музыкальный плеер. Импорт папок и файлов, медиатека, фоновое воспроизведение.",
+    longDescription:
+      "Полноценный музыкальный плеер в браузере: MP3, FLAC, WAV и другие форматы. Вся музыка хранится локально на устройстве. Эквалайзер, очередь, избранное, Media Session для экрана блокировки.",
+    href: "/tools/music",
+    tags: ["tools", "music"],
+    icon: "🎧",
+    color: "from-gray-200/50 to-gray-50",
+    author: "QHub",
+    authorType: "qhub",
+    featured: true,
+    sortOrder: 0,
+  },
+  {
     id: "music-editor",
     title: "Music Editor",
     description:

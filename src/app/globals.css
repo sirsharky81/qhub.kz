@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #030712;
+    --foreground: #f9fafb;
+    --muted: #9ca3af;
+    --muted-light: #6b7280;
+    --border: #1f2937;
+    --border-light: #111827;
+    --surface: #111827;
+    --surface-hover: #1f2937;
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #0a0a0a;
@@ -63,4 +78,153 @@ body {
   transform: translateY(-2px);
   border-color: #d1d5db;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.07), 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Обычные карточки — чуть темнее серого */
+.app-card-surface {
+  background-color: #f3f4f6;
+  background-image: radial-gradient(
+    ellipse 85% 65% at 50% 0%,
+    rgba(255, 255, 255, 0.45) 0%,
+    transparent 72%
+  );
+}
+
+.app-card-standard {
+  background-color: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+/* Music Hub — без изменений */
+.music-card-surface {
+  background-color: #f9fafb;
+  background-image: radial-gradient(
+    ellipse 85% 65% at 50% 0%,
+    rgba(255, 255, 255, 0.95) 0%,
+    transparent 72%
+  );
+}
+
+.music-card-active {
+  background-color: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+.music-card-active.music-card-playing {
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.06),
+    0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.music-card-glow {
+  background: radial-gradient(
+    ellipse 90% 70% at 50% 110%,
+    rgba(0, 0, 0, 0.04) 0%,
+    transparent 65%
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-card-surface {
+    background-color: #0e1219;
+    background-image: radial-gradient(
+      ellipse 85% 65% at 50% 0%,
+      rgba(31, 41, 55, 0.45) 0%,
+      transparent 72%
+    );
+  }
+
+  .app-card-standard {
+    background-color: #0e1219;
+    border-color: #374151;
+  }
+
+  .music-card-surface {
+    background-color: #111827;
+    background-image: radial-gradient(
+      ellipse 85% 65% at 50% 0%,
+      rgba(31, 41, 55, 0.9) 0%,
+      transparent 72%
+    );
+  }
+
+  .music-card-active {
+    background-color: #111827;
+    border-color: #374151;
+  }
+
+  .music-card-active.music-card-playing {
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.25),
+      0 1px 4px rgba(0, 0, 0, 0.15);
+  }
+
+  .music-card-glow {
+    background: radial-gradient(
+      ellipse 90% 70% at 50% 110%,
+      rgba(255, 255, 255, 0.04) 0%,
+      transparent 65%
+    );
+  }
+}
+
+@keyframes music-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+}
+
+.music-status-dot {
+  animation: music-status-pulse 2.2s ease-in-out infinite;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Слайдер громкости в карточке музыки */
+.music-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+.music-volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #111827 var(--vol-pct, 50%), #e5e7eb var(--vol-pct, 50%));
+}
+
+.music-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 9999px;
+  background: #111827;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+
+@media (prefers-color-scheme: dark) {
+  .music-volume-slider::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #f9fafb var(--vol-pct, 50%), #374151 var(--vol-pct, 50%));
+  }
+
+  .music-volume-slider::-webkit-slider-thumb {
+    background: #f9fafb;
+    border-color: #111827;
+  }
 }

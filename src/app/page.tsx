@@ -1,15 +1,15 @@
 import Link from "next/link";
-import Image from "next/image";
 import Navbar from "@/components/Navbar";
-import TestingBadge from "@/components/TestingBadge";
-import { sortedApps, TAG_LABELS } from "@/data/apps";
+import { HomePageExtras } from "@/components/home/HomePageExtras";
+import { AppsGrid } from "@/components/home/AppsGrid";
+import { sortedApps } from "@/data/apps";
 
 const liveCount = sortedApps.filter((a) => !a.comingSoon).length;
 const comingSoonCount = sortedApps.filter((a) => a.comingSoon).length;
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen bg-white text-gray-900">
+    <div className="flex flex-col min-h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 pb-16">
       <Navbar />
 
       {/* ── HERO ─────────────────────────────────────────────── */}
@@ -79,6 +79,8 @@ export default function Home() {
         </div>
       </section>
 
+      <HomePageExtras />
+
       {/* ── APPS GRID ────────────────────────────────────────── */}
       <section id="apps" className="py-20 px-4 sm:px-6 max-w-6xl mx-auto w-full">
         <div className="mb-12">
@@ -94,62 +96,7 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {sortedApps.map((app) => {
-            const cardClass = `app-card relative rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4 overflow-hidden shadow-sm ${
-              app.comingSoon ? "opacity-50 cursor-default" : "cursor-pointer"
-            }`;
-
-            const inner = (
-              <>
-                <div className={`absolute inset-0 bg-gradient-to-br ${app.color} pointer-events-none`} />
-                {app.comingSoon && (
-                  <span className="absolute top-4 right-4 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border border-gray-200 text-gray-400 bg-gray-50">
-                    Скоро
-                  </span>
-                )}
-                {!app.comingSoon && app.beta && (
-                  <span className="absolute top-4 right-4">
-                    <TestingBadge />
-                  </span>
-                )}
-                <div className="relative text-3xl">
-                  {app.icon.startsWith("/") ? (
-                    <Image
-                      src={app.icon}
-                      alt={app.title}
-                      width={40}
-                      height={40}
-                      className="object-contain mix-blend-multiply"
-                    />
-                  ) : (
-                    app.icon
-                  )}
-                </div>
-                <div className="relative flex-1">
-                  <h3 className="font-semibold text-base mb-1.5 text-gray-900">{app.title}</h3>
-                  <p className="text-sm text-gray-500 leading-relaxed">{app.description}</p>
-                </div>
-                <div className="relative flex items-center justify-between">
-                  <div className="flex gap-1.5 flex-wrap">
-                    {app.tags.map((tag) => (
-                      <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                        {TAG_LABELS[tag]}
-                      </span>
-                    ))}
-                  </div>
-                  <span className="text-xs text-gray-400 font-mono">{app.author}</span>
-                </div>
-              </>
-            );
-
-            return app.comingSoon ? (
-              <div key={app.id} className={cardClass}>{inner}</div>
-            ) : (
-              <Link key={app.id} href={app.href} className={cardClass}>{inner}</Link>
-            );
-          })}
-        </div>
+        <AppsGrid />
       </section>
 
       {/* ── ABOUT / VIBE CODING ─────────────────────────────── */}
