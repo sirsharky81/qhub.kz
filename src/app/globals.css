@@ -153,9 +153,9 @@ body {
 
 .music-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -4px;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
   border-radius: 9999px;
   background: #111827;
   border: 2px solid #fff;
@@ -170,8 +170,8 @@ body {
 }
 
 .music-volume-slider::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
   border-radius: 9999px;
   background: #111827;
   border: 2px solid #fff;

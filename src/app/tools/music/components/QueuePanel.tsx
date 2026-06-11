@@ -271,9 +271,16 @@ export function QueuePanel() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-shrink-0 px-2 py-1.5 border-b border-gray-100 flex items-center justify-between">
-        <h3 className="text-[11px] font-semibold text-gray-700 uppercase tracking-wide">Очередь</h3>
-        <span className="text-[10px] text-gray-400 font-mono">{queue.length}</span>
+      <div className="flex-shrink-0 px-2 py-1.5 border-b border-gray-100">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[11px] font-semibold text-gray-700 uppercase tracking-wide">Очередь</h3>
+          <span className="text-[10px] text-gray-400 font-mono">{queue.length}</span>
+        </div>
+        {isTouch && queue.length > 1 ? (
+          <p className="text-[10px] text-gray-400 mt-1 leading-snug">
+            Смахните трек влево → ▲ или ▼, затем подтвердите
+          </p>
+        ) : null}
       </div>
 
       <div className="flex-1 overflow-auto py-0.5">

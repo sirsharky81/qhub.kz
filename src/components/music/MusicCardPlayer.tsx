@@ -112,7 +112,7 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
         className="pointer-events-auto relative z-20 w-full rounded-xl border border-gray-200 bg-white px-1.5 py-1.5 shadow-sm"
         onClick={stopControlBubble}
       >
-        <div className="flex items-center gap-1 w-full overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-1 w-full overflow-x-auto scrollbar-none touch-pan-x">
           <div className="inline-flex items-center gap-0.5 shrink-0">
             <button
               type="button"
@@ -169,34 +169,37 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
               </svg>
             </button>
           </div>
+        </div>
 
-          <span className="w-px h-5 bg-gray-200 shrink-0 mx-0.5" aria-hidden />
-
-          <div className="inline-flex items-center gap-1.5 shrink-0 pr-0.5">
-            <button
-              type="button"
-              onClick={toggleMute}
-              className={isMuted ? btnActive : btnSm}
-              aria-label={isMuted ? "Включить звук" : "Без звука"}
-              aria-pressed={isMuted}
-            >
-              <IconMute muted={isMuted} />
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              onInput={(e) => setVolume(Number(e.currentTarget.value))}
-              onPointerDown={stopControlBubble}
-              onClick={stopControlBubble}
-              style={{ "--vol-pct": `${Math.round(volume * 100)}%` } as CSSProperties}
-              className="music-volume-slider w-16 sm:w-[4.5rem] h-5 cursor-pointer shrink-0 touch-manipulation"
-              aria-label="Громкость"
-            />
-          </div>
+        <div
+          className="flex items-center gap-2 pt-1 touch-none"
+          onPointerDown={stopControlBubble}
+          onClick={stopControlBubble}
+        >
+          <button
+            type="button"
+            onClick={toggleMute}
+            className={isMuted ? btnActive : btnSm}
+            aria-label={isMuted ? "Включить звук" : "Без звука"}
+            aria-pressed={isMuted}
+          >
+            <IconMute muted={isMuted} />
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={volume}
+            onChange={(e) => setVolume(Number(e.target.value))}
+            onInput={(e) => setVolume(Number(e.currentTarget.value))}
+            style={{ "--vol-pct": `${Math.round(volume * 100)}%` } as CSSProperties}
+            className="music-volume-slider flex-1 min-w-0 h-8 cursor-pointer touch-manipulation"
+            aria-label="Громкость"
+          />
+          <span className="text-[10px] font-mono text-gray-400 w-6 text-right tabular-nums shrink-0">
+            {Math.round(volume * 100)}
+          </span>
         </div>
       </div>
     </div>

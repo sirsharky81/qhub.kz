@@ -15,6 +15,18 @@ type CapturableAudio = HTMLAudioElement & {
   mozCaptureStream?: () => MediaStream;
 };
 
+function isIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function isPageHidden(): boolean {
+  return typeof document !== "undefined" && document.hidden;
+}
+
 export class AudioEngine {
   private audio: CapturableAudio;
   /** Только для визуализации — не в цепочке воспроизведения */
@@ -30,7 +42,7 @@ export class AudioEngine {
   private lifecycleAttached = false;
 
   private readonly onPlayingForAnalyser = () => {
-    void this.ensureAnalyser();
+    if (!isPageHidden()) void this.ensureAnalyser();
   };
 
   private readonly onVisibilityResume = () => {
@@ -138,9 +150,12 @@ export class AudioEngine {
       this.audio.playbackRate = 1;
       try {
         await this.audio.play();
+        void this.ensureAnalyser();
       } catch {
         /* gesture / policy */
       }
+    } else if (this.status === "playing" && !this.audio.paused) {
+      void this.ensureAnalyser();
     }
   }
 
@@ -296,7 +311,10 @@ export class AudioEngine {
   async play(): Promise<void> {
     this.audio.playbackRate = 1;
     await this.audio.play();
-    await this.ensureAnalyser();
+    // captureStream() на заблокированном экране iOS глушит <audio>
+    if (!isPageHidden()) {
+      await this.ensureAnalyser();
+    }
     this.updatePositionState();
   }
 
@@ -352,32 +370,55 @@ export class AudioEngine {
         : [],
     });
 
-    navigator.mediaSession.setActionHandler("play", handlers.onPlay);
-    navigator.mediaSession.setActionHandler("pause", handlers.onPause);
-    navigator.mediaSession.setActionHandler("previoustrack", handlers.onPrevious);
-    navigator.mediaSession.setActionHandler("nexttrack", handlers.onNext);
-    navigator.mediaSession.setActionHandler("stop", () => {
-      this.stop();
-      handlers.onPause();
-    });
+    try {
+      navigator.mediaSession.setActionHandler("play", handlers.onPlay);
+      navigator.mediaSession.setActionHandler("pause", handlers.onPause);
+      navigator.mediaSession.setActionHandler("previoustrack", handlers.onPrevious);
+      navigator.mediaSession.setActionHandler("nexttrack", handlers.onNext);
+      navigator.mediaSession.setActionHandler("stop", () => {
+        this.stop();
+        handlers.onPause();
+      });
+    } catch {
+      /* Safari может отклонить отдельные действия */
+    }
 
-    navigator.mediaSession.setActionHandler("seekto", (details) => {
-      if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
-      this.seek(details.seekTime);
-      this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-    });
+    if (typeof navigator.mediaSession.setPositionState === "function") {
+      try {
+        navigator.mediaSession.setActionHandler("seekto", (details) => {
+          if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
+          this.seek(details.seekTime);
+          this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+        });
+      } catch {
+        /* ignore */
+      }
+    }
 
-    navigator.mediaSession.setActionHandler("seekbackward", (details) => {
-      const offset = details.seekOffset ?? 10;
-      this.seek(this.audio.currentTime - offset);
-      this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-    });
-
-    navigator.mediaSession.setActionHandler("seekforward", (details) => {
-      const offset = details.seekOffset ?? 10;
-      this.seek(this.audio.currentTime + offset);
-      this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-    });
+    // На iOS seekbackward/seekforward заменяют стрелки «пред./след. трек» на экране блокировки
+    if (!isIOSDevice()) {
+      try {
+        navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+          const offset = details.seekOffset ?? 10;
+          this.seek(this.audio.currentTime - offset);
+          this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+        });
+        navigator.mediaSession.setActionHandler("seekforward", (details) => {
+          const offset = details.seekOffset ?? 10;
+          this.seek(this.audio.currentTime + offset);
+          this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+        });
+      } catch {
+        /* ignore */
+      }
+    } else {
+      try {
+        navigator.mediaSession.setActionHandler("seekbackward", null);
+        navigator.mediaSession.setActionHandler("seekforward", null);
+      } catch {
+        /* ignore */
+      }
+    }
 
     this.updatePositionState();
   }

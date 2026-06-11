@@ -122,6 +122,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initializedRef = useRef(false);
+  const sessionActionsRef = useRef({
+    onPlay: async () => {},
+    onPause: () => {},
+    onPrevious: async () => {},
+    onNext: async () => {},
+  });
+
+  const bindMediaSession = useCallback((track: Track) => {
+    engineRef.current?.updateMediaSession(track, {
+      onPlay: () => void sessionActionsRef.current.onPlay(),
+      onPause: () => sessionActionsRef.current.onPause(),
+      onPrevious: () => void sessionActionsRef.current.onPrevious(),
+      onNext: () => void sessionActionsRef.current.onNext(),
+    });
+  }, []);
 
   const persistState = useCallback(async () => {
     const qm = queueRef.current;
@@ -160,18 +175,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setCurrentTrack(track);
       setDuration(track.duration || engine.getAudioElement().duration || 0);
       engine.setVolume(volume);
-      engine.updateMediaSession(track, {
-        onPlay: () => void engine.play(),
-        onPause: () => engine.pause(),
-        onPrevious: () => void loadPrevious(),
-        onNext: () => void loadNext(),
-      });
+      bindMediaSession(track);
       await engine.play();
       engine.setMediaSessionPlaybackState("playing");
       schedulePersist();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tracks, volume, schedulePersist],
+    [tracks, volume, schedulePersist, bindMediaSession],
   );
 
   const loadNext = useCallback(async () => {
@@ -266,12 +276,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           if (file) {
             await engine.load(file, state.lastPosition);
             setDuration(track.duration || engine.getAudioElement().duration || 0);
-            engine.updateMediaSession(track, {
-              onPlay: () => void engine.play(),
-              onPause: () => engine.pause(),
-              onPrevious: () => void loadPrevious(),
-              onNext: () => void loadNext(),
-            });
+            bindMediaSession(track);
             setStatus("paused");
           }
         } catch {
@@ -369,6 +374,19 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const previous = useCallback(async () => {
     await loadPrevious();
   }, [loadPrevious]);
+
+  useEffect(() => {
+    sessionActionsRef.current = {
+      onPlay: play,
+      onPause: pause,
+      onPrevious: loadPrevious,
+      onNext: loadNext,
+    };
+  }, [play, pause, loadPrevious, loadNext]);
+
+  useEffect(() => {
+    if (currentTrack) bindMediaSession(currentTrack);
+  }, [currentTrack, bindMediaSession]);
 
   const seek = useCallback((time: number) => {
     engineRef.current?.seek(time);

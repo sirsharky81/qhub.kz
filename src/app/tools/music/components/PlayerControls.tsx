@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 const btnSm =
   "w-7 h-7 rounded-full border border-gray-200 dark:border-gray-600 flex items-center justify-center hover:bg-white dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors disabled:opacity-40";
 
@@ -110,7 +112,7 @@ export function PlayerControls({
         </button>
       </div>
 
-      <div className="flex items-center gap-2 px-1 pb-0.5">
+      <div className="flex items-center gap-2 px-1 pb-0.5 touch-none min-h-[36px]">
         <svg className="w-3 h-3 text-gray-400 shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
         </svg>
@@ -121,10 +123,12 @@ export function PlayerControls({
           step={0.01}
           value={volume}
           onChange={(e) => onVolumeChange(Number(e.target.value))}
-          className="flex-1 h-1 accent-violet-600 cursor-pointer"
+          onInput={(e) => onVolumeChange(Number(e.currentTarget.value))}
+          style={{ "--vol-pct": `${Math.round(volume * 100)}%` } as CSSProperties}
+          className="music-volume-slider flex-1 min-w-0 h-8 cursor-pointer touch-manipulation"
           aria-label="Громкость"
         />
-        <span className="text-[10px] font-mono text-gray-400 w-7 text-right tabular-nums">
+        <span className="text-[10px] font-mono text-gray-400 w-7 text-right tabular-nums shrink-0">
           {Math.round(volume * 100)}
         </span>
       </div>
