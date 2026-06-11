@@ -10,8 +10,8 @@ const btnSm =
 const btnActive =
   "w-7 h-7 rounded-full border border-gray-300 bg-gray-200 flex items-center justify-center text-gray-900 active:scale-95 transition-all shrink-0 touch-manipulation";
 
-function stopControlEvent(e: SyntheticEvent) {
-  e.preventDefault();
+/** Блокирует клик по Link-оверлею карточки, не отменяя нативное поведение range-input. */
+function stopControlBubble(e: SyntheticEvent) {
   e.stopPropagation();
 }
 
@@ -110,8 +110,7 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
 
       <div
         className="pointer-events-auto relative z-20 w-full rounded-xl border border-gray-200 bg-white px-1.5 py-1.5 shadow-sm"
-        onClick={stopControlEvent}
-        onPointerDown={stopControlEvent}
+        onClick={stopControlBubble}
       >
         <div className="flex items-center gap-1 w-full overflow-x-auto scrollbar-none">
           <div className="inline-flex items-center gap-0.5 shrink-0">
@@ -189,10 +188,12 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
               max={1}
               step={0.01}
               value={volume}
-              disabled={isMuted}
               onChange={(e) => setVolume(Number(e.target.value))}
+              onInput={(e) => setVolume(Number(e.currentTarget.value))}
+              onPointerDown={stopControlBubble}
+              onClick={stopControlBubble}
               style={{ "--vol-pct": `${Math.round(volume * 100)}%` } as CSSProperties}
-              className="music-volume-slider w-16 sm:w-[4.5rem] h-5 cursor-pointer shrink-0 touch-manipulation disabled:opacity-40"
+              className="music-volume-slider w-16 sm:w-[4.5rem] h-5 cursor-pointer shrink-0 touch-manipulation"
               aria-label="Громкость"
             />
           </div>

@@ -163,3 +163,19 @@ body {
   cursor: pointer;
 }
 
+.music-volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #111827 var(--vol-pct, 50%), #e5e7eb var(--vol-pct, 50%));
+}
+
+.music-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #111827;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+

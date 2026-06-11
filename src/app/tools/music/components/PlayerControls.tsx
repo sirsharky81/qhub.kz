@@ -45,7 +45,7 @@ export function PlayerControls({
   );
 
   return (
-    <div className="rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 p-2 space-y-2">
+    <div className="rounded-xl border border-gray-100 bg-gray-50 px-2 pt-2 pb-1 space-y-1.5">
       <div className="flex items-center justify-center gap-1">
         <button
           type="button"
@@ -110,7 +110,7 @@ export function PlayerControls({
         </button>
       </div>
 
-      <div className="flex items-center gap-2 px-1">
+      <div className="flex items-center gap-2 px-1 pb-0.5">
         <svg className="w-3 h-3 text-gray-400 shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
         </svg>

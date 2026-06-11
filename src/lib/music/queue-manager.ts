@@ -77,6 +77,28 @@ export class QueueManager {
     this.rebuildShuffleOrder();
   }
 
+  reorderQueue(fromIndex: number, toIndex: number): void {
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= this.queue.length || toIndex >= this.queue.length) return;
+
+    const currentId = this.getCurrentId();
+    const [item] = this.queue.splice(fromIndex, 1);
+    this.queue.splice(toIndex, 0, item);
+
+    if (currentId) {
+      this.index = this.queue.indexOf(currentId);
+    }
+    this.rebuildShuffleOrder();
+  }
+
+  moveQueueItem(index: number, direction: -1 | 1): boolean {
+    const target = index + direction;
+    if (target < 0 || target >= this.queue.length) return false;
+    this.reorderQueue(index, target);
+    return true;
+  }
+
   playTrack(trackId: string, allTrackIds?: string[]): void {
     if (allTrackIds) {
       this.setQueue(allTrackIds, allTrackIds.indexOf(trackId));

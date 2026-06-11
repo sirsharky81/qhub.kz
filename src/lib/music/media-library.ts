@@ -226,6 +226,10 @@ export async function loadLibrary(): Promise<Track[]> {
   return storage.getAllTracks();
 }
 
+export async function deleteTrack(id: string): Promise<void> {
+  await storage.deleteTrack(id);
+}
+
 export async function clearLibrary(): Promise<void> {
   await storage.clearLibrary();
 }

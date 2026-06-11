@@ -71,6 +71,9 @@ interface MusicPlayerContextValue {
   toggleFavorite: (trackId: string) => void;
   addToQueue: (trackId: string) => void;
   removeFromQueue: (trackId: string) => void;
+  reorderQueue: (fromIndex: number, toIndex: number) => void;
+  moveQueueItem: (index: number, direction: -1 | 1) => void;
+  removeTrackFromLibrary: (trackId: string) => Promise<void>;
   createPlaylist: (name: string, trackIds: string[]) => Promise<void>;
   deletePlaylist: (id: string) => Promise<void>;
   clearLibrary: () => Promise<void>;
@@ -460,6 +463,69 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     [schedulePersist],
   );
 
+  const reorderQueue = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      queueRef.current.reorderQueue(fromIndex, toIndex);
+      setQueue(queueRef.current.getQueue());
+      setQueueIndex(queueRef.current.getIndex());
+      schedulePersist();
+    },
+    [schedulePersist],
+  );
+
+  const moveQueueItem = useCallback(
+    (index: number, direction: -1 | 1) => {
+      if (queueRef.current.moveQueueItem(index, direction)) {
+        setQueue(queueRef.current.getQueue());
+        setQueueIndex(queueRef.current.getIndex());
+        schedulePersist();
+      }
+    },
+    [schedulePersist],
+  );
+
+  const removeTrackFromLibrary = useCallback(
+    async (trackId: string) => {
+      const track = tracks.find((t) => t.id === trackId);
+      if (track?.coverArtUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(track.coverArtUrl);
+      }
+
+      const wasCurrent = currentTrack?.id === trackId;
+
+      if (queue.includes(trackId)) {
+        queueRef.current.removeFromQueue(trackId);
+        setQueue(queueRef.current.getQueue());
+        setQueueIndex(queueRef.current.getIndex());
+      }
+
+      setFavoriteTrackIds((prev) => {
+        const next = new Set(prev);
+        next.delete(trackId);
+        return next;
+      });
+
+      await mediaLibrary.deleteTrack(trackId);
+      setTracks((prev) => prev.filter((t) => t.id !== trackId));
+
+      if (wasCurrent) {
+        const nextId = queueRef.current.getCurrentId();
+        if (nextId) {
+          await loadAndPlay(nextId);
+        } else {
+          engineRef.current?.stop();
+          engineRef.current?.setMediaSessionPlaybackState("none");
+          setCurrentTrack(null);
+          setCurrentTime(0);
+          setDuration(0);
+        }
+      }
+
+      schedulePersist();
+    },
+    [tracks, currentTrack, queue, loadAndPlay, schedulePersist],
+  );
+
   const createPlaylist = useCallback(
     async (name: string, trackIds: string[]) => {
       const playlist: Playlist = {
@@ -558,6 +624,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     toggleFavorite,
     addToQueue,
     removeFromQueue,
+    reorderQueue,
+    moveQueueItem,
+    removeTrackFromLibrary,
     createPlaylist,
     deletePlaylist: deletePlaylistHandler,
     clearLibrary: clearLibraryHandler,

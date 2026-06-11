@@ -45,9 +45,9 @@ export function PlayerView() {
   const isFavorite = favoriteTrackIds.has(currentTrack.id);
 
   return (
-    <div className="flex flex-col h-full p-3 sm:p-4 max-w-lg mx-auto w-full">
+    <div className="flex flex-col h-full p-3 sm:p-4 max-w-lg mx-auto w-full justify-start">
       {/* Now playing card */}
-      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-sm flex-1 flex flex-col min-h-0">
+      <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm flex flex-col">
         <div className="flex gap-3 items-start shrink-0">
           <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 flex-shrink-0 shadow-sm">
             {currentTrack.coverArtUrl ? (
@@ -111,7 +111,7 @@ export function PlayerView() {
           />
         </div>
 
-        <div className="mt-3 shrink-0">
+        <div className="mt-2 shrink-0">
           <PlayerControls
             isPlaying={isPlaying}
             shuffle={shuffle}
