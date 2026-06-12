@@ -265,6 +265,8 @@ export class AudioEngine {
   private lifecycleAttached = false;
   private lastPositionLogAt = 0;
   private positionSkipLogged = false;
+  private visibleResumeInFlight = false;
+  private lastVisibleResumeAt = 0;
   private sessionCallbacks: MediaSessionCallbacks = {
     onSyncPlay: () => {},
     onSyncPause: () => {},
@@ -282,8 +284,48 @@ export class AudioEngine {
       if (!isIOSDevice()) this.teardownAnalyser();
       return;
     }
-    void this.resumePlaybackIfNeeded();
+    void this.onPageBecameVisible("visibilitychange");
   };
+
+  private readonly onPageShowOrFocus = () => {
+    if (document.visibilityState !== "visible") return;
+    logAudioEvent("lifecycle:pageshow-or-focus", this.audio);
+    void this.onPageBecameVisible("pageshow-or-focus");
+  };
+
+  /** Foreground: never pause; resume only when status says playing but element is paused. */
+  private async onPageBecameVisible(source: string): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastVisibleResumeAt < 400) return;
+    if (this.visibleResumeInFlight) return;
+
+    if (!this.audio.paused) return;
+
+    if (this.status === "playing" && this.audio.src) {
+      this.visibleResumeInFlight = true;
+      this.lastVisibleResumeAt = now;
+      logAudioEvent(`visibility:resume:${source}`, this.audio);
+      try {
+        await this.handleMediaSessionPlay();
+        if (!isIOSDevice() && !isPageHidden()) {
+          void this.ensureAnalyser();
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        this.visibleResumeInFlight = false;
+      }
+      return;
+    }
+
+    if (!isIOSDevice() && this.context?.state === "suspended") {
+      try {
+        await this.context.resume();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 
   constructor(callbacks: AudioEngineCallbacks, existingAudio?: HTMLAudioElement | null) {
     this.callbacks = callbacks;
@@ -416,37 +458,16 @@ export class AudioEngine {
     this.lifecycleAttached = true;
 
     document.addEventListener("visibilitychange", this.onVisibilityChange);
-    window.addEventListener("pageshow", this.onVisibilityChange);
-    window.addEventListener("focus", this.onVisibilityChange);
+    window.addEventListener("pageshow", this.onPageShowOrFocus);
+    window.addEventListener("focus", this.onPageShowOrFocus);
   }
 
   private detachLifecycleHandlers(): void {
     if (!this.lifecycleAttached || typeof document === "undefined") return;
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
-    window.removeEventListener("pageshow", this.onVisibilityChange);
-    window.removeEventListener("focus", this.onVisibilityChange);
+    window.removeEventListener("pageshow", this.onPageShowOrFocus);
+    window.removeEventListener("focus", this.onPageShowOrFocus);
     this.lifecycleAttached = false;
-  }
-
-  private async resumePlaybackIfNeeded(): Promise<void> {
-    if (isIOSDevice()) return;
-
-    if (this.context?.state === "suspended") {
-      try {
-        await this.context.resume();
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (this.status === "playing" && this.audio.paused && this.audio.src) {
-      try {
-        await this.audio.play();
-        void this.ensureAnalyser();
-      } catch {
-        /* ignore */
-      }
-    }
   }
 
   private captureStream(): MediaStream | null {
