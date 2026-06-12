@@ -892,7 +892,7 @@ export class AudioEngine {
   }
 
   private updatePositionState(force = false): void {
-    if (this.isSoftPaused()) return;
+    if (this.softPauseVolume !== null) return;
     if (!("mediaSession" in navigator)) return;
     if (typeof navigator.mediaSession.setPositionState !== "function") return;
     if (this.status === "stopped" || this.status === "idle" || this.status === "loading") return;
