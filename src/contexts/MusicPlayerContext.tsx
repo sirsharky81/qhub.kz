@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { agentDebugLog } from "@/lib/debug-agent-log";
-import { AudioEngine, type PlaybackStatus } from "@/lib/music/audio-engine";
+import { AudioEngine, waitForAudioReady, type PlaybackStatus } from "@/lib/music/audio-engine";
 import * as storage from "@/lib/music/indexed-db-storage";
 import * as mediaLibrary from "@/lib/music/media-library";
 import { QueueManager } from "@/lib/music/queue-manager";
@@ -27,6 +27,7 @@ import type {
 } from "@/lib/music/types";
 import { formatTime } from "@/lib/music/types";
 import { MusicToast } from "@/components/music/MusicToast";
+import { AudioDebugPanel } from "@/components/music/AudioDebugPanel";
 import DebugLogPanel from "@/app/tools/music/DebugLogPanel";
 
 interface MusicPlayerContextValue {
@@ -232,11 +233,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         track,
         {
           onPlay: () => {
-            engineRef.current?.setMediaSessionPlaybackState("playing");
             schedulePersist();
           },
           onPause: () => {
-            engineRef.current?.setMediaSessionPlaybackState("paused");
             schedulePersist();
           },
           onPrevious: (opts) => {
@@ -253,7 +252,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const tryLockScreenTrackSwitch = useCallback(
-    (trackId: string): boolean => {
+    async (trackId: string): Promise<boolean> => {
       const file = mediaLibrary.getCachedTrackFile(trackId);
       const track = tracksRef.current.find((t) => t.id === trackId);
       const engine = engineRef.current;
@@ -286,10 +285,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueueIndex(queueRef.current.getIndex());
       engine.setVolume(volume);
       bindMediaSession(track);
-      engine.playFromLockScreen(() => {
-        engine.setMediaSessionPlaybackState("playing");
-        schedulePersist();
+      await waitForAudioReady(engine.getAudioElement());
+      await new Promise<void>((resolve) => {
+        engine.playFromLockScreen(() => resolve());
       });
+      schedulePersist();
       prefetchQueueForLockScreen(trackId);
       return true;
     },
@@ -331,20 +331,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       engine.setVolume(volume);
       bindMediaSession(track);
 
-      const hidden =
-        typeof document !== "undefined" &&
-        (document.hidden || document.visibilityState === "hidden");
-      if (hidden) {
-        await new Promise<void>((resolve) => {
-          engine.playFromLockScreen(() => {
-            engine.setMediaSessionPlaybackState("playing");
-            resolve();
-          });
-        });
-      } else {
-        await engine.play();
-        engine.setMediaSessionPlaybackState("playing");
-      }
+      await engine.play();
       schedulePersist();
       prefetchQueueForLockScreen(trackId);
       return true;
@@ -413,7 +400,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
 
-      if (opts?.lockScreen && tryLockScreenTrackSwitch(nextId)) {
+      if (opts?.lockScreen && (await tryLockScreenTrackSwitch(nextId))) {
         // #region agent log
         agentDebugLog(
           "MusicPlayerContext.tsx:loadNext",
@@ -467,7 +454,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
 
-      if (opts?.lockScreen && tryLockScreenTrackSwitch(prevId)) {
+      if (opts?.lockScreen && (await tryLockScreenTrackSwitch(prevId))) {
         return;
       }
       await loadAndPlay(prevId, 0, false);
@@ -485,7 +472,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           if (d > 0) setDuration(d);
         },
         onStatusChange: setStatus,
-        onEnded: () => void navigationRef.current.onNext(),
+        onEnded: () => {
+          const lockScreen =
+            typeof document !== "undefined" &&
+            (document.hidden || document.visibilityState === "hidden");
+          void navigationRef.current.onNext(lockScreen ? { lockScreen: true } : undefined);
+        },
         onError: () => setStatus("stopped"),
         onGraphReady: (node) => setAnalyser(node),
       },
@@ -622,20 +614,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const engine = engineRef.current;
     if (!engine) return;
     await engine.play();
-    if (engine.getStatus() === "playing") {
-      engine.setMediaSessionPlaybackState("playing");
-    }
   }, [currentTrack]);
 
   const pause = useCallback(() => {
     engineRef.current?.pause();
-    engineRef.current?.setMediaSessionPlaybackState("paused");
     schedulePersist();
   }, [schedulePersist]);
 
   const stop = useCallback(() => {
     engineRef.current?.stop();
-    engineRef.current?.setMediaSessionPlaybackState("none");
     setCurrentTime(0);
     schedulePersist();
   }, [schedulePersist]);
@@ -862,7 +849,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           await loadAndPlayWithSkip(nextId, 0, false);
         } else {
           engineRef.current?.stop();
-          engineRef.current?.setMediaSessionPlaybackState("none");
           setCurrentTrack(null);
           setCurrentTime(0);
           setDuration(0);
@@ -1147,6 +1133,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       {children}
       <MusicToast message={toastMessage} onDismiss={dismissToast} />
       <DebugLogPanel />
+      <AudioDebugPanel />
     </MusicPlayerContext.Provider>
   );
 }
