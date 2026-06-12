@@ -467,6 +467,11 @@ export class AudioEngine {
     this.audio.muted = false;
     this.audio.playbackRate = 1;
 
+    if (isIOSDevice() && isStandalonePWA() && this.audio.src) {
+      const pos = this.audio.currentTime;
+      this.audio.currentTime = pos;
+    }
+
     const onSuccess = () => {
       // #region agent log
       agentDebugLog(
@@ -479,8 +484,10 @@ export class AudioEngine {
           readyState: this.audio.readyState,
           currentTime: this.audio.currentTime,
           connected: this.audio.isConnected,
+          pwa: isStandalonePWA(),
         },
         "H4-pwa-play",
+        "post-fix-v2",
       );
       // #endregion
       if ("mediaSession" in navigator) {
@@ -503,8 +510,10 @@ export class AudioEngine {
           readyState: this.audio.readyState,
           hasSrc: !!this.audio.src,
           connected: this.audio.isConnected,
+          pwa: isStandalonePWA(),
         },
         "H4-pwa-play",
+        "post-fix-v2",
       );
       // #endregion
     };

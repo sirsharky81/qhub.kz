@@ -283,16 +283,35 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   const loadNext = useCallback(
     async (opts?: { lockScreen?: boolean }) => {
-      const nextId = queueRef.current.next();
+      const qm = queueRef.current;
+      const nextId = qm.next();
       // #region agent log
       agentDebugLog(
         "MusicPlayerContext.tsx:loadNext",
         "loadNext called",
-        { nextId, lockScreen: !!opts?.lockScreen },
+        {
+          nextId,
+          lockScreen: !!opts?.lockScreen,
+          queueLen: qm.getQueue().length,
+          queueIndex: qm.getIndex(),
+          repeat: qm.getRepeat(),
+        },
         "H5-navigation",
+        "post-fix-v2",
       );
       // #endregion
       if (!nextId) {
+        // #region agent log
+        agentDebugLog(
+          "MusicPlayerContext.tsx:loadNext",
+          "nextId null — end of queue",
+          { lockScreen: !!opts?.lockScreen, queueLen: qm.getQueue().length },
+          "H5-navigation",
+          "post-fix-v2",
+        );
+        // #endregion
+        // Lock screen: stop() ломает audio pipeline (особенно PWA) — не останавливаем
+        if (opts?.lockScreen) return;
         engineRef.current?.stop();
         setStatus("stopped");
         return;
@@ -327,19 +346,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const loadPrevious = useCallback(
     async (opts?: { lockScreen?: boolean }) => {
       const engine = engineRef.current;
-      if (engine && engine.getAudioElement().currentTime > 3) {
+      // В приложении: первое нажатие «назад» = в начало трека. На lock screen — всегда пред. трек.
+      if (engine && engine.getAudioElement().currentTime > 3 && !opts?.lockScreen) {
         // #region agent log
         agentDebugLog(
           "MusicPlayerContext.tsx:loadPrevious",
           "seek to 0 (same track)",
-          { lockScreen: !!opts?.lockScreen },
+          { lockScreen: false },
           "H5-navigation",
+          "post-fix-v2",
         );
         // #endregion
         engine.seek(0);
-        if (opts?.lockScreen && engine.getStatus() === "playing") {
-          engine.playFromLockScreen();
-        }
         return;
       }
       const prevId = queueRef.current.previous();
@@ -422,10 +440,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (state.lastTrackId && loadedTracks.some((t) => t.id === state.lastTrackId)) {
         const track = loadedTracks.find((t) => t.id === state.lastTrackId)!;
         setCurrentTrack(track);
-        if (state.queue.length === 0) {
-          queueRef.current.playTrack(state.lastTrackId);
-          setQueue([state.lastTrackId]);
-          setQueueIndex(0);
+        if (state.queue.length === 0 && loadedTracks.length > 0) {
+          queueRef.current.playAllFromTracks(loadedTracks, state.lastTrackId);
+          setQueue(queueRef.current.getQueue());
+          setQueueIndex(queueRef.current.getIndex());
         }
         try {
           const file = await mediaLibrary.getTrackFile(track);
@@ -588,7 +606,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   const playTrack = useCallback(
     async (trackId: string, contextTracks?: Track[]) => {
-      const list = contextTracks ?? tracks;
+      const list = contextTracks ?? tracksRef.current;
+      if (list.length === 0) return;
       queueRef.current.playTrack(trackId, list.map((t) => t.id));
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());

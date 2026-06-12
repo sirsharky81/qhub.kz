@@ -89,7 +89,10 @@ export function LibraryPanel() {
 
       <div className="flex-1 min-h-0 px-1 py-1">
         {libraryTab === "tracks" || libraryTab === "favorites" ? (
-          <TrackList tracks={filteredTracks} onPlay={(id) => void playTrack(id)} />
+          <TrackList
+            tracks={filteredTracks}
+            onPlay={(id) => void playTrack(id, filteredTracks)}
+          />
         ) : libraryTab === "albums" ? (
           <div className="h-full overflow-auto space-y-0.5">
             {albums.map((group) => (
