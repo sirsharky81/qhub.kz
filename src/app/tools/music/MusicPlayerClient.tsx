@@ -4,14 +4,16 @@ import { useState } from "react";
 import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
 import { ImportScreen } from "./components/ImportScreen";
 import { LibraryPanel } from "./components/LibraryPanel";
+import { PlaylistsPanel } from "./components/PlaylistsPanel";
 import { PlayerView } from "./components/PlayerView";
 import { QueuePanel } from "./components/QueuePanel";
 
-type Tab = "player" | "library" | "queue";
+type Tab = "player" | "library" | "playlists" | "queue";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "player", label: "Плеер" },
   { id: "library", label: "Медиатека" },
+  { id: "playlists", label: "Плейлисты" },
   { id: "queue", label: "Очередь" },
 ];
 
@@ -99,13 +101,26 @@ export default function MusicPlayerClient() {
           <LibraryPanel />
         </div>
 
+        {/* Playlists */}
+        <div
+          className={`${
+            tab === "playlists" ? "flex" : "hidden"
+          } md:flex flex-col w-full md:w-52 lg:w-60 flex-shrink-0 min-h-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900`}
+        >
+          <PlaylistsPanel />
+        </div>
+
         {/* Queue */}
         <div
           className={`${
             tab === "queue" ? "flex" : "hidden"
           } md:flex flex-col w-full md:w-52 lg:w-60 flex-shrink-0 min-h-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900`}
         >
-          <QueuePanel />
+          <QueuePanel
+            onNavigate={(target) => {
+              setTab(target === "library" ? "library" : "playlists");
+            }}
+          />
         </div>
       </div>
     </div>

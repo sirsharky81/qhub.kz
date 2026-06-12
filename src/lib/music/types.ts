@@ -11,7 +11,9 @@ export const AUDIO_MIME_PREFIXES = ["audio/"];
 
 export type RepeatMode = "none" | "one" | "all";
 
-export type LibraryTab = "tracks" | "albums" | "artists" | "favorites";
+export type LibraryTab = "tracks" | "albums" | "artists" | "favorites" | "folders";
+
+export type UnavailableFilter = "hide" | "show" | "only";
 
 export type SortField = "title" | "artist" | "album" | "duration" | "addedAt";
 export type SortDirection = "asc" | "desc";
@@ -31,6 +33,10 @@ export interface Track {
   hasBlob: boolean;
   /** true when FileSystemFileHandle is stored */
   hasHandle: boolean;
+  /** relative folder path from directory import */
+  folderPath?: string;
+  /** true when cover art blob is stored in IndexedDB */
+  hasCover?: boolean;
 }
 
 export interface Playlist {
@@ -63,6 +69,11 @@ export interface TrackBlobRecord {
 export interface TrackHandleRecord {
   trackId: string;
   handle: FileSystemFileHandle;
+}
+
+export interface TrackCoverRecord {
+  trackId: string;
+  blob: Blob;
 }
 
 export interface ImportProgress {

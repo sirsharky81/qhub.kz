@@ -10,9 +10,18 @@ function generateId(): string {
 async function buildTrackFromFile(
   file: File,
   handle?: FileSystemFileHandle,
+  folderPath?: string,
 ): Promise<Track> {
   const meta = await extractMetadata(file);
   const id = generateId();
+
+  let coverArtUrl: string | null = null;
+  let hasCover = false;
+  if (meta.coverBlob) {
+    await storage.saveCover({ trackId: id, blob: meta.coverBlob });
+    coverArtUrl = getOrCreateCoverUrl(id, meta.coverBlob);
+    hasCover = true;
+  }
 
   const track: Track = {
     id,
@@ -21,12 +30,14 @@ async function buildTrackFromFile(
     album: meta.album,
     genre: meta.genre,
     duration: meta.duration,
-    coverArtUrl: meta.coverArtUrl,
+    coverArtUrl,
     fileName: file.name,
     mimeType: file.type || "audio/mpeg",
     addedAt: Date.now(),
     hasBlob: !handle,
     hasHandle: !!handle,
+    folderPath: folderPath || undefined,
+    hasCover,
   };
 
   await storage.saveTrack(track);
@@ -69,15 +80,17 @@ export async function importFiles(
 
 async function collectHandlesFromDirectory(
   dirHandle: FileSystemDirectoryHandle,
-  results: { handle: FileSystemFileHandle; file: File }[],
+  results: { handle: FileSystemFileHandle; file: File; folderPath: string }[],
+  basePath = "",
 ): Promise<void> {
   for await (const entry of dirHandle.values()) {
     if (entry.kind === "file") {
       const handle = entry as FileSystemFileHandle;
       const file = await handle.getFile();
-      if (isAudioFile(file)) results.push({ handle, file });
+      if (isAudioFile(file)) results.push({ handle, file, folderPath: basePath || "/" });
     } else if (entry.kind === "directory") {
-      await collectHandlesFromDirectory(entry as FileSystemDirectoryHandle, results);
+      const subPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+      await collectHandlesFromDirectory(entry as FileSystemDirectoryHandle, results, subPath);
     }
   }
 }
@@ -86,18 +99,18 @@ export async function importDirectory(
   dirHandle: FileSystemDirectoryHandle,
   onProgress?: (progress: ImportProgress) => void,
 ): Promise<Track[]> {
-  const entries: { handle: FileSystemFileHandle; file: File }[] = [];
+  const entries: { handle: FileSystemFileHandle; file: File; folderPath: string }[] = [];
   await collectHandlesFromDirectory(dirHandle, entries);
 
   const imported: Track[] = [];
   for (let i = 0; i < entries.length; i++) {
-    const { handle, file } = entries[i];
+    const { handle, file, folderPath } = entries[i];
     onProgress?.({
       total: entries.length,
       processed: i,
       currentFile: file.name,
     });
-    const track = await buildTrackFromFile(file, handle);
+    const track = await buildTrackFromFile(file, handle, folderPath);
     imported.push(track);
   }
 
@@ -112,6 +125,56 @@ export async function importDirectory(
 
 const fileCache = new Map<string, File>();
 const objectUrlCache = new Map<string, string>();
+const coverUrlCache = new Map<string, string>();
+
+export function getOrCreateCoverUrl(trackId: string, blob: Blob): string {
+  const cached = coverUrlCache.get(trackId);
+  if (cached) return cached;
+  const url = URL.createObjectURL(blob);
+  coverUrlCache.set(trackId, url);
+  return url;
+}
+
+export function releaseCoverUrl(trackId: string): void {
+  const url = coverUrlCache.get(trackId);
+  if (!url) return;
+  URL.revokeObjectURL(url);
+  coverUrlCache.delete(trackId);
+}
+
+async function hydrateTrackCover(track: Track): Promise<Track> {
+  if (track.coverArtUrl && coverUrlCache.has(track.id)) {
+    return track;
+  }
+
+  if (track.hasCover) {
+    const blob = await storage.getCover(track.id);
+    if (blob) {
+      return { ...track, coverArtUrl: getOrCreateCoverUrl(track.id, blob) };
+    }
+    return { ...track, coverArtUrl: null, hasCover: false };
+  }
+
+  // Legacy tracks imported before cover persistence — re-extract from audio file
+  const file = await getTrackFile(track);
+  if (!file) {
+    return { ...track, coverArtUrl: null };
+  }
+
+  const meta = await extractMetadata(file);
+  if (!meta.coverBlob) {
+    return { ...track, coverArtUrl: null, hasCover: false };
+  }
+
+  await storage.saveCover({ trackId: track.id, blob: meta.coverBlob });
+  const hydrated = {
+    ...track,
+    hasCover: true,
+    coverArtUrl: getOrCreateCoverUrl(track.id, meta.coverBlob),
+  };
+  await storage.saveTrack(hydrated);
+  return hydrated;
+}
 
 export function cacheTrackFile(trackId: string, file: File): void {
   fileCache.set(trackId, file);
@@ -236,6 +299,42 @@ export interface ArtistGroup {
   tracks: Track[];
 }
 
+export interface FolderGroup {
+  folderPath: string;
+  tracks: Track[];
+}
+
+export function groupByFolder(tracks: Track[]): FolderGroup[] {
+  const map = new Map<string, FolderGroup>();
+  for (const track of tracks) {
+    const path = track.folderPath || "/";
+    const existing = map.get(path);
+    if (existing) {
+      existing.tracks.push(track);
+    } else {
+      map.set(path, { folderPath: path, tracks: [track] });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.folderPath.localeCompare(b.folderPath, "ru"));
+}
+
+export async function isTrackFileAvailable(track: Track): Promise<boolean> {
+  if (fileCache.has(track.id)) return true;
+  const file = await getTrackFile(track);
+  return file !== null;
+}
+
+export async function scanUnavailableTracks(tracks: Track[]): Promise<Set<string>> {
+  const unavailable = new Set<string>();
+  await Promise.all(
+    tracks.map(async (track) => {
+      const ok = await isTrackFileAvailable(track);
+      if (!ok) unavailable.add(track.id);
+    }),
+  );
+  return unavailable;
+}
+
 export function groupByAlbum(tracks: Track[]): AlbumGroup[] {
   const map = new Map<string, AlbumGroup>();
   for (const track of tracks) {
@@ -272,13 +371,19 @@ export function groupByArtist(tracks: Track[]): ArtistGroup[] {
 }
 
 export async function loadLibrary(): Promise<Track[]> {
-  return storage.getAllTracks();
+  const tracks = await storage.getAllTracks();
+  const hydrated = await Promise.all(tracks.map((track) => hydrateTrackCover(track)));
+  return hydrated.sort((a, b) => a.addedAt - b.addedAt);
 }
 
 export async function deleteTrack(id: string): Promise<void> {
+  releaseCoverUrl(id);
   await storage.deleteTrack(id);
 }
 
 export async function clearLibrary(): Promise<void> {
+  for (const trackId of coverUrlCache.keys()) {
+    releaseCoverUrl(trackId);
+  }
   await storage.clearLibrary();
 }

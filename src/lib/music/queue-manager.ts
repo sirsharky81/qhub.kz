@@ -56,6 +56,27 @@ export class QueueManager {
     this.rebuildShuffleOrder();
   }
 
+  addTracksToQueue(trackIds: string[]): void {
+    for (const id of trackIds) {
+      if (!this.queue.includes(id)) this.queue.push(id);
+    }
+    if (this.index < 0 && this.queue.length > 0) this.index = 0;
+    this.rebuildShuffleOrder();
+  }
+
+  shuffleQueue(): void {
+    if (this.queue.length <= 1) return;
+    const currentId = this.getCurrentId();
+    const rest = this.queue.filter((id) => id !== currentId);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    this.queue = currentId ? [currentId, ...rest] : rest;
+    if (currentId) this.index = 0;
+    this.rebuildShuffleOrder();
+  }
+
   addNext(trackId: string): void {
     if (this.index < 0) {
       this.queue.push(trackId);

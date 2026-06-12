@@ -23,8 +23,10 @@ import type {
   SortDirection,
   SortField,
   Track,
+  UnavailableFilter,
 } from "@/lib/music/types";
 import { formatTime } from "@/lib/music/types";
+import { MusicToast } from "@/components/music/MusicToast";
 import DebugLogPanel from "@/app/tools/music/DebugLogPanel";
 
 interface MusicPlayerContextValue {
@@ -41,6 +43,9 @@ interface MusicPlayerContextValue {
   repeat: RepeatMode;
   favoriteTrackIds: Set<string>;
   playlists: Playlist[];
+  unavailableTrackIds: Set<string>;
+  unavailableFilter: UnavailableFilter;
+  toastMessage: string | null;
   libraryTab: LibraryTab;
   searchQuery: string;
   sortField: SortField;
@@ -72,12 +77,25 @@ interface MusicPlayerContextValue {
   playAlbum: (tracks: Track[], startId?: string) => Promise<void>;
   toggleFavorite: (trackId: string) => void;
   addToQueue: (trackId: string) => void;
+  addTracksToQueue: (trackIds: string[]) => void;
   removeFromQueue: (trackId: string) => void;
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   moveQueueItem: (index: number, direction: -1 | 1) => void;
+  clearQueue: () => void;
+  shuffleQueue: () => void;
+  saveQueueAsPlaylist: (name: string) => Promise<void>;
   removeTrackFromLibrary: (trackId: string) => Promise<void>;
+  removeAllUnavailableFromLibrary: () => Promise<void>;
   createPlaylist: (name: string, trackIds: string[]) => Promise<void>;
+  renamePlaylist: (id: string, name: string) => Promise<void>;
   deletePlaylist: (id: string) => Promise<void>;
+  addTracksToPlaylist: (playlistId: string, trackIds: string[]) => Promise<void>;
+  removeTrackFromPlaylist: (playlistId: string, trackId: string) => Promise<void>;
+  playPlaylist: (playlistId: string) => Promise<void>;
+  isTrackUnavailable: (trackId: string) => boolean;
+  setUnavailableFilter: (filter: UnavailableFilter) => void;
+  showToast: (message: string) => void;
+  dismissToast: () => void;
   clearLibrary: () => Promise<void>;
   filteredTracks: Track[];
   favoriteTracks: Track[];
@@ -109,6 +127,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [repeat, setRepeat] = useState<RepeatMode>("none");
   const [favoriteTrackIds, setFavoriteTrackIds] = useState<Set<string>>(new Set());
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [unavailableTrackIds, setUnavailableTrackIds] = useState<Set<string>>(new Set());
+  const [unavailableFilter, setUnavailableFilterState] = useState<UnavailableFilter>("hide");
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("tracks");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("title");
@@ -126,6 +147,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tracksRef = useRef<Track[]>([]);
+  const unavailableRef = useRef<Set<string>>(new Set());
   const navigationRef = useRef({
     onNext: async (_opts?: { lockScreen?: boolean }) => {},
     onPrevious: async (_opts?: { lockScreen?: boolean }) => {},
@@ -138,6 +160,45 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     tracksRef.current = tracks;
   }, [tracks]);
+
+  useEffect(() => {
+    unavailableRef.current = unavailableTrackIds;
+  }, [unavailableTrackIds]);
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    setToastMessage(null);
+  }, []);
+
+  const markUnavailable = useCallback((trackId: string) => {
+    setUnavailableTrackIds((prev) => {
+      if (prev.has(trackId)) return prev;
+      const next = new Set(prev);
+      next.add(trackId);
+      return next;
+    });
+  }, []);
+
+  const markAvailable = useCallback((trackId: string) => {
+    setUnavailableTrackIds((prev) => {
+      if (!prev.has(trackId)) return prev;
+      const next = new Set(prev);
+      next.delete(trackId);
+      return next;
+    });
+  }, []);
+
+  const isTrackUnavailable = useCallback(
+    (trackId: string) => unavailableTrackIds.has(trackId),
+    [unavailableTrackIds],
+  );
+
+  const setUnavailableFilter = useCallback((filter: UnavailableFilter) => {
+    setUnavailableFilterState(filter);
+  }, []);
 
   const persistState = useCallback(async () => {
     const qm = queueRef.current;
@@ -240,17 +301,26 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   }, [favoriteTrackIds, volume, shuffle, repeat, queue, queueIndex, isPlayerReady, schedulePersist]);
 
   const loadAndPlay = useCallback(
-    async (trackId: string, startPosition = 0) => {
-      const track = tracks.find((t) => t.id === trackId) ?? (await storage.getTrack(trackId));
-      if (!track) return;
+    async (trackId: string, startPosition = 0, userInitiated = false): Promise<boolean> => {
+      const track =
+        tracksRef.current.find((t) => t.id === trackId) ?? (await storage.getTrack(trackId));
+      if (!track) return false;
 
       const file = await mediaLibrary.getTrackFile(track);
-      if (!file) return;
+      if (!file) {
+        markUnavailable(trackId);
+        if (userInitiated) {
+          showToast("Файл недоступен. Возможно был удалён или перемещён.");
+        }
+        return false;
+      }
+
+      markAvailable(trackId);
       mediaLibrary.cacheTrackFile(track.id, file);
       mediaLibrary.getOrCreateObjectUrl(track.id, file);
 
       const engine = engineRef.current;
-      if (!engine) return;
+      if (!engine) return false;
 
       const trackDuration = track.duration || 0;
       engine.setMediaDuration(trackDuration);
@@ -276,9 +346,32 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
       schedulePersist();
       prefetchQueueForLockScreen(trackId);
+      return true;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tracks, volume, schedulePersist, bindMediaSession, prefetchQueueForLockScreen],
+    [volume, schedulePersist, bindMediaSession, prefetchQueueForLockScreen, markUnavailable, markAvailable, showToast],
+  );
+
+  const loadAndPlayWithSkip = useCallback(
+    async (trackId: string, startPosition = 0, userInitiated = false, lockScreen = false) => {
+      const played = await loadAndPlay(trackId, startPosition, userInitiated);
+      if (played || userInitiated) return;
+
+      const qm = queueRef.current;
+      const maxAttempts = qm.getQueue().length;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const nextId = qm.next();
+        if (!nextId) break;
+        setQueue(qm.getQueue());
+        setQueueIndex(qm.getIndex());
+        if (await loadAndPlay(nextId, 0, false)) return;
+      }
+
+      if (!lockScreen) {
+        engineRef.current?.stop();
+        setStatus("stopped");
+      }
+    },
+    [loadAndPlay],
   );
 
   const loadNext = useCallback(
@@ -338,9 +431,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         "H5-navigation",
       );
       // #endregion
-      await loadAndPlay(nextId);
+      await loadAndPlayWithSkip(nextId, 0, false, !!opts?.lockScreen);
     },
-    [loadAndPlay, tryLockScreenTrackSwitch],
+    [loadAndPlayWithSkip, tryLockScreenTrackSwitch],
   );
 
   const loadPrevious = useCallback(
@@ -376,7 +469,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (opts?.lockScreen && tryLockScreenTrackSwitch(prevId)) {
         return;
       }
-      await loadAndPlay(prevId);
+      await loadAndPlay(prevId, 0, false);
     },
     [loadAndPlay, tryLockScreenTrackSwitch],
   );
@@ -437,6 +530,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueueIndex(state.queueIndex);
       setIsLibraryLoading(false);
 
+      void mediaLibrary.scanUnavailableTracks(loadedTracks).then(setUnavailableTrackIds);
+
       if (state.lastTrackId && loadedTracks.some((t) => t.id === state.lastTrackId)) {
         const track = loadedTracks.find((t) => t.id === state.lastTrackId)!;
         setCurrentTrack(track);
@@ -469,21 +564,29 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nativeAudioReady]);
 
+  const startImportPlayback = useCallback(
+    async (imported: Track[]) => {
+      if (imported.length === 0) return;
+      queueRef.current.playAllFromTracks(imported, imported[0].id);
+      setQueue(queueRef.current.getQueue());
+      setQueueIndex(queueRef.current.getIndex());
+      await loadAndPlayWithSkip(imported[0].id, 0, false);
+    },
+    [loadAndPlayWithSkip],
+  );
+
   const importFilesHandler = useCallback(
     async (files: File[]) => {
       setImportProgress({ total: files.length, processed: 0, currentFile: "" });
       const imported = await mediaLibrary.importFiles(files, setImportProgress);
       setTracks((prev) => [...prev, ...imported]);
       setImportProgress(null);
-      if (imported.length > 0 && !currentTrack) {
-        queueRef.current.playAllFromTracks([...tracks, ...imported], imported[0].id);
-        setQueue(queueRef.current.getQueue());
-        setQueueIndex(queueRef.current.getIndex());
-        await loadAndPlay(imported[0].id);
+      if (imported.length > 0) {
+        await startImportPlayback(imported);
       }
       schedulePersist();
     },
-    [currentTrack, tracks, loadAndPlay, schedulePersist],
+    [startImportPlayback, schedulePersist],
   );
 
   const importDirectoryHandler = useCallback(async () => {
@@ -497,11 +600,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       const imported = await mediaLibrary.importDirectory(dirHandle, setImportProgress);
       setTracks((prev) => [...prev, ...imported]);
       setImportProgress(null);
-      if (imported.length > 0 && !currentTrack) {
-        queueRef.current.playAllFromTracks([...tracks, ...imported], imported[0].id);
-        setQueue(queueRef.current.getQueue());
-        setQueueIndex(queueRef.current.getIndex());
-        await loadAndPlay(imported[0].id);
+      if (imported.length > 0) {
+        await startImportPlayback(imported);
       }
       schedulePersist();
     } catch (err) {
@@ -510,7 +610,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
       setImportProgress(null);
     }
-  }, [currentTrack, tracks, loadAndPlay, schedulePersist]);
+  }, [startImportPlayback, schedulePersist]);
 
   const pickFiles = useCallback(() => {
     fileInputRef.current?.click();
@@ -606,26 +706,36 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   const playTrack = useCallback(
     async (trackId: string, contextTracks?: Track[]) => {
-      const list = contextTracks ?? tracksRef.current;
-      if (list.length === 0) return;
-      queueRef.current.playTrack(trackId, list.map((t) => t.id));
+      if (unavailableRef.current.has(trackId)) {
+        showToast("Файл недоступен. Возможно был удалён или перемещён.");
+        return;
+      }
+      if (contextTracks) {
+        queueRef.current.playTrack(trackId, contextTracks.map((t) => t.id));
+      } else {
+        queueRef.current.playTrack(trackId);
+      }
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
-      await loadAndPlay(trackId);
+      await loadAndPlayWithSkip(trackId, 0, true);
     },
-    [tracks, loadAndPlay],
+    [loadAndPlayWithSkip, showToast],
   );
 
   const playAlbum = useCallback(
     async (albumTracks: Track[], startId?: string) => {
       const ids = albumTracks.map((t) => t.id);
       const start = startId ?? ids[0];
+      if (unavailableRef.current.has(start)) {
+        showToast("Файл недоступен. Возможно был удалён или перемещён.");
+        return;
+      }
       queueRef.current.setQueue(ids, ids.indexOf(start));
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
-      await loadAndPlay(start);
+      await loadAndPlayWithSkip(start, 0, true);
     },
-    [loadAndPlay],
+    [loadAndPlayWithSkip, showToast],
   );
 
   const toggleFavorite = useCallback(
@@ -648,6 +758,45 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       schedulePersist();
     },
     [schedulePersist],
+  );
+
+  const addTracksToQueue = useCallback(
+    (trackIds: string[]) => {
+      queueRef.current.addTracksToQueue(trackIds);
+      setQueue(queueRef.current.getQueue());
+      schedulePersist();
+    },
+    [schedulePersist],
+  );
+
+  const clearQueueHandler = useCallback(() => {
+    queueRef.current.clear();
+    setQueue([]);
+    setQueueIndex(-1);
+    schedulePersist();
+  }, [schedulePersist]);
+
+  const shuffleQueueHandler = useCallback(() => {
+    queueRef.current.shuffleQueue();
+    setQueue(queueRef.current.getQueue());
+    setQueueIndex(queueRef.current.getIndex());
+    schedulePersist();
+  }, [schedulePersist]);
+
+  const saveQueueAsPlaylist = useCallback(
+    async (name: string) => {
+      const ids = queueRef.current.getQueue();
+      if (ids.length === 0) return;
+      const playlist: Playlist = {
+        id: crypto.randomUUID(),
+        name,
+        trackIds: ids,
+        createdAt: Date.now(),
+      };
+      await storage.savePlaylist(playlist);
+      setPlaylists((prev) => [...prev, playlist]);
+    },
+    [],
   );
 
   const removeFromQueue = useCallback(
@@ -684,8 +833,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const removeTrackFromLibrary = useCallback(
     async (trackId: string) => {
       const track = tracks.find((t) => t.id === trackId);
-      if (track?.coverArtUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(track.coverArtUrl);
+      if (track?.coverArtUrl) {
+        mediaLibrary.releaseCoverUrl(trackId);
       }
 
       const wasCurrent = currentTrack?.id === trackId;
@@ -704,11 +853,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       await mediaLibrary.deleteTrack(trackId);
       setTracks((prev) => prev.filter((t) => t.id !== trackId));
+      markAvailable(trackId);
 
       if (wasCurrent) {
         const nextId = queueRef.current.getCurrentId();
         if (nextId) {
-          await loadAndPlay(nextId);
+          await loadAndPlayWithSkip(nextId, 0, false);
         } else {
           engineRef.current?.stop();
           engineRef.current?.setMediaSessionPlaybackState("none");
@@ -720,7 +870,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       schedulePersist();
     },
-    [tracks, currentTrack, queue, loadAndPlay, schedulePersist],
+    [tracks, currentTrack, queue, loadAndPlayWithSkip, schedulePersist, markAvailable],
   );
 
   const createPlaylist = useCallback(
@@ -737,10 +887,63 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const renamePlaylist = useCallback(async (id: string, name: string) => {
+    setPlaylists((prev) => {
+      const pl = prev.find((p) => p.id === id);
+      if (!pl) return prev;
+      const updated = { ...pl, name };
+      void storage.savePlaylist(updated);
+      return prev.map((p) => (p.id === id ? updated : p));
+    });
+  }, []);
+
+  const addTracksToPlaylist = useCallback(async (playlistId: string, trackIds: string[]) => {
+    setPlaylists((prev) => {
+      const pl = prev.find((p) => p.id === playlistId);
+      if (!pl) return prev;
+      const merged = [...pl.trackIds];
+      for (const id of trackIds) {
+        if (!merged.includes(id)) merged.push(id);
+      }
+      const updated = { ...pl, trackIds: merged };
+      void storage.savePlaylist(updated);
+      return prev.map((p) => (p.id === playlistId ? updated : p));
+    });
+  }, []);
+
+  const removeTrackFromPlaylist = useCallback(async (playlistId: string, trackId: string) => {
+    setPlaylists((prev) => {
+      const pl = prev.find((p) => p.id === playlistId);
+      if (!pl) return prev;
+      const updated = { ...pl, trackIds: pl.trackIds.filter((id) => id !== trackId) };
+      void storage.savePlaylist(updated);
+      return prev.map((p) => (p.id === playlistId ? updated : p));
+    });
+  }, []);
+
+  const playPlaylist = useCallback(
+    async (playlistId: string) => {
+      const pl = playlists.find((p) => p.id === playlistId);
+      if (!pl || pl.trackIds.length === 0) return;
+      queueRef.current.setQueue(pl.trackIds, 0);
+      setQueue(queueRef.current.getQueue());
+      setQueueIndex(queueRef.current.getIndex());
+      await loadAndPlayWithSkip(pl.trackIds[0], 0, false);
+    },
+    [playlists, loadAndPlayWithSkip],
+  );
+
   const deletePlaylistHandler = useCallback(async (id: string) => {
     await storage.deletePlaylist(id);
     setPlaylists((prev) => prev.filter((p) => p.id !== id));
   }, []);
+
+  const removeAllUnavailableFromLibrary = useCallback(async () => {
+    const ids = Array.from(unavailableTrackIds);
+    for (const id of ids) {
+      await removeTrackFromLibrary(id);
+    }
+  }, [unavailableTrackIds, removeTrackFromLibrary]);
 
   const clearLibraryHandler = useCallback(async () => {
     stop();
@@ -763,9 +966,23 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (libraryTab === "favorites") {
       list = list.filter((t) => favoriteTrackIds.has(t.id));
     }
+    if (unavailableFilter === "hide") {
+      list = list.filter((t) => !unavailableTrackIds.has(t.id));
+    } else if (unavailableFilter === "only") {
+      list = list.filter((t) => unavailableTrackIds.has(t.id));
+    }
     list = mediaLibrary.filterTracks(list, searchQuery);
     return mediaLibrary.sortTracks(list, sortField, sortDirection);
-  }, [tracks, libraryTab, favoriteTrackIds, searchQuery, sortField, sortDirection]);
+  }, [
+    tracks,
+    libraryTab,
+    favoriteTrackIds,
+    searchQuery,
+    sortField,
+    sortDirection,
+    unavailableFilter,
+    unavailableTrackIds,
+  ]);
 
   const favoriteTracks = useMemo(
     () => tracks.filter((t) => favoriteTrackIds.has(t.id)),
@@ -790,6 +1007,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     repeat,
     favoriteTrackIds,
     playlists,
+    unavailableTrackIds,
+    unavailableFilter,
+    toastMessage,
     libraryTab,
     searchQuery,
     sortField,
@@ -820,12 +1040,25 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     playAlbum,
     toggleFavorite,
     addToQueue,
+    addTracksToQueue,
     removeFromQueue,
     reorderQueue,
     moveQueueItem,
+    clearQueue: clearQueueHandler,
+    shuffleQueue: shuffleQueueHandler,
+    saveQueueAsPlaylist,
     removeTrackFromLibrary,
+    removeAllUnavailableFromLibrary,
     createPlaylist,
+    renamePlaylist,
     deletePlaylist: deletePlaylistHandler,
+    addTracksToPlaylist,
+    removeTrackFromPlaylist,
+    playPlaylist,
+    isTrackUnavailable,
+    setUnavailableFilter,
+    showToast,
+    dismissToast,
     clearLibrary: clearLibraryHandler,
     filteredTracks,
     favoriteTracks,
@@ -884,6 +1117,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         }}
       />
       {children}
+      <MusicToast message={toastMessage} onDismiss={dismissToast} />
       <DebugLogPanel />
     </MusicPlayerContext.Provider>
   );

@@ -6,13 +6,18 @@ export interface ParsedMetadata {
   album: string;
   genre: string;
   duration: number;
-  coverArtUrl: string | null;
+  coverBlob: Blob | null;
 }
 
-function revokeCoverUrl(url: string | null): void {
-  if (url?.startsWith("blob:")) {
-    URL.revokeObjectURL(url);
-  }
+function normalizeImageMime(format: string | undefined): string {
+  if (!format) return "image/jpeg";
+  if (format.startsWith("image/")) return format;
+  const ext = format.toLowerCase();
+  if (ext === "jpeg" || ext === "jpg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  if (ext === "gif") return "image/gif";
+  if (ext === "webp") return "image/webp";
+  return "image/jpeg";
 }
 
 export async function extractMetadata(file: File): Promise<ParsedMetadata> {
@@ -22,13 +27,13 @@ export async function extractMetadata(file: File): Promise<ParsedMetadata> {
     const { parseBlob } = await import("music-metadata");
     const metadata = await parseBlob(file, { skipCovers: false });
 
-    let coverArtUrl: string | null = null;
+    let coverBlob: Blob | null = null;
     const picture = metadata.common.picture?.[0];
-    if (picture?.data) {
-      const blob = new Blob([Uint8Array.from(picture.data)], {
-        type: picture.format ?? "image/jpeg",
+    if (picture?.data && picture.data.byteLength > 0) {
+      const bytes = new Uint8Array(picture.data);
+      coverBlob = new Blob([bytes], {
+        type: normalizeImageMime(picture.format),
       });
-      coverArtUrl = URL.createObjectURL(blob);
     }
 
     return {
@@ -40,7 +45,7 @@ export async function extractMetadata(file: File): Promise<ParsedMetadata> {
       album: metadata.common.album?.trim() || "Без альбома",
       genre: metadata.common.genre?.[0]?.trim() || "",
       duration: metadata.format.duration ?? 0,
-      coverArtUrl,
+      coverBlob,
     };
   } catch {
     return {
@@ -49,9 +54,13 @@ export async function extractMetadata(file: File): Promise<ParsedMetadata> {
       album: "Без альбома",
       genre: "",
       duration: 0,
-      coverArtUrl: null,
+      coverBlob: null,
     };
   }
 }
 
-export { revokeCoverUrl };
+export function revokeCoverUrl(url: string | null): void {
+  if (url?.startsWith("blob:")) {
+    URL.revokeObjectURL(url);
+  }
+}

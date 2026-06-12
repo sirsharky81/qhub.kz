@@ -4,16 +4,18 @@ import type {
   Playlist,
   Track,
   TrackBlobRecord,
+  TrackCoverRecord,
   TrackHandleRecord,
 } from "./types";
 
 const DB_NAME = "qhub-music";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
   tracks: "tracks",
   blobs: "blobs",
   handles: "handles",
+  covers: "covers",
   playlists: "playlists",
   state: "state",
 } as const;
@@ -51,6 +53,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORES.handles)) {
         db.createObjectStore(STORES.handles, { keyPath: "trackId" });
+      }
+      if (!db.objectStoreNames.contains(STORES.covers)) {
+        db.createObjectStore(STORES.covers, { keyPath: "trackId" });
       }
       if (!db.objectStoreNames.contains(STORES.playlists)) {
         db.createObjectStore(STORES.playlists, { keyPath: "id" });
@@ -121,7 +126,8 @@ export async function getTrack(id: string): Promise<Track | undefined> {
 }
 
 export async function saveTrack(track: Track): Promise<void> {
-  await tx(STORES.tracks, "readwrite", (store) => store.put(track));
+  const persisted: Track = { ...track, coverArtUrl: null };
+  await tx(STORES.tracks, "readwrite", (store) => store.put(persisted));
 }
 
 export async function saveTracks(tracks: Track[]): Promise<void> {
@@ -133,11 +139,16 @@ export async function saveTracks(tracks: Track[]): Promise<void> {
 }
 
 export async function deleteTrack(id: string): Promise<void> {
-  await txMulti([STORES.tracks, STORES.blobs, STORES.handles], "readwrite", (stores) => {
-    stores[STORES.tracks].delete(id);
-    stores[STORES.blobs].delete(id);
-    stores[STORES.handles].delete(id);
-  });
+  await txMulti(
+    [STORES.tracks, STORES.blobs, STORES.handles, STORES.covers],
+    "readwrite",
+    (stores) => {
+      stores[STORES.tracks].delete(id);
+      stores[STORES.blobs].delete(id);
+      stores[STORES.handles].delete(id);
+      stores[STORES.covers].delete(id);
+    },
+  );
 }
 
 export async function saveBlob(record: TrackBlobRecord): Promise<void> {
@@ -160,6 +171,17 @@ export async function getHandle(trackId: string): Promise<FileSystemFileHandle |
     store.get(trackId),
   );
   return record?.handle ?? null;
+}
+
+export async function saveCover(record: TrackCoverRecord): Promise<void> {
+  await tx(STORES.covers, "readwrite", (store) => store.put(record));
+}
+
+export async function getCover(trackId: string): Promise<Blob | null> {
+  const record = await tx<TrackCoverRecord>(STORES.covers, "readonly", (store) =>
+    store.get(trackId),
+  );
+  return record?.blob ?? null;
 }
 
 export async function getPlaybackState(): Promise<PlaybackState> {
@@ -195,10 +217,16 @@ export async function deletePlaylist(id: string): Promise<void> {
 
 export async function clearLibrary(): Promise<void> {
   await txMulti(
-    [STORES.tracks, STORES.blobs, STORES.handles, STORES.playlists],
+    [STORES.tracks, STORES.blobs, STORES.handles, STORES.covers, STORES.playlists],
     "readwrite",
     (stores) => {
-      for (const name of [STORES.tracks, STORES.blobs, STORES.handles, STORES.playlists]) {
+      for (const name of [
+        STORES.tracks,
+        STORES.blobs,
+        STORES.handles,
+        STORES.covers,
+        STORES.playlists,
+      ]) {
         stores[name].clear();
       }
     },
