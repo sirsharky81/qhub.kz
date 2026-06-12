@@ -8,6 +8,8 @@ type AudioLogEntry = {
     currentTime: number;
     readyState: number;
     networkState: number;
+    volume: number;
+    muted: boolean;
   };
 };
 
@@ -24,6 +26,8 @@ export function logAudioEvent(event: string, audio: HTMLAudioElement): void {
       currentTime: Math.round(audio.currentTime),
       readyState: audio.readyState,
       networkState: audio.networkState,
+      volume: Math.round(audio.volume * 100) / 100,
+      muted: audio.muted,
     },
   });
 
