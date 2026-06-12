@@ -1,16 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { clearAudioLog, getAudioLog, isAudioDebugEnabled } from "@/lib/audioDebug";
+import { useSearchParams } from "next/navigation";
+import { clearAudioLog, getAudioLog } from "@/lib/audioDebug";
+
+function isDebugQuery(search: string): boolean {
+  return search.includes("debug=1");
+}
 
 export function AudioDebugPanel() {
+  const searchParams = useSearchParams();
   const [enabled, setEnabled] = useState(false);
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<ReturnType<typeof getAudioLog>>([]);
 
   useEffect(() => {
-    setEnabled(isAudioDebugEnabled());
-  }, []);
+    const fromParams = searchParams.get("debug") === "1";
+    const fromUrl =
+      typeof window !== "undefined" && isDebugQuery(window.location.search);
+    setEnabled(fromParams || fromUrl || process.env.NODE_ENV === "development");
+  }, [searchParams]);
 
   useEffect(() => {
     if (!enabled || !open) return;
@@ -28,19 +37,21 @@ export function AudioDebugPanel() {
   if (!enabled) return null;
 
   return (
-    <>
+    <div className="mt-2 shrink-0 border-t border-dashed border-amber-300 pt-2">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-20 right-2 z-[9998] rounded bg-gray-800 px-2 py-1 text-[10px] text-white shadow"
+        className="rounded bg-gray-800 px-2 py-1 text-[10px] text-white"
         aria-label="Audio debug log"
       >
-        Debug
+        Debug {open ? "▲" : "▼"}
       </button>
       {open && (
-        <div className="fixed bottom-28 right-2 left-2 z-[9998] max-h-64 overflow-auto rounded border border-gray-300 bg-white p-2 text-[10px] shadow-lg dark:border-gray-600 dark:bg-gray-900">
+        <div className="mt-2 max-h-40 overflow-auto rounded border border-amber-200 bg-amber-50 p-2 text-[10px] dark:border-amber-800 dark:bg-amber-950/40">
           <div className="mb-1 flex items-center justify-between">
-            <span className="font-semibold">Audio events (last 20)</span>
+            <span className="font-semibold text-amber-900 dark:text-amber-100">
+              Audio events (last 20)
+            </span>
             <button type="button" onClick={handleClear} className="text-blue-600">
               Clear
             </button>
@@ -50,7 +61,10 @@ export function AudioDebugPanel() {
           ) : (
             <ul className="space-y-1 font-mono">
               {events.map((entry, i) => (
-                <li key={`${entry.time}-${entry.event}-${i}`} className="border-b border-gray-100 pb-1">
+                <li
+                  key={`${entry.time}-${entry.event}-${i}`}
+                  className="border-b border-amber-100 pb-1 dark:border-amber-900"
+                >
                   <span className="text-gray-500">{entry.time}</span>{" "}
                   <span className="font-semibold">{entry.event}</span>{" "}
                   paused={String(entry.state.paused)} t={entry.state.currentTime} rs=
@@ -61,6 +75,6 @@ export function AudioDebugPanel() {
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }

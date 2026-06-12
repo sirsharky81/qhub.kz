@@ -27,7 +27,6 @@ import type {
 } from "@/lib/music/types";
 import { formatTime } from "@/lib/music/types";
 import { MusicToast } from "@/components/music/MusicToast";
-import { AudioDebugPanel } from "@/components/music/AudioDebugPanel";
 import DebugLogPanel from "@/app/tools/music/DebugLogPanel";
 
 interface MusicPlayerContextValue {
@@ -1133,7 +1132,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       {children}
       <MusicToast message={toastMessage} onDismiss={dismissToast} />
       <DebugLogPanel />
-      <AudioDebugPanel />
     </MusicPlayerContext.Provider>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense } from "react";
+import { AudioDebugPanel } from "@/components/music/AudioDebugPanel";
 import { AudioEqualizer } from "@/components/music/AudioEqualizer";
 import { SeekBar } from "@/components/music/SeekBar";
 import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
@@ -126,6 +128,10 @@ export function PlayerView() {
             onVolumeChange={setVolume}
           />
         </div>
+
+        <Suspense fallback={null}>
+          <AudioDebugPanel />
+        </Suspense>
       </div>
     </div>
   );

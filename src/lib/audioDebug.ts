@@ -37,9 +37,3 @@ export function getAudioLog(): AudioLogEntry[] {
 export function clearAudioLog(): void {
   eventLog.length = 0;
 }
-
-export function isAudioDebugEnabled(): boolean {
-  if (typeof window === "undefined") return false;
-  if (process.env.NODE_ENV === "development") return true;
-  return new URLSearchParams(window.location.search).get("debug") === "1";
-}

@@ -211,10 +211,9 @@ function installMediaSessionHandlersGlobally(): void {
 
 export function isIOSDevice(): boolean {
   if (typeof navigator === "undefined") return false;
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return isIOS || isStandalone;
 }
 
 function isPageHidden(): boolean {
@@ -481,6 +480,48 @@ export class AudioEngine {
     }
   }
 
+  private async playUntilPlaying(): Promise<void> {
+    await waitForAudioReady(this.audio);
+
+    if (!this.audio.paused) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        cleanup();
+        if (!this.audio.paused) {
+          resolve();
+          return;
+        }
+        reject(new Error("play timeout — still paused"));
+      }, 8000);
+
+      const onPlaying = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("play error event"));
+      };
+      const cleanup = () => {
+        window.clearTimeout(timeoutId);
+        this.audio.removeEventListener("playing", onPlaying);
+        this.audio.removeEventListener("error", onError);
+      };
+
+      this.audio.addEventListener("playing", onPlaying);
+      this.audio.addEventListener("error", onError);
+
+      const playPromise = this.audio.play();
+      if (playPromise) {
+        playPromise.catch((err) => {
+          cleanup();
+          reject(err);
+        });
+      }
+    });
+  }
+
   private async handleMediaSessionPlay(onSync?: () => void): Promise<void> {
     ensureNavigatorAudioSession();
     this.ensureAudioInDom();
@@ -496,9 +537,7 @@ export class AudioEngine {
     logAudioEvent("mediaSession:play", this.audio);
 
     try {
-      await waitForAudioReady(this.audio);
-      const playPromise = this.audio.play();
-      if (playPromise) await playPromise;
+      await this.playUntilPlaying();
       logAudioEvent("play", this.audio);
       onSync?.();
     } catch (err) {
@@ -514,7 +553,7 @@ export class AudioEngine {
           pwa: isStandalonePWA(),
         },
         "H4-pwa-play",
-        "post-fix-v3",
+        "post-fix-v4",
       );
       // #endregion
       this.setStatus("paused");
@@ -738,9 +777,8 @@ export class AudioEngine {
     }
 
     try {
-      await waitForAudioReady(this.audio);
-      logAudioEvent("play", this.audio);
-      await this.audio.play();
+      logAudioEvent("play:request", this.audio);
+      await this.playUntilPlaying();
       if (!isIOSDevice()) {
         await this.ensureAnalyser();
       }
