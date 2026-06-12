@@ -17,6 +17,7 @@ export function PlaylistsPanel() {
     renamePlaylist,
     deletePlaylist,
     playPlaylist,
+    playPlaylistFromTrack,
     addTracksToQueue,
     removeTrackFromPlaylist,
     isTrackUnavailable,
@@ -106,12 +107,8 @@ export function PlaylistsPanel() {
           ) : (
             playlistTracks.map((track) => {
               const unavailable = isTrackUnavailable(track.id);
-              const row = (
-                <div
-                  className={`flex items-center gap-2 px-2 py-1 rounded-lg ${
-                    unavailable ? "opacity-50" : ""
-                  }`}
-                >
+              const rowContent = (
+                <>
                   <TrackArtwork coverArtUrl={track.coverArtUrl} />
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-medium text-gray-900 dark:text-gray-100 truncate">
@@ -124,6 +121,22 @@ export function PlaylistsPanel() {
                   <span className="text-[9px] text-gray-400 font-mono tabular-nums shrink-0">
                     {formatTime(track.duration)}
                   </span>
+                </>
+              );
+
+              const row = (
+                <div
+                  className={`flex items-center gap-2 px-2 py-1 rounded-lg ${
+                    unavailable ? "opacity-50" : ""
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => void playPlaylistFromTrack(selected.id, track.id)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors -my-1 py-1"
+                  >
+                    {rowContent}
+                  </button>
                   {!isTouch ? (
                     <button
                       type="button"

@@ -92,6 +92,7 @@ interface MusicPlayerContextValue {
   addTracksToPlaylist: (playlistId: string, trackIds: string[]) => Promise<void>;
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => Promise<void>;
   playPlaylist: (playlistId: string) => Promise<void>;
+  playPlaylistFromTrack: (playlistId: string, trackId: string) => Promise<void>;
   isTrackUnavailable: (trackId: string) => boolean;
   setUnavailableFilter: (filter: UnavailableFilter) => void;
   showToast: (message: string) => void;
@@ -925,12 +926,38 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     async (playlistId: string) => {
       const pl = playlists.find((p) => p.id === playlistId);
       if (!pl || pl.trackIds.length === 0) return;
+      queueRef.current.clear();
       queueRef.current.setQueue(pl.trackIds, 0);
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
       await loadAndPlayWithSkip(pl.trackIds[0], 0, false);
+      schedulePersist();
     },
-    [playlists, loadAndPlayWithSkip],
+    [playlists, loadAndPlayWithSkip, schedulePersist],
+  );
+
+  const playPlaylistFromTrack = useCallback(
+    async (playlistId: string, trackId: string) => {
+      const pl = playlists.find((p) => p.id === playlistId);
+      if (!pl) return;
+
+      const startIndex = pl.trackIds.indexOf(trackId);
+      if (startIndex < 0) return;
+
+      if (unavailableRef.current.has(trackId)) {
+        showToast("Файл недоступен. Возможно был удалён или перемещён.");
+        return;
+      }
+
+      const queueSlice = pl.trackIds.slice(startIndex);
+      queueRef.current.clear();
+      queueRef.current.setQueue(queueSlice, 0);
+      setQueue(queueRef.current.getQueue());
+      setQueueIndex(queueRef.current.getIndex());
+      await loadAndPlayWithSkip(trackId, 0, true);
+      schedulePersist();
+    },
+    [playlists, loadAndPlayWithSkip, showToast, schedulePersist],
   );
 
   const deletePlaylistHandler = useCallback(async (id: string) => {
@@ -1055,6 +1082,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     addTracksToPlaylist,
     removeTrackFromPlaylist,
     playPlaylist,
+    playPlaylistFromTrack,
     isTrackUnavailable,
     setUnavailableFilter,
     showToast,
