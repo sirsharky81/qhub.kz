@@ -91,24 +91,6 @@ function installMediaSessionHandlersGlobally(): void {
           "post-fix",
         );
         // #endregion
-        if (
-          activeEngine?.isSoftPaused() &&
-          activeEngine.getAudioElement().paused &&
-          isPWA()
-        ) {
-          // #region agent log
-          agentDebugLog(
-            "audio-engine.ts:soft-pause-failed",
-            "soft-pause-failed: audio.paused=true in play-handler",
-            {
-              softPauseVolume: activeEngine.getSoftPauseVolume(),
-              volume: activeEngine.getAudioElement().volume,
-            },
-            "H4-pwa-play",
-            "post-fix-v3",
-          );
-          // #endregion
-        }
         globalSessionCallbacks.onSyncPlay();
       },
     },
@@ -255,11 +237,6 @@ export function isStandalonePWA(): boolean {
   );
 }
 
-function isPWA(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.matchMedia("(display-mode: standalone)").matches;
-}
-
 export function getInstalledMediaSessionActions(): string[] {
   return [...installedMediaSessionActions];
 }
@@ -304,7 +281,6 @@ export class AudioEngine {
   private lastReportedPosition = -1;
   private visibleResumeInFlight = false;
   private lastVisibleResumeAt = 0;
-  private softPauseVolume: number | null = null;
   private sessionCallbacks: MediaSessionCallbacks = {
     onSyncPlay: () => {},
     onSyncPause: () => {},
@@ -347,24 +323,7 @@ export class AudioEngine {
     }
   }
 
-  private restoreSoftPauseVolumeIfNeeded(): void {
-    if (this.softPauseVolume === null) return;
-    this.audio.volume = this.softPauseVolume;
-    this.softPauseVolume = null;
-    logAudioEvent("soft-pause:unlock-restore-volume", this.audio);
-  }
-
-  isSoftPaused(): boolean {
-    return this.softPauseVolume !== null;
-  }
-
-  getSoftPauseVolume(): number | null {
-    return this.softPauseVolume;
-  }
-
   private async resumePlaybackIfNeeded(): Promise<void> {
-    this.restoreSoftPauseVolumeIfNeeded();
-
     if (!isIOSDevice() && this.context?.state === "suspended") {
       try {
         await this.context.resume();
@@ -665,44 +624,9 @@ export class AudioEngine {
     this.audio.muted = false;
     this.audio.playbackRate = 1;
 
-    logAudioEvent("mediaSession:play", this.audio);
-
-    if (
-      typeof document !== "undefined" &&
-      document.hidden &&
-      isPWA() &&
-      this.softPauseVolume !== null &&
-      !this.audio.paused
-    ) {
-      this.audio.volume = this.softPauseVolume;
-      this.softPauseVolume = null;
-      if ("mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "playing";
-        setAudioDiagnostics({ mediaSessionPlaybackState: "playing" });
-      }
-      this.setStatus("playing");
-      this.updatePositionState(true);
-      logAudioEvent("soft-resume:unmute-only", this.audio);
-      // #region agent log
-      agentDebugLog(
-        "audio-engine.ts:soft-resume",
-        "soft-resume: unmute only",
-        {
-          paused: this.audio.paused,
-          volume: this.audio.volume,
-          currentTime: this.audio.currentTime,
-        },
-        "H4-pwa-play",
-        "post-fix-v3",
-      );
-      // #endregion
-      onSync?.();
-      void this.verifyPlaybackProgress("lockscreen-play");
-      return;
-    }
-
-    this.softPauseVolume = null;
     this.nudgeIOSAudioPipeline();
+
+    logAudioEvent("mediaSession:play", this.audio);
 
     const onSuccess = () => {
       // #region agent log
@@ -772,57 +696,6 @@ export class AudioEngine {
   private handleMediaSessionPause(onSync?: () => void): void {
     ensureNavigatorAudioSession();
     logAudioEvent("mediaSession:pause", this.audio);
-
-    if (typeof document !== "undefined" && document.hidden && isPWA()) {
-      this.softPauseVolume = this.audio.volume;
-      this.audio.volume = 0;
-      if ("mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "paused";
-        setAudioDiagnostics({ mediaSessionPlaybackState: "paused" });
-      }
-      this.setStatus("paused");
-      this.lastReportedPosition = this.audio.currentTime;
-      this.onSavePosition?.(this.audio.currentTime);
-      logAudioEvent("soft-pause:volume-zero", this.audio);
-      if (
-        "mediaSession" in navigator &&
-        typeof navigator.mediaSession.setPositionState === "function"
-      ) {
-        const duration = this.getEffectiveDuration();
-        const position = this.audio.currentTime;
-        if (duration > 0 && Number.isFinite(duration) && Number.isFinite(position)) {
-          const clampedPosition = Math.max(0, Math.min(position, duration));
-          try {
-            navigator.mediaSession.setPositionState({
-              duration: Math.round(duration * 100) / 100,
-              position: Math.round(clampedPosition * 100) / 100,
-              playbackRate: 0,
-            });
-            this.lastReportedPosition = clampedPosition;
-            logAudioEvent("soft-pause:position-state-rate-zero", this.audio);
-          } catch {
-            /* iOS may reject setPositionState while hidden */
-          }
-        }
-      }
-      // #region agent log
-      agentDebugLog(
-        "audio-engine.ts:soft-pause",
-        "soft-pause: volume=0, pipeline kept alive",
-        {
-          softPauseVolume: this.softPauseVolume,
-          paused: this.audio.paused,
-          currentTime: this.audio.currentTime,
-        },
-        "H4-pwa-play",
-        "post-fix-v3",
-      );
-      // #endregion
-      onSync?.();
-      return;
-    }
-
-    this.softPauseVolume = null;
     this.audio.pause();
     if ("mediaSession" in navigator) {
       navigator.mediaSession.playbackState = "paused";
@@ -892,7 +765,6 @@ export class AudioEngine {
   }
 
   private updatePositionState(force = false): void {
-    if (this.softPauseVolume !== null) return;
     if (!("mediaSession" in navigator)) return;
     if (typeof navigator.mediaSession.setPositionState !== "function") return;
     if (this.status === "stopped" || this.status === "idle" || this.status === "loading") return;
@@ -1070,10 +942,6 @@ export class AudioEngine {
 
   pause(): void {
     logAudioEvent("pause:request", this.audio);
-    if (this.softPauseVolume !== null) {
-      this.audio.volume = this.softPauseVolume;
-      this.softPauseVolume = null;
-    }
     this.audio.pause();
     this.onSavePosition?.(this.audio.currentTime);
     if (!isIOSDevice()) this.teardownAnalyser();
