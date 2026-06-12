@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { useEffect, useState } from "react";
 import { AudioDebugPanel } from "@/components/music/AudioDebugPanel";
 import { AudioEqualizer } from "@/components/music/AudioEqualizer";
 import { SeekBar } from "@/components/music/SeekBar";
@@ -8,6 +8,19 @@ import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
 import { PlayerControls } from "./PlayerControls";
 
 export function PlayerView() {
+  const [showDebug, setShowDebug] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.search.includes("debug=1")) {
+      sessionStorage.setItem("qhub-debug", "1");
+    }
+    setShowDebug(
+      window.location.search.includes("debug=1") ||
+        sessionStorage.getItem("qhub-debug") === "1",
+    );
+  }, []);
+
   const {
     currentTrack,
     status,
@@ -129,9 +142,7 @@ export function PlayerView() {
           />
         </div>
 
-        <Suspense fallback={null}>
-          <AudioDebugPanel />
-        </Suspense>
+        <AudioDebugPanel enabled={showDebug} />
       </div>
     </div>
   );

@@ -1,25 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { clearAudioLog, getAudioLog } from "@/lib/audioDebug";
 
-function isDebugQuery(search: string): boolean {
-  return search.includes("debug=1");
-}
+type AudioDebugPanelProps = {
+  enabled?: boolean;
+};
 
-export function AudioDebugPanel() {
-  const searchParams = useSearchParams();
-  const [enabled, setEnabled] = useState(false);
+export function AudioDebugPanel({ enabled = false }: AudioDebugPanelProps) {
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<ReturnType<typeof getAudioLog>>([]);
-
-  useEffect(() => {
-    const fromParams = searchParams.get("debug") === "1";
-    const fromUrl =
-      typeof window !== "undefined" && isDebugQuery(window.location.search);
-    setEnabled(fromParams || fromUrl || process.env.NODE_ENV === "development");
-  }, [searchParams]);
 
   useEffect(() => {
     if (!enabled || !open) return;
