@@ -577,7 +577,7 @@ export class AudioEngine {
     if (this.audio.paused) return false;
 
     const delta = this.audio.currentTime - t0;
-    const frozen = delta < 0.05;
+    const frozen = Math.abs(delta) < 0.05;
     const payload = {
       source,
       t0,
@@ -784,6 +784,27 @@ export class AudioEngine {
       this.lastReportedPosition = this.audio.currentTime;
       this.onSavePosition?.(this.audio.currentTime);
       logAudioEvent("soft-pause:volume-zero", this.audio);
+      if (
+        "mediaSession" in navigator &&
+        typeof navigator.mediaSession.setPositionState === "function"
+      ) {
+        const duration = this.getEffectiveDuration();
+        const position = this.audio.currentTime;
+        if (duration > 0 && Number.isFinite(duration) && Number.isFinite(position)) {
+          const clampedPosition = Math.max(0, Math.min(position, duration));
+          try {
+            navigator.mediaSession.setPositionState({
+              duration: Math.round(duration * 100) / 100,
+              position: Math.round(clampedPosition * 100) / 100,
+              playbackRate: 0,
+            });
+            this.lastReportedPosition = clampedPosition;
+            logAudioEvent("soft-pause:position-state-rate-zero", this.audio);
+          } catch {
+            /* iOS may reject setPositionState while hidden */
+          }
+        }
+      }
       // #region agent log
       agentDebugLog(
         "audio-engine.ts:soft-pause",
@@ -871,6 +892,7 @@ export class AudioEngine {
   }
 
   private updatePositionState(force = false): void {
+    if (this.isSoftPaused()) return;
     if (!("mediaSession" in navigator)) return;
     if (typeof navigator.mediaSession.setPositionState !== "function") return;
     if (this.status === "stopped" || this.status === "idle" || this.status === "loading") return;
