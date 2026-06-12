@@ -522,35 +522,21 @@ export class AudioEngine {
     });
   }
 
-  /** iOS PWA lock screen: after pause, readyState stays 4 but audio pipeline is dead. */
-  private async restartIOSAudioPipelineIfNeeded(): Promise<void> {
-    if (!isIOSDevice() || !this.audio.src) return;
-
-    const shouldRestart =
-      (isStandalonePWA() && this.audio.paused) || this.audio.readyState === 0;
-    if (!shouldRestart) return;
-
-    const savedTime = this.audio.currentTime;
-    logAudioEvent("ios:pipeline-restart:before", this.audio);
-    this.audio.pause();
-    this.audio.load();
-    await waitForAudioReady(this.audio);
-    if (savedTime > 0 && Number.isFinite(savedTime)) {
-      this.audio.currentTime = savedTime;
-    }
-    logAudioEvent("ios:pipeline-restart:after", this.audio);
-  }
-
   private async handleMediaSessionPlay(onSync?: () => void): Promise<void> {
     ensureNavigatorAudioSession();
     this.ensureAudioInDom();
     this.audio.muted = false;
     this.audio.playbackRate = 1;
 
+    if (isIOSDevice() && this.audio.readyState === 0 && this.audio.src) {
+      const savedTime = this.audio.currentTime;
+      this.audio.load();
+      this.audio.currentTime = savedTime;
+    }
+
     logAudioEvent("mediaSession:play", this.audio);
 
     try {
-      await this.restartIOSAudioPipelineIfNeeded();
       await this.playUntilPlaying();
       logAudioEvent("play", this.audio);
       onSync?.();
@@ -562,14 +548,12 @@ export class AudioEngine {
         {
           err: err instanceof Error ? err.message : String(err),
           paused: this.audio.paused,
-          muted: this.audio.muted,
-          volume: this.audio.volume,
           readyState: this.audio.readyState,
           hasSrc: !!this.audio.src,
           pwa: isStandalonePWA(),
         },
         "H4-pwa-play",
-        "post-fix-v5",
+        "post-fix-v4",
       );
       // #endregion
       this.setStatus("paused");
