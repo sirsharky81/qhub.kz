@@ -125,7 +125,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef(new QueueManager());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const initializedRef = useRef(false);
   const tracksRef = useRef<Track[]>([]);
   const navigationRef = useRef({
     onNext: async (_opts?: { lockScreen?: boolean }) => {},
@@ -365,8 +364,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (!nativeAudioReady || initializedRef.current || !nativeAudioRef.current) return;
-    initializedRef.current = true;
+    if (!nativeAudioReady || !nativeAudioRef.current || engineRef.current) return;
 
     const engine = new AudioEngine(
       {
@@ -449,12 +447,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
     })();
 
-    return () => {
-      engine.destroy();
-      engineRef.current = null;
-      initializedRef.current = false;
-      setIsPlayerReady(false);
-    };
+    // Provider живёт всё время сессии — не уничтожаем engine при Strict Mode remount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nativeAudioReady]);
 

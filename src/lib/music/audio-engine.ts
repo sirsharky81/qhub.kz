@@ -25,6 +25,194 @@ type MediaSessionCallbacks = {
   onNext: (opts?: LockScreenActionOpts) => void;
 };
 
+/** iOS: один setActionHandler на всех — handlers живут на уровне модуля */
+let globalMediaSessionInstalled = false;
+let activeEngine: AudioEngine | null = null;
+const globalSessionCallbacks: MediaSessionCallbacks = {
+  onSyncPlay: () => {},
+  onSyncPause: () => {},
+  onPrevious: () => {},
+  onNext: () => {},
+};
+
+function installMediaSessionHandlersGlobally(): void {
+  if (globalMediaSessionInstalled || !("mediaSession" in navigator)) return;
+  globalMediaSessionInstalled = true;
+
+  const handlers: Array<{
+    action: MediaSessionAction;
+    handler: MediaSessionActionHandler;
+  }> = [
+    {
+      action: "play",
+      handler: () => {
+        // #region agent log
+        agentDebugLog(
+          "audio-engine.ts:play-handler",
+          "mediaSession play handler fired",
+          {
+            paused: activeEngine?.getAudioElement().paused,
+            muted: activeEngine?.getAudioElement().muted,
+            volume: activeEngine?.getAudioElement().volume,
+            readyState: activeEngine?.getAudioElement().readyState,
+            hasSrc: !!activeEngine?.getAudioElement().src,
+          },
+          "H1-handlers",
+          "post-fix",
+        );
+        // #endregion
+        activeEngine?.dispatchLockScreenPlay(() => globalSessionCallbacks.onSyncPlay());
+      },
+    },
+    {
+      action: "pause",
+      handler: () => {
+        // #region agent log
+        agentDebugLog(
+          "audio-engine.ts:pause-handler",
+          "mediaSession pause handler fired",
+          { currentTime: activeEngine?.getAudioElement().currentTime },
+          "H1-handlers",
+          "post-fix",
+        );
+        // #endregion
+        activeEngine?.dispatchLockScreenPause(() => globalSessionCallbacks.onSyncPause());
+      },
+    },
+    {
+      action: "previoustrack",
+      handler: () => {
+        // #region agent log
+        agentDebugLog(
+          "audio-engine.ts:prev-handler",
+          "mediaSession previoustrack fired",
+          {},
+          "H1-handlers",
+          "post-fix",
+        );
+        // #endregion
+        globalSessionCallbacks.onPrevious({ lockScreen: true });
+      },
+    },
+    {
+      action: "nexttrack",
+      handler: () => {
+        // #region agent log
+        agentDebugLog(
+          "audio-engine.ts:next-handler",
+          "mediaSession nexttrack fired",
+          {},
+          "H1-handlers",
+          "post-fix",
+        );
+        // #endregion
+        globalSessionCallbacks.onNext({ lockScreen: true });
+      },
+    },
+    {
+      action: "stop",
+      handler: () => {
+        activeEngine?.stop();
+        globalSessionCallbacks.onSyncPause();
+      },
+    },
+  ];
+
+  // iOS: seekto забирает UI у previoustrack/nexttrack (подтверждено логами).
+  // Вместо seekto — seekforward/seekbackward как переключение треков (паттерн dbushell).
+  if (isIOSDevice()) {
+    handlers.push(
+      {
+        action: "seekbackward",
+        handler: () => {
+          // #region agent log
+          agentDebugLog(
+            "audio-engine.ts:ios-seekback",
+            "iOS seekbackward -> previous track",
+            {},
+            "H1-handlers",
+            "post-fix",
+          );
+          // #endregion
+          globalSessionCallbacks.onPrevious({ lockScreen: true });
+        },
+      },
+      {
+        action: "seekforward",
+        handler: () => {
+          // #region agent log
+          agentDebugLog(
+            "audio-engine.ts:ios-seekfwd",
+            "iOS seekforward -> next track",
+            {},
+            "H1-handlers",
+            "post-fix",
+          );
+          // #endregion
+          globalSessionCallbacks.onNext({ lockScreen: true });
+        },
+      },
+    );
+  } else if (typeof navigator.mediaSession.setPositionState === "function") {
+    handlers.push({
+      action: "seekto",
+      handler: (details) => {
+        // #region agent log
+        agentDebugLog(
+          "audio-engine.ts:seekto-handler",
+          "mediaSession seekto fired",
+          { seekTime: details.seekTime },
+          "H6-seekto",
+          "post-fix",
+        );
+        // #endregion
+        if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
+        activeEngine?.seek(details.seekTime);
+      },
+    });
+    handlers.push(
+      {
+        action: "seekbackward",
+        handler: (details) => {
+          const offset = details.seekOffset ?? 10;
+          activeEngine?.seek((activeEngine?.getAudioElement().currentTime ?? 0) - offset);
+        },
+      },
+      {
+        action: "seekforward",
+        handler: (details) => {
+          const offset = details.seekOffset ?? 10;
+          activeEngine?.seek((activeEngine?.getAudioElement().currentTime ?? 0) + offset);
+        },
+      },
+    );
+  }
+
+  const installed: string[] = [];
+  for (const { action, handler } of handlers) {
+    try {
+      navigator.mediaSession.setActionHandler(action, handler);
+      installed.push(action);
+    } catch {
+      /* Safari / PWA */
+    }
+  }
+  // #region agent log
+  agentDebugLog(
+    "audio-engine.ts:install-handlers",
+    "mediaSession handlers installed (global once)",
+    {
+      installed,
+      ios: isIOSDevice(),
+      pwa: isStandalonePWA(),
+      iosMode: isIOSDevice() ? "track-skip-no-seekto" : "desktop-full",
+    },
+    "H1-handlers",
+    "post-fix",
+  );
+  // #endregion
+}
+
 export function isIOSDevice(): boolean {
   if (typeof navigator === "undefined") return false;
   return (
@@ -80,7 +268,6 @@ export class AudioEngine {
   private savePositionTimer: ReturnType<typeof setInterval> | null = null;
   private onSavePosition: ((position: number) => void) | null = null;
   private lifecycleAttached = false;
-  private mediaSessionInstalled = false;
   private lastPositionLogAt = 0;
   private positionSkipLogged = false;
   private sessionCallbacks: MediaSessionCallbacks = {
@@ -107,6 +294,7 @@ export class AudioEngine {
     this.ownsAudioElement = !existingAudio;
     this.audio = (existingAudio ?? new Audio()) as CapturableAudio;
     this.configureAudioElement();
+    activeEngine = this;
 
     if (typeof document !== "undefined") {
       if (this.ownsAudioElement) {
@@ -115,7 +303,7 @@ export class AudioEngine {
       }
       ensureNavigatorAudioSession();
       this.attachLifecycleHandlers();
-      this.installMediaSessionHandlers();
+      installMediaSessionHandlersGlobally();
     }
 
     this.audio.addEventListener("timeupdate", () => {
@@ -188,146 +376,12 @@ export class AudioEngine {
     }, 3000);
   }
 
-  /**
-   * iOS Safari: любой повторный setActionHandler сбрасывает ВСЕ остальные handlers.
-   * Регистрируем один раз и дальше только обновляем sessionCallbacks / metadata.
-   */
-  private installMediaSessionHandlers(): void {
-    if (this.mediaSessionInstalled || !("mediaSession" in navigator)) return;
-    this.mediaSessionInstalled = true;
+  dispatchLockScreenPlay(onSync?: () => void): void {
+    this.handleMediaSessionPlay(onSync);
+  }
 
-    const handlers: Array<{
-      action: MediaSessionAction;
-      handler: MediaSessionActionHandler;
-    }> = [
-      {
-        action: "play",
-        handler: () => {
-          // #region agent log
-          agentDebugLog(
-            "audio-engine.ts:play-handler",
-            "mediaSession play handler fired",
-            {
-              paused: this.audio.paused,
-              muted: this.audio.muted,
-              volume: this.audio.volume,
-              readyState: this.audio.readyState,
-              hasSrc: !!this.audio.src,
-            },
-            "H1-handlers",
-          );
-          // #endregion
-          this.handleMediaSessionPlay(() => this.sessionCallbacks.onSyncPlay());
-        },
-      },
-      {
-        action: "pause",
-        handler: () => {
-          // #region agent log
-          agentDebugLog(
-            "audio-engine.ts:pause-handler",
-            "mediaSession pause handler fired",
-            { currentTime: this.audio.currentTime },
-            "H1-handlers",
-          );
-          // #endregion
-          this.handleMediaSessionPause(() => this.sessionCallbacks.onSyncPause());
-        },
-      },
-      {
-        action: "previoustrack",
-        handler: () => {
-          // #region agent log
-          agentDebugLog(
-            "audio-engine.ts:prev-handler",
-            "mediaSession previoustrack fired",
-            { queueViaCallback: true },
-            "H1-handlers",
-          );
-          // #endregion
-          this.sessionCallbacks.onPrevious({ lockScreen: true });
-        },
-      },
-      {
-        action: "nexttrack",
-        handler: () => {
-          // #region agent log
-          agentDebugLog(
-            "audio-engine.ts:next-handler",
-            "mediaSession nexttrack fired",
-            { queueViaCallback: true },
-            "H1-handlers",
-          );
-          // #endregion
-          this.sessionCallbacks.onNext({ lockScreen: true });
-        },
-      },
-      {
-        action: "stop",
-        handler: () => {
-          this.stop();
-          this.sessionCallbacks.onSyncPause();
-        },
-      },
-    ];
-
-    if (typeof navigator.mediaSession.setPositionState === "function") {
-      handlers.push({
-        action: "seekto",
-        handler: (details) => {
-          // #region agent log
-          agentDebugLog(
-            "audio-engine.ts:seekto-handler",
-            "mediaSession seekto fired",
-            { seekTime: details.seekTime },
-            "H6-seekto",
-          );
-          // #endregion
-          if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
-          this.seek(details.seekTime);
-          this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-        },
-      });
-    }
-
-    if (!isIOSDevice()) {
-      handlers.push(
-        {
-          action: "seekbackward",
-          handler: (details) => {
-            const offset = details.seekOffset ?? 10;
-            this.seek(this.audio.currentTime - offset);
-            this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-          },
-        },
-        {
-          action: "seekforward",
-          handler: (details) => {
-            const offset = details.seekOffset ?? 10;
-            this.seek(this.audio.currentTime + offset);
-            this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-          },
-        },
-      );
-    }
-
-    const installed: string[] = [];
-    for (const { action, handler } of handlers) {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-        installed.push(action);
-      } catch {
-        /* Safari / PWA */
-      }
-    }
-    // #region agent log
-    agentDebugLog(
-      "audio-engine.ts:install-handlers",
-      "mediaSession handlers installed",
-      { installed, ios: isIOSDevice(), pwa: isStandalonePWA() },
-      "H1-handlers",
-    );
-    // #endregion
+  dispatchLockScreenPause(onSync?: () => void): void {
+    this.handleMediaSessionPause(onSync);
   }
 
   private ensureAudioInDom(): void {
@@ -741,12 +795,11 @@ export class AudioEngine {
   ): void {
     if (!("mediaSession" in navigator)) return;
 
-    this.sessionCallbacks = {
-      onSyncPlay: handlers.onPlay,
-      onSyncPause: handlers.onPause,
-      onPrevious: handlers.onPrevious,
-      onNext: handlers.onNext,
-    };
+    globalSessionCallbacks.onSyncPlay = handlers.onPlay;
+    globalSessionCallbacks.onSyncPause = handlers.onPause;
+    globalSessionCallbacks.onPrevious = handlers.onPrevious;
+    globalSessionCallbacks.onNext = handlers.onNext;
+    this.sessionCallbacks = globalSessionCallbacks;
 
     if (!track) {
       navigator.mediaSession.metadata = null;
@@ -782,6 +835,7 @@ export class AudioEngine {
   }
 
   destroy(): void {
+    if (activeEngine === this) activeEngine = null;
     this.stop();
     this.revokeUrl();
     this.releaseAudioGraph();

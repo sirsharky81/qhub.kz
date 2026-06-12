@@ -18,6 +18,7 @@ export function agentDebugLog(
   hypothesisId: DebugHypothesis = "H1-handlers",
   runId = "pre-fix",
 ): void {
+  // runId passed by caller; post-fix runs tagged explicitly
   if (typeof window === "undefined") return;
 
   const entry = {
