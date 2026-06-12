@@ -515,12 +515,29 @@ export class AudioEngine {
     }
   }
 
-  private async verifyPlaybackProgress(source: string): Promise<void> {
-    if (this.audio.paused) return;
+  private nudgeIOSAudioPipeline(): void {
+    if (!isIOSDevice() || !this.audio.src) return;
+    const pos = this.audio.currentTime;
+    this.audio.currentTime = pos;
+  }
+
+  private syncLockScreenPaused(): void {
+    if (!this.audio.paused) {
+      this.audio.pause();
+    }
+    this.setStatus("paused");
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "paused";
+      setAudioDiagnostics({ mediaSessionPlaybackState: "paused" });
+    }
+  }
+
+  private async verifyPlaybackProgress(source: string): Promise<boolean> {
+    if (this.audio.paused) return false;
 
     const t0 = this.audio.currentTime;
     await new Promise<void>((resolve) => window.setTimeout(resolve, 1200));
-    if (this.audio.paused) return;
+    if (this.audio.paused) return false;
 
     const delta = this.audio.currentTime - t0;
     const frozen = delta < 0.05;
@@ -547,17 +564,59 @@ export class AudioEngine {
         "pre-fix",
       );
       // #endregion
-    } else {
-      logAudioEvent(`progress-ok:${source}`, this.audio);
-      // #region agent log
-      agentDebugLog(
-        "audio-engine.ts:progress-ok",
-        "currentTime advanced after play",
-        payload,
-        "H7-zombie",
-        "pre-fix",
-      );
-      // #endregion
+      return true;
+    }
+
+    logAudioEvent(`progress-ok:${source}`, this.audio);
+    // #region agent log
+    agentDebugLog(
+      "audio-engine.ts:progress-ok",
+      "currentTime advanced after play",
+      payload,
+      "H7-zombie",
+      "pre-fix",
+    );
+    // #endregion
+    return false;
+  }
+
+  private async recoverFromZombiePlay(source: string): Promise<boolean> {
+    logAudioEvent(`zombie-recovery:start:${source}`, this.audio);
+    // #region agent log
+    agentDebugLog(
+      "audio-engine.ts:zombie-recovery",
+      "attempting iOS pipeline nudge after zombie",
+      { source, currentTime: this.audio.currentTime },
+      "H7-zombie",
+      "post-fix",
+    );
+    // #endregion
+
+    this.syncLockScreenPaused();
+    this.nudgeIOSAudioPipeline();
+
+    try {
+      await this.playUntilPlaying();
+      const stillZombie = await this.verifyPlaybackProgress(`recovery-${source}`);
+      if (stillZombie) {
+        this.syncLockScreenPaused();
+        logAudioEvent(`zombie-recovery:failed:${source}`, this.audio);
+        // #region agent log
+        agentDebugLog(
+          "audio-engine.ts:zombie-recovery-fail",
+          "recovery failed — staying paused",
+          { source, currentTime: this.audio.currentTime },
+          "H7-zombie",
+          "post-fix",
+        );
+        // #endregion
+        return false;
+      }
+      logAudioEvent(`zombie-recovery:ok:${source}`, this.audio);
+      return true;
+    } catch {
+      this.syncLockScreenPaused();
+      return false;
     }
   }
 
@@ -615,13 +674,24 @@ export class AudioEngine {
       this.audio.currentTime = savedTime;
     }
 
+    this.nudgeIOSAudioPipeline();
+
     logAudioEvent("mediaSession:play", this.audio);
 
     try {
       await this.playUntilPlaying();
       logAudioEvent("play", this.audio);
-      void this.verifyPlaybackProgress("lockscreen-play");
-      onSync?.();
+
+      let zombie = await this.verifyPlaybackProgress("lockscreen-play");
+      if (zombie && isIOSDevice()) {
+        const recovered = await this.recoverFromZombiePlay("lockscreen-play");
+        if (!recovered) return;
+        zombie = false;
+      }
+
+      if (!zombie) {
+        onSync?.();
+      }
     } catch (err) {
       // #region agent log
       agentDebugLog(
@@ -742,6 +812,11 @@ export class AudioEngine {
       return;
     }
     this.positionSkipLogged = false;
+
+    // iOS rejects playbackRate: 0 (Type error in logs) — pause is signaled via playbackState.
+    if (this.audio.paused) {
+      if (isIOSDevice()) return;
+    }
 
     const playbackRate = this.audio.paused
       ? 0
