@@ -1,6 +1,6 @@
-const SESSION_ID = "47c766";
+const SESSION_ID = "1c0a94";
 const INGEST_URL = "http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e";
-const STORAGE_KEY = "qhub-debug-47c766";
+const STORAGE_KEY = "qhub-debug-1c0a94";
 const MAX_EVENTS = 200;
 
 export type DebugHypothesis =
@@ -9,7 +9,8 @@ export type DebugHypothesis =
   | "H3-position"
   | "H4-pwa-play"
   | "H5-navigation"
-  | "H6-seekto";
+  | "H6-seekto"
+  | "H7-zombie";
 
 export function agentDebugLog(
   location: string,

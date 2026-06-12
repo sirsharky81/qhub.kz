@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { clearAgentDebugLogs, getAgentDebugLogs } from "@/lib/debug-agent-log";
 
-const DEBUG_FLAG = "qhub-debug-47c766";
+const DEBUG_FLAG = "qhub-debug-1c0a94";
 
 export default function DebugLogPanel() {
   const [visible, setVisible] = useState(false);
@@ -11,11 +11,13 @@ export default function DebugLogPanel() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("debug") === "47c766") {
+    if (params.get("debug") === "1c0a94") {
       localStorage.setItem(DEBUG_FLAG, "1");
     }
     setVisible(
-      params.get("debug") === "47c766" || localStorage.getItem(DEBUG_FLAG) === "1",
+      params.get("debug") === "1c0a94" ||
+        localStorage.getItem(DEBUG_FLAG) === "1" ||
+        localStorage.getItem("qhub-debug") === "1",
     );
   }, []);
 
@@ -53,9 +55,9 @@ export default function DebugLogPanel() {
 
   return (
     <div className="fixed bottom-2 left-2 right-2 z-[9999] rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs shadow-lg">
-      <p className="font-semibold text-amber-900">Debug 47c766 — lock screen ({count} событий)</p>
+      <p className="font-semibold text-amber-900">Debug 1c0a94 — lock screen ({count} событий)</p>
       <p className="mt-1 text-amber-800">
-        Работает и в PWA после одного открытия с ?debug=47c766 в Safari. Скопируйте логи после
+        Основная панель — кнопка Debug на странице плеера (5 тапов). Скопируйте логи после
         воспроизведения бага.
       </p>
       <div className="mt-2 flex gap-2">

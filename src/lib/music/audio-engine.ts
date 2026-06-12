@@ -1,4 +1,4 @@
-import { logAudioEvent } from "@/lib/audioDebug";
+import { logAudioAlert, logAudioEvent, setAudioDiagnostics } from "@/lib/audioDebug";
 import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { Track } from "./types";
 
@@ -46,6 +46,7 @@ type MediaSessionCallbacks = {
 
 /** iOS: один setActionHandler на всех — handlers живут на уровне модуля */
 let globalMediaSessionInstalled = false;
+let installedMediaSessionActions: string[] = [];
 let activeEngine: AudioEngine | null = null;
 const globalSessionCallbacks: MediaSessionCallbacks = {
   onSyncPlay: () => {},
@@ -207,6 +208,13 @@ function installMediaSessionHandlersGlobally(): void {
     "post-fix",
   );
   // #endregion
+  installedMediaSessionActions = installed;
+  setAudioDiagnostics({
+    ios: isIOSDevice(),
+    pwa: isStandalonePWA(),
+    iosMode: isIOSDevice() ? "track-skip-only" : "desktop-full",
+    installedHandlers: installed,
+  });
 }
 
 export function isIOSDevice(): boolean {
@@ -226,6 +234,10 @@ export function isStandalonePWA(): boolean {
   return (
     window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true
   );
+}
+
+export function getInstalledMediaSessionActions(): string[] {
+  return [...installedMediaSessionActions];
 }
 
 function ensureNavigatorAudioSession(): void {
@@ -367,6 +379,7 @@ export class AudioEngine {
       this.setStatus("playing");
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "playing";
+        setAudioDiagnostics({ mediaSessionPlaybackState: "playing" });
       }
       this.updatePositionState();
       this.onPlayingForAnalyser();
@@ -377,6 +390,7 @@ export class AudioEngine {
         this.setStatus("paused");
         if ("mediaSession" in navigator) {
           navigator.mediaSession.playbackState = "paused";
+          setAudioDiagnostics({ mediaSessionPlaybackState: "paused" });
         }
         this.updatePositionState();
       }
@@ -501,6 +515,52 @@ export class AudioEngine {
     }
   }
 
+  private async verifyPlaybackProgress(source: string): Promise<void> {
+    if (this.audio.paused) return;
+
+    const t0 = this.audio.currentTime;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1200));
+    if (this.audio.paused) return;
+
+    const delta = this.audio.currentTime - t0;
+    const frozen = delta < 0.05;
+    const payload = {
+      source,
+      t0,
+      t1: this.audio.currentTime,
+      delta,
+      paused: this.audio.paused,
+      readyState: this.audio.readyState,
+      status: this.status,
+      pwa: isStandalonePWA(),
+    };
+
+    if (frozen) {
+      logAudioEvent(`zombie:${source}`, this.audio);
+      logAudioAlert(`ZOMBIE ${source}: playing but t stuck at ${t0.toFixed(1)}s`);
+      // #region agent log
+      agentDebugLog(
+        "audio-engine.ts:zombie-detect",
+        "audio reports playing but currentTime frozen",
+        payload,
+        "H7-zombie",
+        "pre-fix",
+      );
+      // #endregion
+    } else {
+      logAudioEvent(`progress-ok:${source}`, this.audio);
+      // #region agent log
+      agentDebugLog(
+        "audio-engine.ts:progress-ok",
+        "currentTime advanced after play",
+        payload,
+        "H7-zombie",
+        "pre-fix",
+      );
+      // #endregion
+    }
+  }
+
   private async playUntilPlaying(): Promise<void> {
     await waitForAudioReady(this.audio);
 
@@ -560,6 +620,7 @@ export class AudioEngine {
     try {
       await this.playUntilPlaying();
       logAudioEvent("play", this.audio);
+      void this.verifyPlaybackProgress("lockscreen-play");
       onSync?.();
     } catch (err) {
       // #region agent log
@@ -800,6 +861,7 @@ export class AudioEngine {
     try {
       logAudioEvent("play:request", this.audio);
       await this.playUntilPlaying();
+      void this.verifyPlaybackProgress("ui-play");
       if (!isIOSDevice()) {
         await this.ensureAnalyser();
       }
