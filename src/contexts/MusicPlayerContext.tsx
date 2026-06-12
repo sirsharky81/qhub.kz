@@ -157,6 +157,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     onPrevious: (_opts?: { lockScreen?: boolean }) => {},
     onNext: (_opts?: { lockScreen?: boolean }) => {},
   });
+  const playRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -232,6 +233,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         track,
         {
           onPlay: () => {
+            void playRef.current();
             schedulePersist();
           },
           onPause: () => {
@@ -614,6 +616,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (!engine) return;
     await engine.play();
   }, [currentTrack]);
+
+  playRef.current = play;
 
   const pause = useCallback(() => {
     engineRef.current?.pause();
