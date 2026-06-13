@@ -145,7 +145,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef(new QueueManager());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const resumeUrlRef = useRef<string | null>(null);
   const tracksRef = useRef<Track[]>([]);
   const unavailableRef = useRef<Set<string>>(new Set());
   const navigationRef = useRef({
@@ -256,54 +255,29 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * iOS PWA resume на lock screen. Возобновление того же трека через обычный play() даёт «зомби»
-   * (играет по флагам, без звука) — после фоновой паузы iOS деактивирует аудио-сессию. Смена трека
-   * при этом работает, потому что грузит НОВЫЙ ресурс СИНХРОННО в жесте. Повторяем это для резюма:
-   * создаём СВЕЖИЙ blob URL того же файла и играем его синхронно (без await), восстанавливая позицию.
+   * iOS PWA resume на lock screen. Сброс src здесь (playFreshSync) уводил Now Playing в Apple Music
+   * и нестабильно стартовал: после фоновой паузы аудио-сессия iOS «холодная», и оживить её в фоне
+   * JS-средствами нельзя (тот же код в Safari резюмит, в standalone PWA — нет, это ограничение iOS).
+   * Поэтому НЕ трогаем src — обычный play() (как в вебе): без перехвата Apple Music, наш трек
+   * остаётся на lock screen; если сессия холодная — может молчать до открытия приложения.
    */
-  const resumeCurrentTrackOnLockScreen = useCallback(
-    (track: Track) => {
-      const engine = engineRef.current;
-      if (!engine) return;
-      const position = engine.getAudioElement().currentTime;
-      const file = mediaLibrary.getCachedTrackFile(track.id);
-      // #region agent log
-      agentDebugLog(
-        "MusicPlayerContext.tsx:resume",
-        "resumeCurrentTrackOnLockScreen",
-        {
-          trackId: track.id,
-          hasFile: !!file,
-          position: Math.round(position),
-          pwa: true,
-          hidden: typeof document !== "undefined" && document.hidden,
-        },
-        "H6-resume",
-      );
-      // #endregion
-      if (!file) {
-        void engine.play();
-        return;
-      }
-      if (resumeUrlRef.current) {
-        try {
-          URL.revokeObjectURL(resumeUrlRef.current);
-        } catch {
-          /* ignore */
-        }
-      }
-      const freshUrl = URL.createObjectURL(file);
-      resumeUrlRef.current = freshUrl;
-      const trackDuration = track.duration || 0;
-      engine.setMediaDuration(trackDuration);
-      bindMediaSession(track);
-      engine.setVolume(volume);
-      // СИНХРОННО в жесте кнопки play: свежий src + play() + восстановление позиции.
-      engine.playFreshSync(freshUrl, position, trackDuration);
-      schedulePersist();
-    },
-    [volume, bindMediaSession, schedulePersist],
-  );
+  const resumeCurrentTrackOnLockScreen = useCallback((track: Track) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    // #region agent log
+    agentDebugLog(
+      "MusicPlayerContext.tsx:resume",
+      "resume via plain play (no src reset)",
+      {
+        trackId: track.id,
+        pwa: true,
+        hidden: typeof document !== "undefined" && document.hidden,
+      },
+      "H6-resume",
+    );
+    // #endregion
+    void engine.play();
+  }, []);
 
   const tryLockScreenTrackSwitch = useCallback(
     async (trackId: string): Promise<boolean> => {
