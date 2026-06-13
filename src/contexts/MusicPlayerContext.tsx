@@ -140,8 +140,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
-  const nativeAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [nativeAudioReady, setNativeAudioReady] = useState(false);
   const engineRef = useRef<AudioEngine | null>(null);
   const volumeBeforeMuteRef = useRef(0.85);
   const queueRef = useRef(new QueueManager());
@@ -157,7 +155,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     onPrevious: (_opts?: { lockScreen?: boolean }) => {},
     onNext: (_opts?: { lockScreen?: boolean }) => {},
   });
-  const playRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -233,10 +230,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         track,
         {
           onPlay: () => {
-            void playRef.current();
+            engineRef.current?.setMediaSessionPlaybackState("playing");
             schedulePersist();
           },
           onPause: () => {
+            engineRef.current?.setMediaSessionPlaybackState("paused");
             schedulePersist();
           },
           onPrevious: (opts) => {
@@ -464,26 +462,23 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (!nativeAudioReady || !nativeAudioRef.current || engineRef.current) return;
+    if (engineRef.current) return;
 
-    const engine = new AudioEngine(
-      {
-        onTimeUpdate: (t, d) => {
-          setCurrentTime(t);
-          if (d > 0) setDuration(d);
-        },
-        onStatusChange: setStatus,
-        onEnded: () => {
-          const lockScreen =
-            typeof document !== "undefined" &&
-            (document.hidden || document.visibilityState === "hidden");
-          void navigationRef.current.onNext(lockScreen ? { lockScreen: true } : undefined);
-        },
-        onError: () => setStatus("stopped"),
-        onGraphReady: (node) => setAnalyser(node),
+    const engine = new AudioEngine({
+      onTimeUpdate: (t, d) => {
+        setCurrentTime(t);
+        if (d > 0) setDuration(d);
       },
-      nativeAudioRef.current,
-    );
+      onStatusChange: setStatus,
+      onEnded: () => {
+        const lockScreen =
+          typeof document !== "undefined" &&
+          (document.hidden || document.visibilityState === "hidden");
+        void navigationRef.current.onNext(lockScreen ? { lockScreen: true } : undefined);
+      },
+      onError: () => setStatus("stopped"),
+      onGraphReady: (node) => setAnalyser(node),
+    });
 
     engine.setSavePositionHandler((pos) => {
       void storage.savePlaybackState({
@@ -556,7 +551,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     // Provider живёт всё время сессии — не уничтожаем engine при Strict Mode remount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nativeAudioReady]);
+  }, []);
 
   const startImportPlayback = useCallback(
     async (imported: Track[]) => {
@@ -615,12 +610,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const engine = engineRef.current;
     if (!engine) return;
     await engine.play();
+    engine.setMediaSessionPlaybackState("playing");
   }, [currentTrack]);
-
-  playRef.current = play;
 
   const pause = useCallback(() => {
     engineRef.current?.pause();
+    engineRef.current?.setMediaSessionPlaybackState("paused");
     schedulePersist();
   }, [schedulePersist]);
 
@@ -1084,27 +1079,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   return (
     <MusicPlayerContext.Provider value={value}>
-      {/* Нативный <audio> в React-дереве — критично для iOS PWA Media Session */}
-      <audio
-        ref={(el) => {
-          nativeAudioRef.current = el;
-          setNativeAudioReady(el !== null);
-        }}
-        playsInline
-        preload="auto"
-        aria-hidden="true"
-        tabIndex={-1}
-        className="pointer-events-none"
-        style={{
-          position: "fixed",
-          left: 0,
-          bottom: 0,
-          width: 1,
-          height: 1,
-          opacity: 0.001,
-          zIndex: -1,
-        }}
-      />
+      {/* <audio> создаётся и управляется движком (new Audio()) — критично для iOS PWA audio session */}
       <input
         ref={fileInputRef}
         type="file"

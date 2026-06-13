@@ -1,5 +1,4 @@
-import { logAudioAlert, logAudioEvent, setAudioDiagnostics } from "@/lib/audioDebug";
-import { agentDebugLog } from "@/lib/debug-agent-log";
+import { logAudioEvent, setAudioDiagnostics } from "@/lib/audioDebug";
 import type { Track } from "./types";
 
 export async function waitForAudioReady(audio: HTMLAudioElement): Promise<void> {
@@ -37,192 +36,19 @@ type CapturableAudio = HTMLAudioElement & {
 
 type LockScreenActionOpts = { lockScreen?: boolean };
 
-type MediaSessionCallbacks = {
-  onSyncPlay: () => void;
-  onSyncPause: () => void;
+type MediaSessionHandlers = {
+  onPlay: () => void;
+  onPause: () => void;
   onPrevious: (opts?: LockScreenActionOpts) => void;
   onNext: (opts?: LockScreenActionOpts) => void;
 };
 
-/** iOS: один setActionHandler на всех — handlers живут на уровне модуля */
-let globalMediaSessionInstalled = false;
-let installedMediaSessionActions: string[] = [];
-let activeEngine: AudioEngine | null = null;
-const globalSessionCallbacks: MediaSessionCallbacks = {
-  onSyncPlay: () => {},
-  onSyncPause: () => {},
-  onPrevious: () => {},
-  onNext: () => {},
-};
-
-function installMediaSessionHandlersGlobally(): void {
-  if (globalMediaSessionInstalled || !("mediaSession" in navigator)) return;
-  globalMediaSessionInstalled = true;
-
-  if (isIOSDevice()) {
-    for (const action of ["seekbackward", "seekforward"] as MediaSessionAction[]) {
-      try {
-        navigator.mediaSession.setActionHandler(action, null);
-      } catch {
-        /* Safari / PWA */
-      }
-    }
-  }
-
-  const handlers: Array<{
-    action: MediaSessionAction;
-    handler: MediaSessionActionHandler;
-  }> = [
-    {
-      action: "play",
-      handler: () => {
-        // #region agent log
-        agentDebugLog(
-          "audio-engine.ts:play-handler",
-          "mediaSession play handler fired",
-          {
-            paused: activeEngine?.getAudioElement().paused,
-            muted: activeEngine?.getAudioElement().muted,
-            volume: activeEngine?.getAudioElement().volume,
-            readyState: activeEngine?.getAudioElement().readyState,
-            hasSrc: !!activeEngine?.getAudioElement().src,
-          },
-          "H1-handlers",
-          "post-fix",
-        );
-        // #endregion
-        globalSessionCallbacks.onSyncPlay();
-      },
-    },
-    {
-      action: "pause",
-      handler: () => {
-        // #region agent log
-        agentDebugLog(
-          "audio-engine.ts:pause-handler",
-          "mediaSession pause handler fired",
-          { currentTime: activeEngine?.getAudioElement().currentTime },
-          "H1-handlers",
-          "post-fix",
-        );
-        // #endregion
-        activeEngine?.dispatchLockScreenPause(() => globalSessionCallbacks.onSyncPause());
-      },
-    },
-    {
-      action: "previoustrack",
-      handler: () => {
-        // #region agent log
-        agentDebugLog(
-          "audio-engine.ts:prev-handler",
-          "mediaSession previoustrack fired",
-          {},
-          "H1-handlers",
-          "post-fix",
-        );
-        // #endregion
-        globalSessionCallbacks.onPrevious({ lockScreen: true });
-      },
-    },
-    {
-      action: "nexttrack",
-      handler: () => {
-        // #region agent log
-        agentDebugLog(
-          "audio-engine.ts:next-handler",
-          "mediaSession nexttrack fired",
-          {},
-          "H1-handlers",
-          "post-fix",
-        );
-        // #endregion
-        globalSessionCallbacks.onNext({ lockScreen: true });
-      },
-    },
-    {
-      action: "stop",
-      handler: () => {
-        activeEngine?.stop();
-        globalSessionCallbacks.onSyncPause();
-      },
-    },
-  ];
-
-  const seekToHandler: MediaSessionActionHandler = (details) => {
-    // #region agent log
-    agentDebugLog(
-      "audio-engine.ts:seekto-handler",
-      "mediaSession seekto fired",
-      { seekTime: details.seekTime },
-      "H6-seekto",
-      "post-fix-v2",
-    );
-    // #endregion
-    if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
-    activeEngine?.seek(details.seekTime);
-  };
-
-  // iOS: seekto + previoustrack/nexttrack, seek±10 = null (1335111). Без seekto iOS показывает native ±10.
-  if (typeof navigator.mediaSession.setPositionState === "function") {
-    handlers.push({ action: "seekto", handler: seekToHandler });
-  }
-
-  if (!isIOSDevice()) {
-    handlers.push(
-      {
-        action: "seekbackward",
-        handler: (details) => {
-          const offset = details.seekOffset ?? 10;
-          activeEngine?.seek((activeEngine?.getAudioElement().currentTime ?? 0) - offset);
-        },
-      },
-      {
-        action: "seekforward",
-        handler: (details) => {
-          const offset = details.seekOffset ?? 10;
-          activeEngine?.seek((activeEngine?.getAudioElement().currentTime ?? 0) + offset);
-        },
-      },
-    );
-  }
-
-  const installed: string[] = [];
-  for (const { action, handler } of handlers) {
-    try {
-      navigator.mediaSession.setActionHandler(action, handler);
-      installed.push(action);
-    } catch {
-      /* Safari / PWA */
-    }
-  }
-  // #region agent log
-  agentDebugLog(
-    "audio-engine.ts:install-handlers",
-    "mediaSession handlers installed (global once)",
-    {
-      installed,
-      ios: isIOSDevice(),
-      pwa: isStandalonePWA(),
-      iosMode: isIOSDevice() ? "ios-seekto-track-skip" : "desktop-full",
-    },
-    "H1-handlers",
-    "post-fix",
-  );
-  // #endregion
-  installedMediaSessionActions = installed;
-  setAudioDiagnostics({
-    ios: isIOSDevice(),
-    pwa: isStandalonePWA(),
-    iosMode: isIOSDevice() ? "ios-seekto-track-skip" : "desktop-full",
-    installedHandlers: installed,
-  });
-}
-
 export function isIOSDevice(): boolean {
   if (typeof navigator === "undefined") return false;
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  return isIOS || isStandalone;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
 }
 
 function isPageHidden(): boolean {
@@ -237,10 +63,6 @@ export function isStandalonePWA(): boolean {
   );
 }
 
-export function getInstalledMediaSessionActions(): string[] {
-  return [...installedMediaSessionActions];
-}
-
 function ensureNavigatorAudioSession(): void {
   if (typeof navigator === "undefined") return;
   const nav = navigator as Navigator & { audioSession?: { type: string } };
@@ -250,21 +72,28 @@ function ensureNavigatorAudioSession(): void {
 }
 
 function hideAudioElement(audio: HTMLAudioElement): void {
+  // PWA на iOS: элемент за экраном (-9999px) глушит звук с lock screen — держим в кадре, но 1px.
+  const pwaIos = isIOSDevice() && isStandalonePWA();
   Object.assign(audio.style, {
     position: "fixed",
-    left: "0",
+    left: pwaIos ? "0" : "-9999px",
     bottom: "0",
     width: "1px",
     height: "1px",
-    opacity: "0.001",
+    opacity: pwaIos ? "0.001" : "0",
     pointerEvents: "none",
     zIndex: "-1",
   });
 }
 
+/**
+ * Движок ВЛАДЕЕТ <audio> (new Audio()), создаёт его императивно и держит всю сессию.
+ * Это критично для iOS PWA: элемент, чей первый play() произошёл в user gesture,
+ * получает устойчивую audio session, которая переживает фоновую паузу/возобновление.
+ * React-рендеренный <audio> (создаётся вне жеста) терял pipeline после pause в hidden → zombie.
+ */
 export class AudioEngine {
   private audio: CapturableAudio;
-  private ownsAudioElement: boolean;
   private context: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private streamSource: MediaStreamAudioSourceNode | null = null;
@@ -276,14 +105,10 @@ export class AudioEngine {
   private savePositionTimer: ReturnType<typeof setInterval> | null = null;
   private onSavePosition: ((position: number) => void) | null = null;
   private lifecycleAttached = false;
-  private lastPositionLogAt = 0;
-  private positionSkipLogged = false;
-  private lastReportedPosition = -1;
-  private visibleResumeInFlight = false;
-  private lastVisibleResumeAt = 0;
-  private sessionCallbacks: MediaSessionCallbacks = {
-    onSyncPlay: () => {},
-    onSyncPause: () => {},
+  private mediaSessionRegistered = false;
+  private sessionHandlers: MediaSessionHandlers = {
+    onPlay: () => {},
+    onPause: () => {},
     onPrevious: () => {},
     onNext: () => {},
   };
@@ -293,84 +118,38 @@ export class AudioEngine {
   };
 
   private readonly onVisibilityChange = () => {
+    if (typeof document === "undefined") return;
     logAudioEvent(`visibilitychange:${document.visibilityState}`, this.audio);
     if (document.visibilityState === "hidden") {
       if (!isIOSDevice()) this.teardownAnalyser();
       return;
     }
-    void this.onPageBecameVisible("visibilitychange");
+    void this.resumePlaybackIfNeeded();
   };
 
-  private readonly onPageShowOrFocus = () => {
-    if (document.visibilityState !== "visible") return;
-    logAudioEvent("lifecycle:pageshow-or-focus", this.audio);
-    void this.onPageBecameVisible("pageshow-or-focus");
-  };
-
-  /** Foreground: simple resume like 1335111 — no handleMediaSessionPlay recovery loop. */
-  private async onPageBecameVisible(source: string): Promise<void> {
-    const now = Date.now();
-    if (now - this.lastVisibleResumeAt < 400) return;
-    if (this.visibleResumeInFlight) return;
-
-    this.visibleResumeInFlight = true;
-    this.lastVisibleResumeAt = now;
-    logAudioEvent(`visibility:resume:${source}`, this.audio);
-    try {
-      await this.resumePlaybackIfNeeded();
-    } finally {
-      this.visibleResumeInFlight = false;
-    }
-  }
-
-  private async resumePlaybackIfNeeded(): Promise<void> {
-    if (!isIOSDevice() && this.context?.state === "suspended") {
-      try {
-        await this.context.resume();
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (this.status !== "playing" || !this.audio.paused || !this.audio.src) return;
-
-    this.audio.playbackRate = 1;
-    this.nudgeIOSAudioPipeline();
-    try {
-      logAudioEvent("resume:simple-play", this.audio);
-      await this.audio.play();
-      if (!isIOSDevice() && !isPageHidden()) {
-        void this.ensureAnalyser();
-      }
-    } catch {
-      /* gesture / policy */
-    }
-  }
-
-  constructor(callbacks: AudioEngineCallbacks, existingAudio?: HTMLAudioElement | null) {
+  constructor(callbacks: AudioEngineCallbacks) {
     this.callbacks = callbacks;
-    this.ownsAudioElement = !existingAudio;
-    this.audio = (existingAudio ?? new Audio()) as CapturableAudio;
-    this.configureAudioElement();
-    activeEngine = this;
+    this.audio = new Audio() as CapturableAudio;
+    this.audio.preload = "auto";
+    this.audio.playbackRate = 1;
+    this.audio.setAttribute("playsinline", "true");
+    this.audio.setAttribute("webkit-playsinline", "true");
 
     if (typeof document !== "undefined") {
-      if (this.ownsAudioElement) {
-        hideAudioElement(this.audio);
-        document.body.appendChild(this.audio);
-      }
+      hideAudioElement(this.audio);
+      document.body.appendChild(this.audio);
       ensureNavigatorAudioSession();
       this.attachLifecycleHandlers();
-      installMediaSessionHandlersGlobally();
+      this.registerMediaSessionHandlersOnce();
     }
 
     this.audio.addEventListener("timeupdate", () => {
       this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
-      if (!this.audio.paused) this.updatePositionState();
+      if (this.status === "playing") this.updatePositionState();
     });
     this.audio.addEventListener("durationchange", () => {
       if (this.audio.duration > 0) this.mediaDuration = this.audio.duration;
-      this.updatePositionState(true);
+      this.updatePositionState();
     });
     this.audio.addEventListener("ended", () => {
       logAudioEvent("ended", this.audio);
@@ -385,45 +164,18 @@ export class AudioEngine {
     this.audio.addEventListener("playing", () => {
       logAudioEvent("playing", this.audio);
       this.setStatus("playing");
-      if ("mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "playing";
-        setAudioDiagnostics({ mediaSessionPlaybackState: "playing" });
-      }
       this.onPlayingForAnalyser();
     });
     this.audio.addEventListener("pause", () => {
       logAudioEvent("pause", this.audio);
-      if (this.status !== "stopped") {
-        this.setStatus("paused");
-        if ("mediaSession" in navigator) {
-          navigator.mediaSession.playbackState = "paused";
-          setAudioDiagnostics({ mediaSessionPlaybackState: "paused" });
-        }
-        this.updatePositionState();
-      }
+      if (this.status !== "stopped") this.setStatus("paused");
     });
-    this.audio.addEventListener("waiting", () => {
-      logAudioEvent("waiting", this.audio);
-      this.setStatus("loading");
-    });
-    this.audio.addEventListener("canplay", () => logAudioEvent("canplay", this.audio));
-    this.audio.addEventListener("canplaythrough", () =>
-      logAudioEvent("canplaythrough", this.audio),
-    );
-    this.audio.addEventListener("stalled", () => logAudioEvent("stalled", this.audio));
-    this.audio.addEventListener("suspend", () => logAudioEvent("suspend", this.audio));
+    this.audio.addEventListener("waiting", () => this.setStatus("loading"));
     this.audio.addEventListener("ratechange", () => {
       if (this.audio.playbackRate !== 1) {
         this.audio.playbackRate = 1;
       }
     });
-  }
-
-  private configureAudioElement(): void {
-    this.audio.preload = "auto";
-    this.audio.playbackRate = 1;
-    this.audio.setAttribute("playsinline", "true");
-    this.audio.setAttribute("webkit-playsinline", "true");
   }
 
   getAnalyser(): AnalyserNode | null {
@@ -458,20 +210,104 @@ export class AudioEngine {
     }, 3000);
   }
 
-  dispatchLockScreenPlay(onSync?: () => void): void {
-    this.handleMediaSessionPlay(onSync);
+  /** iOS: seekbackward/seekforward = null → кнопки на lock screen становятся ⏮⏭ (а не ±10с) */
+  private clearIOSSkipSeekHandlers(): void {
+    if (!isIOSDevice() || !("mediaSession" in navigator)) return;
+    for (const action of ["seekbackward", "seekforward"] as const) {
+      try {
+        navigator.mediaSession.setActionHandler(action, null);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
-  dispatchLockScreenPause(onSync?: () => void): void {
-    this.handleMediaSessionPause(onSync);
+  /** seekto → бегунок (scrubber) на lock screen. Доступен и на iOS, и на desktop. */
+  private registerSeekToHandler(): void {
+    if (!("mediaSession" in navigator)) return;
+    if (typeof navigator.mediaSession.setPositionState !== "function") return;
+    try {
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (details.seekTime == null || !Number.isFinite(details.seekTime)) return;
+        this.seek(details.seekTime);
+        this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+      });
+    } catch {
+      /* Safari */
+    }
+  }
+
+  /**
+   * iOS перестраивает раскладку lock screen при смене MediaMetadata. Поэтому seek-конфиг
+   * (seekto + null seek±) нужно ПЕРЕустанавливать после каждого setMetadata в updateMediaSession.
+   * Этот вызов делает это единообразно для конструктора и updateMediaSession.
+   */
+  private applyIOSSeekConfig(): void {
+    this.clearIOSSkipSeekHandlers();
+    this.registerSeekToHandler();
   }
 
   private ensureAudioInDom(): void {
     if (typeof document === "undefined") return;
+    hideAudioElement(this.audio);
     if (!this.audio.isConnected) {
-      hideAudioElement(this.audio);
       document.body.appendChild(this.audio);
     }
+  }
+
+  /** Handlers регистрируем один раз; callbacks обновляем через sessionHandlers */
+  private registerMediaSessionHandlersOnce(): void {
+    if (this.mediaSessionRegistered || !("mediaSession" in navigator)) return;
+    this.mediaSessionRegistered = true;
+
+    const installed: string[] = [];
+    const set = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+        if (handler) installed.push(action);
+      } catch {
+        /* Safari / PWA */
+      }
+    };
+
+    set("play", () => this.handleMediaSessionPlay(() => this.sessionHandlers.onPlay()));
+    set("pause", () => this.handleMediaSessionPause(() => this.sessionHandlers.onPause()));
+    set("previoustrack", () => this.sessionHandlers.onPrevious({ lockScreen: true }));
+    set("nexttrack", () => this.sessionHandlers.onNext({ lockScreen: true }));
+    set("stop", () => {
+      this.stop();
+      this.sessionHandlers.onPause();
+    });
+
+    this.applyIOSSeekConfig();
+    if (this.registerSeekToHandlerInstalled()) installed.push("seekto");
+
+    if (!isIOSDevice()) {
+      set("seekbackward", (details) => {
+        const offset = details.seekOffset ?? 10;
+        this.seek(this.audio.currentTime - offset);
+        this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+      });
+      set("seekforward", (details) => {
+        const offset = details.seekOffset ?? 10;
+        this.seek(this.audio.currentTime + offset);
+        this.callbacks.onTimeUpdate(this.audio.currentTime, this.audio.duration || 0);
+      });
+    }
+
+    setAudioDiagnostics({
+      ios: isIOSDevice(),
+      pwa: isStandalonePWA(),
+      iosMode: isIOSDevice() ? "ios-seekto-prevnext" : "desktop-full",
+      installedHandlers: installed,
+    });
+  }
+
+  private registerSeekToHandlerInstalled(): boolean {
+    return (
+      "mediaSession" in navigator &&
+      typeof navigator.mediaSession.setPositionState === "function"
+    );
   }
 
   private attachLifecycleHandlers(): void {
@@ -479,16 +315,38 @@ export class AudioEngine {
     this.lifecycleAttached = true;
 
     document.addEventListener("visibilitychange", this.onVisibilityChange);
-    window.addEventListener("pageshow", this.onPageShowOrFocus);
-    window.addEventListener("focus", this.onPageShowOrFocus);
+    window.addEventListener("pageshow", this.onVisibilityChange);
+    window.addEventListener("focus", this.onVisibilityChange);
   }
 
   private detachLifecycleHandlers(): void {
     if (!this.lifecycleAttached || typeof document === "undefined") return;
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
-    window.removeEventListener("pageshow", this.onPageShowOrFocus);
-    window.removeEventListener("focus", this.onPageShowOrFocus);
+    window.removeEventListener("pageshow", this.onVisibilityChange);
+    window.removeEventListener("focus", this.onVisibilityChange);
     this.lifecycleAttached = false;
+  }
+
+  /** Foreground resume: на iOS не трогаем (audio.play() без жеста бесполезен и роняет pipeline). */
+  private async resumePlaybackIfNeeded(): Promise<void> {
+    if (isIOSDevice()) return;
+
+    if (this.context?.state === "suspended") {
+      try {
+        await this.context.resume();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (this.status === "playing" && this.audio.paused && this.audio.src) {
+      try {
+        await this.audio.play();
+        void this.ensureAnalyser();
+      } catch {
+        /* gesture / policy */
+      }
+    }
   }
 
   private captureStream(): MediaStream | null {
@@ -522,173 +380,58 @@ export class AudioEngine {
     }
   }
 
-  private nudgeIOSAudioPipeline(): void {
-    if (!isIOSDevice() || !this.audio.src) return;
-    const pos = this.audio.currentTime;
-    this.audio.currentTime = pos;
-  }
-
-  private async verifyPlaybackProgress(source: string): Promise<boolean> {
-    if (this.audio.paused) return false;
-
-    const t0 = this.audio.currentTime;
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 1200));
-    if (this.audio.paused) return false;
-
-    const delta = this.audio.currentTime - t0;
-    const frozen = Math.abs(delta) < 0.05;
-    const payload = {
-      source,
-      t0,
-      t1: this.audio.currentTime,
-      delta,
-      paused: this.audio.paused,
-      readyState: this.audio.readyState,
-      status: this.status,
-      pwa: isStandalonePWA(),
-    };
-
-    if (frozen) {
-      logAudioEvent(`zombie:${source}`, this.audio);
-      logAudioAlert(`ZOMBIE ${source}: playing but t stuck at ${t0.toFixed(1)}s`);
-      // #region agent log
-      agentDebugLog(
-        "audio-engine.ts:zombie-detect",
-        "audio reports playing but currentTime frozen",
-        payload,
-        "H7-zombie",
-        "post-fix-v2",
-      );
-      // #endregion
-      return true;
-    }
-
-    logAudioEvent(`progress-ok:${source}`, this.audio);
-    // #region agent log
-    agentDebugLog(
-      "audio-engine.ts:progress-ok",
-      "currentTime advanced after play",
-      payload,
-      "H7-zombie",
-      "post-fix-v2",
-    );
-    // #endregion
-    return false;
-  }
-
-  private async playUntilPlaying(): Promise<void> {
-    await waitForAudioReady(this.audio);
-
-    if (!this.audio.paused) return;
-
-    await new Promise<void>((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        cleanup();
-        if (!this.audio.paused) {
-          resolve();
-          return;
-        }
-        reject(new Error("play timeout — still paused"));
-      }, 8000);
-
-      const onPlaying = () => {
-        cleanup();
-        resolve();
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("play error event"));
-      };
-      const cleanup = () => {
-        window.clearTimeout(timeoutId);
-        this.audio.removeEventListener("playing", onPlaying);
-        this.audio.removeEventListener("error", onError);
-      };
-
-      this.audio.addEventListener("playing", onPlaying);
-      this.audio.addEventListener("error", onError);
-
-      const playPromise = this.audio.play();
-      if (playPromise) {
-        playPromise.catch((err) => {
-          cleanup();
-          reject(err);
-        });
-      }
-    });
-  }
-
+  /**
+   * PWA/iOS: audio.play() должен вызываться синхронно внутри Media Session play handler,
+   * иначе теряется user activation и звук пропадает после паузы на lock screen.
+   */
   private handleMediaSessionPlay(onSync?: () => void): void {
     ensureNavigatorAudioSession();
     this.ensureAudioInDom();
     this.audio.muted = false;
     this.audio.playbackRate = 1;
-
-    this.nudgeIOSAudioPipeline();
-
     logAudioEvent("mediaSession:play", this.audio);
 
+    // iOS PWA: «толкнуть» pipeline переустановкой currentTime перед play.
+    if (isIOSDevice() && isStandalonePWA() && this.audio.src) {
+      const position = this.audio.currentTime;
+      this.audio.currentTime = position;
+    }
+
     const onSuccess = () => {
-      // #region agent log
-      agentDebugLog(
-        "audio-engine.ts:play-success",
-        "lock screen audio.play resolved",
-        {
-          paused: this.audio.paused,
-          readyState: this.audio.readyState,
-          currentTime: this.audio.currentTime,
-          pwa: isStandalonePWA(),
-        },
-        "H4-pwa-play",
-        "post-fix-v2",
-      );
-      // #endregion
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "playing";
         setAudioDiagnostics({ mediaSessionPlaybackState: "playing" });
       }
       this.setStatus("playing");
-      this.updatePositionState(true);
+      this.updatePositionState();
       onSync?.();
-      void this.verifyPlaybackProgress("lockscreen-play");
-    };
-
-    const onFail = (label: string, err?: unknown) => {
-      // #region agent log
-      agentDebugLog(
-        "audio-engine.ts:play-fail",
-        label,
-        {
-          err: err instanceof Error ? err.message : String(err),
-          paused: this.audio.paused,
-          readyState: this.audio.readyState,
-          hasSrc: !!this.audio.src,
-          pwa: isStandalonePWA(),
-        },
-        "H4-pwa-play",
-        "post-fix-v2",
-      );
-      // #endregion
     };
 
     const retry = () => {
-      const p = this.audio.play();
-      if (p !== undefined) {
-        p.then(onSuccess).catch((e) => onFail("retry play rejected", e));
+      if (isIOSDevice() && isStandalonePWA()) {
+        const p = this.audio.play();
+        if (p !== undefined) p.then(onSuccess).catch(() => {});
+        return;
       }
+      const src = this.audio.currentSrc || this.audio.src;
+      const position = this.audio.currentTime;
+      if (!src) return;
+      this.audio.src = src;
+      this.audio.currentTime = position;
+      const p = this.audio.play();
+      if (p !== undefined) p.then(onSuccess).catch(() => {});
+      else onSuccess();
     };
 
     const promise = this.audio.play();
     if (promise !== undefined) {
-      promise.then(onSuccess).catch((e) => {
-        onFail("initial play rejected", e);
-        retry();
-      });
+      promise.then(onSuccess).catch(retry);
     } else {
       onSuccess();
     }
   }
 
+  /** Публичный путь для play с lock screen / фона (PWA) */
   playFromLockScreen(onDone?: () => void): void {
     this.handleMediaSessionPlay(onDone);
   }
@@ -702,7 +445,7 @@ export class AudioEngine {
       setAudioDiagnostics({ mediaSessionPlaybackState: "paused" });
     }
     this.setStatus("paused");
-    this.lastReportedPosition = this.audio.currentTime;
+    this.updatePositionState();
     this.onSavePosition?.(this.audio.currentTime);
     onSync?.();
   }
@@ -764,98 +507,31 @@ export class AudioEngine {
     return this.mediaDuration;
   }
 
-  private updatePositionState(force = false): void {
+  /** Позиция для бегунка на lock screen iOS (Media Session API) */
+  private updatePositionState(): void {
     if (!("mediaSession" in navigator)) return;
     if (typeof navigator.mediaSession.setPositionState !== "function") return;
     if (this.status === "stopped" || this.status === "idle" || this.status === "loading") return;
 
     const duration = this.getEffectiveDuration();
     const position = this.audio.currentTime;
-    if (duration <= 0 || !Number.isFinite(duration) || !Number.isFinite(position)) {
-      // #region agent log
-      if (!this.positionSkipLogged) {
-        this.positionSkipLogged = true;
-        agentDebugLog(
-          "audio-engine.ts:position-skip",
-          "setPositionState skipped — invalid duration",
-          {
-            duration,
-            position,
-            audioDuration: this.audio.duration,
-            mediaDuration: this.mediaDuration,
-            status: this.status,
-          },
-          "H3-position",
-        );
-      }
-      // #endregion
-      return;
-    }
-    this.positionSkipLogged = false;
+    if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(position)) return;
 
-    if (this.audio.paused) {
-      if (isIOSDevice()) return;
-    } else if (
-      !force &&
-      this.lastReportedPosition >= 0 &&
-      Math.abs(position - this.lastReportedPosition) < 0.05
-    ) {
-      return;
-    }
-
-    const playbackRate = this.audio.paused
-      ? 0
-      : this.audio.playbackRate > 0
-        ? this.audio.playbackRate
-        : 1;
-
-    const clampedPosition = Math.max(0, Math.min(position, duration));
-    const roundedDuration = Math.round(duration * 100) / 100;
-    const roundedPosition = Math.round(clampedPosition * 100) / 100;
+    const playbackRate =
+      this.status === "playing" && this.audio.playbackRate > 0 ? this.audio.playbackRate : 1;
 
     try {
       navigator.mediaSession.setPositionState({
-        duration: roundedDuration,
+        duration,
         playbackRate,
-        position: roundedPosition,
+        position: Math.max(0, Math.min(position, duration)),
       });
-      this.lastReportedPosition = clampedPosition;
-      // #region agent log
-      const now = Date.now();
-      if (now - this.lastPositionLogAt > 15000) {
-        this.lastPositionLogAt = now;
-        agentDebugLog(
-          "audio-engine.ts:position-state",
-          "setPositionState ok",
-          {
-            duration,
-            position,
-            playbackRate,
-            audioDuration: this.audio.duration,
-            mediaDuration: this.mediaDuration,
-            status: this.status,
-          },
-          "H3-position",
-        );
-      }
-      // #endregion
-    } catch (err) {
-      // #region agent log
-      agentDebugLog(
-        "audio-engine.ts:position-state-fail",
-        "setPositionState threw",
-        {
-          err: err instanceof Error ? err.message : String(err),
-          duration,
-          position,
-          mediaDuration: this.mediaDuration,
-        },
-        "H3-position",
-      );
-      // #endregion
+    } catch {
+      /* Safari отклоняет невалидное состояние */
     }
   }
 
+  /** Синхронная смена трека с lock screen (без await load/canplay) */
   setSourceUrlSync(url: string, startPosition = 0, duration = 0): void {
     ensureNavigatorAudioSession();
     this.ensureAudioInDom();
@@ -866,12 +542,10 @@ export class AudioEngine {
     if (duration > 0) this.mediaDuration = duration;
     this.audio.playbackRate = 1;
     this.audio.src = url;
-    this.audio.load();
     if (startPosition > 0) {
       this.audio.currentTime = startPosition;
     }
     this.setStatus("paused");
-    this.updatePositionState(true);
   }
 
   async load(file: File, startPosition = 0, knownDuration = 0): Promise<void> {
@@ -905,12 +579,10 @@ export class AudioEngine {
     if (this.audio.duration > 0) {
       this.mediaDuration = this.audio.duration;
     }
-
     if (startPosition > 0) {
       this.audio.currentTime = startPosition;
     }
     this.setStatus("paused");
-    this.updatePositionState(true);
   }
 
   async play(): Promise<void> {
@@ -918,31 +590,32 @@ export class AudioEngine {
     this.audio.muted = false;
     this.audio.playbackRate = 1;
 
-    if (isPageHidden()) {
-      this.handleMediaSessionPlay();
+    // iOS PWA / hidden: единый синхронный путь через Media Session play (сохраняет user activation).
+    if (isPageHidden() || (isIOSDevice() && isStandalonePWA() && this.audio.paused)) {
+      await new Promise<void>((resolve) => this.handleMediaSessionPlay(resolve));
       return;
     }
 
-    try {
-      logAudioEvent("play:request", this.audio);
-      await this.playUntilPlaying();
-      void this.verifyPlaybackProgress("ui-play");
-      if (!isIOSDevice()) {
-        await this.ensureAnalyser();
-      }
-      this.updatePositionState();
-    } catch (err) {
-      logAudioEvent("play:error", this.audio);
-      this.setStatus("paused");
-      if ("mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "paused";
-      }
+    await this.audio.play();
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "playing";
+      setAudioDiagnostics({ mediaSessionPlaybackState: "playing" });
     }
+    if (!isIOSDevice()) {
+      await this.ensureAnalyser();
+    }
+    this.updatePositionState();
   }
 
   pause(): void {
     logAudioEvent("pause:request", this.audio);
     this.audio.pause();
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "paused";
+      setAudioDiagnostics({ mediaSessionPlaybackState: "paused" });
+    }
+    this.setStatus("paused");
+    this.updatePositionState();
     this.onSavePosition?.(this.audio.currentTime);
     if (!isIOSDevice()) this.teardownAnalyser();
   }
@@ -965,27 +638,18 @@ export class AudioEngine {
         ? Math.max(0, Math.min(time, duration))
         : Math.max(0, time);
     this.audio.currentTime = clamped;
-    this.updatePositionState(true);
+    this.updatePositionState();
     this.callbacks.onTimeUpdate(this.audio.currentTime, duration);
   }
 
   updateMediaSession(
     track: Track | null,
-    handlers: {
-      onPlay: () => void;
-      onPause: () => void;
-      onPrevious: (opts?: LockScreenActionOpts) => void;
-      onNext: (opts?: LockScreenActionOpts) => void;
-    },
+    handlers: MediaSessionHandlers,
     queueInfo?: { queueLength: number; queueIndex: number },
   ): void {
     if (!("mediaSession" in navigator)) return;
 
-    globalSessionCallbacks.onSyncPlay = handlers.onPlay;
-    globalSessionCallbacks.onSyncPause = handlers.onPause;
-    globalSessionCallbacks.onPrevious = handlers.onPrevious;
-    globalSessionCallbacks.onNext = handlers.onNext;
-    this.sessionCallbacks = globalSessionCallbacks;
+    this.sessionHandlers = handlers;
 
     if (!track) {
       navigator.mediaSession.metadata = null;
@@ -1011,7 +675,10 @@ export class AudioEngine {
         : [],
     });
 
-    this.updatePositionState(true);
+    // КЛЮЧЕВОЕ: iOS сбрасывает раскладку кнопок при смене metadata —
+    // переустанавливаем seekto (бегунок) + null seek± (⏮⏭) после каждого setMetadata.
+    this.applyIOSSeekConfig();
+    this.updatePositionState();
   }
 
   setMediaSessionPlaybackState(state: "playing" | "paused" | "none"): void {
@@ -1021,14 +688,13 @@ export class AudioEngine {
   }
 
   destroy(): void {
-    if (activeEngine === this) activeEngine = null;
     this.stop();
     this.revokeUrl();
     this.releaseAudioGraph();
     if (this.savePositionTimer) clearInterval(this.savePositionTimer);
     this.detachLifecycleHandlers();
     this.audio.removeEventListener("playing", this.onPlayingForAnalyser);
-    if (this.ownsAudioElement && this.audio.parentNode) {
+    if (this.audio.parentNode) {
       this.audio.parentNode.removeChild(this.audio);
     }
   }
