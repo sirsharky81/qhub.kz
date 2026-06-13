@@ -105,7 +105,6 @@ export class AudioEngine {
   private savePositionTimer: ReturnType<typeof setInterval> | null = null;
   private onSavePosition: ((position: number) => void) | null = null;
   private lifecycleAttached = false;
-  private mediaSessionRegistered = false;
   private sessionHandlers: MediaSessionHandlers = {
     onPlay: () => {},
     onPause: () => {},
@@ -140,7 +139,7 @@ export class AudioEngine {
       document.body.appendChild(this.audio);
       ensureNavigatorAudioSession();
       this.attachLifecycleHandlers();
-      this.registerMediaSessionHandlersOnce();
+      this.registerMediaSessionHandlers();
     }
 
     this.audio.addEventListener("timeupdate", () => {
@@ -255,10 +254,14 @@ export class AudioEngine {
     }
   }
 
-  /** Handlers регистрируем один раз; callbacks обновляем через sessionHandlers */
-  private registerMediaSessionHandlersOnce(): void {
-    if (this.mediaSessionRegistered || !("mediaSession" in navigator)) return;
-    this.mediaSessionRegistered = true;
+  /**
+   * Регистрируем ВЕСЬ набор хендлеров. Вызывается в конструкторе И после каждого
+   * setMetadata в updateMediaSession: iOS пересобирает раскладку lock screen при смене
+   * метаданных и «забывает» previoustrack/nexttrack → кнопки ⏮⏭ становятся неактивными.
+   * setActionHandler идемпотентен, повторная регистрация безопасна.
+   */
+  private registerMediaSessionHandlers(): void {
+    if (!("mediaSession" in navigator)) return;
 
     const installed: string[] = [];
     const set = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
@@ -391,12 +394,6 @@ export class AudioEngine {
     this.audio.playbackRate = 1;
     logAudioEvent("mediaSession:play", this.audio);
 
-    // iOS PWA: «толкнуть» pipeline переустановкой currentTime перед play.
-    if (isIOSDevice() && isStandalonePWA() && this.audio.src) {
-      const position = this.audio.currentTime;
-      this.audio.currentTime = position;
-    }
-
     const onSuccess = () => {
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "playing";
@@ -407,12 +404,23 @@ export class AudioEngine {
       onSync?.();
     };
 
+    // iOS PWA на lock screen (hidden): аудио-сессия часто «умирает» после фоновой паузы —
+    // play() резолвится, но звука нет и currentTime стоит (zombie). Простой play() это не
+    // лечит. Пересоздаём pipeline: переустанавливаем src + load() СИНХРОННО внутри жеста,
+    // затем play(). Позицию восстанавливаем на loadedmetadata, на время восстановления
+    // глушим звук, чтобы не было слышно скачка с нуля.
+    if (isIOSDevice() && isStandalonePWA() && isPageHidden() && this.audio.src) {
+      const src = this.audio.currentSrc || this.audio.src;
+      const position = this.audio.currentTime;
+      logAudioEvent("lockscreen:reattach", this.audio);
+      this.reattachPipeline(src, position);
+      const p = this.audio.play();
+      if (p !== undefined) p.then(onSuccess).catch(() => {});
+      else onSuccess();
+      return;
+    }
+
     const retry = () => {
-      if (isIOSDevice() && isStandalonePWA()) {
-        const p = this.audio.play();
-        if (p !== undefined) p.then(onSuccess).catch(() => {});
-        return;
-      }
       const src = this.audio.currentSrc || this.audio.src;
       const position = this.audio.currentTime;
       if (!src) return;
@@ -429,6 +437,36 @@ export class AudioEngine {
     } else {
       onSuccess();
     }
+  }
+
+  /**
+   * Пересоздаёт media pipeline в рамках текущего жеста: переустанавливает src и load(),
+   * восстанавливает позицию на loadedmetadata. Звук заглушён до завершения seek, чтобы
+   * не было слышимого скачка с нуля. Используется для оживления «зомби»-сессии iOS PWA.
+   */
+  private reattachPipeline(src: string, position: number): void {
+    this.audio.muted = true;
+    const restorePosition = () => {
+      this.audio.removeEventListener("loadedmetadata", restorePosition);
+      if (position > 0) {
+        const unmute = () => {
+          this.audio.removeEventListener("seeked", unmute);
+          this.audio.muted = false;
+        };
+        this.audio.addEventListener("seeked", unmute);
+        window.setTimeout(unmute, 600);
+        try {
+          this.audio.currentTime = position;
+        } catch {
+          this.audio.muted = false;
+        }
+      } else {
+        this.audio.muted = false;
+      }
+    };
+    this.audio.addEventListener("loadedmetadata", restorePosition);
+    this.audio.src = src;
+    this.audio.load();
   }
 
   /** Публичный путь для play с lock screen / фона (PWA) */
@@ -675,9 +713,9 @@ export class AudioEngine {
         : [],
     });
 
-    // КЛЮЧЕВОЕ: iOS сбрасывает раскладку кнопок при смене metadata —
-    // переустанавливаем seekto (бегунок) + null seek± (⏮⏭) после каждого setMetadata.
-    this.applyIOSSeekConfig();
+    // КЛЮЧЕВОЕ: iOS сбрасывает раскладку кнопок при смене metadata — переустанавливаем
+    // ВЕСЬ набор хендлеров (play/pause/⏮⏭/stop) + seek-конфиг, иначе ⏮⏭ становятся серыми.
+    this.registerMediaSessionHandlers();
     this.updatePositionState();
   }
 
