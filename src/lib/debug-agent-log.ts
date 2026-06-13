@@ -10,7 +10,9 @@ export type DebugHypothesis =
   | "H4-pwa-play"
   | "H5-navigation"
   | "H6-seekto"
-  | "H7-zombie";
+  | "H7-zombie"
+  | "H6-resume"
+  | "H7-autoadvance";
 
 export function agentDebugLog(
   location: string,

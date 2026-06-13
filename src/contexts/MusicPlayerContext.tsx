@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { agentDebugLog } from "@/lib/debug-agent-log";
-import { AudioEngine, waitForAudioReady, type PlaybackStatus } from "@/lib/music/audio-engine";
+import { AudioEngine, type PlaybackStatus } from "@/lib/music/audio-engine";
 import * as storage from "@/lib/music/indexed-db-storage";
 import * as mediaLibrary from "@/lib/music/media-library";
 import { QueueManager } from "@/lib/music/queue-manager";
@@ -258,17 +258,31 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   /**
    * iOS PWA resume на lock screen. Возобновление того же трека через обычный play() даёт «зомби»
    * (играет по флагам, без звука) — после фоновой паузы iOS деактивирует аудио-сессию. Смена трека
-   * при этом работает, потому что грузит НОВЫЙ ресурс. Поэтому resume повторяем как смену трека:
-   * создаём СВЕЖИЙ blob URL того же файла, ждём готовности, восстанавливаем позицию и играем.
+   * при этом работает, потому что грузит НОВЫЙ ресурс СИНХРОННО в жесте. Повторяем это для резюма:
+   * создаём СВЕЖИЙ blob URL того же файла и играем его синхронно (без await), восстанавливая позицию.
    */
   const resumeCurrentTrackOnLockScreen = useCallback(
-    async (track: Track) => {
+    (track: Track) => {
       const engine = engineRef.current;
       if (!engine) return;
       const position = engine.getAudioElement().currentTime;
       const file = mediaLibrary.getCachedTrackFile(track.id);
+      // #region agent log
+      agentDebugLog(
+        "MusicPlayerContext.tsx:resume",
+        "resumeCurrentTrackOnLockScreen",
+        {
+          trackId: track.id,
+          hasFile: !!file,
+          position: Math.round(position),
+          pwa: true,
+          hidden: typeof document !== "undefined" && document.hidden,
+        },
+        "H6-resume",
+      );
+      // #endregion
       if (!file) {
-        await engine.play();
+        void engine.play();
         return;
       }
       if (resumeUrlRef.current) {
@@ -282,12 +296,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       resumeUrlRef.current = freshUrl;
       const trackDuration = track.duration || 0;
       engine.setMediaDuration(trackDuration);
-      engine.setSourceUrlSync(freshUrl, 0, trackDuration);
       bindMediaSession(track);
       engine.setVolume(volume);
-      await waitForAudioReady(engine.getAudioElement());
-      if (position > 0) engine.seek(position);
-      await new Promise<void>((resolve) => engine.playFromLockScreen(() => resolve()));
+      // СИНХРОННО в жесте кнопки play: свежий src + play() + восстановление позиции.
+      engine.playFreshSync(freshUrl, position, trackDuration);
       schedulePersist();
     },
     [volume, bindMediaSession, schedulePersist],
@@ -320,17 +332,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       const url = mediaLibrary.getOrCreateObjectUrl(track.id, file);
       const trackDuration = track.duration || 0;
       engine.setMediaDuration(trackDuration);
-      engine.setSourceUrlSync(url, 0, trackDuration);
       setCurrentTrack(track);
       setDuration(trackDuration || engine.getAudioElement().duration || 0);
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
       engine.setVolume(volume);
       bindMediaSession(track);
-      await waitForAudioReady(engine.getAudioElement());
-      await new Promise<void>((resolve) => {
-        engine.playFromLockScreen(() => resolve());
-      });
+      // СИНХРОННО: src + play() в том же тике, что и жест/`ended` — без await, чтобы не терять
+      // user activation и право на продолжение аудио-сессии (иначе авто-переход не играет).
+      engine.playFreshSync(url, 0, trackDuration);
       schedulePersist();
       prefetchQueueForLockScreen(trackId);
       return true;
@@ -517,6 +527,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         const lockScreen =
           typeof document !== "undefined" &&
           (document.hidden || document.visibilityState === "hidden");
+        // #region agent log
+        agentDebugLog(
+          "MusicPlayerContext.tsx:onEnded",
+          "track ended → auto-advance",
+          { lockScreen, queueIndex: queueRef.current.getIndex() },
+          "H7-autoadvance",
+        );
+        // #endregion
         void navigationRef.current.onNext(lockScreen ? { lockScreen: true } : undefined);
       },
       onError: () => setStatus("stopped"),
@@ -693,7 +711,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       onPrevious: loadPrevious,
       onNext: loadNext,
     };
-    resumeActionRef.current = (track) => void resumeCurrentTrackOnLockScreen(track);
+    resumeActionRef.current = resumeCurrentTrackOnLockScreen;
   }, [loadPrevious, loadNext, resumeCurrentTrackOnLockScreen]);
 
   const seek = useCallback((time: number) => {

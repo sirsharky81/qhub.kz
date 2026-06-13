@@ -445,11 +445,6 @@ export class AudioEngine {
     }
   }
 
-  /** Публичный путь для play с lock screen / фона (PWA) */
-  playFromLockScreen(onDone?: () => void): void {
-    this.handleMediaSessionPlay(onDone);
-  }
-
   private handleMediaSessionPause(onSync?: () => void): void {
     ensureNavigatorAudioSession();
     logAudioEvent("mediaSession:pause", this.audio);
@@ -560,6 +555,67 @@ export class AudioEngine {
       this.audio.currentTime = startPosition;
     }
     this.setStatus("paused");
+  }
+
+  /**
+   * Единый СИНХРОННЫЙ путь старта трека на iOS lock screen (смена трека, авто-переход, резюм):
+   * ставит новый src и вызывает play() В ТОМ ЖЕ тике, что и инициатор (жест ⏮⏭/play или событие
+   * `ended`). Это сохраняет user activation / право на продолжение аудио-сессии — без await,
+   * который ранее разрывал контекст (авто-переход не играл, резюм глох / уходил в Apple Music).
+   * Позиция (для резюма) восстанавливается на loadedmetadata; до завершения seek звук заглушён,
+   * чтобы не было слышно старта с нуля.
+   */
+  playFreshSync(url: string, startPosition = 0, duration = 0, onDone?: () => void): void {
+    ensureNavigatorAudioSession();
+    this.ensureAudioInDom();
+    if (this.objectUrl && this.objectUrl !== url) {
+      URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = null;
+    }
+    if (duration > 0) this.mediaDuration = duration;
+    this.audio.playbackRate = 1;
+    this.audio.muted = startPosition > 0;
+    this.audio.src = url;
+
+    if (startPosition > 0) {
+      const restorePosition = () => {
+        this.audio.removeEventListener("loadedmetadata", restorePosition);
+        const unmute = () => {
+          this.audio.removeEventListener("seeked", unmute);
+          this.audio.muted = false;
+        };
+        this.audio.addEventListener("seeked", unmute);
+        window.setTimeout(unmute, 1000);
+        try {
+          this.audio.currentTime = startPosition;
+        } catch {
+          this.audio.muted = false;
+        }
+      };
+      this.audio.addEventListener("loadedmetadata", restorePosition);
+    }
+
+    logAudioEvent("playFreshSync", this.audio);
+
+    const onSuccess = () => {
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "playing";
+        setAudioDiagnostics({ mediaSessionPlaybackState: "playing" });
+      }
+      this.setStatus("playing");
+      this.updatePositionState();
+      onDone?.();
+    };
+
+    const p = this.audio.play();
+    if (p !== undefined) {
+      p.then(onSuccess).catch(() => {
+        this.audio.muted = false;
+        onDone?.();
+      });
+    } else {
+      onSuccess();
+    }
   }
 
   async load(file: File, startPosition = 0, knownDuration = 0): Promise<void> {
