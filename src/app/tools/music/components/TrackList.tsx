@@ -3,10 +3,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useRef, useState } from "react";
 import { SwipeableRow } from "@/components/music/SwipeableRow";
+import { ConfirmDialog } from "@/components/music/ConfirmDialog";
 import { TrackArtwork } from "@/components/music/TrackArtwork";
 import { PlaylistPickerDialog } from "@/components/music/PlaylistPickerDialog";
 import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
 import { useCoarsePointer } from "@/hooks/useCoarsePointer";
+import { useWideLayout } from "@/hooks/useWideLayout";
 import type { Track } from "@/lib/music/types";
 import { formatTime } from "@/lib/music/types";
 
@@ -21,12 +23,18 @@ function TrackContextMenu({
   onPlayNow,
   onAddToQueue,
   onAddToPlaylist,
+  onSelect,
+  onDelete,
+  showDesktopActions,
 }: {
   track: Track;
   onClose: () => void;
   onPlayNow: () => void;
   onAddToQueue: () => void;
   onAddToPlaylist: () => void;
+  onSelect: () => void;
+  onDelete: () => void;
+  showDesktopActions: boolean;
 }) {
   return (
     <>
@@ -67,6 +75,30 @@ function TrackContextMenu({
           >
             Добавить в плейлист
           </button>
+          {showDesktopActions ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect();
+                  onClose();
+                }}
+                className="w-full px-4 py-2.5 text-left text-xs text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Выделить
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDelete();
+                  onClose();
+                }}
+                className="w-full px-4 py-2.5 text-left text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+              >
+                Удалить из медиатеки
+              </button>
+            </>
+          ) : null}
         </div>
         <button
           type="button"
@@ -85,6 +117,7 @@ function TrackRow({
   isActive,
   isFavorite,
   isTouch,
+  isWideLayout,
   isSelectionMode,
   isSelected,
   unavailable,
@@ -93,11 +126,13 @@ function TrackRow({
   onDelete,
   onLongPress,
   onToggleSelect,
+  onCtrlSelect,
 }: {
   track: Track;
   isActive: boolean;
   isFavorite: boolean;
   isTouch: boolean;
+  isWideLayout: boolean;
   isSelectionMode: boolean;
   isSelected: boolean;
   unavailable: boolean;
@@ -106,6 +141,7 @@ function TrackRow({
   onDelete: () => void;
   onLongPress: () => void;
   onToggleSelect: () => void;
+  onCtrlSelect: () => void;
 }) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowBg = isActive ? "bg-gray-100 dark:bg-gray-800" : "bg-white dark:bg-gray-900";
@@ -132,7 +168,7 @@ function TrackRow({
       onTouchMove={clearLongPress}
       onTouchCancel={clearLongPress}
       onContextMenu={(e) => {
-        if (isTouch) return;
+        if (!isWideLayout) return;
         e.preventDefault();
         onLongPress();
       }}
@@ -154,7 +190,15 @@ function TrackRow({
 
       <button
         type="button"
-        onClick={isSelectionMode ? onToggleSelect : onPlay}
+        onClick={(e) => {
+          if (isWideLayout && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            onCtrlSelect();
+            return;
+          }
+          if (isSelectionMode) onToggleSelect();
+          else onPlay();
+        }}
         className="flex items-center gap-2 flex-1 min-w-0 text-left"
       >
         <TrackArtwork coverArtUrl={track.coverArtUrl} />
@@ -192,11 +236,11 @@ function TrackRow({
         </button>
       ) : null}
 
-      {!isTouch && !isSelectionMode ? (
+      {isWideLayout && !isSelectionMode ? (
         <button
           type="button"
           onClick={onDelete}
-          className="w-5 h-5 flex items-center justify-center text-[10px] text-gray-300 hover:text-red-500 hover:bg-red-50 rounded shrink-0"
+          className="w-5 h-5 flex items-center justify-center text-[10px] text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded shrink-0"
           aria-label="Удалить из медиатеки"
         >
           ✕
@@ -228,6 +272,7 @@ function TrackRow({
 export function TrackList({ tracks, onPlay }: TrackListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const isTouch = useCoarsePointer();
+  const isWideLayout = useWideLayout();
   const {
     currentTrack,
     favoriteTrackIds,
@@ -243,6 +288,7 @@ export function TrackList({ tracks, onPlay }: TrackListProps) {
   const [contextTrack, setContextTrack] = useState<Track | null>(null);
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
   const [playlistTrackIds, setPlaylistTrackIds] = useState<string[]>([]);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ ids: string[]; title: string } | null>(null);
 
   const virtualizer = useVirtualizer({
     count: tracks.length,
@@ -272,6 +318,46 @@ export function TrackList({ tracks, onPlay }: TrackListProps) {
     setPlaylistTrackIds(ids);
     setPlaylistPickerOpen(true);
   };
+
+  const requestDelete = useCallback(
+    (ids: string[]) => {
+      const uniqueIds = [...new Set(ids)];
+      if (uniqueIds.length === 0) return;
+
+      const title =
+        uniqueIds.length === 1
+          ? `Удалить «${tracks.find((t) => t.id === uniqueIds[0])?.title ?? "трек"}» из медиатеки?`
+          : `Удалить ${uniqueIds.length} треков из медиатеки?`;
+
+      setDeleteConfirm({ ids: uniqueIds, title });
+    },
+    [tracks],
+  );
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteConfirm) return;
+    for (const id of deleteConfirm.ids) {
+      await removeTrackFromLibrary(id);
+    }
+    setDeleteConfirm(null);
+    exitSelection();
+  }, [deleteConfirm, removeTrackFromLibrary, exitSelection]);
+
+  const enterSelectionWith = useCallback((id: string) => {
+    setSelectionMode(true);
+    setSelectedIds(new Set([id]));
+  }, []);
+
+  const ctrlSelect = useCallback(
+    (id: string) => {
+      if (!selectionMode) {
+        enterSelectionWith(id);
+        return;
+      }
+      toggleSelect(id);
+    },
+    [selectionMode, enterSelectionWith, toggleSelect],
+  );
 
   if (tracks.length === 0) {
     return <p className="text-xs text-gray-400 text-center py-8">Не найдено</p>;
@@ -307,6 +393,16 @@ export function TrackList({ tracks, onPlay }: TrackListProps) {
           >
             + PL
           </button>
+          {isWideLayout ? (
+            <button
+              type="button"
+              disabled={selectedIds.size === 0}
+              onClick={() => requestDelete(Array.from(selectedIds))}
+              className="px-2 py-0.5 text-[10px] font-medium border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 rounded disabled:opacity-40"
+            >
+              Удалить
+            </button>
+          ) : null}
           <button type="button" onClick={exitSelection} className="px-2 py-0.5 text-[10px] text-gray-500">
             ✕
           </button>
@@ -334,16 +430,13 @@ export function TrackList({ tracks, onPlay }: TrackListProps) {
                   isActive={currentTrack?.id === track.id}
                   isFavorite={favoriteTrackIds.has(track.id)}
                   isTouch={isTouch}
+                  isWideLayout={isWideLayout}
                   isSelectionMode={selectionMode}
                   isSelected={selectedIds.has(track.id)}
                   unavailable={isTrackUnavailable(track.id)}
                   onPlay={() => onPlay(track.id)}
                   onToggleFavorite={() => toggleFavorite(track.id)}
-                  onDelete={() => {
-                    if (window.confirm(`Удалить «${track.title}» из медиатеки?`)) {
-                      void removeTrackFromLibrary(track.id);
-                    }
-                  }}
+                  onDelete={() => requestDelete([track.id])}
                   onLongPress={() => {
                     if (selectionMode) return;
                     if (isTouch) {
@@ -354,6 +447,7 @@ export function TrackList({ tracks, onPlay }: TrackListProps) {
                     }
                   }}
                   onToggleSelect={() => toggleSelect(track.id)}
+                  onCtrlSelect={() => ctrlSelect(track.id)}
                 />
               </div>
             );
@@ -364,12 +458,23 @@ export function TrackList({ tracks, onPlay }: TrackListProps) {
       {contextTrack ? (
         <TrackContextMenu
           track={contextTrack}
+          showDesktopActions={isWideLayout}
           onClose={() => setContextTrack(null)}
           onPlayNow={() => onPlay(contextTrack.id)}
           onAddToQueue={() => addToQueue(contextTrack.id)}
           onAddToPlaylist={() => openPlaylistPicker([contextTrack.id])}
+          onSelect={() => enterSelectionWith(contextTrack.id)}
+          onDelete={() => requestDelete([contextTrack.id])}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        title={deleteConfirm?.title ?? ""}
+        destructive
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteConfirm(null)}
+      />
 
       <PlaylistPickerDialog
         open={playlistPickerOpen}

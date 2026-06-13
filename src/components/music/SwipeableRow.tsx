@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface SwipeAction {
   id: string;
@@ -107,40 +108,18 @@ export function SwipeableRow({
         </div>
       </div>
 
-      {confirmAction && (
-        <div
-          className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/40 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="swipe-confirm-title"
-        >
-          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
-            <p id="swipe-confirm-title" className="text-sm font-medium text-gray-900">
-              {confirmAction.confirmTitle}
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  confirmAction.onAction();
-                  setConfirmAction(null);
-                  closeSwipe();
-                }}
-                className="flex-1 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium"
-              >
-                Подтвердить
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmAction(null)}
-                className="flex-1 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm font-medium"
-              >
-                Отмена
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirmAction !== null}
+        title={confirmAction?.confirmTitle ?? ""}
+        destructive
+        onConfirm={() => {
+          if (!confirmAction) return;
+          confirmAction.onAction();
+          setConfirmAction(null);
+          closeSwipe();
+        }}
+        onCancel={() => setConfirmAction(null)}
+      />
     </>
   );
 }

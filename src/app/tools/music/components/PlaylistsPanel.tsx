@@ -6,6 +6,7 @@ import { TrackArtwork } from "@/components/music/TrackArtwork";
 import { NameInputDialog } from "@/components/music/NameInputDialog";
 import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
 import { useCoarsePointer } from "@/hooks/useCoarsePointer";
+import { useWideLayout } from "@/hooks/useWideLayout";
 import type { Playlist } from "@/lib/music/types";
 import { formatTime } from "@/lib/music/types";
 
@@ -24,6 +25,7 @@ export function PlaylistsPanel() {
   } = useMusicPlayer();
 
   const isTouch = useCoarsePointer();
+  const isWideLayout = useWideLayout();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<Playlist | null>(null);
@@ -137,7 +139,7 @@ export function PlaylistsPanel() {
                   >
                     {rowContent}
                   </button>
-                  {!isTouch ? (
+                  {isWideLayout ? (
                     <button
                       type="button"
                       onClick={() => void removeTrackFromPlaylist(selected.id, track.id)}
@@ -220,7 +222,7 @@ export function PlaylistsPanel() {
               </button>
             );
 
-            if (!isTouch) {
+            if (isWideLayout) {
               return (
                 <div key={pl.id} className="group relative">
                   {row}
