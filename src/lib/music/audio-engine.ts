@@ -41,6 +41,12 @@ type MediaSessionHandlers = {
   onPause: () => void;
   onPrevious: (opts?: LockScreenActionOpts) => void;
   onNext: (opts?: LockScreenActionOpts) => void;
+  /**
+   * iOS PWA resume на lock screen: контекст перезагружает текущий трек по «свежему» blob URL
+   * на сохранённой позиции (тот же путь, что и рабочая смена трека) — это оживляет аудио-сессию
+   * без перехвата Now Playing. Если не задан, используется обычный play().
+   */
+  onResume?: () => void;
 };
 
 export function isIOSDevice(): boolean {
@@ -105,7 +111,6 @@ export class AudioEngine {
   private savePositionTimer: ReturnType<typeof setInterval> | null = null;
   private onSavePosition: ((position: number) => void) | null = null;
   private lifecycleAttached = false;
-  private lastMetadataInit: MediaMetadataInit | null = null;
   private sessionHandlers: MediaSessionHandlers = {
     onPlay: () => {},
     onPause: () => {},
@@ -274,7 +279,23 @@ export class AudioEngine {
       }
     };
 
-    set("play", () => this.handleMediaSessionPlay(() => this.sessionHandlers.onPlay(), true));
+    set("play", () => {
+      // iOS PWA на lock screen: возобновление того же трека через простой play() даёт «зомби»
+      // (играет по флагам, без звука). Делегируем контексту перезагрузку трека по свежему URL —
+      // тот же путь, что и рабочая смена трека. В вебе/foreground — обычный play().
+      if (
+        isIOSDevice() &&
+        isStandalonePWA() &&
+        isPageHidden() &&
+        this.audio.paused &&
+        this.sessionHandlers.onResume
+      ) {
+        logAudioEvent("mediaSession:play", this.audio);
+        this.sessionHandlers.onResume();
+        return;
+      }
+      this.handleMediaSessionPlay(() => this.sessionHandlers.onPlay());
+    });
     set("pause", () => this.handleMediaSessionPause(() => this.sessionHandlers.onPause()));
     set("previoustrack", () => this.sessionHandlers.onPrevious({ lockScreen: true }));
     set("nexttrack", () => this.sessionHandlers.onNext({ lockScreen: true }));
@@ -388,7 +409,7 @@ export class AudioEngine {
    * PWA/iOS: audio.play() должен вызываться синхронно внутри Media Session play handler,
    * иначе теряется user activation и звук пропадает после паузы на lock screen.
    */
-  private handleMediaSessionPlay(onSync?: () => void, reArm = false): void {
+  private handleMediaSessionPlay(onSync?: () => void): void {
     ensureNavigatorAudioSession();
     this.ensureAudioInDom();
     this.audio.muted = false;
@@ -404,25 +425,6 @@ export class AudioEngine {
       this.updatePositionState();
       onSync?.();
     };
-
-    // iOS PWA, возобновление того же трека на lock screen: после фоновой паузы iOS
-    // деактивирует аудио-сессию приложения, и play() по тому же src даёт «зомби» (играет
-    // по флагам, но без звука и без движения currentTime). Смена ТРЕКА работает, потому что
-    // новый src + новые metadata заново активируют сессию. Поэтому возобновление делаем как
-    // мини-смену трека: переустанавливаем тот же src + ПЕРЕзадаём metadata/handlers (это
-    // удерживает Now Playing за нами в окне перезагрузки — иначе его перехватывает Apple Music),
-    // и восстанавливаем позицию.
-    if (
-      reArm &&
-      isIOSDevice() &&
-      isStandalonePWA() &&
-      isPageHidden() &&
-      this.audio.paused &&
-      this.audio.src
-    ) {
-      this.rearmAndPlay(onSuccess);
-      return;
-    }
 
     const retry = () => {
       const src = this.audio.currentSrc || this.audio.src;
@@ -441,64 +443,6 @@ export class AudioEngine {
     } else {
       onSuccess();
     }
-  }
-
-  /**
-   * Возобновление того же трека на iOS PWA lock screen «как смена трека»: переустановка src
-   * заново активирует аудио-сессию (лечит zombie), переустановка metadata/handlers удерживает
-   * Now Playing за приложением (иначе перехват Apple Music), позиция восстанавливается на
-   * loadedmetadata. Звук заглушён до завершения seek, чтобы не было слышно старта с нуля.
-   */
-  private rearmAndPlay(onSuccess: () => void): void {
-    const src = this.audio.currentSrc || this.audio.src;
-    const position = this.audio.currentTime;
-    logAudioEvent("lockscreen:rearm", this.audio);
-
-    this.audio.muted = true;
-    const restorePosition = () => {
-      this.audio.removeEventListener("loadedmetadata", restorePosition);
-      if (position > 0) {
-        const unmute = () => {
-          this.audio.removeEventListener("seeked", unmute);
-          this.audio.muted = false;
-        };
-        this.audio.addEventListener("seeked", unmute);
-        window.setTimeout(unmute, 800);
-        try {
-          this.audio.currentTime = position;
-        } catch {
-          this.audio.muted = false;
-        }
-      } else {
-        this.audio.muted = false;
-      }
-    };
-    this.audio.addEventListener("loadedmetadata", restorePosition);
-
-    this.audio.src = src;
-    this.reassertMediaSession();
-
-    const p = this.audio.play();
-    if (p !== undefined) {
-      p.then(onSuccess).catch(() => {
-        this.audio.muted = false;
-      });
-    } else {
-      onSuccess();
-    }
-  }
-
-  /** Заново заявляем metadata + handlers, чтобы удержать Now Playing за приложением. */
-  private reassertMediaSession(): void {
-    if (!("mediaSession" in navigator)) return;
-    if (this.lastMetadataInit) {
-      try {
-        navigator.mediaSession.metadata = new MediaMetadata(this.lastMetadataInit);
-      } catch {
-        /* ignore */
-      }
-    }
-    this.registerMediaSessionHandlers();
   }
 
   /** Публичный путь для play с lock screen / фона (PWA) */
@@ -736,15 +680,14 @@ export class AudioEngine {
         ? `Очередь · ${queueInfo.queueIndex + 1} из ${queueInfo.queueLength}`
         : "QHub Music");
 
-    this.lastMetadataInit = {
+    navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist,
       album: albumLabel,
       artwork: track.coverArtUrl
         ? [{ src: track.coverArtUrl, sizes: "512x512", type: "image/jpeg" }]
         : [],
-    };
-    navigator.mediaSession.metadata = new MediaMetadata(this.lastMetadataInit);
+    });
 
     // КЛЮЧЕВОЕ: iOS сбрасывает раскладку кнопок при смене metadata — переустанавливаем
     // ВЕСЬ набор хендлеров (play/pause/⏮⏭/stop) + seek-конфиг, иначе ⏮⏭ становятся серыми.

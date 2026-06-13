@@ -145,6 +145,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef(new QueueManager());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumeUrlRef = useRef<string | null>(null);
   const tracksRef = useRef<Track[]>([]);
   const unavailableRef = useRef<Set<string>>(new Set());
   const navigationRef = useRef({
@@ -155,6 +156,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     onPrevious: (_opts?: { lockScreen?: boolean }) => {},
     onNext: (_opts?: { lockScreen?: boolean }) => {},
   });
+  const resumeActionRef = useRef<(track: Track) => void>(() => {});
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -243,11 +245,52 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           onNext: (opts) => {
             sessionActionsRef.current.onNext(opts);
           },
+          onResume: () => {
+            resumeActionRef.current(track);
+          },
         },
         { queueLength: q.length, queueIndex: idx },
       );
     },
     [schedulePersist],
+  );
+
+  /**
+   * iOS PWA resume на lock screen. Возобновление того же трека через обычный play() даёт «зомби»
+   * (играет по флагам, без звука) — после фоновой паузы iOS деактивирует аудио-сессию. Смена трека
+   * при этом работает, потому что грузит НОВЫЙ ресурс. Поэтому resume повторяем как смену трека:
+   * создаём СВЕЖИЙ blob URL того же файла, ждём готовности, восстанавливаем позицию и играем.
+   */
+  const resumeCurrentTrackOnLockScreen = useCallback(
+    async (track: Track) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      const position = engine.getAudioElement().currentTime;
+      const file = mediaLibrary.getCachedTrackFile(track.id);
+      if (!file) {
+        await engine.play();
+        return;
+      }
+      if (resumeUrlRef.current) {
+        try {
+          URL.revokeObjectURL(resumeUrlRef.current);
+        } catch {
+          /* ignore */
+        }
+      }
+      const freshUrl = URL.createObjectURL(file);
+      resumeUrlRef.current = freshUrl;
+      const trackDuration = track.duration || 0;
+      engine.setMediaDuration(trackDuration);
+      engine.setSourceUrlSync(freshUrl, 0, trackDuration);
+      bindMediaSession(track);
+      engine.setVolume(volume);
+      await waitForAudioReady(engine.getAudioElement());
+      if (position > 0) engine.seek(position);
+      await new Promise<void>((resolve) => engine.playFromLockScreen(() => resolve()));
+      schedulePersist();
+    },
+    [volume, bindMediaSession, schedulePersist],
   );
 
   const tryLockScreenTrackSwitch = useCallback(
@@ -650,7 +693,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       onPrevious: loadPrevious,
       onNext: loadNext,
     };
-  }, [loadPrevious, loadNext]);
+    resumeActionRef.current = (track) => void resumeCurrentTrackOnLockScreen(track);
+  }, [loadPrevious, loadNext, resumeCurrentTrackOnLockScreen]);
 
   const seek = useCallback((time: number) => {
     engineRef.current?.seek(time);
