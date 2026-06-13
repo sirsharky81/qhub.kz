@@ -404,22 +404,9 @@ export class AudioEngine {
       onSync?.();
     };
 
-    // iOS PWA на lock screen (hidden): аудио-сессия часто «умирает» после фоновой паузы —
-    // play() резолвится, но звука нет и currentTime стоит (zombie). Простой play() это не
-    // лечит. Пересоздаём pipeline: переустанавливаем src + load() СИНХРОННО внутри жеста,
-    // затем play(). Позицию восстанавливаем на loadedmetadata, на время восстановления
-    // глушим звук, чтобы не было слышно скачка с нуля.
-    if (isIOSDevice() && isStandalonePWA() && isPageHidden() && this.audio.src) {
-      const src = this.audio.currentSrc || this.audio.src;
-      const position = this.audio.currentTime;
-      logAudioEvent("lockscreen:reattach", this.audio);
-      this.reattachPipeline(src, position);
-      const p = this.audio.play();
-      if (p !== undefined) p.then(onSuccess).catch(() => {});
-      else onSuccess();
-      return;
-    }
-
+    // ВАЖНО: НЕ трогаем src и НЕ вызываем load() в фоне/на lock screen. В standalone PWA
+    // любой сброс src уводит «Now Playing» другому приложению (например, Apple Music).
+    // Веб-версия (тот же iOS) работает на простом play() — повторяем её поведение и в PWA.
     const retry = () => {
       const src = this.audio.currentSrc || this.audio.src;
       const position = this.audio.currentTime;
@@ -437,36 +424,6 @@ export class AudioEngine {
     } else {
       onSuccess();
     }
-  }
-
-  /**
-   * Пересоздаёт media pipeline в рамках текущего жеста: переустанавливает src и load(),
-   * восстанавливает позицию на loadedmetadata. Звук заглушён до завершения seek, чтобы
-   * не было слышимого скачка с нуля. Используется для оживления «зомби»-сессии iOS PWA.
-   */
-  private reattachPipeline(src: string, position: number): void {
-    this.audio.muted = true;
-    const restorePosition = () => {
-      this.audio.removeEventListener("loadedmetadata", restorePosition);
-      if (position > 0) {
-        const unmute = () => {
-          this.audio.removeEventListener("seeked", unmute);
-          this.audio.muted = false;
-        };
-        this.audio.addEventListener("seeked", unmute);
-        window.setTimeout(unmute, 600);
-        try {
-          this.audio.currentTime = position;
-        } catch {
-          this.audio.muted = false;
-        }
-      } else {
-        this.audio.muted = false;
-      }
-    };
-    this.audio.addEventListener("loadedmetadata", restorePosition);
-    this.audio.src = src;
-    this.audio.load();
   }
 
   /** Публичный путь для play с lock screen / фона (PWA) */
