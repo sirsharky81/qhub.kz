@@ -25,6 +25,7 @@ import type {
   Track,
   UnavailableFilter,
 } from "@/lib/music/types";
+import { prefetchTrackPlaceholderArtwork, setLockScreenArtworkRefreshHandler } from "@/lib/music/lock-screen-artwork";
 import { formatTime } from "@/lib/music/types";
 import { MusicToast } from "@/components/music/MusicToast";
 import DebugLogPanel from "@/app/tools/music/DebugLogPanel";
@@ -146,6 +147,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tracksRef = useRef<Track[]>([]);
+  const currentTrackRef = useRef<Track | null>(null);
   const unavailableRef = useRef<Set<string>>(new Set());
   const navigationRef = useRef({
     onNext: async (_opts?: { lockScreen?: boolean }) => {},
@@ -160,6 +162,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     tracksRef.current = tracks;
   }, [tracks]);
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
 
   useEffect(() => {
     unavailableRef.current = unavailableTrackIds;
@@ -253,6 +259,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     },
     [schedulePersist],
   );
+
+  useEffect(() => {
+    setLockScreenArtworkRefreshHandler(() => {
+      const track = currentTrackRef.current;
+      if (track && !track.hasCover) bindMediaSession(track);
+    });
+  }, [bindMediaSession]);
 
   /**
    * iOS PWA resume на lock screen. Сброс src здесь (playFreshSync) уводил Now Playing в Apple Music
@@ -530,6 +543,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const existingAnalyser = engine.getAnalyser();
     if (existingAnalyser) setAnalyser(existingAnalyser);
     setIsPlayerReady(true);
+    prefetchTrackPlaceholderArtwork();
 
     void (async () => {
       const [loadedTracks, state, loadedPlaylists] = await Promise.all([

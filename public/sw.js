@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v7";
+const CACHE_NAME = "qhub-v8";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
@@ -64,12 +64,33 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (PRECACHE.includes(pathname)) {
+    // Плейсхолдер обложки: network-first — iOS lock screen иначе может получить устаревший SW-кэш.
+    if (pathname === "/track-placeholder.png") {
+      event.respondWith(networkFirst(request));
+      return;
+    }
     event.respondWith(cacheFirst(request));
     return;
   }
 
   event.respondWith(fetch(request));
 });
+
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    throw new Error("offline");
+  }
+}
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
