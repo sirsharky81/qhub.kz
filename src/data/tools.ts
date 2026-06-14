@@ -12,6 +12,16 @@ export interface Tool {
 
 export const tools: Tool[] = [
   {
+    id: "file-converter",
+    name: "QHub Smart File Converter",
+    description:
+      "Умный конвертер файлов: изображения, видео, аудио, PDF, таблицы — всё локально в браузере.",
+    icon: "RefreshCw",
+    category: "utilities",
+    href: "/tools/file-converter",
+    isNew: true,
+  },
+  {
     id: "music-editor",
     name: "Music Editor",
     description:

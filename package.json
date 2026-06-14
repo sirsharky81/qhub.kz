@@ -23,6 +23,8 @@
     "exifr": "^7.1.3",
     "face-api.js": "^0.22.2",
     "file-saver": "^2.0.5",
+    "heic2any": "^0.0.4",
+    "jszip": "^3.10.1",
     "music-metadata": "^11.13.0",
     "next": "16.2.7",
     "next-intl": "^4.13.0",
@@ -31,7 +33,8 @@
     "pdfjs-dist": "^6.0.227",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "react-image-crop": "^11.0.10"
+    "react-image-crop": "^11.0.10",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

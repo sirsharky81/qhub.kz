@@ -119,6 +119,22 @@ export const apps: App[] = [
     sortOrder: 6,
   },
   {
+    id: "file-converter",
+    title: "QHub Smart File Converter",
+    description:
+      "Умный помощник для файлов: HEIC, MP4, PDF, XLSX, EPUB — всё локально в браузере.",
+    longDescription:
+      "Загрузите файл — сервис определит тип и предложит лучшие действия. Конвертация изображений, видео, аудио, PDF, таблиц и книг без загрузки на сервер. Встроенный генератор PWA-иконок.",
+    href: "/tools/file-converter",
+    tags: ["tools", "productivity"],
+    icon: "🔄",
+    color: "from-indigo-500/10 to-violet-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    featured: true,
+    sortOrder: 3,
+  },
+  {
     id: "pdf-pages",
     title: "PDF Pages",
     description:
