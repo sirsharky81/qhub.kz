@@ -1,10 +1,10 @@
-const CACHE_NAME = "qhub-v3";
+const CACHE_NAME = "qhub-v4";
 const PRECACHE = [
   "/manifest.json",
-  "/icon.svg",
   "/icon-192.png",
   "/icon-512.png",
   "/apple-touch-icon.png",
+  "/track-placeholder.png",
 ];
 
 self.addEventListener("install", (event) => {

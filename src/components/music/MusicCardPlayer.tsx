@@ -81,9 +81,8 @@ export function MusicCardPlayer({ embedded = false, isPlaying: isPlayingProp }: 
               // eslint-disable-next-line @next/next/no-img-element
               <img src={currentTrack.coverArtUrl} alt="" className="w-full h-full object-cover" />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-sm bg-gray-100">
-                🎵
-              </div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src="/track-placeholder.png" alt="" className="w-full h-full object-cover" />
             )}
           </div>
           <div className="flex-1 min-w-0">

@@ -32,7 +32,8 @@ export function GlobalMiniPlayer() {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={currentTrack.coverArtUrl} alt="" className="w-full h-full object-cover" />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-sm">🎵</div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src="/track-placeholder.png" alt="" className="w-full h-full object-cover" />
             )}
           </Link>
 

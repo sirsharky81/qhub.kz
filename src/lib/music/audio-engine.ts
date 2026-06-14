@@ -736,13 +736,20 @@ export class AudioEngine {
         ? `Очередь · ${queueInfo.queueIndex + 1} из ${queueInfo.queueLength}`
         : "QHub Music");
 
+    // Нет обложки → ставим брендовый плейсхолдер QHub Music (иначе iOS показывает иконку Apple Music).
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const artwork: MediaImage[] = track.coverArtUrl
+      ? [{ src: track.coverArtUrl, sizes: "512x512", type: "image/jpeg" }]
+      : [
+          { src: `${origin}/track-placeholder.png`, sizes: "512x512", type: "image/png" },
+          { src: `${origin}/icon-192.png`, sizes: "192x192", type: "image/png" },
+        ];
+
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist,
       album: albumLabel,
-      artwork: track.coverArtUrl
-        ? [{ src: track.coverArtUrl, sizes: "512x512", type: "image/jpeg" }]
-        : [],
+      artwork,
     });
 
     // КЛЮЧЕВОЕ: iOS сбрасывает раскладку кнопок при смене metadata — переустанавливаем

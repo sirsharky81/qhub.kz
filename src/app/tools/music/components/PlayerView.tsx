@@ -108,7 +108,12 @@ export function PlayerView() {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-2xl">🎵</div>
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src="/track-placeholder.png"
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                 )}
               </div>
 

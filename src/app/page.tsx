@@ -202,8 +202,9 @@ export default function Home() {
       <footer className="mt-auto border-t border-gray-100 py-8 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gray-900 flex items-center justify-center">
-              <span className="text-white font-bold text-xs leading-none">Q</span>
+            <div className="w-6 h-6 rounded-md overflow-hidden flex-shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icon-192.png" alt="QHub" className="w-full h-full object-cover" />
             </div>
             <span className="text-sm font-medium text-gray-500">
               QHub<span className="text-gray-300">.kz</span>

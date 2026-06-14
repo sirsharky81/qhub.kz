@@ -13,8 +13,9 @@ export default function MerchPage() {
       {/* Thin top bar */}
       <div className="flex-shrink-0 h-11 border-b border-gray-200 bg-white flex items-center px-4 gap-3">
         <Link href="/" className="flex items-center gap-2 group">
-          <div className="w-5 h-5 rounded bg-gray-900 flex items-center justify-center">
-            <span className="text-white font-bold text-[10px] leading-none">Q</span>
+          <div className="w-5 h-5 rounded overflow-hidden flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icon-192.png" alt="QHub" className="w-full h-full object-cover" />
           </div>
           <span className="text-sm font-medium text-gray-900 group-hover:text-gray-600 transition-colors">
             QHub.kz

@@ -133,7 +133,8 @@ export function LibraryPanel() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={group.coverArtUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="w-full h-full flex items-center justify-center text-xs">💿</span>
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src="/track-placeholder.png" alt="" className="w-full h-full object-cover" />
                   )}
                 </div>
                 <div className="min-w-0">

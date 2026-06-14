@@ -16,8 +16,9 @@ export default function PassportPhotoPage() {
           href="/"
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors"
         >
-          <div className="w-5 h-5 rounded bg-gray-900 flex items-center justify-center">
-            <span className="text-white font-bold text-[10px] leading-none">Q</span>
+          <div className="w-5 h-5 rounded overflow-hidden flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icon-192.png" alt="QHub" className="w-full h-full object-cover" />
           </div>
           <span className="font-medium">QHub.kz</span>
         </Link>

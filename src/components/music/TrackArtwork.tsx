@@ -35,7 +35,8 @@ export function TrackArtwork({ coverArtUrl, size = "sm", className = "" }: Track
           onError={() => setFailed(true)}
         />
       ) : (
-        <span aria-hidden>🎵</span>
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src="/track-placeholder.png" alt="" className="w-full h-full object-cover" />
       )}
     </div>
   );

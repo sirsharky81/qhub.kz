@@ -15,8 +15,13 @@ export default function Navbar() {
 
           {/* Logo + tagline */}
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-7 h-7 rounded-lg bg-gray-900 flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold text-sm leading-none tracking-tight">Q</span>
+            <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icon-192.png"
+                alt="QHub"
+                className="w-full h-full object-cover"
+              />
             </div>
             <div className="flex flex-col leading-none">
               <span className="font-semibold text-gray-900 tracking-tight text-sm">
