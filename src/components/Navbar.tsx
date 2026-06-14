@@ -18,7 +18,7 @@ export default function Navbar() {
             <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="/icon-192.png?v=3"
+                src="/icon-192.png?v=4"
                 alt="QHub"
                 className="w-full h-full object-cover"
               />

@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v6";
+const CACHE_NAME = "qhub-v7";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",

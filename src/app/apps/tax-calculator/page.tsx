@@ -19,7 +19,7 @@ export default function TaxCalculatorPage() {
         >
           <div className="w-5 h-5 rounded overflow-hidden flex-shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon-192.png?v=3" alt="QHub" className="w-full h-full object-cover" />
+            <img src="/icon-192.png?v=4" alt="QHub" className="w-full h-full object-cover" />
           </div>
           <span className="font-medium">QHub.kz</span>
         </Link>
