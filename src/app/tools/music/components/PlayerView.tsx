@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AGENT_DEBUG_ENABLED } from "@/lib/agent-debug-enabled";
 import { AudioDebugPanel } from "@/components/music/AudioDebugPanel";
 import { AudioEqualizer } from "@/components/music/AudioEqualizer";
 import { SeekBar } from "@/components/music/SeekBar";
@@ -12,7 +13,7 @@ const DEBUG_TAP_COUNT = 5;
 const DEBUG_TAP_WINDOW_MS = 2000;
 
 function isDebugEnabledInStorage(): boolean {
-  if (typeof window === "undefined") return false;
+  if (!AGENT_DEBUG_ENABLED || typeof window === "undefined") return false;
   return (
     window.location.search.includes("debug=1") ||
     localStorage.getItem(DEBUG_STORAGE_KEY) === "1"
@@ -48,6 +49,7 @@ export function PlayerView() {
   } = useMusicPlayer();
 
   const enableDebug = useCallback(() => {
+    if (!AGENT_DEBUG_ENABLED) return;
     localStorage.setItem(DEBUG_STORAGE_KEY, "1");
     setShowDebug(true);
     showToast("Debug включён");
@@ -55,7 +57,7 @@ export function PlayerView() {
   }, [showToast]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !AGENT_DEBUG_ENABLED) return;
     if (window.location.search.includes("debug=1")) {
       localStorage.setItem(DEBUG_STORAGE_KEY, "1");
     }
@@ -63,7 +65,7 @@ export function PlayerView() {
   }, []);
 
   const handleDebugTap = useCallback(() => {
-    if (showDebug) return;
+    if (!AGENT_DEBUG_ENABLED || showDebug) return;
 
     const now = Date.now();
     if (now - lastTapAtRef.current > DEBUG_TAP_WINDOW_MS) {
@@ -189,7 +191,9 @@ export function PlayerView() {
           </>
         )}
 
-        <AudioDebugPanel enabled={showDebug} />
+        {AGENT_DEBUG_ENABLED && showDebug ? (
+          <AudioDebugPanel enabled={showDebug} />
+        ) : null}
       </div>
     </div>
   );

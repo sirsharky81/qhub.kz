@@ -1,4 +1,5 @@
 import exifr from "exifr";
+import { AGENT_DEBUG_ENABLED } from "@/lib/agent-debug-enabled";
 import { getFormatRule, type PhotoFormatId } from "./format-rules";
 import {
   getChinPoint,
@@ -200,8 +201,10 @@ export function passportDebugLog(
   message: string,
   data: Record<string, unknown>,
   hypothesisId: string,
-  runId = "pre-fix"
+  runId = "pre-fix",
 ): void {
+  if (!AGENT_DEBUG_ENABLED) return;
+
   const entry = {
     sessionId: "10ddbd",
     location,

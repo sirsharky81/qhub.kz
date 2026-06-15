@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { AGENT_DEBUG_ENABLED } from "@/lib/agent-debug-enabled";
 import { clearAgentDebugLogs, getAgentDebugLogs } from "@/lib/debug-agent-log";
 
 const DEBUG_FLAG = "qhub-debug-1c0a94";
@@ -10,6 +11,7 @@ export default function DebugLogPanel() {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
+    if (!AGENT_DEBUG_ENABLED) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("debug") === "1c0a94") {
       localStorage.setItem(DEBUG_FLAG, "1");
@@ -51,7 +53,7 @@ export default function DebugLogPanel() {
     setCount(0);
   }, []);
 
-  if (!visible) return null;
+  if (!AGENT_DEBUG_ENABLED || !visible) return null;
 
   return (
     <div className="fixed bottom-2 left-2 right-2 z-[9999] rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs shadow-lg">

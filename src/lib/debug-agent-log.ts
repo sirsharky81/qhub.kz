@@ -1,3 +1,5 @@
+import { AGENT_DEBUG_ENABLED } from "./agent-debug-enabled";
+
 const SESSION_ID = "1c0a94";
 const INGEST_URL = "http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e";
 const STORAGE_KEY = "qhub-debug-1c0a94";
@@ -21,8 +23,7 @@ export function agentDebugLog(
   hypothesisId: DebugHypothesis = "H1-handlers",
   runId = "pre-fix",
 ): void {
-  // runId passed by caller; post-fix runs tagged explicitly
-  if (typeof window === "undefined") return;
+  if (!AGENT_DEBUG_ENABLED || typeof window === "undefined") return;
 
   const entry = {
     sessionId: SESSION_ID,
@@ -63,11 +64,11 @@ export function agentDebugLog(
 }
 
 export function getAgentDebugLogs(): string {
-  if (typeof window === "undefined") return "[]";
+  if (!AGENT_DEBUG_ENABLED || typeof window === "undefined") return "[]";
   return localStorage.getItem(STORAGE_KEY) ?? "[]";
 }
 
 export function clearAgentDebugLogs(): void {
-  if (typeof window === "undefined") return;
+  if (!AGENT_DEBUG_ENABLED || typeof window === "undefined") return;
   localStorage.removeItem(STORAGE_KEY);
 }
