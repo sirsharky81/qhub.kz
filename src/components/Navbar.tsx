@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import IdeaModal from "./IdeaModal";
+import QHubBrandLink from "./QHubBrandLink";
 
 export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -13,25 +14,7 @@ export default function Navbar() {
       <header className="fixed top-0 left-0 right-0 z-50 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
         <nav className="mx-auto max-w-6xl px-4 sm:px-6 flex items-center justify-between h-14">
 
-          {/* Logo + tagline */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/icon-192.png?v=4"
-                alt="QHub"
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div className="flex flex-col leading-none">
-              <span className="font-semibold text-gray-900 tracking-tight text-sm">
-                QHub<span className="text-gray-400">.kz</span>
-              </span>
-              <span className="text-[9px] text-gray-400 tracking-wide hidden sm:block">
-                Первый казахский хаб полезных приложений
-              </span>
-            </div>
-          </Link>
+          <QHubBrandLink />
 
           {/* Desktop links */}
           <div className="hidden md:flex items-center gap-6">

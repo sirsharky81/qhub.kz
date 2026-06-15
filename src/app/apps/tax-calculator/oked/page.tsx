@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import ServicePageHeader from "@/components/ServicePageHeader";
 import {
   SELF_EMPLOYED_OKED,
   SELF_EMPLOYED_OKED_SOURCE_URL,
@@ -14,31 +15,22 @@ export const metadata: Metadata = {
 export default function SelfEmployedOkedPage() {
   return (
     <div className="flex flex-col min-h-screen bg-white">
-      <div className="flex-shrink-0 h-11 border-b border-gray-200 bg-white flex items-center px-4 gap-3">
-        <Link
-          href="/"
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors"
-        >
-          <div className="w-5 h-5 rounded overflow-hidden flex-shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon-192.png?v=4" alt="QHub" className="w-full h-full object-cover" />
-          </div>
-          <span className="font-medium">QHub.kz</span>
-        </Link>
-
-        <span className="text-gray-300 select-none">/</span>
+      <ServicePageHeader>
+        <span className="text-gray-300 select-none shrink-0">/</span>
 
         <Link
           href="/apps/tax-calculator"
-          className="text-sm text-gray-500 hover:text-gray-900 transition-colors"
+          className="text-xs sm:text-sm text-gray-500 hover:text-gray-900 transition-colors truncate"
         >
           Налоговый калькулятор
         </Link>
 
-        <span className="text-gray-300 select-none">/</span>
+        <span className="text-gray-300 select-none shrink-0">/</span>
 
-        <span className="text-sm font-medium text-gray-800">ОКЭД самозанятых</span>
-      </div>
+        <span className="text-xs sm:text-sm font-medium text-gray-800 truncate">
+          ОКЭД самозанятых
+        </span>
+      </ServicePageHeader>
 
       <main className="flex-1 overflow-y-auto bg-dot-grid">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">

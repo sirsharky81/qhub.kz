@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import ServicePageHeader from "@/components/ServicePageHeader";
 
 export const metadata: Metadata = {
   title: "Merch — QHub.kz",
@@ -10,26 +11,19 @@ export const metadata: Metadata = {
 export default function MerchPage() {
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-900">
-      {/* Thin top bar */}
-      <div className="flex-shrink-0 h-11 border-b border-gray-200 bg-white flex items-center px-4 gap-3">
-        <Link href="/" className="flex items-center gap-2 group">
-          <div className="w-5 h-5 rounded overflow-hidden flex-shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon-192.png?v=4" alt="QHub" className="w-full h-full object-cover" />
-          </div>
-          <span className="text-sm font-medium text-gray-900 group-hover:text-gray-600 transition-colors">
-            QHub.kz
-          </span>
-        </Link>
-        <span className="text-gray-300 select-none">/</span>
-        <span className="text-sm font-medium text-gray-800">Merch</span>
-        <Link
-          href="/"
-          className="ml-auto text-xs text-gray-400 hover:text-gray-700 transition-colors"
-        >
-          ← На главную
-        </Link>
-      </div>
+      <ServicePageHeader
+        trailing={
+          <Link
+            href="/"
+            className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
+          >
+            ← На главную
+          </Link>
+        }
+      >
+        <span className="text-gray-300 select-none shrink-0">/</span>
+        <span className="text-xs sm:text-sm font-medium text-gray-800">Merch</span>
+      </ServicePageHeader>
 
       {/* Hero */}
       <section className="relative overflow-hidden flex flex-col items-center text-center px-4 pt-24 pb-16 bg-dot-grid">
