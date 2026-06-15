@@ -8,7 +8,8 @@ export type AppTag =
   | "food"
   | "music"
   | "editor"
-  | "taxes";
+  | "taxes"
+  | "documents";
 
 export interface App {
   id: string;
@@ -40,6 +41,7 @@ export const TAG_LABELS: Record<AppTag, string> = {
   music: "Музыка",
   editor: "Редактор",
   taxes: "Налоги",
+  documents: "Документы",
 };
 
 export const apps: App[] = [
@@ -145,6 +147,21 @@ export const apps: App[] = [
     tags: ["tools", "editor"],
     icon: "📄",
     color: "from-rose-500/10 to-rose-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 5,
+  },
+  {
+    id: "document-scanner",
+    title: "Сканер документов",
+    description:
+      "Сканируйте с камеры или файла: автообрезка, фильтры и многостраничный PDF — локально в браузере.",
+    longDescription:
+      "Превратите фото документов в качественный PDF формата A4. Автоопределение границ, коррекция, альбомная ориентация, печать и экспорт. Вся обработка на устройстве — без сервера.",
+    href: "/tools/document-scanner",
+    tags: ["tools", "documents"],
+    icon: "/tools/document-scanner/icon-192.png",
+    color: "from-slate-500/10 to-slate-600/5",
     author: "QHub",
     authorType: "qhub",
     sortOrder: 5,

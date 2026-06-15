@@ -1,0 +1,80 @@
+"use client";
+
+import type { ScannerStep } from "@/lib/document-scanner/types";
+
+const STEPS = ["Обрезка", "Редактирование", "Страницы"] as const;
+
+interface Props {
+  step: ScannerStep;
+}
+
+function getStepIndex(step: ScannerStep): 0 | 1 | 2 | null {
+  switch (step) {
+    case "crop":
+      return 0;
+    case "edit":
+    case "compose":
+      return 1;
+    case "pages":
+      return 2;
+    default:
+      return null;
+  }
+}
+
+function getStep2Label(step: ScannerStep): string {
+  return step === "compose" ? "Объединение" : STEPS[1];
+}
+
+export default function ScannerStepIndicator({ step }: Props) {
+  const index = getStepIndex(step);
+  if (index === null) return null;
+
+  const step2Label = getStep2Label(step);
+
+  return (
+    <div className="shrink-0 bg-white/95 backdrop-blur-sm border-b border-gray-100">
+      <div className="flex items-center max-w-2xl mx-auto px-4 py-2.5 gap-2">
+        {STEPS.map((label, i) => {
+          const displayLabel = i === 1 ? step2Label : label;
+          const isActive = i === index;
+          const isDone = i < index;
+          return (
+            <div key={label} className="flex items-center gap-2 flex-1 last:flex-none">
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <div
+                  className={[
+                    "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
+                    isActive
+                      ? "bg-gray-900 text-white"
+                      : isDone
+                        ? "bg-emerald-500 text-white"
+                        : "bg-gray-100 text-gray-400",
+                  ].join(" ")}
+                >
+                  {isDone ? "✓" : i + 1}
+                </div>
+                <span
+                  className={[
+                    "text-xs font-medium hidden sm:inline",
+                    isActive ? "text-gray-900" : isDone ? "text-emerald-600" : "text-gray-400",
+                  ].join(" ")}
+                >
+                  {displayLabel}
+                </span>
+              </div>
+              {i < STEPS.length - 1 && (
+                <div
+                  className={[
+                    "flex-1 h-px transition-colors",
+                    isDone ? "bg-emerald-300" : "bg-gray-100",
+                  ].join(" ")}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

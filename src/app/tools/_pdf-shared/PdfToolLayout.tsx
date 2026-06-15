@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 interface PdfToolLayoutProps {
   title: string;
   icon?: string;
+  /** PNG/SVG app icon (preferred over emoji) */
+  iconSrc?: string;
   children: ReactNode;
   badge?: ReactNode;
   /** Корневой контейнер страницы */
@@ -13,16 +15,17 @@ interface PdfToolLayoutProps {
 export function PdfToolLayout({
   title,
   icon = "📄",
+  iconSrc,
   children,
   badge,
   shellClassName = "min-h-screen bg-white",
 }: PdfToolLayoutProps) {
   return (
     <div className={`flex flex-col ${shellClassName}`}>
-      <div className="flex-shrink-0 h-11 border-b border-gray-200 bg-white flex items-center px-4 gap-3 print:hidden">
+      <div className="flex-shrink-0 h-11 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 flex items-center px-4 gap-3 print:hidden">
         <Link
           href="/"
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors"
+          className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
         >
           <div className="w-5 h-5 rounded overflow-hidden flex-shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -34,10 +37,17 @@ export function PdfToolLayout({
         <span className="text-gray-300 select-none">/</span>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-base" aria-hidden>
-            {icon}
-          </span>
-          <span className="text-sm font-medium text-gray-800">{title}</span>
+          {iconSrc ? (
+            <div className="w-5 h-5 rounded-[22%] overflow-hidden flex-shrink-0 shadow-sm">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={iconSrc} alt="" className="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <span className="text-base" aria-hidden>
+              {icon}
+            </span>
+          )}
+          <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{title}</span>
         </div>
 
         <div className="ml-auto flex items-center gap-2">

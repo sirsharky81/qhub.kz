@@ -122,9 +122,13 @@ export function AppCard({ app, showPin = true, draggable = false }: AppCardProps
                 <Image
                   src={app.icon}
                   alt=""
-                  width={28}
-                  height={28}
-                  className="object-contain"
+                  width={40}
+                  height={40}
+                  className={
+                    app.id === "document-scanner"
+                      ? "w-full h-full object-cover"
+                      : "w-7 h-7 object-contain"
+                  }
                 />
               ) : (
                 <span className="text-2xl leading-none">{app.icon}</span>
