@@ -66,7 +66,7 @@ export interface FileAnalysis {
   processBlockReason?: string;
   metadata: FileMetadata;
   deviceType: DeviceType;
-  /** Битое имя из-за старой кодировки (часто MP3) */
+  /** Битая кодировка в имени файла или ID3-тегах (title/artist) */
   filenameEncodingIssue?: boolean;
 }
 

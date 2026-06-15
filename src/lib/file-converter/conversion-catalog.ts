@@ -56,7 +56,7 @@ export const CONVERSION_CATALOG: CatalogEntry[] = [
   { id: "remove-exif", actionId: "image-remove-exif", label: "Удалить EXIF", inputFormats: "JPG, PNG, WebP", outputFormats: "тот же формат", description: "Скрыть геолокацию и метаданные", icon: "🔒", category: "photo" },
 
   // Аудио
-  { id: "fix-mp3-name", actionId: "audio-fix-filename", label: "Исправить имя MP3", inputFormats: "MP3", outputFormats: "MP3", description: "Автоисправление битой кодировки (CP1251/UTF-8) и имя из ID3-тегов", icon: "🔤", category: "audio", featured: true },
+  { id: "fix-mp3-name", actionId: "audio-fix-filename", label: "Исправить имя MP3", inputFormats: "MP3", outputFormats: "MP3", description: "Имя файла и ID3-теги (title/artist в плеере): автоисправление CP1251/UTF-8", icon: "🔤", category: "audio", featured: true },
   { id: "any-mp3", actionId: "audio-to-mp3", label: "→ MP3", inputFormats: "WAV, FLAC, M4A, AAC, OGG, AMR", outputFormats: "MP3", description: "Универсальный формат, имя исправляется автоматически", icon: "🎵", category: "audio", featured: true },
   { id: "mp3-wav", actionId: "audio-to-wav", label: "→ WAV", inputFormats: "MP3, M4A, FLAC, OGG", outputFormats: "WAV", description: "Без сжатия, для монтажа", icon: "🎵", category: "audio" },
   { id: "mp3-aac", actionId: "audio-to-aac", label: "→ AAC (M4A)", inputFormats: "MP3, WAV, FLAC", outputFormats: "M4A", description: "Для Apple-устройств", icon: "🎵", category: "audio" },

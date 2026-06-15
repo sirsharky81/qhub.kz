@@ -114,7 +114,11 @@ async function checkExif(file: File): Promise<boolean> {
   }
 }
 
-async function analyzeMedia(file: File, category: "video" | "audio", metadata: FileMetadata): Promise<void> {
+async function analyzeMedia(
+  file: File,
+  category: "video" | "audio",
+  metadata: FileMetadata,
+): Promise<{ tagEncodingIssue?: boolean }> {
   try {
     const tags = await parseBlob(file);
     const format = tags.format;
@@ -129,10 +133,17 @@ async function analyzeMedia(file: File, category: "video" | "audio", metadata: F
         bitrate: format.bitrate,
         codec: format.codec,
       };
+      const title = tags.common.title?.trim();
+      const artist = tags.common.artist?.trim();
+      const tagEncodingIssue =
+        Boolean(title && looksLikeBrokenEncoding(title)) ||
+        Boolean(artist && looksLikeBrokenEncoding(artist));
+      return { tagEncodingIssue };
     }
   } catch {
     /* optional metadata */
   }
+  return {};
 }
 
 async function analyzePdf(file: File, metadata: FileMetadata): Promise<void> {
@@ -210,15 +221,19 @@ export async function analyzeFile(file: File): Promise<FileAnalysis> {
 
   await initPdfWorker();
 
+  let tagEncodingIssue = false;
+
   try {
     switch (category) {
       case "image":
         await analyzeImage(file, metadata);
         break;
       case "video":
-      case "audio":
-        await analyzeMedia(file, category, metadata);
+      case "audio": {
+        const media = await analyzeMedia(file, category, metadata);
+        tagEncodingIssue = media.tagEncodingIssue ?? false;
         break;
+      }
       case "pdf":
         await analyzePdf(file, metadata);
         break;
@@ -261,7 +276,9 @@ export async function analyzeFile(file: File): Promise<FileAnalysis> {
     metadata,
     deviceType,
     filenameEncodingIssue:
-      category === "audio" && (extension === "mp3" || extension === "m4a") && looksLikeBrokenEncoding(file.name),
+      category === "audio" &&
+      (extension === "mp3" || extension === "m4a") &&
+      (looksLikeBrokenEncoding(file.name) || tagEncodingIssue),
   };
 }
 

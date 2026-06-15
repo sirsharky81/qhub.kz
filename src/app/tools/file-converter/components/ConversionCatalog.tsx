@@ -119,9 +119,9 @@ export function ConversionCatalog({
       </div>
 
       <p className="text-[11px] text-gray-400 leading-relaxed px-1">
-        <span className="text-gray-600 font-medium">Аудио:</span> при конвертации в MP3 и «Исправить
-        имя MP3» битые названия (CP1251/UTF-8) восстанавливаются автоматически; если есть ID3-теги —
-        имя берётся из них.
+        <span className="text-gray-600 font-medium">Аудио:</span> «Исправить имя MP3» восстанавливает битую
+        кодировку (CP1251/UTF-8) в имени файла и в ID3-тегах (title, artist), которые показывает плеер.
+        При конвертации в MP3 имя файла тоже исправляется автоматически.
       </p>
     </section>
   );
@@ -182,7 +182,7 @@ function CatalogRow({
             )}
             {entry.id === "fix-mp3-name" && (
               <span className="text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">
-                авто-имя
+                имя + теги
               </span>
             )}
           </div>

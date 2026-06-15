@@ -1,6 +1,6 @@
 import type { ProcessProgress } from "../types";
 import { runFfmpeg, outputFilename, uint8ToBlob } from "../ffmpeg-client";
-import { applyFilenameFix, resolveAudioFilename } from "../filename-encoding";
+import { applyFilenameFix, buildMp3MetadataArgs, resolveMp3Fix } from "../filename-encoding";
 
 type AudioFormat = "mp3" | "wav" | "aac" | "flac" | "ogg";
 
@@ -21,8 +21,27 @@ export async function fixMp3Filename(
   file: File,
   onProgress?: (p: ProcessProgress) => void,
 ): Promise<{ blob: Blob; filename: string; mimeType: string }> {
-  onProgress?.({ stage: "analyze", percent: 40, message: "Чтение имени и тегов…" });
-  const resolved = await resolveAudioFilename(file);
+  onProgress?.({ stage: "analyze", percent: 30, message: "Чтение имени и ID3-тегов…" });
+  const resolved = await resolveMp3Fix(file);
+
+  if (resolved.tagsFixed) {
+    onProgress?.({ stage: "encode", percent: 50, message: "Запись исправленных тегов в файл…" });
+    const out = `out_${Date.now()}.mp3`;
+    const metadataArgs = buildMp3MetadataArgs(resolved.tags);
+    const data = await runFfmpeg(
+      file,
+      ["-c", "copy", "-map", "0", ...metadataArgs],
+      out,
+      onProgress,
+    );
+    onProgress?.({ stage: "done", percent: 100, message: "Готово" });
+    return {
+      blob: uint8ToBlob(data, "audio/mpeg"),
+      filename: resolved.filename,
+      mimeType: "audio/mpeg",
+    };
+  }
+
   onProgress?.({ stage: "done", percent: 100, message: "Готово" });
   return {
     blob: file,

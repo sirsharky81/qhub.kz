@@ -32,8 +32,8 @@ const VIDEO_ACTIONS: SmartAction[] = [
 ];
 
 const AUDIO_ACTIONS: SmartAction[] = [
-  { id: "audio-fix-filename", label: "Исправить имя файла", description: "Битая кодировка CP1251/UTF-8 → читаемое имя", recommended: true, icon: "🔤" },
-  { id: "audio-to-mp3", label: "Конвертировать в MP3", description: "Имя исправляется автоматически", recommended: true, icon: "🎵" },
+  { id: "audio-fix-filename", label: "Исправить имя файла", description: "Имя файла и название в плеере (ID3): CP1251/UTF-8 → читаемый текст", recommended: true, icon: "🔤" },
+  { id: "audio-to-mp3", label: "Конвертировать в MP3", description: "Имя файла исправляется автоматически", recommended: true, icon: "🎵" },
   { id: "audio-to-wav", label: "Конвертировать в WAV", description: "Без сжатия", icon: "🎵" },
   { id: "audio-to-aac", label: "Конвертировать в AAC", description: "Для Apple", icon: "🎵" },
   { id: "audio-to-flac", label: "Конвертировать в FLAC", description: "Без потерь", icon: "🎵" },
