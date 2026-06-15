@@ -31,8 +31,7 @@ export function PdfToolLayout({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/icon-192.png?v=4" alt="QHub" className="w-full h-full object-cover" />
           </div>
-          <span className="font-medium sm:hidden">QHub</span>
-          <span className="font-medium hidden sm:inline">QHub.kz</span>
+          <span className="font-medium">QHub.kz</span>
         </Link>
 
         <span className="text-gray-300 select-none shrink-0">/</span>
