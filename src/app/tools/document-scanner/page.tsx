@@ -36,14 +36,6 @@ const webAppJsonLd = {
   provider: { "@type": "Organization", name: "QHub", url: "https://qhub.kz" },
 };
 
-function PrivacyBadge() {
-  return (
-    <span className="text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full border border-emerald-200 text-emerald-600 bg-emerald-50">
-      🔒 локально
-    </span>
-  );
-}
-
 const SCANNER_ICON = "/tools/document-scanner/icon-192.png";
 
 export default function DocumentScannerPage() {
@@ -52,7 +44,7 @@ export default function DocumentScannerPage() {
       title="Сканер документов"
       iconSrc={SCANNER_ICON}
       shellClassName="min-h-[100dvh] flex flex-col bg-white"
-      badge={<PrivacyBadge />}
+      badge={false}
     >
       <script
         type="application/ld+json"
