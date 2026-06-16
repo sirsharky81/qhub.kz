@@ -2,15 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FilterMode, PageAdjustments, PageOrientation } from "@/lib/document-scanner/types";
-import { blobToCanvas } from "@/lib/document-scanner/canvas-utils";
+import { blobToCanvas, detectContentRect, type ContentRect } from "@/lib/document-scanner/canvas-utils";
 import { applyFilters } from "@/lib/document-scanner/filters";
 import {
   computeDrawSize,
-  computeMaxFillDrawSize,
   getAvailArea,
   getItemBounds,
   pointerToLocal,
-  widthFracFromLocalPointer,
+  widthFracFromDragRatio,
 } from "@/lib/document-scanner/layout-utils";
 import { getPageAspectClass, getPreviewCanvasSize } from "@/lib/document-scanner/page-size";
 import {
@@ -49,7 +48,8 @@ export default function A4InteractivePreview({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const filteredRef = useRef<HTMLCanvasElement | null>(null);
-  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+  const contentRef = useRef<ContentRect | null>(null);
+  const [layoutSize, setLayoutSize] = useState<{ w: number; h: number } | null>(null);
   const [ready, setReady] = useState(false);
 
   const { width: PAGE_W, height: PAGE_H } = useMemo(
@@ -66,7 +66,9 @@ export default function A4InteractivePreview({
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     const filtered = filteredRef.current;
-    if (!canvas || !filtered || !imgSize) return;
+    const layout = layoutSize;
+    const content = contentRef.current;
+    if (!canvas || !filtered || !layout || !content) return;
 
     canvas.width = PAGE_W;
     canvas.height = PAGE_H;
@@ -75,7 +77,7 @@ export default function A4InteractivePreview({
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, PAGE_W, PAGE_H);
 
-    const { drawW, drawH } = computeDrawSize(imgSize.w, imgSize.h, widthFrac, availW, availH);
+    const { drawW, drawH } = computeDrawSize(layout.w, layout.h, widthFrac, availW, availH);
     const cx = margin + x * availW;
     const cy = margin + y * availH;
 
@@ -87,9 +89,19 @@ export default function A4InteractivePreview({
     ctx.setLineDash([6, 4]);
     ctx.strokeRect(-drawW / 2 - 2, -drawH / 2 - 2, drawW + 4, drawH + 4);
     ctx.setLineDash([]);
-    ctx.drawImage(filtered, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.drawImage(
+      filtered,
+      content.sx,
+      content.sy,
+      content.sw,
+      content.sh,
+      -drawW / 2,
+      -drawH / 2,
+      drawW,
+      drawH,
+    );
     ctx.restore();
-  }, [imgSize, x, y, rotation, widthFrac, margin, availW, availH, PAGE_W, PAGE_H]);
+  }, [x, y, rotation, widthFrac, margin, availW, availH, PAGE_W, PAGE_H, layoutSize]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,8 +109,11 @@ export default function A4InteractivePreview({
       setReady(false);
       const src = await blobToCanvas(imageBlob);
       if (cancelled) return;
-      filteredRef.current = applyFilters(src, filter, adjustments);
-      setImgSize({ w: src.width, h: src.height });
+      const filtered = applyFilters(src, filter, adjustments);
+      filteredRef.current = filtered;
+      const content = detectContentRect(filtered);
+      contentRef.current = content;
+      setLayoutSize({ w: content.sw, h: content.sh });
       setReady(true);
     })();
     return () => {
@@ -120,49 +135,69 @@ export default function A4InteractivePreview({
     };
   }
 
-  function applyResize(clientX: number, clientY: number) {
-    if (!imgSize) return;
-    const pt = canvasPoint(clientX, clientY);
+  function beginResize(e: React.PointerEvent) {
+    if (!layoutSize) return;
+
+    const pt = canvasPoint(e.clientX, e.clientY);
     if (!pt) return;
+
     const item = { x, y, widthFrac, rotation };
-    const { cx, cy } = getItemBounds(item, imgSize.w, imgSize.h, PAGE_W, PAGE_H);
-    let local = pointerToLocal(pt.x, pt.y, cx, cy, rotation);
-
-    // Allow dragging toward sheet edges (finger may go outside the canvas on mobile).
-    const maxFill = computeMaxFillDrawSize(imgSize.w, imgSize.h, availW, availH);
-    const maxHalfW = maxFill.drawW / 2;
-    const maxHalfH = maxFill.drawH / 2;
-    if (Math.abs(local.x) > maxHalfW || Math.abs(local.y) > maxHalfH) {
-      local = {
-        x: Math.sign(local.x || 1) * Math.max(Math.abs(local.x), maxHalfW),
-        y: Math.sign(local.y || 1) * Math.max(Math.abs(local.y), maxHalfH),
-      };
-    }
-
-    onWidthFracChange(
-      widthFracFromLocalPointer(local.x, local.y, imgSize.w, imgSize.h, availW, availH),
+    const { cx, cy, drawW, drawH } = getItemBounds(
+      item,
+      layoutSize.w,
+      layoutSize.h,
+      PAGE_W,
+      PAGE_H,
     );
+    const startLocal = pointerToLocal(pt.x, pt.y, cx, cy, rotation);
+    const startWidthFrac = widthFrac;
+
+    startPointerDrag(e, (ev) => {
+      const movePt = canvasPoint(ev.clientX, ev.clientY);
+      if (!movePt) return;
+      const local = pointerToLocal(movePt.x, movePt.y, cx, cy, rotation);
+      onWidthFracChange(
+        widthFracFromDragRatio(
+          local.x,
+          local.y,
+          startLocal.x,
+          startLocal.y,
+          startWidthFrac,
+          layoutSize.w,
+          layoutSize.h,
+          availW,
+          availH,
+        ),
+      );
+    });
   }
 
   const handlePositions =
-    imgSize &&
-    (() => {
-      const item = { x, y, widthFrac, rotation };
-      const { cx, cy, drawW, drawH } = getItemBounds(item, imgSize.w, imgSize.h, PAGE_W, PAGE_H);
-      const rad = (rotation * Math.PI) / 180;
-      const cos = Math.cos(rad);
-      const sin = Math.sin(rad);
-      const locals = [
-        { x: -drawW / 2, y: -drawH / 2 },
-        { x: drawW / 2, y: -drawH / 2 },
-        { x: drawW / 2, y: drawH / 2 },
-        { x: -drawW / 2, y: drawH / 2 },
-      ];
-      return locals.map(({ x: lx, y: ly }) => ({
-        x: cx + lx * cos - ly * sin,
-        y: cy + lx * sin + ly * cos,
-      }));
-    })();
+    layoutSize && ready
+      ? (() => {
+          const item = { x, y, widthFrac, rotation };
+          const { cx, cy, drawW, drawH } = getItemBounds(
+            item,
+            layoutSize.w,
+            layoutSize.h,
+            PAGE_W,
+            PAGE_H,
+          );
+          const rad = (rotation * Math.PI) / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+          const locals = [
+            { x: -drawW / 2, y: -drawH / 2 },
+            { x: drawW / 2, y: -drawH / 2 },
+            { x: drawW / 2, y: drawH / 2 },
+            { x: -drawW / 2, y: drawH / 2 },
+          ];
+          return locals.map(({ x: lx, y: ly }) => ({
+            x: cx + lx * cos - ly * sin,
+            y: cy + lx * sin + ly * cos,
+          }));
+        })()
+      : null;
 
   return (
     <div className={`relative w-full max-w-xs ${className}`}>
@@ -172,12 +207,18 @@ export default function A4InteractivePreview({
         height={PAGE_H}
         className={`w-full ${aspectClass} border border-gray-200 rounded-xl shadow-sm bg-white touch-none`}
         onPointerDown={(e) => {
-          if (!onPositionChange || !imgSize) return;
+          if (!onPositionChange || !layoutSize) return;
           const pt = canvasPoint(e.clientX, e.clientY);
           if (!pt) return;
 
           const item = { x, y, widthFrac, rotation };
-          const { cx, cy, drawW, drawH } = getItemBounds(item, imgSize.w, imgSize.h, PAGE_W, PAGE_H);
+          const { cx, cy, drawW, drawH } = getItemBounds(
+            item,
+            layoutSize.w,
+            layoutSize.h,
+            PAGE_W,
+            PAGE_H,
+          );
           const local = pointerToLocal(pt.x, pt.y, cx, cy, rotation);
           if (Math.abs(local.x) > drawW / 2 || Math.abs(local.y) > drawH / 2) return;
 
@@ -211,11 +252,7 @@ export default function A4InteractivePreview({
             marginLeft: -TOUCH_HANDLE_PX / 2,
             marginTop: -TOUCH_HANDLE_PX / 2,
           }}
-          onPointerDown={(e) => {
-            startPointerDrag(e, (ev) => {
-              applyResize(ev.clientX, ev.clientY);
-            });
-          }}
+          onPointerDown={beginResize}
           aria-label={`Изменить размер, угол ${i + 1}`}
         >
           <span className={touchResizeDotClass} />

@@ -5,11 +5,16 @@ import type { A4FitMode, FilterMode, PageAdjustments, PageOrientation, ScanPage 
 import { DEFAULT_ADJUSTMENTS } from "@/lib/document-scanner/types";
 import { FILTER_LABELS } from "@/lib/document-scanner/filters";
 import { generateId } from "@/lib/document-scanner/constants";
-import { blobToCanvas } from "@/lib/document-scanner/canvas-utils";
-import { computeFitWidthFrac, getAvailArea } from "@/lib/document-scanner/layout-utils";
+import { blobToCanvas, detectContentRect } from "@/lib/document-scanner/canvas-utils";
+import { applyFilters } from "@/lib/document-scanner/filters";
+import {
+  computeFitWidthFrac,
+  FULL_PAGE_WIDTH_FRAC,
+  getAvailArea,
+} from "@/lib/document-scanner/layout-utils";
 import { getPageAspectClass, getPageSizePx } from "@/lib/document-scanner/page-size";
 import A4InteractivePreview from "./A4InteractivePreview";
-import { footerActions, footerBar, footerBtnBack, footerBtnNext, IconChevronLeft, IconChevronRight } from "./ScannerIcons";
+import { btnOutline, footerActions, footerBar, footerBtnBack, footerBtnNext, IconChevronLeft, IconChevronRight } from "./ScannerIcons";
 
 interface Props {
   croppedBlob: Blob;
@@ -36,20 +41,43 @@ export default function EditScreen({ croppedBlob, existingPage, onConfirm, onBac
   const [posY, setPosY] = useState(existingPage?.items[0]?.y ?? 0.5);
   const [manualSize, setManualSize] = useState(!!existingPage?.items[0]?.widthFrac);
 
+  function fillPage() {
+    setManualSize(true);
+    setWidthFrac(FULL_PAGE_WIDTH_FRAC);
+    setPosX(0.5);
+    setPosY(0.5);
+  }
+
   useEffect(() => {
     if (manualSize) return;
     let cancelled = false;
     (async () => {
       const canvas = await blobToCanvas(croppedBlob);
-      const { width, height } = getPageSizePx(orientation);
+      const filtered = applyFilters(canvas, filter, adjustments);
+      const content = detectContentRect(filtered);
+      const contentAspect = content.sw / content.sh;
+
+      let pageOrientation = orientation;
+      if (!existingPage) {
+        if (contentAspect > 1.08) {
+          pageOrientation = "landscape";
+        } else if (contentAspect < 0.92) {
+          pageOrientation = "portrait";
+        }
+        if (pageOrientation !== orientation) {
+          setOrientation(pageOrientation);
+        }
+      }
+
+      const { width, height } = getPageSizePx(pageOrientation);
       const { availW, availH } = getAvailArea(width, height);
-      const frac = computeFitWidthFrac(canvas.width, canvas.height, availW, availH, a4FitMode);
+      const frac = computeFitWidthFrac(content.sw, content.sh, availW, availH, a4FitMode);
       if (!cancelled) setWidthFrac(frac);
     })();
     return () => {
       cancelled = true;
     };
-  }, [croppedBlob, a4FitMode, manualSize, orientation]);
+  }, [croppedBlob, a4FitMode, manualSize, orientation, existingPage, filter, adjustments]);
 
   const draftPage = useMemo<ScanPage | null>(() => {
     if (widthFrac == null && !existingPage?.items[0]) return null;
@@ -125,10 +153,17 @@ export default function EditScreen({ croppedBlob, existingPage, onConfirm, onBac
             Загрузка…
           </div>
         )}
-        <p className="text-[11px] text-gray-500 text-center mb-4 max-w-xs">
+        <p className="text-[11px] text-gray-500 text-center mb-2 max-w-xs">
           Потяните углы для изменения размера (пропорции сохраняются). Перетащите изображение для
           смещения на листе.
         </p>
+        <button
+          type="button"
+          onClick={fillPage}
+          className={btnOutline("mb-4 px-4 py-2 text-xs")}
+        >
+          На весь лист
+        </button>
 
         <div className="w-full max-w-md space-y-4">
           <div>
@@ -195,6 +230,11 @@ export default function EditScreen({ croppedBlob, existingPage, onConfirm, onBac
                   onClick={() => {
                     setManualSize(false);
                     setA4FitMode(mode);
+                    if (mode === "fit") {
+                      setWidthFrac(FULL_PAGE_WIDTH_FRAC);
+                      setPosX(0.5);
+                      setPosY(0.5);
+                    }
                   }}
                   className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${
                     a4FitMode === mode

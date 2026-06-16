@@ -49,6 +49,75 @@ export async function fileToCanvas(
   }
 }
 
+export interface ContentRect {
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+}
+
+/** Bounding box of non-white scan content (ignores empty margins in cropped JPEG). */
+export function detectContentRect(
+  canvas: HTMLCanvasElement,
+  whiteThreshold = 238,
+): ContentRect {
+  const maxSample = 480;
+  const downscale = Math.min(1, maxSample / Math.max(canvas.width, canvas.height));
+
+  let sample = canvas;
+  let invScale = 1;
+  if (downscale < 1) {
+    const tmp = document.createElement("canvas");
+    tmp.width = Math.max(1, Math.round(canvas.width * downscale));
+    tmp.height = Math.max(1, Math.round(canvas.height * downscale));
+    tmp.getContext("2d")!.drawImage(canvas, 0, 0, tmp.width, tmp.height);
+    sample = tmp;
+    invScale = 1 / downscale;
+  }
+
+  const ctx = sample.getContext("2d")!;
+  const { width, height } = sample;
+  const data = ctx.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const r = data[i]!;
+      const g = data[i + 1]!;
+      const b = data[i + 2]!;
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+      if (lum < whiteThreshold || chroma > 10) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX) {
+    return { sx: 0, sy: 0, sw: canvas.width, sh: canvas.height };
+  }
+
+  const pad = Math.max(2, Math.round(0.015 * Math.max(maxX - minX, maxY - minY)));
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(width - 1, maxX + pad);
+  maxY = Math.min(height - 1, maxY + pad);
+
+  return {
+    sx: Math.round(minX * invScale),
+    sy: Math.round(minY * invScale),
+    sw: Math.round((maxX - minX + 1) * invScale),
+    sh: Math.round((maxY - minY + 1) * invScale),
+  };
+}
+
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();

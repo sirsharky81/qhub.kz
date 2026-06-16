@@ -1,6 +1,6 @@
 import type { ScanItem, ScanPage } from "./types";
 import { applyFilters } from "./filters";
-import { blobToCanvas } from "./canvas-utils";
+import { blobToCanvas, detectContentRect } from "./canvas-utils";
 import { getPageSizePx, resolveOrientation } from "./page-size";
 import {
   computeDrawSize,
@@ -45,7 +45,8 @@ function drawItem(
   availH: number,
 ): void {
   const widthFrac = resolveWidthFrac(item);
-  const { drawW, drawH } = computeDrawSize(img.width, img.height, widthFrac, availW, availH);
+  const content = detectContentRect(img);
+  const { drawW, drawH } = computeDrawSize(content.sw, content.sh, widthFrac, availW, availH);
 
   const cx = margin + item.x * availW;
   const cy = margin + item.y * availH;
@@ -53,7 +54,17 @@ function drawItem(
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate((item.rotation * Math.PI) / 180);
-  ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+  ctx.drawImage(
+    img,
+    content.sx,
+    content.sy,
+    content.sw,
+    content.sh,
+    -drawW / 2,
+    -drawH / 2,
+    drawW,
+    drawH,
+  );
   ctx.restore();
 }
 

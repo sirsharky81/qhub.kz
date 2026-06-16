@@ -149,6 +149,38 @@ function scaleFromLocalHalfExtents(
   return Math.max(MIN_WIDTH_FRAC, scale);
 }
 
+/** Full-bleed scale on the virtual sheet. */
+export const FULL_PAGE_WIDTH_FRAC = 1;
+
+/** Resize from corner drag — ratio relative to where the drag started (reliable on touch). */
+export function widthFracFromDragRatio(
+  localX: number,
+  localY: number,
+  startLocalX: number,
+  startLocalY: number,
+  startWidthFrac: number,
+  imgW: number,
+  imgH: number,
+  availW: number,
+  availH: number,
+): number {
+  const maxFill = computeMaxFillDrawSize(imgW, imgH, availW, availH);
+  const maxHalfW = maxFill.drawW / 2;
+  const maxHalfH = maxFill.drawH / 2;
+
+  const effX = Math.min(Math.abs(localX), maxHalfW);
+  const effY = Math.min(Math.abs(localY), maxHalfH);
+  const startX = Math.max(Math.abs(startLocalX), 8);
+  const startY = Math.max(Math.abs(startLocalY), 8);
+
+  const ratio = Math.max(effX / startX, effY / startY);
+  let scale = Math.min(1, startWidthFrac * ratio);
+  if (scale >= FILL_SNAP_THRESHOLD) {
+    scale = 1;
+  }
+  return Math.max(MIN_WIDTH_FRAC, scale);
+}
+
 /** Proportional resize from local pointer coords (center-relative, unrotated). */
 export function widthFracFromLocalPointer(
   localX: number,
