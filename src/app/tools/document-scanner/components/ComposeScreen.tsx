@@ -15,6 +15,12 @@ import {
   widthFracFromPointer,
 } from "@/lib/document-scanner/layout-utils";
 import { getPageAspectClass, getPreviewCanvasSize } from "@/lib/document-scanner/page-size";
+import {
+  startPointerDrag,
+  TOUCH_HANDLE_PX,
+  touchHandleOuterClass,
+  touchResizeDotClass,
+} from "@/lib/document-scanner/pointer-drag";
 import { btnOutline, btnPrimary, footerActions, footerBar, footerBtnBack, footerBtnNext, IconChevronLeft, IconChevronRight } from "./ScannerIcons";
 
 interface Props {
@@ -35,9 +41,6 @@ export default function ComposeScreen({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null);
   const [imageSizes, setImageSizes] = useState<Record<string, { w: number; h: number }>>({});
-  const dragging = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(
-    null,
-  );
 
   const { width: PAGE_W, height: PAGE_H } = useMemo(
     () => getPreviewCanvasSize(400, orientation),
@@ -207,52 +210,48 @@ export default function ComposeScreen({
               if (hit) {
                 const item = items.find((i) => i.id === hit)!;
                 setSelectedId(hit);
-                dragging.current = {
-                  id: hit,
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  origX: item.x,
-                  origY: item.y,
-                };
-                e.currentTarget.setPointerCapture(e.pointerId);
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const origX = item.x;
+                const origY = item.y;
+
+                startPointerDrag(e, (ev) => {
+                  if (!canvasRef.current) return;
+                  const rect = canvasRef.current.getBoundingClientRect();
+                  const dx = (ev.clientX - startX) / rect.width;
+                  const dy = (ev.clientY - startY) / rect.height;
+                  updateItem(hit, {
+                    x: Math.min(1, Math.max(0, origX + dx)),
+                    y: Math.min(1, Math.max(0, origY + dy)),
+                  });
+                });
               }
-            }}
-            onPointerMove={(e) => {
-              if (!dragging.current || !canvasRef.current) return;
-              const rect = canvasRef.current.getBoundingClientRect();
-              const dx = (e.clientX - dragging.current.startX) / rect.width;
-              const dy = (e.clientY - dragging.current.startY) / rect.height;
-              updateItem(dragging.current.id, {
-                x: Math.min(1, Math.max(0, dragging.current.origX + dx)),
-                y: Math.min(1, Math.max(0, dragging.current.origY + dy)),
-              });
-            }}
-            onPointerUp={() => {
-              dragging.current = null;
             }}
           />
 
           {resizeHandles?.map((hp, i) => (
             <div
               key={i}
-              className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-gray-900 border-[1.5px] border-white shadow-md cursor-nwse-resize z-10 touch-none"
+              className={touchHandleOuterClass}
               style={{
                 left: `${(hp.x / PAGE_W) * 100}%`,
                 top: `${(hp.y / PAGE_H) * 100}%`,
+                width: TOUCH_HANDLE_PX,
+                height: TOUCH_HANDLE_PX,
+                marginLeft: -TOUCH_HANDLE_PX / 2,
+                marginTop: -TOUCH_HANDLE_PX / 2,
               }}
               onPointerDown={(e) => {
-                e.stopPropagation();
-                if (selected) e.currentTarget.setPointerCapture(e.pointerId);
-              }}
-              onPointerMove={(e) => {
-                if (!selected || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                applyResize(selected, e.clientX, e.clientY);
-              }}
-              onPointerUp={(e) => {
-                e.currentTarget.releasePointerCapture(e.pointerId);
+                if (!selected) return;
+                const item = selected;
+                startPointerDrag(e, (ev) => {
+                  applyResize(item, ev.clientX, ev.clientY);
+                });
               }}
               aria-label={`Изменить размер, угол ${i + 1}`}
-            />
+            >
+              <span className={touchResizeDotClass} />
+            </div>
           ))}
         </div>
       </div>

@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  captureHighResPhoto,
+  openCameraStream,
+  waitForVideoReady,
+} from "@/lib/document-scanner/camera-capture";
 
 interface Props {
   onCapture: (file: File) => void;
@@ -12,16 +17,14 @@ export default function ScannerCameraCapture({ onCapture, onClose }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [capturing, setCapturing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false,
-        });
+        const stream = await openCameraStream();
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -31,7 +34,8 @@ export default function ScannerCameraCapture({ onCapture, onClose }: Props) {
         if (video) {
           video.srcObject = stream;
           await video.play();
-          setReady(true);
+          await waitForVideoReady(video);
+          if (!cancelled) setReady(true);
         }
       } catch {
         if (!cancelled) {
@@ -46,23 +50,21 @@ export default function ScannerCameraCapture({ onCapture, onClose }: Props) {
     };
   }, []);
 
-  function takePhoto() {
+  async function takePhoto() {
     const video = videoRef.current;
-    if (!video || video.videoWidth === 0) return;
+    const stream = streamRef.current;
+    if (!video || !stream || capturing) return;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d")!.drawImage(video, 0, 0);
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return;
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        onCapture(new File([blob], `scan-${Date.now()}.jpg`, { type: "image/jpeg" }));
-      },
-      "image/jpeg",
-      0.95,
-    );
+    setCapturing(true);
+    try {
+      const blob = await captureHighResPhoto(stream, video);
+      stream.getTracks().forEach((t) => t.stop());
+      onCapture(new File([blob], `scan-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" }));
+    } catch {
+      setError("Не удалось сделать снимок. Попробуйте ещё раз или загрузите фото из галереи.");
+    } finally {
+      setCapturing(false);
+    }
   }
 
   return (
@@ -95,12 +97,13 @@ export default function ScannerCameraCapture({ onCapture, onClose }: Props) {
 
       <div className="flex flex-col items-center gap-3 px-4 py-6 bg-black/80">
         <p className="text-gray-400 text-xs text-center max-w-xs">
-          Расположите документ в кадре. Система автоматически найдёт его границы.
+          Держите телефон неподвижно, дождитесь фокуса и сделайте снимок. Текст будет чётче при
+          хорошем освещении.
         </p>
         <button
           type="button"
           onClick={takePhoto}
-          disabled={!ready || !!error}
+          disabled={!ready || !!error || capturing}
           className="w-16 h-16 rounded-full border-4 border-white bg-white/20 active:scale-95 transition-transform disabled:opacity-40"
           aria-label="Сделать снимок"
         />

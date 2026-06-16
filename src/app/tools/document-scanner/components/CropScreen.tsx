@@ -14,6 +14,12 @@ import {
 import { defaultA4CropCorners } from "@/lib/document-scanner/crop-utils";
 import { perfAsync } from "@/lib/document-scanner/scanner-perf";
 import { yieldToMain } from "@/lib/document-scanner/async-utils";
+import {
+  startPointerDrag,
+  TOUCH_HANDLE_PX,
+  touchHandleDotClass,
+  touchHandleOuterClass,
+} from "@/lib/document-scanner/pointer-drag";
 import { btnOutline, btnPrimary, footerActions, footerBar, footerBtnBack, footerBtnNext, IconChevronLeft, IconChevronRight, IconRotate } from "./ScannerIcons";
 
 interface Props {
@@ -127,43 +133,41 @@ export default function CropScreen({
     [displaySize],
   );
 
-  function beginDrag(target: DragTarget, norm: NormPoint) {
+  function beginDrag(target: DragTarget, norm: NormPoint, e: React.PointerEvent) {
     dragRef.current = {
       target,
       startNorm: norm,
       startCorners: corners.map((c) => ({ ...c })),
     };
-  }
 
-  function handlePointerMove(e: React.PointerEvent) {
-    if (!dragRef.current || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const current = fromDisplay(x, y);
-    const { target, startNorm, startCorners } = dragRef.current;
-    const delta = {
-      x: current.x - startNorm.x,
-      y: current.y - startNorm.y,
-    };
+    startPointerDrag(e, (ev) => {
+      if (!dragRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      const current = fromDisplay(x, y);
+      const { target: dragTarget, startNorm, startCorners } = dragRef.current;
+      const delta = {
+        x: current.x - startNorm.x,
+        y: current.y - startNorm.y,
+      };
 
-    if (target.kind === "corner") {
-      setCorners((prev) =>
-        prev.map((c, idx) => (idx === target.index ? clampNorm(current) : c)),
+      if (dragTarget.kind === "corner") {
+        setCorners((prev) =>
+          prev.map((c, idx) => (idx === dragTarget.index ? clampNorm(current) : c)),
+        );
+        return;
+      }
+
+      const [a, b] = EDGES[dragTarget.index]!;
+      setCorners(
+        startCorners.map((c, idx) =>
+          idx === a || idx === b ? clampNorm({ x: c.x + delta.x, y: c.y + delta.y }) : c,
+        ),
       );
-      return;
-    }
-
-    const [a, b] = EDGES[target.index]!;
-    setCorners(
-      startCorners.map((c, idx) =>
-        idx === a || idx === b ? clampNorm({ x: c.x + delta.x, y: c.y + delta.y }) : c,
-      ),
-    );
-  }
-
-  function handlePointerUp() {
-    dragRef.current = null;
+    }, () => {
+      dragRef.current = null;
+    });
   }
 
   async function handleConfirm() {
@@ -179,7 +183,7 @@ export default function CropScreen({
           warped.toBlob(
             (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
             "image/jpeg",
-            0.92,
+            0.95,
           );
         });
         onConfirm(blob);
@@ -240,9 +244,6 @@ export default function CropScreen({
           ref={containerRef}
           className="relative select-none touch-none rounded-xl overflow-hidden"
           style={{ width: displaySize.w || "100%", height: displaySize.h || 300 }}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
         >
           <canvas
             ref={previewCanvasRef}
@@ -286,28 +287,27 @@ export default function CropScreen({
             return (
               <div
                 key={`edge-${edgeIndex}`}
-                className="absolute z-[5] flex items-center justify-center cursor-grab active:cursor-grabbing"
+                className={`${touchHandleOuterClass} z-[5] cursor-grab active:cursor-grabbing`}
                 style={{
                   left: mid.x,
                   top: mid.y,
-                  width: 28,
-                  height: 14,
-                  marginLeft: -14,
-                  marginTop: -7,
+                  width: Math.max(TOUCH_HANDLE_PX, 28),
+                  height: TOUCH_HANDLE_PX,
+                  marginLeft: -Math.max(TOUCH_HANDLE_PX, 28) / 2,
+                  marginTop: -TOUCH_HANDLE_PX / 2,
                   transform: `rotate(${angle}deg)`,
-                  touchAction: "none",
                 }}
                 onPointerDown={(e) => {
-                  e.currentTarget.setPointerCapture(e.pointerId);
                   const rect = containerRef.current!.getBoundingClientRect();
                   beginDrag(
                     { kind: "edge", index: edgeIndex },
                     fromDisplay(e.clientX - rect.left, e.clientY - rect.top),
+                    e,
                   );
                 }}
                 aria-label={`Грань ${edgeIndex + 1}`}
               >
-                <span className="block w-5 h-1.5 rounded-full bg-white border border-gray-900 shadow" />
+                <span className="block w-5 h-1.5 rounded-full bg-white border border-gray-900 shadow pointer-events-none" />
               </div>
             );
           })}
@@ -317,18 +317,27 @@ export default function CropScreen({
             return (
               <div
                 key={i}
-                className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-gray-900 border-[1.5px] border-white shadow-md cursor-grab active:cursor-grabbing z-10"
-                style={{ left: d.x, top: d.y, touchAction: "none" }}
+                className={touchHandleOuterClass}
+                style={{
+                  left: d.x,
+                  top: d.y,
+                  width: TOUCH_HANDLE_PX,
+                  height: TOUCH_HANDLE_PX,
+                  marginLeft: -TOUCH_HANDLE_PX / 2,
+                  marginTop: -TOUCH_HANDLE_PX / 2,
+                }}
                 onPointerDown={(e) => {
-                  e.currentTarget.setPointerCapture(e.pointerId);
                   const rect = containerRef.current!.getBoundingClientRect();
                   beginDrag(
                     { kind: "corner", index: i },
                     fromDisplay(e.clientX - rect.left, e.clientY - rect.top),
+                    e,
                   );
                 }}
                 aria-label={`Угол ${i + 1}`}
-              />
+              >
+                <span className={touchHandleDotClass} />
+              </div>
             );
           })}
         </div>

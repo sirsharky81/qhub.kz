@@ -40,7 +40,7 @@ export async function warpPerspectiveOpenCV(
       dst,
       M,
       dsize,
-      cv.INTER_LINEAR,
+      cv.INTER_CUBIC,
       cv.BORDER_CONSTANT,
       [255, 255, 255, 255],
     );

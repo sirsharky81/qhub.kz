@@ -30,6 +30,7 @@ export type OpenCVInstance = {
   COLOR_RGB2GRAY: number;
   INTER_AREA: number;
   INTER_LINEAR: number;
+  INTER_CUBIC: number;
   ADAPTIVE_THRESH_GAUSSIAN_C: number;
   THRESH_BINARY: number;
   MORPH_RECT: number;

@@ -13,6 +13,12 @@ import {
   widthFracFromPointer,
 } from "@/lib/document-scanner/layout-utils";
 import { getPageAspectClass, getPreviewCanvasSize } from "@/lib/document-scanner/page-size";
+import {
+  startPointerDrag,
+  TOUCH_HANDLE_PX,
+  touchHandleOuterClass,
+  touchResizeDotClass,
+} from "@/lib/document-scanner/pointer-drag";
 
 interface Props {
   imageBlob: Blob;
@@ -45,9 +51,6 @@ export default function A4InteractivePreview({
   const filteredRef = useRef<HTMLCanvasElement | null>(null);
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [ready, setReady] = useState(false);
-  const moveRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
-    null,
-  );
 
   const { width: PAGE_W, height: PAGE_H } = useMemo(
     () => getPreviewCanvasSize(400, orientation),
@@ -175,51 +178,45 @@ export default function A4InteractivePreview({
           const local = pointerToLocal(pt.x, pt.y, cx, cy, rotation);
           if (Math.abs(local.x) > drawW / 2 || Math.abs(local.y) > drawH / 2) return;
 
-          moveRef.current = {
-            startX: e.clientX,
-            startY: e.clientY,
-            origX: x,
-            origY: y,
-          };
-          e.currentTarget.setPointerCapture(e.pointerId);
-        }}
-        onPointerMove={(e) => {
-          const drag = moveRef.current;
-          if (!drag || !canvasRef.current) return;
-          const rect = canvasRef.current.getBoundingClientRect();
-          const dx = (e.clientX - drag.startX) / rect.width;
-          const dy = (e.clientY - drag.startY) / rect.height;
-          onPositionChange?.(
-            Math.min(1, Math.max(0, drag.origX + dx)),
-            Math.min(1, Math.max(0, drag.origY + dy)),
-          );
-        }}
-        onPointerUp={() => {
-          moveRef.current = null;
+          const origX = x;
+          const origY = y;
+          const startX = e.clientX;
+          const startY = e.clientY;
+
+          startPointerDrag(e, (ev) => {
+            if (!canvasRef.current) return;
+            const rect = canvasRef.current.getBoundingClientRect();
+            const dx = (ev.clientX - startX) / rect.width;
+            const dy = (ev.clientY - startY) / rect.height;
+            onPositionChange?.(
+              Math.min(1, Math.max(0, origX + dx)),
+              Math.min(1, Math.max(0, origY + dy)),
+            );
+          });
         }}
       />
 
       {handlePositions?.map((hp, i) => (
         <div
           key={i}
-          className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-gray-900 border-[1.5px] border-white shadow-md cursor-nwse-resize z-10 touch-none"
+          className={touchHandleOuterClass}
           style={{
             left: `${(hp.x / PAGE_W) * 100}%`,
             top: `${(hp.y / PAGE_H) * 100}%`,
+            width: TOUCH_HANDLE_PX,
+            height: TOUCH_HANDLE_PX,
+            marginLeft: -TOUCH_HANDLE_PX / 2,
+            marginTop: -TOUCH_HANDLE_PX / 2,
           }}
           onPointerDown={(e) => {
-            e.stopPropagation();
-            e.currentTarget.setPointerCapture(e.pointerId);
-          }}
-          onPointerMove={(e) => {
-            if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-            applyResize(e.clientX, e.clientY);
-          }}
-          onPointerUp={(e) => {
-            e.currentTarget.releasePointerCapture(e.pointerId);
+            startPointerDrag(e, (ev) => {
+              applyResize(ev.clientX, ev.clientY);
+            });
           }}
           aria-label={`Изменить размер, угол ${i + 1}`}
-        />
+        >
+          <span className={touchResizeDotClass} />
+        </div>
       ))}
 
       {!ready && (

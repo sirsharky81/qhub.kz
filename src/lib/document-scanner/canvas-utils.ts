@@ -1,4 +1,5 @@
 import type { NormPoint, Point } from "./types";
+import { CROP_OUTPUT_MAX_PX } from "./constants";
 
 const WORKING_MAX_PX = 4096;
 const DETECT_MAX_PX = 960;
@@ -166,7 +167,7 @@ export function estimateOutputSize(corners: NormPoint[], srcW: number, srcH: num
   const h2 = Math.hypot(pts[2]!.x - pts[1]!.x, pts[2]!.y - pts[1]!.y);
   const w = Math.max(w1, w2);
   const h = Math.max(h1, h2);
-  const maxDim = 2400;
+  const maxDim = CROP_OUTPUT_MAX_PX;
   const scale = Math.min(1, maxDim / Math.max(w, h));
   return { w: Math.round(w * scale), h: Math.round(h * scale) };
 }

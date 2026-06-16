@@ -9,6 +9,9 @@ export const A4_HEIGHT_PT = 841.89;
 /** Max upload size — 50 MB per spec */
 export const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
+/** Max dimension for perspective-corrected crop (preserve text detail). */
+export const CROP_OUTPUT_MAX_PX = 4096;
+
 export const QUALITY_PRESETS = {
   high: { jpeg: 0.92, webp: 0.9, pdfScale: 1 },
   medium: { jpeg: 0.82, webp: 0.8, pdfScale: 0.75 },
