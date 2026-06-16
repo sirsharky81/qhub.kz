@@ -152,6 +152,22 @@ export const apps: App[] = [
     sortOrder: 5,
   },
   {
+    id: "random-picker",
+    title: "QHub Random Picker",
+    description:
+      "Случайный выбор участников, жеребьёвка, колесо, группы и генератор чисел — локально в браузере.",
+    longDescription:
+      "Универсальный сервис QHub для жеребьёвок, случайного выбора, перемешивания списков и распределения по группам. Проверяемый результат с SHA-256, PDF-протокол и PWA.",
+    href: "/tools/random-picker",
+    tags: ["tools", "productivity"],
+    icon: "/tools/random-picker/icon-192.png",
+    color: "from-blue-500/10 to-blue-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    featured: true,
+    sortOrder: 3,
+  },
+  {
     id: "document-scanner",
     title: "Сканер документов",
     description:

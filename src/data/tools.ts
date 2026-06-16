@@ -12,6 +12,16 @@ export interface Tool {
 
 export const tools: Tool[] = [
   {
+    id: "random-picker",
+    name: "QHub Random Picker",
+    description:
+      "Случайный выбор участников, жеребьёвка, колесо, группы и генератор чисел — локально в браузере.",
+    icon: "Dices",
+    category: "utilities",
+    href: "/tools/random-picker",
+    isNew: true,
+  },
+  {
     id: "file-converter",
     name: "QHub Smart File Converter",
     description:

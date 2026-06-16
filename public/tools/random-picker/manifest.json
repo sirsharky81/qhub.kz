@@ -1,0 +1,37 @@
+{
+  "name": "QHub Random Picker",
+  "short_name": "Random Picker",
+  "description": "Случайный выбор, жеребьёвка и генерация чисел — локально в браузере",
+  "start_url": "/tools/random-picker",
+  "scope": "/tools/random-picker",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#2563eb",
+  "theme_color": "#2563eb",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/tools/random-picker/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/random-picker/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/random-picker/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/tools/random-picker/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
