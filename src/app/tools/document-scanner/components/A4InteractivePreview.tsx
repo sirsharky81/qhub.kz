@@ -9,8 +9,7 @@ import {
   getAvailArea,
   getItemBounds,
   pointerToLocal,
-  resolveWidthFrac,
-  widthFracFromPointer,
+  widthFracFromLocalPointer,
 } from "@/lib/document-scanner/layout-utils";
 import { getPageAspectClass, getPreviewCanvasSize } from "@/lib/document-scanner/page-size";
 import {
@@ -128,16 +127,7 @@ export default function A4InteractivePreview({
     const { cx, cy } = getItemBounds(item, imgSize.w, imgSize.h, PAGE_W, PAGE_H);
     const local = pointerToLocal(pt.x, pt.y, cx, cy, rotation);
     onWidthFracChange(
-      widthFracFromPointer(
-        cx,
-        cy,
-        cx + local.x,
-        cy + local.y,
-        imgSize.w,
-        imgSize.h,
-        availW,
-        availH,
-      ),
+      widthFracFromLocalPointer(local.x, local.y, imgSize.w, imgSize.h, availW, availH),
     );
   }
 

@@ -12,7 +12,7 @@ import {
   getItemBounds,
   pointerToLocal,
   resolveWidthFrac,
-  widthFracFromPointer,
+  widthFracFromLocalPointer,
 } from "@/lib/document-scanner/layout-utils";
 import { getPageAspectClass, getPreviewCanvasSize } from "@/lib/document-scanner/page-size";
 import {
@@ -145,11 +145,9 @@ export default function ComposeScreen({
     const { cx, cy } = getItemBounds(item, size.w, size.h, PAGE_W, PAGE_H);
     const local = pointerToLocal(pt.x, pt.y, cx, cy, item.rotation);
     updateItem(item.id, {
-      widthFrac: widthFracFromPointer(
-        cx,
-        cy,
-        cx + local.x,
-        cy + local.y,
+      widthFrac: widthFracFromLocalPointer(
+        local.x,
+        local.y,
         size.w,
         size.h,
         availW,
