@@ -6,6 +6,7 @@ import { blobToCanvas } from "@/lib/document-scanner/canvas-utils";
 import { applyFilters } from "@/lib/document-scanner/filters";
 import {
   computeDrawSize,
+  computeMaxFillDrawSize,
   getAvailArea,
   getItemBounds,
   pointerToLocal,
@@ -125,7 +126,19 @@ export default function A4InteractivePreview({
     if (!pt) return;
     const item = { x, y, widthFrac, rotation };
     const { cx, cy } = getItemBounds(item, imgSize.w, imgSize.h, PAGE_W, PAGE_H);
-    const local = pointerToLocal(pt.x, pt.y, cx, cy, rotation);
+    let local = pointerToLocal(pt.x, pt.y, cx, cy, rotation);
+
+    // Allow dragging toward sheet edges (finger may go outside the canvas on mobile).
+    const maxFill = computeMaxFillDrawSize(imgSize.w, imgSize.h, availW, availH);
+    const maxHalfW = maxFill.drawW / 2;
+    const maxHalfH = maxFill.drawH / 2;
+    if (Math.abs(local.x) > maxHalfW || Math.abs(local.y) > maxHalfH) {
+      local = {
+        x: Math.sign(local.x || 1) * Math.max(Math.abs(local.x), maxHalfW),
+        y: Math.sign(local.y || 1) * Math.max(Math.abs(local.y), maxHalfH),
+      };
+    }
+
     onWidthFracChange(
       widthFracFromLocalPointer(local.x, local.y, imgSize.w, imgSize.h, availW, availH),
     );

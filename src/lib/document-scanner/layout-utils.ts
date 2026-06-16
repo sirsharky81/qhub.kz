@@ -1,12 +1,13 @@
 import type { A4FitMode } from "./types";
 import { A4_HEIGHT_PX, A4_WIDTH_PX } from "./constants";
 
-export const A4_MARGIN_FRAC = 0.05;
+/** No inner margin — scan fills the virtual sheet edge to edge. */
+export const A4_MARGIN_FRAC = 0;
 
 const MIN_WIDTH_FRAC = 0.05;
 const MAX_WIDTH_FRAC = 1;
-/** Snap to full-page fill when pinch/drag reaches this fraction of max (touch-friendly). */
-const FILL_SNAP_THRESHOLD = 0.88;
+/** Snap to full-page fill when drag reaches this fraction of max (touch-friendly). */
+const FILL_SNAP_THRESHOLD = 0.8;
 
 export function getAvailArea(pageW: number, pageH: number) {
   const margin = pageW * A4_MARGIN_FRAC;
@@ -17,7 +18,7 @@ export function getAvailArea(pageW: number, pageH: number) {
   };
 }
 
-/** Largest size that fits in the printable area while keeping aspect ratio. */
+/** Largest size that fits on the sheet while keeping aspect ratio. */
 export function computeMaxFillDrawSize(
   imgW: number,
   imgH: number,
@@ -33,27 +34,20 @@ export function computeMaxFillDrawSize(
   return { drawW: availH * aspect, drawH: availH };
 }
 
-/**
- * Convert a target draw size to stored widthFrac (legacy linear encoding).
- * computeDrawSize(widthFrac) reproduces the target size.
- */
-export function widthFracForDrawSize(
-  drawW: number,
-  drawH: number,
+/** Scale 0–1 relative to {@link computeMaxFillDrawSize}. */
+export function scaleToDrawSize(
   imgW: number,
   imgH: number,
+  scale: number,
   availW: number,
   availH: number,
-): number {
-  const aspect = imgW / imgH;
-  let wf = drawW / availW;
-  if ((availW * wf) / aspect > availH) {
-    wf = (availH * aspect) / availW;
-  }
-  return Math.min(MAX_WIDTH_FRAC, Math.max(MIN_WIDTH_FRAC, wf));
+): { drawW: number; drawH: number } {
+  const max = computeMaxFillDrawSize(imgW, imgH, availW, availH);
+  const s = Math.min(MAX_WIDTH_FRAC, Math.max(MIN_WIDTH_FRAC, scale));
+  return { drawW: max.drawW * s, drawH: max.drawH * s };
 }
 
-/** Width of item as fraction of available area width (0–1). */
+/** Width of item as fraction of max fill (0–1). */
 export function computeFitWidthFrac(
   imgW: number,
   imgH: number,
@@ -79,15 +73,7 @@ export function computeFitWidthFrac(
 
   const scale = Math.min(1, drawW / max.drawW, drawH / max.drawH);
   if (scale >= FILL_SNAP_THRESHOLD) return 1;
-
-  return widthFracForDrawSize(
-    max.drawW * scale,
-    max.drawH * scale,
-    imgW,
-    imgH,
-    availW,
-    availH,
-  );
+  return Math.max(MIN_WIDTH_FRAC, scale);
 }
 
 export function computeDrawSize(
@@ -97,23 +83,11 @@ export function computeDrawSize(
   availW: number,
   availH: number,
 ): { drawW: number; drawH: number } {
-  const aspect = imgW / imgH;
-  const clamped = Math.min(MAX_WIDTH_FRAC, Math.max(MIN_WIDTH_FRAC, widthFrac));
-  let drawW = availW * clamped;
-  let drawH = drawW / aspect;
-
-  if (drawH > availH) {
-    drawH = availH;
-    drawW = drawH * aspect;
-  }
-
-  return { drawW, drawH };
+  return scaleToDrawSize(imgW, imgH, widthFrac, availW, availH);
 }
 
 export function defaultComposeWidthFrac(index: number): number {
-  const { availW } = getAvailArea(A4_WIDTH_PX, A4_HEIGHT_PX);
-  const baseW = availW * 0.42;
-  return Math.min(0.55, baseW / availW);
+  return 0.42;
 }
 
 export function defaultComposePosition(index: number): { x: number; y: number } {
@@ -149,6 +123,32 @@ export function getItemBounds(
   return { cx, cy, drawW, drawH, margin, availW, availH, widthFrac };
 }
 
+function scaleFromLocalHalfExtents(
+  halfW: number,
+  halfH: number,
+  imgW: number,
+  imgH: number,
+  availW: number,
+  availH: number,
+): number {
+  const aspect = imgW / imgH;
+  let w = halfW;
+  let h = halfH;
+  if (w / aspect < h) {
+    w = h * aspect;
+  } else {
+    h = w / aspect;
+  }
+
+  const maxFill = computeMaxFillDrawSize(imgW, imgH, availW, availH);
+  const scale = Math.min(1, (w * 2) / maxFill.drawW, (h * 2) / maxFill.drawH);
+
+  if (scale >= FILL_SNAP_THRESHOLD) {
+    return 1;
+  }
+  return Math.max(MIN_WIDTH_FRAC, scale);
+}
+
 /** Proportional resize from local pointer coords (center-relative, unrotated). */
 export function widthFracFromLocalPointer(
   localX: number,
@@ -158,26 +158,14 @@ export function widthFracFromLocalPointer(
   availW: number,
   availH: number,
 ): number {
-  const aspect = imgW / imgH;
-  let halfW = Math.abs(localX);
-  let halfH = Math.abs(localY);
-
-  if (halfW / aspect < halfH) {
-    halfW = halfH * aspect;
-  } else {
-    halfH = halfW / aspect;
-  }
-
-  const maxFill = computeMaxFillDrawSize(imgW, imgH, availW, availH);
-  const scale = Math.min(1, (halfW * 2) / maxFill.drawW, (halfH * 2) / maxFill.drawH);
-
-  if (scale >= FILL_SNAP_THRESHOLD) {
-    return 1;
-  }
-
-  const drawW = maxFill.drawW * scale;
-  const drawH = maxFill.drawH * scale;
-  return widthFracForDrawSize(drawW, drawH, imgW, imgH, availW, availH);
+  return scaleFromLocalHalfExtents(
+    Math.abs(localX),
+    Math.abs(localY),
+    imgW,
+    imgH,
+    availW,
+    availH,
+  );
 }
 
 /** Proportional resize from page pointer — keeps aspect ratio. */
@@ -191,28 +179,14 @@ export function widthFracFromPointer(
   availW: number,
   availH: number,
 ): number {
-  const dx = pointerX - cx;
-  const dy = pointerY - cy;
-  const aspect = imgW / imgH;
-
-  let halfW = Math.abs(dx);
-  let halfH = Math.abs(dy);
-  if (halfW / aspect < halfH) {
-    halfW = halfH * aspect;
-  } else {
-    halfH = halfW / aspect;
-  }
-
-  const maxFill = computeMaxFillDrawSize(imgW, imgH, availW, availH);
-  const scale = Math.min(1, (halfW * 2) / maxFill.drawW, (halfH * 2) / maxFill.drawH);
-
-  if (scale >= FILL_SNAP_THRESHOLD) {
-    return 1;
-  }
-
-  const drawW = maxFill.drawW * scale;
-  const drawH = maxFill.drawH * scale;
-  return widthFracForDrawSize(drawW, drawH, imgW, imgH, availW, availH);
+  return scaleFromLocalHalfExtents(
+    Math.abs(pointerX - cx),
+    Math.abs(pointerY - cy),
+    imgW,
+    imgH,
+    availW,
+    availH,
+  );
 }
 
 export function rotatedCorners(
