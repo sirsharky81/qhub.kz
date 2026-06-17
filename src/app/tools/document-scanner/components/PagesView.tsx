@@ -31,6 +31,7 @@ import {
   IconPageAdd,
   IconPrint,
   IconSave,
+  IconTextRecognize,
 } from "./ScannerIcons";
 
 interface Props {
@@ -46,6 +47,8 @@ interface Props {
   onAddPage: () => void;
   onAddToPage: () => void;
   onExport: () => void;
+  onOcrExport: () => void;
+  ocrExporting?: boolean;
   onPrint: () => void;
   printing?: boolean;
   onBack: () => void;
@@ -297,6 +300,8 @@ export default function PagesView({
   onAddPage,
   onAddToPage,
   onExport,
+  onOcrExport,
+  ocrExporting = false,
   onPrint,
   printing = false,
   onBack,
@@ -374,15 +379,30 @@ export default function PagesView({
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
+            onClick={onOcrExport}
+            disabled={ocrExporting || printing}
+            className={btnOutline("px-2 py-1.5 text-xs")}
+            title="Распознать текст и сохранить в Word"
+          >
+            <IconTextRecognize className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">В Word</span>
+          </button>
+          <button
+            type="button"
             onClick={onPrint}
-            disabled={printing}
+            disabled={printing || ocrExporting}
             className={btnOutline("px-2 py-1.5 text-xs")}
             title="Печать A4"
           >
             <IconPrint className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Печать</span>
           </button>
-          <button type="button" onClick={onExport} className={btnPrimary("px-2 py-1.5 text-xs")}>
+          <button
+            type="button"
+            onClick={onExport}
+            disabled={ocrExporting}
+            className={btnPrimary("px-2 py-1.5 text-xs")}
+          >
             <IconSave className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Сохранить</span>
           </button>

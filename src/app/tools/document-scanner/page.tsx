@@ -5,17 +5,22 @@ import DocumentScannerClient from "./DocumentScannerClient";
 export const metadata: Metadata = {
   title: "Сканер документов — PDF онлайн бесплатно | QHub",
   description:
-    "Сканируйте документы с камеры или из галереи. Автообрезка, фильтры, многостраничный PDF — полностью локально в браузере и PWA.",
+    "Сканируйте документы с камеры или из галереи. Автообрезка, фильтры, распознавание текста в Word (русский, казахский, English) и многостраничный PDF — локально в браузере и PWA.",
   keywords: [
     "сканер документов",
     "сканирование в pdf",
     "сканер онлайн",
+    "распознавание текста",
+    "ocr онлайн",
+    "извлечь текст из фото",
+    "текст в word",
     "document scanner pwa",
     "сканер без сервера",
   ],
   openGraph: {
     title: "Сканер документов | QHub",
-    description: "Быстро превратите фото документов в качественный PDF — локально на устройстве.",
+    description:
+      "Фото документов в PDF и Word: автообрезка, фильтры и OCR на русском, казахском и английском — локально на устройстве.",
     url: "https://qhub.kz/tools/document-scanner",
     siteName: "QHub",
     locale: "ru_KZ",
@@ -32,7 +37,7 @@ const webAppJsonLd = {
   operatingSystem: "Any",
   offers: { "@type": "Offer", price: "0", priceCurrency: "KZT" },
   description:
-    "Сканер документов: автоопределение границ, обрезка, фильтры, многостраничный PDF — полностью в браузере.",
+    "Сканер документов: автоопределение границ, обрезка, фильтры, распознавание текста в Word (русский, казахский, English) и многостраничный PDF — полностью в браузере.",
   provider: { "@type": "Organization", name: "QHub", url: "https://qhub.kz" },
 };
 

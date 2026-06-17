@@ -84,6 +84,15 @@ export function IconPrint({ className = "w-5 h-5" }: IconProps) {
   );
 }
 
+export function IconTextRecognize({ className = "w-5 h-5" }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden {...stroke}>
+      <path d="M4 7h16M4 12h10M4 17h14" />
+      <path d="M17 10l3 2-3 2" />
+    </svg>
+  );
+}
+
 export function IconRotate({ className = "w-5 h-5" }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden {...stroke}>

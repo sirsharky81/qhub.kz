@@ -17,7 +17,7 @@ import {
 
 const SCANNER_ICON = "/tools/document-scanner/icon-192.png";
 
-const CAPABILITY_PILLS = ["A4 PDF", "Автообрезка", "Печать", "Локально"] as const;
+const CAPABILITY_PILLS = ["A4 PDF", "OCR → Word", "Автообрезка", "Локально"] as const;
 
 interface Props {
   onFileSelect: (file: File) => void;
@@ -89,7 +89,8 @@ export default function HomeScreen({
                 Сканер документов
               </h1>
               <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                Загрузите фото или сделайте снимок — получите PDF формата A4 на устройстве.
+                Загрузите фото или сделайте снимок — PDF формата A4 и распознавание текста в Word на
+                устройстве.
               </p>
             </div>
           </div>

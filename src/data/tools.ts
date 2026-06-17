@@ -45,7 +45,7 @@ export const tools: Tool[] = [
     id: "document-scanner",
     name: "Document Scanner",
     description:
-      "Сканируйте документы с камеры или файла. Автообрезка, фильтры и многостраничный PDF — локально в браузере.",
+      "Сканируйте документы с камеры или файла. Автообрезка, OCR в Word (русский, казахский, English) и многостраничный PDF — локально в браузере.",
     icon: "Scan",
     category: "documents",
     href: "/tools/document-scanner",

@@ -2,7 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NormPoint, ScanDocument, ScanPage, ScannerStep } from "@/lib/document-scanner/types";
+import type { FilterMode, NormPoint, PageAdjustments, ScanDocument, ScanPage, ScannerStep } from "@/lib/document-scanner/types";
+import type { OcrLanguage } from "@/lib/document-scanner/ocr-export";
 import { defaultScanFilename, generateId } from "@/lib/document-scanner/constants";
 import { fileToCanvas } from "@/lib/document-scanner/canvas-utils";
 import { detectDocumentCornersFast } from "@/lib/document-scanner/edge-detection";
@@ -17,6 +18,7 @@ const EditScreen = dynamic(() => import("./components/EditScreen"), { ssr: false
 const PagesView = dynamic(() => import("./components/PagesView"), { ssr: false });
 const ComposeScreen = dynamic(() => import("./components/ComposeScreen"), { ssr: false });
 const ExportDialog = dynamic(() => import("./components/ExportDialog"), { ssr: false });
+const OcrDialog = dynamic(() => import("./components/OcrDialog"), { ssr: false });
 const ScannerCameraCapture = dynamic(() => import("./components/ScannerCameraCapture"), {
   ssr: false,
 });
@@ -47,7 +49,11 @@ export default function DocumentScannerClient() {
 
   const [showCamera, setShowCamera] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showOcr, setShowOcr] = useState(false);
+  const [ocrMode, setOcrMode] = useState<"pages" | "edit">("pages");
   const [exporting, setExporting] = useState(false);
+  const [ocrExporting, setOcrExporting] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState("");
   const [printing, setPrinting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [savedDocs, setSavedDocs] = useState<
@@ -55,6 +61,11 @@ export default function DocumentScannerClient() {
   >([]);
 
   const captureIntent = useRef<CaptureIntent>("new-page");
+  const pendingEditOcr = useRef<{
+    blob: Blob;
+    filter: FilterMode;
+    adjustments: PageAdjustments;
+  } | null>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const addFileRef = useRef<HTMLInputElement>(null);
   const stepHistoryRef = useRef<ScannerStep[]>([]);
@@ -273,6 +284,49 @@ export default function DocumentScannerClient() {
     }
   }
 
+  function openOcrDialog(mode: "pages" | "edit") {
+    setOcrMode(mode);
+    setShowOcr(true);
+  }
+
+  async function runOcrExport(language: OcrLanguage) {
+    setOcrExporting(true);
+    setOcrProgress("Загрузка распознавания…");
+    try {
+      const { recognizeScanPages, recognizeCroppedBlob, exportRecognizedTextToWord, hasRecognizedText } =
+        await import("@/lib/document-scanner/ocr-export");
+
+      if (ocrMode === "edit" && pendingEditOcr.current) {
+        const { blob, filter, adjustments } = pendingEditOcr.current;
+        const text = await recognizeCroppedBlob(blob, filter, adjustments, language, (_c, _t, message) => {
+          setOcrProgress(message);
+        });
+        if (!hasRecognizedText([text])) {
+          window.alert("Текст на изображении не найден. Попробуйте режим «Ч/Б» или «Улучшенный».");
+          return;
+        }
+        await exportRecognizedTextToWord([text], docName);
+      } else {
+        const texts = await recognizeScanPages(pages, language, (_c, _t, message) => {
+          setOcrProgress(message);
+        });
+        if (!hasRecognizedText(texts)) {
+          window.alert("Текст на изображениях не найден. Попробуйте режим «Ч/Б» или «Улучшенный».");
+          return;
+        }
+        await exportRecognizedTextToWord(texts, docName);
+      }
+
+      setShowOcr(false);
+      pendingEditOcr.current = null;
+    } catch {
+      window.alert("Не удалось распознать текст. Попробуйте ещё раз.");
+    } finally {
+      setOcrExporting(false);
+      setOcrProgress("");
+    }
+  }
+
   async function handlePrint() {
     if (pages.length === 0) return;
     setPrinting(true);
@@ -291,9 +345,11 @@ export default function DocumentScannerClient() {
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white">
       {step !== "home" && <ScannerStepIndicator step={step} />}
-      {(loading || printing) && (
+      {(loading || printing || ocrExporting) && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-white/80">
-          <p className="text-sm text-gray-500">{printing ? "Подготовка к печати…" : "Обработка…"}</p>
+          <p className="text-sm text-gray-500">
+            {ocrExporting ? ocrProgress || "Распознавание…" : printing ? "Подготовка к печати…" : "Обработка…"}
+          </p>
         </div>
       )}
 
@@ -347,6 +403,10 @@ export default function DocumentScannerClient() {
           croppedBlob={croppedBlob}
           existingPage={editingPageId ? pages.find((p) => p.id === editingPageId) : undefined}
           onConfirm={handleEditConfirm}
+          onOcrExport={(blob, filter, adjustments) => {
+            pendingEditOcr.current = { blob, filter, adjustments };
+            openOcrDialog("edit");
+          }}
           onBack={goBack}
         />
       )}
@@ -434,6 +494,8 @@ export default function DocumentScannerClient() {
             }
           }}
           onExport={() => setShowExport(true)}
+          onOcrExport={() => openOcrDialog("pages")}
+          ocrExporting={ocrExporting}
           onPrint={handlePrint}
           printing={printing}
           onBack={goBack}
@@ -447,6 +509,20 @@ export default function DocumentScannerClient() {
             beginCapture(file, captureIntent.current);
           }}
           onClose={() => setShowCamera(false)}
+        />
+      )}
+
+      {showOcr && (
+        <OcrDialog
+          pageCount={ocrMode === "pages" ? pages.length : undefined}
+          singlePage={ocrMode === "edit"}
+          exporting={ocrExporting}
+          onConfirm={runOcrExport}
+          onClose={() => {
+            if (ocrExporting) return;
+            setShowOcr(false);
+            pendingEditOcr.current = null;
+          }}
         />
       )}
 

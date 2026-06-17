@@ -1,7 +1,7 @@
 {
   "name": "QHub Сканер документов",
   "short_name": "Сканер",
-  "description": "Сканирование документов в PDF — локально в браузере",
+  "description": "Сканирование документов в PDF и Word с OCR — локально в браузере",
   "start_url": "/tools/document-scanner",
   "scope": "/tools/document-scanner",
   "display": "standalone",

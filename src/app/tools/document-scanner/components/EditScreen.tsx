@@ -14,18 +14,19 @@ import {
 } from "@/lib/document-scanner/layout-utils";
 import { getPageAspectClass, getPageSizePx } from "@/lib/document-scanner/page-size";
 import A4InteractivePreview from "./A4InteractivePreview";
-import { btnOutline, footerActions, footerBar, footerBtnBack, footerBtnNext, IconChevronLeft, IconChevronRight } from "./ScannerIcons";
+import { btnOutline, footerActions, footerBar, footerBtnBack, footerBtnNext, IconChevronLeft, IconChevronRight, IconTextRecognize } from "./ScannerIcons";
 
 interface Props {
   croppedBlob: Blob;
   existingPage?: ScanPage;
   onConfirm: (page: ScanPage) => void;
+  onOcrExport: (blob: Blob, filter: FilterMode, adjustments: PageAdjustments) => void;
   onBack: () => void;
 }
 
 const FILTERS: FilterMode[] = ["color", "enhanced", "grayscale", "bw"];
 
-export default function EditScreen({ croppedBlob, existingPage, onConfirm, onBack }: Props) {
+export default function EditScreen({ croppedBlob, existingPage, onConfirm, onOcrExport, onBack }: Props) {
   const [filter, setFilter] = useState<FilterMode>(existingPage?.filter ?? "enhanced");
   const [adjustments, setAdjustments] = useState<PageAdjustments>(
     existingPage?.adjustments ?? DEFAULT_ADJUSTMENTS,
@@ -286,6 +287,15 @@ export default function EditScreen({ croppedBlob, existingPage, onConfirm, onBac
             className="w-full py-2 text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2"
           >
             Вернуть к оригиналу
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOcrExport(croppedBlob, filter, adjustments)}
+            className={btnOutline("w-full py-2.5 text-xs")}
+          >
+            <IconTextRecognize className="w-4 h-4" />
+            Извлечь текст в Word
           </button>
         </div>
       </div>
