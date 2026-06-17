@@ -179,3 +179,29 @@ body {
   cursor: pointer;
 }
 
+/* QR generator print layout */
+@media print {
+  body.qr-print-mode * {
+    visibility: hidden;
+  }
+  body.qr-print-mode #qr-print-area,
+  body.qr-print-mode #qr-print-area * {
+    visibility: visible;
+  }
+  body.qr-print-mode #qr-print-area {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    padding: 2cm;
+  }
+  body.qr-print-mode #qr-print-area img {
+    width: 12cm !important;
+    height: 12cm !important;
+    max-width: none;
+  }
+}
+

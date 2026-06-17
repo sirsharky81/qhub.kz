@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="1" stop-color="#030712"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="#ffffff">
+    <rect x="96" y="96" width="56" height="56" rx="8"/>
+    <rect x="96" y="360" width="56" height="56" rx="8"/>
+    <rect x="360" y="96" width="56" height="56" rx="8"/>
+    <rect x="112" y="112" width="24" height="24" rx="4" fill="#111827"/>
+    <rect x="112" y="376" width="24" height="24" rx="4" fill="#111827"/>
+    <rect x="376" y="112" width="24" height="24" rx="4" fill="#111827"/>
+  </g>
+  <g fill="#ffffff">
+    <rect x="176" y="96" width="16" height="16"/>
+    <rect x="208" y="96" width="16" height="16"/>
+    <rect x="240" y="96" width="16" height="16"/>
+    <rect x="272" y="96" width="16" height="16"/>
+    <rect x="304" y="96" width="16" height="16"/>
+    <rect x="96" y="176" width="16" height="16"/>
+    <rect x="96" y="208" width="16" height="16"/>
+    <rect x="96" y="240" width="16" height="16"/>
+    <rect x="400" y="176" width="16" height="16"/>
+    <rect x="400" y="208" width="16" height="16"/>
+    <rect x="400" y="240" width="16" height="16"/>
+    <rect x="176" y="400" width="16" height="16"/>
+    <rect x="208" y="400" width="16" height="16"/>
+    <rect x="240" y="400" width="16" height="16"/>
+    <rect x="272" y="400" width="16" height="16"/>
+    <rect x="304" y="400" width="16" height="16"/>
+    <rect x="176" y="176" width="16" height="16"/>
+    <rect x="208" y="176" width="16" height="16"/>
+    <rect x="240" y="176" width="16" height="16"/>
+    <rect x="272" y="208" width="16" height="16"/>
+    <rect x="304" y="240" width="16" height="16"/>
+    <rect x="240" y="240" width="16" height="16"/>
+    <rect x="208" y="272" width="16" height="16"/>
+    <rect x="272" y="272" width="16" height="16"/>
+    <rect x="304" y="304" width="16" height="16"/>
+    <rect x="336" y="176" width="16" height="16"/>
+    <rect x="336" y="208" width="16" height="16"/>
+    <rect x="368" y="240" width="16" height="16"/>
+    <rect x="336" y="272" width="16" height="16"/>
+    <rect x="368" y="304" width="16" height="16"/>
+    <rect x="336" y="336" width="16" height="16"/>
+    <rect x="176" y="304" width="16" height="16"/>
+    <rect x="208" y="336" width="16" height="16"/>
+    <rect x="240" y="336" width="16" height="16"/>
+    <rect x="272" y="336" width="16" height="16"/>
+    <rect x="304" y="368" width="16" height="16"/>
+    <rect x="336" y="368" width="16" height="16"/>
+    <rect x="368" y="368" width="16" height="16"/>
+  </g>
+</svg>

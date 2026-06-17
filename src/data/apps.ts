@@ -183,6 +183,21 @@ export const apps: App[] = [
     sortOrder: 5,
   },
   {
+    id: "qr-generator",
+    title: "QR-генератор",
+    description:
+      "QR-коды для ссылок, Wi-Fi, vCard, реквизитов, WhatsApp и Telegram — локально в браузере.",
+    longDescription:
+      "Быстрый генератор QR-кодов с настройкой цветов, логотипом, экспортом PNG/SVG/JPG и проверкой читаемости. Поддержка vCard, Wi-Fi (Hidden SSID), платёжных реквизитов, геопозиции и событий календаря.",
+    href: "/tools/qr-generator",
+    tags: ["tools", "productivity"],
+    icon: "/tools/qr-generator/icon-192.png",
+    color: "from-gray-500/10 to-gray-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 4,
+  },
+  {
     id: "tax-calculator",
     title: "Налоговый калькулятор ИП",
     description: "Узнайте, сколько налогов заплатите и сколько останется на руки — за 30 секунд.",

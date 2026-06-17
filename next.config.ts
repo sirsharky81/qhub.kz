@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
         destination: "/tools/random-picker",
         permanent: true,
       },
+      {
+        source: "/qr-generator",
+        destination: "/tools/qr-generator",
+        permanent: true,
+      },
     ];
   },
   async headers() {
