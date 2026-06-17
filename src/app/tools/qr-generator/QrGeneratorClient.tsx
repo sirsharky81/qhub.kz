@@ -2,8 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import type { QrFormData, QrSettings, QrType } from "@/lib/qr-generator/types";
-import { DEFAULT_SETTINGS } from "@/lib/qr-generator/types";
+import type { QrFormData, QrSettings, QrType, LabelOptions } from "@/lib/qr-generator/types";
+import { DEFAULT_SETTINGS, DEFAULT_LABEL_OPTIONS } from "@/lib/qr-generator/types";
+import {
+  getStorageDisplayTitle,
+  getStorageIdentifier,
+  getInventoryDisplayTitle,
+  getInventoryIdentifier,
+} from "@/lib/qr-generator/storageSerializers";
+import { renderCode128DataUrl } from "@/lib/qr-generator/barcode";
 import {
   emptyForm,
   getFormLabel,
@@ -32,6 +39,7 @@ import { ExportButtons } from "./components/ExportButtons";
 import { HistoryPanel, TemplatesPanel } from "./components/HistoryPanel";
 import { Disclaimer } from "./components/Disclaimer";
 import { ScenarioLinks } from "./components/ScenarioLinks";
+import { LabelOptionsPanel } from "./components/LabelOptionsPanel";
 
 interface QrGeneratorInnerProps {
   initialType?: QrType;
@@ -60,16 +68,65 @@ function QrGeneratorInner({
   const [history, setHistory] = useState(() => loadHistory());
   const [templates, setTemplates] = useState(() => loadTemplates());
   const [shareToast, setShareToast] = useState(false);
+  const [labelOptions, setLabelOptions] = useState<LabelOptions>(DEFAULT_LABEL_OPTIONS);
+  const [barcodeDataUrl, setBarcodeDataUrl] = useState<string | null>(null);
+
+  const isLabelType = form.type === "storage" || form.type === "inventory";
+  const miniLabel = labelOptions.labelFormat.startsWith("mini-");
 
   const { result, generating } = useQRCode(form, settings);
 
   useEffect(() => {
     const parsed = parseFromUrl(searchParams.toString());
     if (parsed.form) setForm(parsed.form);
+    else {
+      const typeParam = searchParams.get("type") as QrType | null;
+      if (typeParam && typeParam !== initialType) {
+        setForm(emptyForm(typeParam));
+      }
+    }
     if (Object.keys(parsed.settings).length > 0) {
       setSettings((s) => ({ ...s, ...parsed.settings }));
     }
-  }, [searchParams]);
+  }, [searchParams, initialType]);
+
+  useEffect(() => {
+    if (!isLabelType || labelOptions.codeType === "qr") {
+      setBarcodeDataUrl(null);
+      return;
+    }
+    const id =
+      form.type === "storage"
+        ? getStorageIdentifier(form.data)
+        : getInventoryIdentifier(form.data);
+    if (!id) {
+      setBarcodeDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void renderCode128DataUrl(id).then((url) => {
+      if (!cancelled) setBarcodeDataUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form, isLabelType, labelOptions.codeType]);
+
+  const labelMeta = useMemo(() => {
+    if (form.type === "storage") {
+      return {
+        identifier: getStorageIdentifier(form.data),
+        title: getStorageDisplayTitle(form.data),
+      };
+    }
+    if (form.type === "inventory") {
+      return {
+        identifier: getInventoryIdentifier(form.data),
+        title: getInventoryDisplayTitle(form.data),
+      };
+    }
+    return { identifier: "", title: "" };
+  }, [form]);
 
   useEffect(() => {
     if (!result.payload || !result.dataUrl || result.error) return;
@@ -129,14 +186,26 @@ function QrGeneratorInner({
 
           <PickerSection title={t("typeLabel")} hint={typeHint(form.type, t)}>
             <TypeSelector value={form.type} onChange={handleTypeChange} />
-            <TypeForm form={form} onChange={setForm} />
+            <TypeForm form={form} onChange={setForm} miniLabel={miniLabel} />
           </PickerSection>
+
+          {isLabelType && (
+            <PickerSection title={t("label.options")}>
+              <LabelOptionsPanel options={labelOptions} onChange={setLabelOptions} />
+            </PickerSection>
+          )}
 
           <PickerSection title={t("preview")}>
             <QRPreview
               result={result}
               generating={generating}
               printCaption={effectivePrintCaption}
+              labelIdentifier={isLabelType ? labelMeta.identifier : undefined}
+              labelTitle={isLabelType ? labelMeta.title : undefined}
+              barcodeDataUrl={barcodeDataUrl}
+              codeType={isLabelType ? labelOptions.codeType : "qr"}
+              labelFormat={isLabelType ? labelOptions.labelFormat : "standard"}
+              showLabelText={isLabelType}
             />
           </PickerSection>
 

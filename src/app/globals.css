@@ -203,5 +203,29 @@ body {
     height: 12cm !important;
     max-width: none;
   }
+  body.qr-print-mode .qr-label-text {
+    display: block !important;
+  }
+}
+
+.qr-label-40x30 { max-width: 151px; }
+.qr-label-58x40 { max-width: 219px; }
+.qr-label-mini-20 .qr-label-qr { max-width: 76px !important; }
+.qr-label-mini-25 .qr-label-qr { max-width: 95px !important; }
+.qr-label-mini-30 .qr-label-qr { max-width: 113px !important; }
+
+@media print {
+  .qr-label-40x30, .qr-label-58x40, .qr-label-mini-20, .qr-label-mini-25, .qr-label-mini-30 {
+    width: auto !important;
+    border: none !important;
+    padding: 2mm !important;
+  }
+  .qr-label-mini-20 .qr-label-qr { width: 18mm !important; height: 18mm !important; }
+  .qr-label-mini-25 .qr-label-qr { width: 22mm !important; height: 22mm !important; }
+  .qr-label-mini-30 .qr-label-qr { width: 26mm !important; height: 18mm !important; }
+  .qr-label-40x30 .qr-label-qr { width: 28mm !important; height: 28mm !important; }
+  .qr-label-58x40 .qr-label-qr { width: 38mm !important; height: 38mm !important; }
+  .qr-label-text p { margin: 0; }
+  .qr-label-text .font-bold { font-size: 11pt; font-weight: 700; }
 }
 

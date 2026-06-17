@@ -17,13 +17,16 @@ export function parseFromUrl(search: string): {
   settings: Partial<QrSettings>;
 } {
   const params = new URLSearchParams(search);
-  const type = params.get("type") as QrType | null;
+  const typeParam = params.get("type") as QrType | null;
   const dataB64 = params.get("data");
-  if (!type || !dataB64) return { form: null, settings: {} };
+  if (typeParam && !dataB64) {
+    return { form: emptyForm(typeParam), settings: {} };
+  }
+  if (!typeParam || !dataB64) return { form: null, settings: {} };
 
   try {
     const data = JSON.parse(decodeURIComponent(atob(dataB64)));
-    const form = { type, data } as QrFormData;
+    const form = { type: typeParam, data } as QrFormData;
     const settings: Partial<QrSettings> = {};
     const size = params.get("size");
     if (size) settings.size = parseInt(size, 10);
@@ -37,7 +40,7 @@ export function parseFromUrl(search: string): {
     }
     return { form, settings };
   } catch {
-    return { form: emptyForm(type), settings: {} };
+    return { form: emptyForm(typeParam), settings: {} };
   }
 }
 

@@ -10,7 +10,34 @@ export type QrType =
   | "phone"
   | "email"
   | "geo"
-  | "event";
+  | "event"
+  | "storage"
+  | "inventory";
+
+export type StorageLocationType =
+  | "cabinet"
+  | "rack"
+  | "garage"
+  | "warehouse"
+  | "room"
+  | "shelf"
+  | "other";
+
+export type CodeMarkType = "qr" | "barcode" | "both";
+
+export type LabelFormat =
+  | "standard"
+  | "40x30"
+  | "58x40"
+  | "a4-grid"
+  | "mini-20"
+  | "mini-25"
+  | "mini-30";
+
+export interface LabelOptions {
+  codeType: CodeMarkType;
+  labelFormat: LabelFormat;
+}
 
 export type ErrorCorrectionLevel = "L" | "M" | "Q" | "H";
 
@@ -89,6 +116,32 @@ export interface EventFormData {
   description: string;
 }
 
+export interface StorageItemRow {
+  id: string;
+  name: string;
+  quantity: number;
+  comment: string;
+}
+
+export interface StorageFormData {
+  name: string;
+  boxNumber: string;
+  comment: string;
+  locationType: StorageLocationType | "";
+  locationNumber: string;
+  locationSection: string;
+  items: StorageItemRow[];
+}
+
+export interface InventoryFormData {
+  inventoryNumber: string;
+  itemName: string;
+  department: string;
+  responsible: string;
+  serialNumber: string;
+  comment: string;
+}
+
 export type QrFormData =
   | { type: "text"; data: TextFormData }
   | { type: "payment"; data: PaymentFormData }
@@ -99,7 +152,9 @@ export type QrFormData =
   | { type: "phone"; data: PhoneFormData }
   | { type: "email"; data: EmailFormData }
   | { type: "geo"; data: GeoFormData }
-  | { type: "event"; data: EventFormData };
+  | { type: "event"; data: EventFormData }
+  | { type: "storage"; data: StorageFormData }
+  | { type: "inventory"; data: InventoryFormData };
 
 export interface QrHistoryEntry {
   id: string;
@@ -139,8 +194,15 @@ export const DEFAULT_SETTINGS: QrSettings = {
   logoSizePercent: 20,
 };
 
+export const DEFAULT_LABEL_OPTIONS: LabelOptions = {
+  codeType: "qr",
+  labelFormat: "standard",
+};
+
 export const QR_TYPES: QrType[] = [
   "text",
+  "storage",
+  "inventory",
   "payment",
   "vcard",
   "wifi",

@@ -12,13 +12,16 @@ import { FormField, inputClass, textareaClass } from "./FormField";
 import { PaymentDetailsForm } from "./PaymentDetailsForm";
 import { VCardForm } from "./VCardForm";
 import { WifiForm } from "./WifiForm";
+import { StorageForm } from "./StorageForm";
+import { InventoryForm } from "./InventoryForm";
 
 interface TypeFormProps {
   form: QrFormData;
   onChange: (form: QrFormData) => void;
+  miniLabel?: boolean;
 }
 
-export function TypeForm({ form, onChange }: TypeFormProps) {
+export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
   const { t } = useQrTranslations();
 
   switch (form.type) {
@@ -272,6 +275,24 @@ export function TypeForm({ form, onChange }: TypeFormProps) {
             />
           </FormField>
         </div>
+      );
+
+    case "storage":
+      return (
+        <StorageForm
+          data={form.data}
+          onChange={(data) => onChange({ type: "storage", data })}
+          miniLabel={miniLabel}
+        />
+      );
+
+    case "inventory":
+      return (
+        <InventoryForm
+          data={form.data}
+          onChange={(data) => onChange({ type: "inventory", data })}
+          miniLabel={miniLabel}
+        />
       );
   }
 }

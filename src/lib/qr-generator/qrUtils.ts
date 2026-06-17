@@ -11,6 +11,11 @@ import type {
   WhatsAppFormData,
   WifiFormData,
 } from "./types";
+import {
+  buildInventoryPayload,
+  buildStoragePayload,
+  newStorageItem,
+} from "./storageSerializers";
 
 export function escapeWifiValue(value: string): string {
   return value.replace(/([\\;,":])/g, "\\$1");
@@ -146,6 +151,10 @@ export function buildPayload(form: QrFormData): string {
       return buildGeoPayload(form.data);
     case "event":
       return buildEventPayload(form.data);
+    case "storage":
+      return buildStoragePayload(form.data);
+    case "inventory":
+      return buildInventoryPayload(form.data);
   }
 }
 
@@ -198,6 +207,10 @@ export function getFormLabel(form: QrFormData): string {
       return `${form.data.latitude}, ${form.data.longitude}`;
     case "event":
       return form.data.title || "Событие";
+    case "storage":
+      return form.data.boxNumber || form.data.name || "Коробка";
+    case "inventory":
+      return form.data.inventoryNumber || "Инвентарная метка";
   }
 }
 
@@ -246,5 +259,30 @@ export function emptyForm(type: QrFormData["type"]): QrFormData {
       return { type, data: { latitude: "", longitude: "" } };
     case "event":
       return { type, data: { title: "", location: "", start: "", end: "", description: "" } };
+    case "storage":
+      return {
+        type,
+        data: {
+          name: "",
+          boxNumber: "",
+          comment: "",
+          locationType: "",
+          locationNumber: "",
+          locationSection: "",
+          items: [],
+        },
+      };
+    case "inventory":
+      return {
+        type,
+        data: {
+          inventoryNumber: "",
+          itemName: "",
+          department: "",
+          responsible: "",
+          serialNumber: "",
+          comment: "",
+        },
+      };
   }
 }
