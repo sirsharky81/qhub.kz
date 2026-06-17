@@ -157,10 +157,7 @@ CSV / TXT:
 Иван Петров;Менеджер;+7700123****
 Алия Касымова;Директор;+7700765****`;
 
-export const DEFAULT_COLUMNS: ColumnDef[] = [
-  { id: "col-1", name: "ФИО" },
-  { id: "col-2", name: "Должность" },
-];
+export const DEFAULT_COLUMNS: ColumnDef[] = [{ id: "col-1", name: "Участник" }];
 
 export function isEventInfoValid(event: EventInfo): boolean {
   return event.eventName.trim().length > 0;
