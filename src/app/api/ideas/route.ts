@@ -14,58 +14,63 @@ function trimField(value: unknown, maxLen: number): string {
 }
 
 export async function POST(request: Request) {
-  let body: IdeaRequestBody;
   try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "Неверный формат запроса" }, { status: 400 });
-  }
+    let body: IdeaRequestBody;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Неверный формат запроса" }, { status: 400 });
+    }
 
-  if (body.website) {
-    return Response.json({ ok: true });
-  }
+    if (body.website) {
+      return Response.json({ ok: true });
+    }
 
-  const ip = getClientIp(request);
-  const { allowed, retryAfterSec } = await checkIdeasRateLimit(ip);
-  if (!allowed) {
-    return Response.json(
-      { error: "Слишком много отправок. Попробуйте позже." },
-      {
-        status: 429,
-        headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined,
-      },
-    );
-  }
-
-  const idea = trimField(body.idea, 2000);
-  const name = trimField(body.name, 100);
-  const contact = trimField(body.contact, 100);
-
-  if (idea.length < 10) {
-    return Response.json({ error: "Опишите идею подробнее (минимум 10 символов)" }, { status: 400 });
-  }
-
-  if (!name) {
-    return Response.json({ error: "Укажите имя" }, { status: 400 });
-  }
-
-  const text = formatIdeaMessage({
-    idea,
-    name,
-    contact: contact || undefined,
-  });
-
-  const result = await sendTelegramMessage(text);
-
-  if (!result.ok) {
-    if (result.error === "telegram_not_configured") {
+    const ip = getClientIp(request);
+    const { allowed, retryAfterSec } = await checkIdeasRateLimit(ip);
+    if (!allowed) {
       return Response.json(
-        { error: "Сервис временно недоступен" },
-        { status: 503 },
+        { error: "Слишком много отправок. Попробуйте позже." },
+        {
+          status: 429,
+          headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined,
+        },
       );
     }
-    return Response.json({ error: "Не удалось отправить идею" }, { status: 502 });
-  }
 
-  return Response.json({ ok: true });
+    const idea = trimField(body.idea, 2000);
+    const name = trimField(body.name, 100);
+    const contact = trimField(body.contact, 100);
+
+    if (idea.length < 10) {
+      return Response.json({ error: "Опишите идею подробнее (минимум 10 символов)" }, { status: 400 });
+    }
+
+    if (!name) {
+      return Response.json({ error: "Укажите имя" }, { status: 400 });
+    }
+
+    const text = formatIdeaMessage({
+      idea,
+      name,
+      contact: contact || undefined,
+    });
+
+    const result = await sendTelegramMessage(text);
+
+    if (!result.ok) {
+      if (result.error === "telegram_not_configured") {
+        return Response.json(
+          { error: "Сервис временно недоступен" },
+          { status: 503 },
+        );
+      }
+      return Response.json({ error: "Не удалось отправить идею" }, { status: 502 });
+    }
+
+    return Response.json({ ok: true });
+  } catch (err) {
+    console.error("[api/ideas] unhandled error:", err);
+    return Response.json({ error: "Не удалось отправить идею" }, { status: 500 });
+  }
 }

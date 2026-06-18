@@ -29,10 +29,22 @@ export function formatIdeaMessage({ idea, name, contact }: IdeaSubmission): stri
   return lines.join("\n");
 }
 
+function cleanEnv(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
 export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?: string }> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  const topicId = process.env.TELEGRAM_IDEAS_TOPIC_ID;
+  const token = cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
+  const chatId = cleanEnv(process.env.TELEGRAM_CHAT_ID);
+  const topicId = cleanEnv(process.env.TELEGRAM_IDEAS_TOPIC_ID);
 
   if (!token || !chatId || !topicId) {
     return { ok: false, error: "telegram_not_configured" };
