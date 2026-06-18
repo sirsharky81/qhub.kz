@@ -1,4 +1,4 @@
-import { formatIdeaMessage, sendTelegramMessage } from "@/lib/telegram";
+import { formatIdeaMessage, getIdeasTopicId, sendTelegramMessage } from "@/lib/telegram";
 import { checkIdeasRateLimit, getClientIp } from "@/lib/rate-limit";
 
 interface IdeaRequestBody {
@@ -56,7 +56,12 @@ export async function POST(request: Request) {
       contact: contact || undefined,
     });
 
-    const result = await sendTelegramMessage(text);
+    const topicId = getIdeasTopicId();
+    if (!topicId) {
+      return Response.json({ error: "Сервис временно недоступен" }, { status: 503 });
+    }
+
+    const result = await sendTelegramMessage(text, topicId);
 
     if (!result.ok) {
       if (result.error === "telegram_not_configured") {

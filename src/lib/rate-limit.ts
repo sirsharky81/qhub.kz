@@ -1,7 +1,7 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
-let ideasRatelimit: Ratelimit | null | undefined;
+let ratelimitCache: Map<string, Ratelimit | null> | undefined;
 
 function cleanEnv(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -15,23 +15,28 @@ function cleanEnv(value: string | undefined): string | undefined {
   return trimmed;
 }
 
-function getIdeasRatelimit(): Ratelimit | null {
-  if (ideasRatelimit !== undefined) return ideasRatelimit;
+function getRatelimit(prefix: string): Ratelimit | null {
+  if (!ratelimitCache) ratelimitCache = new Map();
+
+  if (ratelimitCache.has(prefix)) {
+    return ratelimitCache.get(prefix) ?? null;
+  }
 
   const url = cleanEnv(process.env.UPSTASH_REDIS_REST_URL);
   const token = cleanEnv(process.env.UPSTASH_REDIS_REST_TOKEN);
   if (!url || !token) {
-    ideasRatelimit = null;
+    ratelimitCache.set(prefix, null);
     return null;
   }
 
-  ideasRatelimit = new Ratelimit({
+  const limiter = new Ratelimit({
     redis: new Redis({ url, token }),
     limiter: Ratelimit.slidingWindow(5, "15 m"),
-    prefix: "qhub:ideas",
+    prefix,
   });
 
-  return ideasRatelimit;
+  ratelimitCache.set(prefix, limiter);
+  return limiter;
 }
 
 export function getClientIp(request: Request): string {
@@ -43,10 +48,11 @@ export function getClientIp(request: Request): string {
   return request.headers.get("x-real-ip") ?? "unknown";
 }
 
-export async function checkIdeasRateLimit(
+export async function checkRateLimit(
+  prefix: string,
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
-  const ratelimit = getIdeasRatelimit();
+  const ratelimit = getRatelimit(prefix);
   if (!ratelimit) return { allowed: true };
 
   try {
@@ -59,4 +65,16 @@ export async function checkIdeasRateLimit(
     console.error("[rate-limit] Upstash check failed, allowing request:", err);
     return { allowed: true };
   }
+}
+
+export async function checkIdeasRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:ideas", identifier);
+}
+
+export async function checkDevelopersRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:developers", identifier);
 }

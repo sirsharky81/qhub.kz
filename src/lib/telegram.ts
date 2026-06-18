@@ -12,6 +12,13 @@ export interface IdeaSubmission {
   contact?: string;
 }
 
+export interface DeveloperSubmission {
+  appName: string;
+  description: string;
+  name: string;
+  contact?: string;
+}
+
 export function formatIdeaMessage({ idea, name, contact }: IdeaSubmission): string {
   const lines = [
     "💡 <b>Новая идея для QHub</b>",
@@ -29,6 +36,30 @@ export function formatIdeaMessage({ idea, name, contact }: IdeaSubmission): stri
   return lines.join("\n");
 }
 
+export function formatDeveloperMessage({
+  appName,
+  description,
+  name,
+  contact,
+}: DeveloperSubmission): string {
+  const lines = [
+    "🛠 <b>Заявка от разработчика</b>",
+    "",
+    `<b>Приложение:</b> ${escapeHtml(appName)}`,
+    "",
+    `<b>Описание:</b>\n${escapeHtml(description)}`,
+    "",
+    `<b>От:</b> ${escapeHtml(name)}`,
+  ];
+
+  if (contact) {
+    lines.push(`<b>Контакт:</b> ${escapeHtml(contact)}`);
+  }
+
+  lines.push("", "<i>Источник: qhub.kz → Для разработчиков</i>");
+  return lines.join("\n");
+}
+
 function cleanEnv(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
@@ -41,12 +72,14 @@ function cleanEnv(value: string | undefined): string | undefined {
   return trimmed;
 }
 
-export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?: string }> {
+export async function sendTelegramMessage(
+  text: string,
+  topicId: string | number,
+): Promise<{ ok: boolean; error?: string }> {
   const token = cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
   const chatId = cleanEnv(process.env.TELEGRAM_CHAT_ID);
-  const topicId = cleanEnv(process.env.TELEGRAM_IDEAS_TOPIC_ID);
 
-  if (!token || !chatId || !topicId) {
+  if (!token || !chatId || topicId === "" || topicId === undefined || topicId === null) {
     return { ok: false, error: "telegram_not_configured" };
   }
 
@@ -69,4 +102,12 @@ export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; 
   }
 
   return { ok: true };
+}
+
+export function getIdeasTopicId(): string | undefined {
+  return cleanEnv(process.env.TELEGRAM_IDEAS_TOPIC_ID);
+}
+
+export function getDevelopersTopicId(): string | undefined {
+  return cleanEnv(process.env.TELEGRAM_DEVELOPERS_TOPIC_ID);
 }
