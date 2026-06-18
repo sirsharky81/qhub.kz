@@ -27,8 +27,10 @@ import type {
 } from "@/lib/music/types";
 import { prefetchTrackPlaceholderArtwork, setLockScreenArtworkRefreshHandler } from "@/lib/music/lock-screen-artwork";
 import { formatTime } from "@/lib/music/types";
+import { usePathname, useRouter } from "next/navigation";
 import { MusicToast } from "@/components/music/MusicToast";
 import DebugLogPanel from "@/app/tools/music/DebugLogPanel";
+import { useLaunchQueue } from "@/app/tools/music/hooks/useLaunchQueue";
 
 interface MusicPlayerContextValue {
   tracks: Track[];
@@ -148,7 +150,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tracksRef = useRef<Track[]>([]);
   const currentTrackRef = useRef<Track | null>(null);
+  const statusRef = useRef<PlaybackStatus>("idle");
+  const pathnameRef = useRef<string>("");
   const unavailableRef = useRef<Set<string>>(new Set());
+  const router = useRouter();
+  const pathname = usePathname();
   const navigationRef = useRef({
     onNext: async (_opts?: { lockScreen?: boolean }) => {},
     onPrevious: async (_opts?: { lockScreen?: boolean }) => {},
@@ -166,6 +172,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     currentTrackRef.current = currentTrack;
   }, [currentTrack]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
 
   useEffect(() => {
     unavailableRef.current = unavailableTrackIds;
@@ -626,6 +640,39 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     },
     [startImportPlayback, schedulePersist],
   );
+
+  const importFilesFromLaunchHandler = useCallback(
+    async (files: File[]) => {
+      setImportProgress({ total: files.length, processed: 0, currentFile: "" });
+      const imported = await mediaLibrary.importFiles(files, setImportProgress);
+      setTracks((prev) => [...prev, ...imported]);
+      setImportProgress(null);
+      if (imported.length > 0) {
+        const appendToQueue =
+          currentTrackRef.current !== null && statusRef.current === "playing";
+        if (appendToQueue) {
+          queueRef.current.addTracksToQueue(imported.map((t) => t.id));
+          setQueue(queueRef.current.getQueue());
+        } else {
+          await startImportPlayback(imported);
+        }
+      }
+      schedulePersist();
+    },
+    [startImportPlayback, schedulePersist],
+  );
+
+  useLaunchQueue({
+    onFilesReceived: async (files) => {
+      if (pathnameRef.current !== "/tools/music") {
+        router.push("/tools/music");
+      }
+      await importFilesFromLaunchHandler(files);
+    },
+    onUnsupportedFile: (name) => {
+      showToast(`Формат файла не поддерживается: ${name}`);
+    },
+  });
 
   const importDirectoryHandler = useCallback(async () => {
     if (!("showDirectoryPicker" in window)) {

@@ -1,9 +1,24 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
+
+function useShowFileHandlerHint(): boolean {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setShow(
+      window.matchMedia("(display-mode: browser)").matches && "launchQueue" in window,
+    );
+  }, []);
+
+  return show;
+}
 
 export function ImportScreen() {
   const { importDirectory, pickFiles, importProgress } = useMusicPlayer();
+  const showFileHandlerHint = useShowFileHandlerHint();
 
   const handlePickFolder = () => {
     if ("showDirectoryPicker" in window) {
@@ -43,6 +58,13 @@ export function ImportScreen() {
       </div>
 
       <p className="mt-4 text-[10px] text-gray-400">MP3 · M4A · AAC · WAV · FLAC · OGG</p>
+
+      {showFileHandlerHint && (
+        <p className="mt-4 text-[10px] text-gray-400 max-w-xs leading-relaxed">
+          Чтобы открывать файлы двойным кликом из проводника, установите QHub Music как приложение
+          (кнопка в адресной строке браузера).
+        </p>
+      )}
 
       {importProgress && (
         <div className="mt-5 w-full max-w-xs">

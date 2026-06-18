@@ -21,6 +21,16 @@ interface FileSystemDirectoryHandle extends FileSystemHandle {
   getFileHandle(name: string): Promise<FileSystemFileHandle>;
 }
 
+interface LaunchParams {
+  readonly files: FileSystemFileHandle[];
+  readonly targetURL?: string;
+}
+
+interface LaunchQueue {
+  setConsumer(consumer: (params: LaunchParams) => void | Promise<void>): void;
+}
+
 interface Window {
   showDirectoryPicker?(options?: { mode?: "read" | "readwrite" }): Promise<FileSystemDirectoryHandle>;
+  readonly launchQueue?: LaunchQueue;
 }

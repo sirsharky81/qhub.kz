@@ -10,7 +10,8 @@
     "postinstall": "node scripts/copy-ffmpeg-core.mjs && node scripts/copy-random-picker-fonts.mjs",
     "generate:scanner-icons": "node scripts/generate-document-scanner-icons.mjs",
     "generate:picker-icons": "node scripts/generate-random-picker-icons.mjs",
-    "generate:qr-icons": "node scripts/generate-qr-generator-icons.mjs"
+    "generate:qr-icons": "node scripts/generate-qr-generator-icons.mjs",
+    "generate:music-icons": "node scripts/generate-music-icons.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

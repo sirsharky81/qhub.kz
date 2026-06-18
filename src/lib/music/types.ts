@@ -5,6 +5,10 @@ export const AUDIO_EXTENSIONS = new Set([
   ".wav",
   ".flac",
   ".ogg",
+  ".aiff",
+  ".aif",
+  ".opus",
+  ".weba",
 ]);
 
 export const AUDIO_MIME_PREFIXES = ["audio/"];
