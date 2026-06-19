@@ -17,7 +17,7 @@ import {
 import { renderCode128DataUrl } from "@/lib/qr-generator/barcode";
 import { PrivacyBanner } from "../../file-converter/components/PrivacyBanner";
 import { PickerButton, PickerSection } from "../../random-picker/components/PickerButton";
-import { FormField, inputClass, selectClass, textareaClass } from "../components/FormField";
+import { FormField, inputClass, textareaClass } from "../components/FormField";
 
 function BulkLabelsInner() {
   const { t } = useQrTranslations();
@@ -123,15 +123,22 @@ function BulkLabelsInner() {
           )}
 
           <PickerSection title={t("label.codeType")}>
-            <select
-              className={selectClass}
-              value={codeType}
-              onChange={(e) => setCodeType(e.target.value as CodeMarkType)}
-            >
-              <option value="qr">{t("label.code.qr")}</option>
-              <option value="barcode">{t("label.code.barcode")}</option>
-              <option value="both">{t("label.code.both")}</option>
-            </select>
+            <div className="flex gap-1 p-1 rounded-xl bg-gray-100 w-fit">
+              {(["qr", "barcode"] as const).map((ct) => (
+                <button
+                  key={ct}
+                  type="button"
+                  onClick={() => setCodeType(ct)}
+                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                    codeType === ct
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  {t(`label.code.${ct}`)}
+                </button>
+              ))}
+            </div>
           </PickerSection>
 
           <PickerButton variant="primary" disabled={busy} onClick={() => void handleGenerate()}>

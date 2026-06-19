@@ -1,4 +1,9 @@
-export async function renderCode128Svg(value: string, height = 60): Promise<string | null> {
+export async function renderCode128Svg(
+  value: string,
+  height = 60,
+  displayValue = true,
+  margin = 4,
+): Promise<string | null> {
   const code = value.replace(/[^\x20-\x7E]/g, "").trim();
   if (!code) return null;
 
@@ -8,9 +13,9 @@ export async function renderCode128Svg(value: string, height = 60): Promise<stri
     JsBarcode(svg, code, {
       format: "CODE128",
       height,
-      displayValue: true,
+      displayValue,
       fontSize: 14,
-      margin: 4,
+      margin,
       width: 2,
     });
     return new XMLSerializer().serializeToString(svg);
@@ -19,8 +24,13 @@ export async function renderCode128Svg(value: string, height = 60): Promise<stri
   }
 }
 
-export async function renderCode128DataUrl(value: string, height = 60): Promise<string | null> {
-  const svg = await renderCode128Svg(value, height);
+export async function renderCode128DataUrl(
+  value: string,
+  height = 60,
+  displayValue = true,
+  margin = 4,
+): Promise<string | null> {
+  const svg = await renderCode128Svg(value, height, displayValue, margin);
   if (!svg) return null;
   const blob = new Blob([svg], { type: "image/svg+xml" });
   const url = URL.createObjectURL(blob);

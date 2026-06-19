@@ -59,14 +59,14 @@ export function buildStoragePayload(data: StorageFormData): string {
 export function buildInventoryPayload(data: InventoryFormData): string {
   const lines: string[] = ["Тип: Инвентарная метка"];
   if (data.inventoryNumber.trim()) lines.push(`Инв.номер: ${data.inventoryNumber.trim()}`);
+  if (data.code.trim()) lines.push(`Код: ${data.code.trim()}`);
   if (data.itemName.trim()) lines.push(`Наименование: ${data.itemName.trim()}`);
+  if (data.category.trim()) lines.push(`Категория: ${data.category.trim()}`);
   if (data.department.trim()) lines.push(`Подразделение: ${data.department.trim()}`);
-  if (data.responsible.trim()) lines.push(`Ответственный: ${data.responsible.trim()}`);
-  if (data.serialNumber.trim()) lines.push(`Серийный номер: ${data.serialNumber.trim()}`);
-  if (data.comment.trim()) {
-    lines.push("Комментарий:");
-    lines.push(data.comment.trim());
-  }
+  if (data.responsible.trim()) lines.push(`МОЛ: ${data.responsible.trim()}`);
+  if (data.entryDate.trim()) lines.push(`Дата ввода: ${data.entryDate.trim()}`);
+  if (data.initialCost.trim()) lines.push(`Первоначальная стоимость: ${data.initialCost.trim()}`);
+  if (data.condition.trim()) lines.push(`Состояние: ${data.condition.trim()}`);
   return lines.join("\n");
 }
 

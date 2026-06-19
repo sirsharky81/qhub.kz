@@ -9,7 +9,12 @@ export type AppTag =
   | "music"
   | "editor"
   | "taxes"
-  | "documents";
+  | "documents"
+  | "inventoryOs"
+  | "qrBarcodeScan"
+  | "osLabels"
+  | "vcard"
+  | "qrBarcode";
 
 export interface App {
   id: string;
@@ -42,6 +47,11 @@ export const TAG_LABELS: Record<AppTag, string> = {
   editor: "Редактор",
   taxes: "Налоги",
   documents: "Документы",
+  inventoryOs: "Инвентаризация ОС",
+  qrBarcodeScan: "Распознавание QR, Штрихкоды",
+  osLabels: "Метки ОС",
+  vcard: "Визитки",
+  qrBarcode: "QR и штрихкод",
 };
 
 export const apps: App[] = [
@@ -183,14 +193,29 @@ export const apps: App[] = [
     sortOrder: 5,
   },
   {
+    id: "code-scanner",
+    title: "Сканер кодов",
+    description:
+      "Распознавание QR и штрих-кодов с камеры. Инвентаризация основных средств по базе 1С — отчёты по излишкам и недостачам. Коробки хранения — локально в браузере.",
+    longDescription:
+      "Сканируйте QR и штрих-коды с камеры или вводите вручную — мгновенное распознавание без сервера. Режим инвентаризации ОС: загрузите выгрузку из 1С, отсканируйте метки основных средств и получите ведомость с отчётами по излишкам и недостачам, экспортом .qhub-inventory и CSV. Также режим коробок QHub для учёта хранения.",
+    href: "/tools/code-scanner",
+    tags: ["tools", "inventoryOs", "qrBarcodeScan"],
+    icon: "/tools/code-scanner/icon-192.png",
+    color: "from-cyan-500/10 to-slate-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 4,
+  },
+  {
     id: "qr-generator",
     title: "QR-генератор",
     description:
-      "QR-коды для ссылок, Wi-Fi, vCard, реквизитов, WhatsApp и Telegram — локально в браузере.",
+      "Метки ОС с QR и штрихкодом — одна или массовая печать из базы 1С. Визитки, Wi-Fi, реквизиты и ссылки — локально в браузере.",
     longDescription:
-      "Быстрый генератор QR-кодов с настройкой цветов, логотипом, экспортом PNG/SVG/JPG и проверкой читаемости. Поддержка vCard, Wi-Fi (Hidden SSID), платёжных реквизитов, геопозиции и событий календаря.",
+      "Формирование этикеток основных средств: QR или штрихкод, одна метка вручную или загрузка выгрузки из 1С с печатью PDF. Универсальный генератор — визитки vCard, Wi-Fi, платёжные реквизиты, геопозиция, события календаря и обычные QR-ссылки. Настройка цветов, экспорт PNG/SVG — всё локально в браузере и PWA.",
     href: "/tools/qr-generator",
-    tags: ["tools", "productivity"],
+    tags: ["tools", "osLabels", "vcard", "qrBarcode"],
     icon: "/tools/qr-generator/icon-192.png",
     color: "from-gray-500/10 to-gray-600/5",
     author: "QHub",

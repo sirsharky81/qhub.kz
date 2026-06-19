@@ -135,11 +135,14 @@ export interface StorageFormData {
 
 export interface InventoryFormData {
   inventoryNumber: string;
+  code: string;
   itemName: string;
+  category: string;
   department: string;
   responsible: string;
-  serialNumber: string;
-  comment: string;
+  entryDate: string;
+  initialCost: string;
+  condition: string;
 }
 
 export type QrFormData =

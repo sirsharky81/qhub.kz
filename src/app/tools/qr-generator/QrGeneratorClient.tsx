@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
-import type { QrFormData, QrSettings, QrType, LabelOptions } from "@/lib/qr-generator/types";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { QrFormData, QrSettings, QrType, LabelOptions, QrHistoryEntry, QrTemplate } from "@/lib/qr-generator/types";
 import { DEFAULT_SETTINGS, DEFAULT_LABEL_OPTIONS } from "@/lib/qr-generator/types";
 import {
   getStorageDisplayTitle,
@@ -40,6 +40,8 @@ import { HistoryPanel, TemplatesPanel } from "./components/HistoryPanel";
 import { Disclaimer } from "./components/Disclaimer";
 import { ScenarioLinks } from "./components/ScenarioLinks";
 import { LabelOptionsPanel } from "./components/LabelOptionsPanel";
+import { InventoryModeSelector, type InventoryMode } from "./components/InventoryModeSelector";
+import InventoryBatchClient from "./inventory/InventoryBatchClient";
 
 interface QrGeneratorInnerProps {
   initialType?: QrType;
@@ -48,6 +50,8 @@ interface QrGeneratorInnerProps {
   seoTitleKey?: string;
   seoDescKey?: string;
   disclaimerVariant?: "general" | "payment";
+  hideNav?: boolean;
+  embedded?: boolean;
 }
 
 function QrGeneratorInner({
@@ -57,24 +61,35 @@ function QrGeneratorInner({
   seoTitleKey,
   seoDescKey,
   disclaimerVariant = "general",
+  hideNav = false,
 }: QrGeneratorInnerProps) {
   const { t } = useQrTranslations();
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const isInventoryPage = pathname.endsWith("/inventory");
 
   const [form, setForm] = useState<QrFormData>(() => emptyForm(initialType));
+  const [inventoryMode, setInventoryMode] = useState<InventoryMode>("single");
   const [settings, setSettings] = useState<QrSettings>(DEFAULT_SETTINGS);
   const [printCaption, setPrintCaption] = useState("");
-  const [history, setHistory] = useState(() => loadHistory());
-  const [templates, setTemplates] = useState(() => loadTemplates());
+  const [history, setHistory] = useState<QrHistoryEntry[]>([]);
+  const [templates, setTemplates] = useState<QrTemplate[]>([]);
   const [shareToast, setShareToast] = useState(false);
   const [labelOptions, setLabelOptions] = useState<LabelOptions>(DEFAULT_LABEL_OPTIONS);
   const [barcodeDataUrl, setBarcodeDataUrl] = useState<string | null>(null);
 
-  const isLabelType = form.type === "storage" || form.type === "inventory";
+  const isInventoryBatch = form.type === "inventory" && inventoryMode === "batch";
+  const isLabelType =
+    (form.type === "storage" || form.type === "inventory") && !isInventoryBatch;
   const miniLabel = labelOptions.labelFormat.startsWith("mini-");
 
   const { result, generating } = useQRCode(form, settings);
+
+  useEffect(() => {
+    setHistory(loadHistory());
+    setTemplates(loadTemplates());
+  }, []);
 
   useEffect(() => {
     const parsed = parseFromUrl(searchParams.toString());
@@ -89,6 +104,13 @@ function QrGeneratorInner({
       setSettings((s) => ({ ...s, ...parsed.settings }));
     }
   }, [searchParams, initialType]);
+
+  useEffect(() => {
+    if (form.type !== "inventory" && initialType !== "inventory") return;
+    const legacyTab = searchParams.get("tab");
+    const modeParam = searchParams.get("mode") ?? (legacyTab === "batch" ? "batch" : "single");
+    setInventoryMode(modeParam === "batch" ? "batch" : "single");
+  }, [searchParams, form.type, initialType]);
 
   useEffect(() => {
     if (!isLabelType || labelOptions.codeType === "qr") {
@@ -139,7 +161,20 @@ function QrGeneratorInner({
 
   const handleTypeChange = (type: QrType) => {
     setForm(emptyForm(type));
+    if (type !== "inventory") setInventoryMode("single");
   };
+
+  const handleInventoryModeChange = useCallback(
+    (mode: InventoryMode) => {
+      setInventoryMode(mode);
+      if (!isInventoryPage) return;
+      router.replace(
+        mode === "batch" ? "/tools/qr-generator/inventory?mode=batch" : "/tools/qr-generator/inventory",
+        { scroll: false },
+      );
+    },
+    [isInventoryPage, router],
+  );
 
   const defaultPrintCaption = useMemo(() => {
     if (form.type === "wifi") return form.data.ssid;
@@ -172,10 +207,12 @@ function QrGeneratorInner({
               {seoDesc ?? (seoDescKey ? t(seoDescKey) : t("subtitle"))}
             </p>
             <PrivacyBanner compact />
-            <div className="pt-2 space-y-1.5">
-              <p className="text-[11px] font-medium text-gray-500">{t("seoScenarios")}</p>
-              <ScenarioLinks />
-            </div>
+            {!hideNav && (
+              <div className="pt-2 space-y-1.5">
+                <p className="text-[11px] font-medium text-gray-500">{t("seoScenarios")}</p>
+                <ScenarioLinks />
+              </div>
+            )}
           </div>
 
           {shareToast && (
@@ -186,7 +223,14 @@ function QrGeneratorInner({
 
           <PickerSection title={t("typeLabel")} hint={typeHint(form.type, t)}>
             <TypeSelector value={form.type} onChange={handleTypeChange} />
-            <TypeForm form={form} onChange={setForm} miniLabel={miniLabel} />
+            {form.type === "inventory" && (
+              <InventoryModeSelector mode={inventoryMode} onChange={handleInventoryModeChange} />
+            )}
+            {isInventoryBatch ? (
+              <InventoryBatchClient embedded />
+            ) : (
+              <TypeForm form={form} onChange={setForm} miniLabel={miniLabel} />
+            )}
           </PickerSection>
 
           {isLabelType && (
@@ -195,72 +239,76 @@ function QrGeneratorInner({
             </PickerSection>
           )}
 
-          <PickerSection title={t("preview")}>
-            <QRPreview
-              result={result}
-              generating={generating}
-              printCaption={effectivePrintCaption}
-              labelIdentifier={isLabelType ? labelMeta.identifier : undefined}
-              labelTitle={isLabelType ? labelMeta.title : undefined}
-              barcodeDataUrl={barcodeDataUrl}
-              codeType={isLabelType ? labelOptions.codeType : "qr"}
-              labelFormat={isLabelType ? labelOptions.labelFormat : "standard"}
-              showLabelText={isLabelType}
-            />
-          </PickerSection>
+          {!isInventoryBatch && (
+            <>
+              <PickerSection title={t("preview")}>
+                <QRPreview
+                  result={result}
+                  generating={generating}
+                  printCaption={effectivePrintCaption}
+                  labelIdentifier={isLabelType ? labelMeta.identifier : undefined}
+                  labelTitle={isLabelType ? labelMeta.title : undefined}
+                  barcodeDataUrl={barcodeDataUrl}
+                  codeType={isLabelType ? labelOptions.codeType : "qr"}
+                  labelFormat={isLabelType ? labelOptions.labelFormat : "standard"}
+                  showLabelText={isLabelType}
+                />
+              </PickerSection>
 
-          <PickerSection title={t("settings")}>
-            <SettingsPanel settings={settings} onChange={setSettings} />
-          </PickerSection>
+              <PickerSection title={t("settings")}>
+                <SettingsPanel settings={settings} onChange={setSettings} />
+              </PickerSection>
 
-          <PickerSection title={t("export")}>
-            <FormFieldPrintCaption
-              value={printCaption}
-              onChange={setPrintCaption}
-              placeholder={defaultPrintCaption}
-            />
-            <ExportButtons
-              result={result}
-              settings={settings}
-              printCaption={effectivePrintCaption}
-              onShare={handleShare}
-            />
-          </PickerSection>
+              <PickerSection title={t("export")}>
+                <FormFieldPrintCaption
+                  value={printCaption}
+                  onChange={setPrintCaption}
+                  placeholder={defaultPrintCaption}
+                />
+                <ExportButtons
+                  result={result}
+                  settings={settings}
+                  printCaption={effectivePrintCaption}
+                  onShare={handleShare}
+                />
+              </PickerSection>
 
-          <PickerSection title={t("history")}>
-            <HistoryPanel
-              entries={history}
-              onLoad={(entry) => {
-                setForm(entry.formSnapshot);
-                setSettings(entry.settings);
-              }}
-              onClear={() => {
-                clearHistory();
-                setHistory([]);
-              }}
-            />
-          </PickerSection>
+              <PickerSection title={t("history")}>
+                <HistoryPanel
+                  entries={history}
+                  onLoad={(entry) => {
+                    setForm(entry.formSnapshot);
+                    setSettings(entry.settings);
+                  }}
+                  onClear={() => {
+                    clearHistory();
+                    setHistory([]);
+                  }}
+                />
+              </PickerSection>
 
-          <PickerSection title={t("templates")}>
-            <TemplatesPanel
-              templates={templates}
-              onLoad={(id) => {
-                const tpl = templates.find((t) => t.id === id);
-                if (tpl) {
-                  setForm(tpl.formSnapshot);
-                  setSettings((s) => ({ ...s, ...tpl.settings }));
-                }
-              }}
-              onDelete={(id) => {
-                deleteTemplate(id);
-                setTemplates(loadTemplates());
-              }}
-              onSave={(name) => {
-                saveTemplate(name, form, settings);
-                setTemplates(loadTemplates());
-              }}
-            />
-          </PickerSection>
+              <PickerSection title={t("templates")}>
+                <TemplatesPanel
+                  templates={templates}
+                  onLoad={(id) => {
+                    const tpl = templates.find((t) => t.id === id);
+                    if (tpl) {
+                      setForm(tpl.formSnapshot);
+                      setSettings((s) => ({ ...s, ...tpl.settings }));
+                    }
+                  }}
+                  onDelete={(id) => {
+                    deleteTemplate(id);
+                    setTemplates(loadTemplates());
+                  }}
+                  onSave={(name) => {
+                    saveTemplate(name, form, settings);
+                    setTemplates(loadTemplates());
+                  }}
+                />
+              </PickerSection>
+            </>
+          )}
 
           <Disclaimer variant={disclaimerVariant} />
         </div>
@@ -299,10 +347,16 @@ export interface QrGeneratorClientProps {
   seoTitleKey?: string;
   seoDescKey?: string;
   disclaimerVariant?: "general" | "payment";
+  hideNav?: boolean;
+  embedded?: boolean;
 }
 
 export default function QrGeneratorClient(props: QrGeneratorClientProps) {
   const [locale, setLocale] = useState<QrLocale>("ru");
+
+  if (props.embedded) {
+    return <QrGeneratorInner {...props} />;
+  }
 
   return (
     <QrI18nProvider locale={locale}>

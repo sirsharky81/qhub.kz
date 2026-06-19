@@ -642,9 +642,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const importFilesFromLaunchHandler = useCallback(
-    async (files: File[]) => {
-      setImportProgress({ total: files.length, processed: 0, currentFile: "" });
-      const imported = await mediaLibrary.importFiles(files, setImportProgress);
+    async (entries: mediaLibrary.LaunchFileEntry[]) => {
+      setImportProgress({ total: entries.length, processed: 0, currentFile: "" });
+      const imported = await mediaLibrary.importLaunchFiles(entries, setImportProgress);
       setTracks((prev) => [...prev, ...imported]);
       setImportProgress(null);
       if (imported.length > 0) {
@@ -663,11 +663,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   useLaunchQueue({
-    onFilesReceived: async (files) => {
+    onFilesReceived: async (entries) => {
       if (pathnameRef.current !== "/tools/music") {
         router.push("/tools/music");
       }
-      await importFilesFromLaunchHandler(files);
+      await importFilesFromLaunchHandler(entries);
     },
     onUnsupportedFile: (name) => {
       showToast(`Формат файла не поддерживается: ${name}`);

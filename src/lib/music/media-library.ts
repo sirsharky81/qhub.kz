@@ -1,7 +1,11 @@
 import * as storage from "./indexed-db-storage";
 import { extractMetadata } from "./metadata";
 import type { ImportProgress, SortDirection, SortField, Track } from "./types";
-import { isAudioFile } from "./types";
+import { isAudioFile, parseFileName } from "./types";
+
+export interface LaunchFileEntry {
+  handle: FileSystemFileHandle;
+}
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -72,6 +76,68 @@ export async function importFiles(
   onProgress?.({
     total: audioFiles.length,
     processed: audioFiles.length,
+    currentFile: "",
+  });
+
+  return imported;
+}
+
+async function buildTrackFromLaunchHandle(handle: FileSystemFileHandle): Promise<Track> {
+  const file = await handle.getFile();
+  const meta = await extractMetadata(file);
+  const fromName = parseFileName(handle.name);
+  const id = generateId();
+
+  let coverArtUrl: string | null = null;
+  let hasCover = false;
+  if (meta.coverBlob) {
+    await storage.saveCover({ trackId: id, blob: meta.coverBlob });
+    coverArtUrl = getOrCreateCoverUrl(id, meta.coverBlob);
+    hasCover = true;
+  }
+
+  const track: Track = {
+    id,
+    title: fromName.title,
+    artist: fromName.artist,
+    album: meta.album,
+    genre: meta.genre,
+    duration: meta.duration,
+    coverArtUrl,
+    fileName: handle.name,
+    mimeType: file.type || "audio/mpeg",
+    addedAt: Date.now(),
+    hasBlob: false,
+    hasHandle: true,
+    hasCover,
+  };
+
+  await storage.saveTrack(track);
+  await storage.saveHandle({ trackId: id, handle });
+  return track;
+}
+
+export async function importLaunchFiles(
+  entries: LaunchFileEntry[],
+  onProgress?: (progress: ImportProgress) => void,
+): Promise<Track[]> {
+  const imported: Track[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const { handle } = entries[i];
+
+    onProgress?.({
+      total: entries.length,
+      processed: i,
+      currentFile: handle.name,
+    });
+    const track = await buildTrackFromLaunchHandle(handle);
+    imported.push(track);
+  }
+
+  onProgress?.({
+    total: entries.length,
+    processed: entries.length,
     currentFile: "",
   });
 

@@ -1,72 +1,36 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { LaunchFileEntry } from "@/lib/music/media-library";
 import { isAudioFile } from "@/lib/music/types";
-
-const CHANNEL_NAME = "qhub-music-launch-handoff";
-
-interface HandoffRequest {
-  type: "handoff-request";
-  id: string;
-  sender: string;
-  handles: FileSystemFileHandle[];
-}
-
-interface HandoffAck {
-  type: "handoff-ack";
-  id: string;
-}
+import { claimPrimaryLaunchWindow } from "./launch-coordinator";
+import { scheduleLaunchFileImport } from "./launch-file-batch";
 
 interface UseLaunchQueueOptions {
-  onFilesReceived: (files: File[]) => void | Promise<void>;
+  onFilesReceived: (entries: LaunchFileEntry[]) => void | Promise<void>;
   onUnsupportedFile?: (name: string) => void;
 }
 
-async function handlesToFiles(
-  handles: FileSystemFileHandle[],
-  onUnsupported?: (name: string) => void,
-): Promise<File[]> {
-  const files: File[] = [];
-  for (const handle of handles) {
-    try {
-      const file = await handle.getFile();
-      if (isAudioFile(file)) {
-        files.push(file);
-      } else {
-        onUnsupported?.(file.name);
-      }
-    } catch (err) {
-      console.warn("[useLaunchQueue] Failed to read file handle:", err);
-    }
-  }
-  return files;
+function isAudioHandle(handle: FileSystemFileHandle): boolean {
+  return isAudioFile(new File([], handle.name, { type: "audio/mpeg" }));
 }
 
-function tryHandoffToExistingWindow(
-  channel: BroadcastChannel,
-  windowId: string,
+function handlesToLaunchEntries(
   handles: FileSystemFileHandle[],
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const id = crypto.randomUUID();
-    const timeout = window.setTimeout(() => resolve(false), 500);
+  onUnsupported?: (name: string) => void,
+): LaunchFileEntry[] {
+  const entries: LaunchFileEntry[] = [];
 
-    const onMessage = (event: MessageEvent<HandoffAck>) => {
-      if (event.data?.type !== "handoff-ack" || event.data.id !== id) return;
-      window.clearTimeout(timeout);
-      channel.removeEventListener("message", onMessage);
-      window.close();
-      resolve(true);
-    };
+  for (let i = 0; i < handles.length; i++) {
+    const handle = handles[i];
+    if (isAudioHandle(handle)) {
+      entries.push({ handle });
+    } else {
+      onUnsupported?.(handle.name);
+    }
+  }
 
-    channel.addEventListener("message", onMessage);
-    channel.postMessage({
-      type: "handoff-request",
-      id,
-      sender: windowId,
-      handles,
-    } satisfies HandoffRequest);
-  });
+  return entries;
 }
 
 export function useLaunchQueue({ onFilesReceived, onUnsupportedFile }: UseLaunchQueueOptions) {
@@ -78,41 +42,26 @@ export function useLaunchQueue({ onFilesReceived, onUnsupportedFile }: UseLaunch
   useEffect(() => {
     if (typeof window === "undefined" || !("launchQueue" in window)) return;
 
-    const windowId = crypto.randomUUID();
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-
-    const processHandles = async (handles: FileSystemFileHandle[]) => {
-      const files = await handlesToFiles(handles, (name) => onUnsupportedRef.current?.(name));
-      if (files.length > 0) {
-        await onFilesRef.current(files);
-      }
-    };
-
-    const onChannelMessage = (event: MessageEvent<HandoffRequest | HandoffAck>) => {
-      const data = event.data;
-      if (data?.type !== "handoff-request" || data.sender === windowId) return;
-
-      void (async () => {
-        await processHandles(data.handles);
-        channel.postMessage({ type: "handoff-ack", id: data.id } satisfies HandoffAck);
-      })();
-    };
-
-    channel.addEventListener("message", onChannelMessage);
-
     window.launchQueue!.setConsumer(async (launchParams) => {
       if (!launchParams.files?.length) return;
 
-      const handles = [...launchParams.files];
-      const handedOff = await tryHandoffToExistingWindow(channel, windowId, handles);
-      if (handedOff) return;
+      const isPrimary = await claimPrimaryLaunchWindow();
+      if (!isPrimary) {
+        window.close();
+        return;
+      }
 
-      await processHandles(handles);
+      const handles: FileSystemFileHandle[] = [];
+      for (let i = 0; i < launchParams.files.length; i++) {
+        handles.push(launchParams.files[i]);
+      }
+
+      const entries = handlesToLaunchEntries(handles, (name) =>
+        onUnsupportedRef.current?.(name),
+      );
+      if (entries.length === 0) return;
+
+      scheduleLaunchFileImport(entries, (batch) => onFilesRef.current(batch));
     });
-
-    return () => {
-      channel.removeEventListener("message", onChannelMessage);
-      channel.close();
-    };
   }, []);
 }

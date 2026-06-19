@@ -277,11 +277,14 @@ export function emptyForm(type: QrFormData["type"]): QrFormData {
         type,
         data: {
           inventoryNumber: "",
+          code: "",
           itemName: "",
+          category: "",
           department: "",
           responsible: "",
-          serialNumber: "",
-          comment: "",
+          entryDate: "",
+          initialCost: "",
+          condition: "",
         },
       };
   }

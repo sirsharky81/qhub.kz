@@ -4,20 +4,27 @@ import { PdfToolLayout } from "../_pdf-shared/PdfToolLayout";
 import QrGeneratorClient from "./QrGeneratorClient";
 
 export const metadata: Metadata = {
-  title: "QR-генератор онлайн бесплатно | QHub",
+  title: "QR-генератор — метки ОС, визитки, QR и штрихкод | QHub",
   description:
-    "Создавайте QR-коды для ссылок, Wi-Fi, vCard, реквизитов, WhatsApp и Telegram — полностью локально в браузере и PWA.",
+    "Метки ОС с QR и штрихкодом — одна или массовая печать из базы 1С. Визитки vCard, Wi-Fi, реквизиты и ссылки — локально в браузере и PWA.",
   keywords: [
+    "метки ос",
+    "qr и штрихкод",
+    "визитки qr",
+    "инвентарные метки",
+    "qr 1с",
+    "основные средства",
     "qr генератор",
     "qr код онлайн",
     "qr wifi",
     "qr vcard",
-    "qr реквизиты",
+    "штрихкод ос",
     "qr code generator",
   ],
   openGraph: {
-    title: "QR-генератор | QHub",
-    description: "Быстрый генератор QR-кодов — данные не покидают устройство.",
+    title: "QR-генератор — метки ОС, визитки | QHub",
+    description:
+      "Метки ОС (QR и штрихкод) из базы 1С, визитки и универсальные QR — локально на устройстве.",
     url: "https://qhub.kz/tools/qr-generator",
     siteName: "QHub",
     locale: "ru_KZ",
@@ -34,7 +41,7 @@ const webAppJsonLd = {
   operatingSystem: "Any",
   offers: { "@type": "Offer", price: "0", priceCurrency: "KZT" },
   description:
-    "Генератор QR-кодов: ссылки, текст, Wi-Fi, vCard, реквизиты, WhatsApp, Telegram — локально в браузере.",
+    "Метки ОС с QR и штрихкодом из базы 1С. Визитки, Wi-Fi, реквизиты и ссылки — локально в браузере.",
   provider: { "@type": "Organization", name: "QHub", url: "https://qhub.kz" },
 };
 

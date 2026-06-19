@@ -1,0 +1,37 @@
+{
+  "name": "QHub Сканер кодов",
+  "short_name": "Сканер",
+  "description": "Распознавание QR и штрих-кодов. Инвентаризация ОС по базе 1С — отчёты по излишкам и недостачам",
+  "start_url": "/tools/code-scanner",
+  "scope": "/tools/code-scanner",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/tools/code-scanner/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/code-scanner/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/code-scanner/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/tools/code-scanner/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

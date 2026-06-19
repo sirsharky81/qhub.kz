@@ -19,26 +19,32 @@ const FORMATS: LabelFormat[] = [
   "mini-30",
 ];
 
-const CODE_TYPES: CodeMarkType[] = ["qr", "barcode", "both"];
+const CODE_TYPES: CodeMarkType[] = ["qr", "barcode"];
 
 export function LabelOptionsPanel({ options, onChange }: LabelOptionsPanelProps) {
   const { t } = useQrTranslations();
   const set = (patch: Partial<LabelOptions>) => onChange({ ...options, ...patch });
+  const codeType = options.codeType === "both" ? "qr" : options.codeType;
 
   return (
     <div className="space-y-3">
       <FormField label={t("label.codeType")} hint={t("label.codeTypeHint")}>
-        <select
-          className={selectClass}
-          value={options.codeType}
-          onChange={(e) => set({ codeType: e.target.value as CodeMarkType })}
-        >
+        <div className="flex gap-1 p-1 rounded-xl bg-gray-100 w-fit">
           {CODE_TYPES.map((ct) => (
-            <option key={ct} value={ct}>
+            <button
+              key={ct}
+              type="button"
+              onClick={() => set({ codeType: ct })}
+              className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                codeType === ct
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
               {t(`label.code.${ct}`)}
-            </option>
+            </button>
           ))}
-        </select>
+        </div>
       </FormField>
 
       <FormField label={t("label.format")}>

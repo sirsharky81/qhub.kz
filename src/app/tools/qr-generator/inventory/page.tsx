@@ -4,11 +4,13 @@ import { PdfToolLayout } from "../../_pdf-shared/PdfToolLayout";
 import QrGeneratorClient from "../QrGeneratorClient";
 
 export const metadata: Metadata = {
-  title: "QR инвентарная метка | QHub",
+  title: "QR метки ОС | QHub",
   description:
-    "Этикетки для ОС, ТМЗ и оборудования — инв.номер, ответственный, мини-форматы для техники.",
+    "Этикетки для основных средств и оборудования — одна метка или массовая печать из базы 1С.",
   openGraph: {
-    title: "Inventory QR label | QHub",
+    title: "QR метки ОС — одиночные и из базы 1С | QHub",
+    description:
+      "Формирование этикеток основных средств: одна метка или массовая печать из выгрузки 1С.",
     url: "https://qhub.kz/tools/qr-generator/inventory",
   },
 };

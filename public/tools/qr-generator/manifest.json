@@ -1,7 +1,7 @@
 {
   "name": "QHub QR-генератор",
   "short_name": "QR",
-  "description": "Генератор QR-кодов — локально в браузере, данные не покидают устройство",
+  "description": "Метки ОС, визитки, QR и штрихкод — локально в браузере",
   "start_url": "/tools/qr-generator",
   "scope": "/tools/qr-generator",
   "display": "standalone",

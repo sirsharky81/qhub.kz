@@ -55,10 +55,15 @@ export { STORAGE_PRESETS, applyStoragePreset } from "./storagePresets";
 export { renderCode128DataUrl, renderCode128Svg } from "./barcode";
 export {
   generateBulkLabelsPdf,
+  generateInventoryBatchPdf,
+  generateSingleInventoryLabelPdf,
+  buildLabelCodeImages,
   parseBulkList,
   generateRangeList,
   labelFormatClass,
+  getLabelDimensions,
 } from "./labelPrint";
+export * from "./inventory-batch";
 export { parseImportFile, autoDetectColumns, rowsToStorageItems } from "./importStorageItems";
 export * from "./types";
 export {

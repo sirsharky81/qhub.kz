@@ -42,6 +42,16 @@ export const tools: Tool[] = [
     isNew: true,
   },
   {
+    id: "code-scanner",
+    name: "Code Scanner",
+    description:
+      "Распознавание QR и штрих-кодов. Инвентаризация ОС по базе 1С — отчёты по излишкам и недостачам — локально в браузере.",
+    icon: "ScanLine",
+    category: "utilities",
+    href: "/tools/code-scanner",
+    isNew: true,
+  },
+  {
     id: "document-scanner",
     name: "Document Scanner",
     description:

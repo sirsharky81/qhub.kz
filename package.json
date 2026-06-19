@@ -11,6 +11,7 @@
     "generate:scanner-icons": "node scripts/generate-document-scanner-icons.mjs",
     "generate:picker-icons": "node scripts/generate-random-picker-icons.mjs",
     "generate:qr-icons": "node scripts/generate-qr-generator-icons.mjs",
+    "generate:code-scanner-icons": "node scripts/generate-code-scanner-icons.mjs",
     "generate:music-icons": "node scripts/generate-music-icons.mjs"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "@tanstack/react-virtual": "^3.14.2",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
+    "@zxing/library": "^0.23.0",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "exifr": "^7.1.3",

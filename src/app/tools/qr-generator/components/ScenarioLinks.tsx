@@ -15,7 +15,6 @@ const SCENARIO_PAGES: { type?: QrType; href: string; labelKey?: string }[] = [
   { type: "telegram", href: "/tools/qr-generator/telegram" },
   { type: "geo", href: "/tools/qr-generator/geo" },
   { type: "event", href: "/tools/qr-generator/event" },
-  { href: "/tools/qr-generator/bulk-labels", labelKey: "bulk.title" },
 ];
 
 export function ScenarioLinks() {
