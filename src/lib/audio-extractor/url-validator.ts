@@ -34,8 +34,13 @@ export function normalizeUrl(raw: string): string {
     throw new Error("invalid_protocol");
   }
   url.hash = "";
+  const platform = detectPlatform(url);
   for (const key of [...url.searchParams.keys()]) {
     if (key.startsWith("utm_") || key === "si" || key === "feature") {
+      url.searchParams.delete(key);
+    }
+    // Single video only — playlist params confuse extractors on serverless.
+    if (platform === "youtube" && (key === "list" || key === "index" || key === "start_radio")) {
       url.searchParams.delete(key);
     }
   }

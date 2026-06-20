@@ -32,7 +32,9 @@ async function main() {
   const filename = isWin ? "yt-dlp.exe" : "yt-dlp";
   const dest = join(binDir, filename);
 
-  if (existsSync(dest)) {
+  const forceOnVercel = process.env.VERCEL === "1";
+
+  if (existsSync(dest) && !forceOnVercel) {
     console.log("[setup-ytdlp] already present:", dest);
     return;
   }

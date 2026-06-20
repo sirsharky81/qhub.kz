@@ -4,6 +4,16 @@ import { join } from "node:path";
 import type { AudioPlatform, VideoMetadata } from "./types";
 import { MAX_DURATION_SEC, MAX_STREAM_BYTES } from "./constants";
 
+const YTDLP_BIN_NAME = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
+
+function bundledCandidates(): string[] {
+  const cwd = process.cwd();
+  return [
+    join(cwd, "bin", YTDLP_BIN_NAME),
+    join(cwd, ".next", "server", "bin", YTDLP_BIN_NAME),
+  ];
+}
+
 export class YtdlpError extends Error {
   constructor(
     message: string,
@@ -24,8 +34,9 @@ export function getYtdlpPath(): string {
   const fromEnv = process.env.YTDLP_PATH?.trim();
   if (fromEnv) return fromEnv;
 
-  const bundled = join(process.cwd(), "bin", process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
-  if (existsSync(bundled)) return bundled;
+  for (const candidate of bundledCandidates()) {
+    if (existsSync(candidate)) return candidate;
+  }
 
   return "yt-dlp";
 }
@@ -39,8 +50,9 @@ function resolveYtdlpPath(): string {
     return fromEnv;
   }
 
-  const bundled = join(process.cwd(), "bin", process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
-  if (existsSync(bundled)) return bundled;
+  for (const candidate of bundledCandidates()) {
+    if (existsSync(candidate)) return candidate;
+  }
 
   throw new YtdlpError("yt-dlp не установлен на сервере", "not_found");
 }
@@ -61,14 +73,26 @@ function mapExtractor(extractor?: string): AudioPlatform {
 
 function classifyYtdlpError(stderr: string, stdout: string): YtdlpError {
   const text = `${stderr}\n${stdout}`.toLowerCase();
+  console.error("[ytdlp] stderr:", stderr.slice(0, 2000));
+
   if (text.includes("private video") || text.includes("this video is unavailable")) {
     return new YtdlpError("Видео недоступно", "unavailable");
   }
   if (text.includes("video unavailable") || text.includes("not available")) {
     return new YtdlpError("Видео недоступно", "unavailable");
   }
-  if (text.includes("geo") || text.includes("country")) {
-    return new YtdlpError("Контент недоступен в регионе сервера", "blocked");
+  if (
+    text.includes("geo") ||
+    text.includes("country") ||
+    text.includes("not a bot") ||
+    text.includes("confirm you're not") ||
+    text.includes("sign in to confirm") ||
+    text.includes("cookies") && text.includes("youtube")
+  ) {
+    return new YtdlpError(
+      "YouTube временно блокирует запросы с сервера. Попробуйте позже или другую ссылку.",
+      "blocked",
+    );
   }
   if (text.includes("sign in") || text.includes("login")) {
     return new YtdlpError("Требуется авторизация на платформе", "blocked");
@@ -76,8 +100,25 @@ function classifyYtdlpError(stderr: string, stdout: string): YtdlpError {
   return new YtdlpError("Не удалось обработать ссылку", "unknown");
 }
 
-function baseArgs(): string[] {
-  const args = ["--no-playlist", "--no-warnings", "--no-color", "--no-progress"];
+function baseArgs(url: string): string[] {
+  const args = [
+    "--no-playlist",
+    "--no-warnings",
+    "--no-color",
+    "--no-progress",
+    "--retries",
+    "3",
+    "--socket-timeout",
+    "20",
+  ];
+
+  if (/youtube\.com|youtu\.be/i.test(url)) {
+    args.push(
+      "--extractor-args",
+      "youtube:player_client=android,web;player_skip=webpage,configs",
+    );
+  }
+
   const cookies = process.env.YTDLP_COOKIES?.trim();
   if (cookies && existsSync(cookies)) {
     args.push("--cookies", cookies);
@@ -98,7 +139,7 @@ function runProcess(
       return;
     }
 
-    if (bin.startsWith(join(process.cwd(), "bin"))) {
+    if (bin.includes(`${join("bin", YTDLP_BIN_NAME)}`) || bin.endsWith(YTDLP_BIN_NAME)) {
       try {
         chmodSync(bin, 0o755);
       } catch {
@@ -147,7 +188,7 @@ function runProcess(
 }
 
 export async function fetchVideoMetadata(url: string): Promise<VideoMetadata> {
-  const args = [...baseArgs(), "--dump-single-json", "--skip-download", url];
+  const args = [...baseArgs(url), "--dump-single-json", "--skip-download", url];
   const { stdout } = await runProcess(args, 30_000);
 
   let data: Record<string, unknown>;
@@ -199,7 +240,7 @@ export function spawnAudioStream(url: string): {
   abort: () => void;
 } {
   const args = [
-    ...baseArgs(),
+    ...baseArgs(url),
     "-f",
     "bestaudio[ext=m4a]/bestaudio/best",
     "-o",
@@ -214,7 +255,7 @@ export function spawnAudioStream(url: string): {
     throw err;
   }
 
-  if (bin.startsWith(join(process.cwd(), "bin"))) {
+  if (bin.includes(`${join("bin", YTDLP_BIN_NAME)}`) || bin.endsWith(YTDLP_BIN_NAME)) {
     try {
       chmodSync(bin, 0o755);
     } catch {
