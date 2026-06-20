@@ -1,6 +1,19 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
+type RateWindow = `${number} ${"s" | "m" | "h" | "d"}`;
+
+interface RateLimitConfig {
+  requests: number;
+  window: RateWindow;
+}
+
+const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
+  "qhub:ideas": { requests: 5, window: "15 m" },
+  "qhub:developers": { requests: 5, window: "15 m" },
+  "qhub:audio-extractor": { requests: 10, window: "1 h" },
+};
+
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;
 
 function cleanEnv(value: string | undefined): string | undefined {
@@ -29,9 +42,11 @@ function getRatelimit(prefix: string): Ratelimit | null {
     return null;
   }
 
+  const config = RATE_LIMIT_CONFIGS[prefix] ?? { requests: 5, window: "15 m" as RateWindow };
+
   const limiter = new Ratelimit({
     redis: new Redis({ url, token }),
-    limiter: Ratelimit.slidingWindow(5, "15 m"),
+    limiter: Ratelimit.slidingWindow(config.requests, config.window),
     prefix,
   });
 
@@ -77,4 +92,10 @@ export async function checkDevelopersRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:developers", identifier);
+}
+
+export async function checkAudioExtractorRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:audio-extractor", identifier);
 }

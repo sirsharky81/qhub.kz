@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node scripts/copy-ffmpeg-core.mjs && node scripts/copy-random-picker-fonts.mjs",
+    "postinstall": "node scripts/copy-ffmpeg-core.mjs && node scripts/copy-random-picker-fonts.mjs && node scripts/setup-ytdlp.mjs",
     "generate:scanner-icons": "node scripts/generate-document-scanner-icons.mjs",
     "generate:picker-icons": "node scripts/generate-random-picker-icons.mjs",
     "generate:qr-icons": "node scripts/generate-qr-generator-icons.mjs",

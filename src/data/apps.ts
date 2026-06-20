@@ -131,6 +131,22 @@ export const apps: App[] = [
     sortOrder: 6,
   },
   {
+    id: "audio-extractor",
+    title: "Audio Extractor",
+    description:
+      "Извлечение аудиодорожки из YouTube, TikTok и Instagram — waveform и MP3/WAV.",
+    longDescription:
+      "Вставьте ссылку на видео: сервис эфемерно извлекает аудио, показывает waveform, позволяет прослушать и сохранить в MP3 (320 kbps) или WAV. Аудио не хранится на сервере.",
+    href: "/tools/audio-extractor",
+    tags: ["tools", "music"],
+    icon: "🎙️",
+    color: "from-fuchsia-500/10 to-fuchsia-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    beta: true,
+    sortOrder: 7,
+  },
+  {
     id: "file-converter",
     title: "QHub Smart File Converter",
     description:

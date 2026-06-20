@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# yt-dlp binary (downloaded at build via scripts/setup-ytdlp.mjs)
+/bin/yt-dlp
+/bin/yt-dlp.exe

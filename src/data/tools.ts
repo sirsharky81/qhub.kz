@@ -42,6 +42,16 @@ export const tools: Tool[] = [
     isNew: true,
   },
   {
+    id: "audio-extractor",
+    name: "Audio Extractor",
+    description:
+      "Извлечение аудиодорожки из YouTube, TikTok и Instagram — waveform и MP3/WAV.",
+    icon: "Mic",
+    category: "audio",
+    href: "/tools/audio-extractor",
+    isNew: true,
+  },
+  {
     id: "code-scanner",
     name: "Code Scanner",
     description:
