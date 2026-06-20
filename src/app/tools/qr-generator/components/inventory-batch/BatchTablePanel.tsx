@@ -5,6 +5,8 @@ import type { BatchRow, InventoryLabelBatch, LabelFilter } from "@/lib/qr-genera
 import { filterBatchRows } from "@/lib/qr-generator/inventory-batch";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
 import { renderCode128DataUrl } from "@/lib/qr-generator/barcode";
+import { printLabelSheet } from "@/lib/qr-generator/labelPrintBrowser";
+import { LabelPrintSheet } from "../LabelPrintSheet";
 import type { LabelFormat, LabelOptions } from "@/lib/qr-generator/types";
 import { LabelOptionsPanel } from "../LabelOptionsPanel";
 
@@ -225,53 +227,67 @@ export function SingleLabelModal({
 
   if (!open) return null;
 
+  const formatKey = labelFormat === "standard" ? "58x40" : labelFormat;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-4">
-        <div className="flex flex-col items-center gap-2 p-4 border border-gray-100 rounded-xl">
-          {(codeType === "qr" || codeType === "both") && qrUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={qrUrl} alt="QR" className="w-40 h-40" />
-          )}
-          {(codeType === "barcode" || codeType === "both") && barcodeUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={barcodeUrl} alt="barcode" className="max-w-full h-12 object-contain" />
-          )}
-          <p className="text-sm font-semibold text-center">{identifier}</p>
-          {title && title !== identifier && (
-            <p className="text-xs text-gray-500 text-center">{title}</p>
-          )}
+    <>
+      <LabelPrintSheet
+        identifier={identifier}
+        title={title}
+        qrDataUrl={qrUrl}
+        barcodeDataUrl={barcodeUrl}
+        codeType={codeType}
+        labelFormat={labelFormat}
+        className="qr-label-offscreen"
+      />
+
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden">
+        <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-4">
+          <div className="flex flex-col items-center gap-2 p-4 border border-gray-100 rounded-xl">
+            {(codeType === "qr" || codeType === "both") && qrUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={qrUrl} alt="QR" className="w-40 h-40" />
+            )}
+            {(codeType === "barcode" || codeType === "both") && barcodeUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={barcodeUrl} alt="barcode" className="max-w-full h-12 object-contain" />
+            )}
+            <p className="text-sm font-semibold text-center">{identifier}</p>
+            {title && title !== identifier && (
+              <p className="text-xs text-gray-500 text-center">{title}</p>
+            )}
+          </div>
+          <div className="flex gap-2 justify-end flex-wrap">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-xl border border-gray-200">
+              {t("cancel")}
+            </button>
+            <button
+              type="button"
+              disabled={pdfBusy}
+              onClick={() => {
+                setPdfBusy(true);
+                void Promise.resolve(onDownloadPdf()).finally(() => setPdfBusy(false));
+              }}
+              className="px-4 py-2 text-sm rounded-xl border border-gray-200 bg-white disabled:opacity-50"
+            >
+              {pdfBusy ? t("batch.busy") : t("batch.downloadLabelPdf")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                printLabelSheet();
+                onPrinted();
+              }}
+              className="px-4 py-2 text-sm rounded-xl bg-gray-900 text-white"
+            >
+              {t("printLabel")}
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-500 text-center">
+            {t("label.format")}: {t(`label.format.${formatKey}`)} · A4 {t("printLabelHint")}
+          </p>
         </div>
-        <div className="flex gap-2 justify-end flex-wrap">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-xl border border-gray-200">
-            {t("cancel")}
-          </button>
-          <button
-            type="button"
-            disabled={pdfBusy}
-            onClick={() => {
-              setPdfBusy(true);
-              void Promise.resolve(onDownloadPdf()).finally(() => setPdfBusy(false));
-            }}
-            className="px-4 py-2 text-sm rounded-xl border border-gray-200 bg-white disabled:opacity-50"
-          >
-            {pdfBusy ? t("batch.busy") : t("batch.downloadLabelPdf")}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              window.print();
-              onPrinted();
-            }}
-            className="px-4 py-2 text-sm rounded-xl bg-gray-900 text-white"
-          >
-            {t("print")}
-          </button>
-        </div>
-        <p className="text-[11px] text-gray-500 text-center">
-          {t("label.format")}: {t(`label.format.${labelFormat === "standard" ? "58x40" : labelFormat}`)} · A4
-        </p>
       </div>
-    </div>
+    </>
   );
 }

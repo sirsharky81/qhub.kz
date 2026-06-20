@@ -182,6 +182,17 @@ async function drawLabelInRect(
   labelH: number,
   pdf: PDFDocument,
 ): Promise<void> {
+  page.drawRectangle({
+    x: cellLeft,
+    y: cellBottom,
+    width: labelW,
+    height: labelH,
+    borderColor: rgb(0.78, 0.78, 0.78),
+    borderWidth: 0.3,
+    borderDashArray: [2, 1.5],
+    borderDashPhase: 0,
+  });
+
   const pad = 1.5 * MM;
   const innerW = labelW - pad * 2;
   const cellTop = cellBottom + labelH;
@@ -293,7 +304,7 @@ export async function generateInventoryBatchPdf(
   saveAs(new Blob([bytes as BlobPart], { type: "application/pdf" }), filename);
 }
 
-/** Одна метка на листе A4 в реальном размере (мм), по центру. */
+/** Одна метка на листе A4 в реальном размере (мм), в левом верхнем углу. */
 export async function generateSingleInventoryLabelPdf(
   label: BulkLabelRow,
   images: LabelCodeImages,
@@ -304,17 +315,8 @@ export async function generateSingleInventoryLabelPdf(
   const fonts = await loadLabelFonts(pdf);
   const page = pdf.addPage([A4.w, A4.h]);
   const { w: labelW, h: labelH } = getLabelDimensions(labelFormat);
-  const cellLeft = (A4.w - labelW) / 2;
-  const cellBottom = (A4.h - labelH) / 2;
-
-  page.drawRectangle({
-    x: cellLeft,
-    y: cellBottom,
-    width: labelW,
-    height: labelH,
-    borderColor: rgb(0.85, 0.85, 0.85),
-    borderWidth: 0.5,
-  });
+  const cellLeft = 0;
+  const cellBottom = A4.h - labelH;
 
   await drawLabelInRect(
     page,

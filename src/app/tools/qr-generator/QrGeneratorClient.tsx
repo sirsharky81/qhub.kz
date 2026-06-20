@@ -265,12 +265,14 @@ function QrGeneratorInner({
                   onChange={setPrintCaption}
                   placeholder={defaultPrintCaption}
                 />
-                <ExportButtons
-                  result={result}
-                  settings={settings}
-                  printCaption={effectivePrintCaption}
-                  onShare={handleShare}
-                />
+            <ExportButtons
+              result={result}
+              settings={settings}
+              printCaption={effectivePrintCaption}
+              onShare={handleShare}
+              labelPrintEnabled={isLabelType}
+              labelPrintDisabled={!labelMeta.identifier}
+            />
               </PickerSection>
 
               <PickerSection title={t("history")}>

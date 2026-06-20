@@ -1,8 +1,8 @@
 "use client";
 
 import type { QrGenerationResult, CodeMarkType, LabelFormat } from "@/lib/qr-generator/types";
-import { labelFormatClass } from "@/lib/qr-generator/labelPrint";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
+import { LabelPrintSheet } from "./LabelPrintSheet";
 
 interface QRPreviewProps {
   result: QrGenerationResult;
@@ -28,57 +28,47 @@ export function QRPreview({
   showLabelText = false,
 }: QRPreviewProps) {
   const { t } = useQrTranslations();
-  const formatClass = labelFormatClass(labelFormat);
+  const isLabel = showLabelText && Boolean(labelIdentifier);
   const displayId = labelIdentifier || printCaption;
   const displayTitle = labelTitle;
 
   return (
     <div className="flex flex-col items-center gap-3">
-      <div
-        id="qr-print-area"
-        className={`relative flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white p-6 min-h-[240px] w-full ${formatClass}`}
-      >
+      <div className="relative w-full rounded-xl border border-gray-200 bg-white p-6 min-h-[240px] flex items-center justify-center">
         {generating && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/70 rounded-xl z-10">
             <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
           </div>
         )}
 
-        {(result.dataUrl || barcodeDataUrl) ? (
-          <div className="qr-label-codes flex flex-col items-center gap-2">
-            <div className={`flex items-center gap-3 ${codeType === "both" ? "flex-row" : "flex-col"}`}>
-              {(codeType === "qr" || codeType === "both") && result.dataUrl && (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={result.dataUrl}
-                  alt="QR code preview"
-                  className="qr-label-qr max-w-full h-auto"
-                  style={{ imageRendering: "pixelated", maxWidth: 280 }}
-                />
-              )}
-              {(codeType === "barcode" || codeType === "both") && barcodeDataUrl && (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={barcodeDataUrl}
-                  alt="Barcode preview"
-                  className="qr-label-barcode max-w-full h-auto"
-                  style={{ maxWidth: codeType === "both" ? 160 : 280 }}
-                />
-              )}
-            </div>
-
-            {(showLabelText || displayId) && (
-              <div className="qr-label-text text-center mt-2 print:block">
-                {displayId && (
-                  <p className="text-sm font-bold text-gray-900 tracking-tight">{displayId}</p>
-                )}
-                {displayTitle && (
-                  <p className="text-xs text-gray-600 mt-0.5 max-w-[280px]">{displayTitle}</p>
-                )}
-              </div>
+        {isLabel && (result.dataUrl || barcodeDataUrl) ? (
+          <LabelPrintSheet
+            identifier={displayId ?? ""}
+            title={displayTitle}
+            qrDataUrl={result.dataUrl}
+            barcodeDataUrl={barcodeDataUrl}
+            codeType={codeType}
+            labelFormat={labelFormat}
+          />
+        ) : (result.dataUrl || barcodeDataUrl) ? (
+          <div id="qr-print-area" className="flex flex-col items-center gap-2">
+            {(codeType === "qr" || codeType === "both") && result.dataUrl && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={result.dataUrl}
+                alt="QR code preview"
+                style={{ imageRendering: "pixelated", maxWidth: 280 }}
+              />
             )}
-
-            {printCaption && !showLabelText && (
+            {(codeType === "barcode" || codeType === "both") && barcodeDataUrl && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={barcodeDataUrl}
+                alt="Barcode preview"
+                style={{ maxWidth: codeType === "both" ? 160 : 280 }}
+              />
+            )}
+            {printCaption && (
               <p className="hidden print:block mt-4 text-lg font-semibold text-center text-gray-900">
                 {printCaption}
               </p>

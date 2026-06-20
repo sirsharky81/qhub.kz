@@ -10,6 +10,7 @@ import {
   downloadSvg,
 } from "@/lib/qr-generator/export";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
+import { printLabelSheet } from "@/lib/qr-generator/labelPrintBrowser";
 import { PickerButton } from "../../random-picker/components/PickerButton";
 
 interface ExportButtonsProps {
@@ -17,6 +18,9 @@ interface ExportButtonsProps {
   settings: QrSettings;
   printCaption: string;
   onShare: () => void;
+  /** Кнопка «Печать метки» для storage / inventory */
+  labelPrintEnabled?: boolean;
+  labelPrintDisabled?: boolean;
 }
 
 export function ExportButtons({
@@ -24,6 +28,8 @@ export function ExportButtons({
   settings,
   printCaption,
   onShare,
+  labelPrintEnabled = false,
+  labelPrintDisabled = false,
 }: ExportButtonsProps) {
   const { t } = useQrTranslations();
   const [toast, setToast] = useState<string | null>(null);
@@ -97,16 +103,28 @@ export function ExportButtons({
         >
           {t("copyClipboard")}
         </PickerButton>
-        <PickerButton variant="secondary" disabled={disabled} onClick={() => handlePrint(false)}>
-          {t("print")}
-        </PickerButton>
-        <PickerButton
-          variant="secondary"
-          disabled={disabled || !printCaption}
-          onClick={() => handlePrint(true)}
-        >
-          {t("printPrepare")}
-        </PickerButton>
+        {!labelPrintEnabled && (
+          <PickerButton variant="secondary" disabled={disabled} onClick={() => handlePrint(false)}>
+            {t("print")}
+          </PickerButton>
+        )}
+        {labelPrintEnabled ? (
+          <PickerButton
+            variant="secondary"
+            disabled={disabled || labelPrintDisabled}
+            onClick={() => printLabelSheet()}
+          >
+            {t("printLabel")}
+          </PickerButton>
+        ) : (
+          <PickerButton
+            variant="secondary"
+            disabled={disabled || !printCaption}
+            onClick={() => handlePrint(true)}
+          >
+            {t("printPrepare")}
+          </PickerButton>
+        )}
         <PickerButton variant="ghost" disabled={disabled} onClick={onShare}>
           {t("share")}
         </PickerButton>
