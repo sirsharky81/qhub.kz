@@ -2,7 +2,14 @@
 
 import type { WifiFormData } from "@/lib/qr-generator/types";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
-import { FormField, inputClass, selectClass, checkboxClass } from "./FormField";
+import {
+  FormField,
+  compactFormGrid,
+  compactFormStack,
+  compactInputClass,
+  compactSelectClass,
+  checkboxClass,
+} from "./FormField";
 
 interface WifiFormProps {
   data: WifiFormData;
@@ -14,40 +21,41 @@ export function WifiForm({ data, onChange }: WifiFormProps) {
   const set = (patch: Partial<WifiFormData>) => onChange({ ...data, ...patch });
 
   return (
-    <div className="space-y-3">
-      <FormField label={t("ssid")}>
+    <div className={compactFormStack}>
+      <FormField label={t("ssid")} compact>
         <input
-          className={inputClass}
+          className={compactInputClass}
           value={data.ssid}
           onChange={(e) => set({ ssid: e.target.value })}
         />
       </FormField>
 
-      <FormField label={t("password")}>
-        <input
-          className={inputClass}
-          type="password"
-          value={data.password}
-          onChange={(e) => set({ password: e.target.value })}
-          disabled={data.encryption === "nopass"}
-        />
-      </FormField>
+      <div className={compactFormGrid}>
+        <FormField label={t("password")} compact>
+          <input
+            className={compactInputClass}
+            type="password"
+            value={data.password}
+            onChange={(e) => set({ password: e.target.value })}
+            disabled={data.encryption === "nopass"}
+          />
+        </FormField>
+        <FormField label={t("encryption")} compact>
+          <select
+            className={compactSelectClass}
+            value={data.encryption}
+            onChange={(e) =>
+              set({ encryption: e.target.value as WifiFormData["encryption"] })
+            }
+          >
+            <option value="WPA">WPA/WPA2</option>
+            <option value="WEP">WEP</option>
+            <option value="nopass">Без пароля</option>
+          </select>
+        </FormField>
+      </div>
 
-      <FormField label={t("encryption")}>
-        <select
-          className={selectClass}
-          value={data.encryption}
-          onChange={(e) =>
-            set({ encryption: e.target.value as WifiFormData["encryption"] })
-          }
-        >
-          <option value="WPA">WPA/WPA2</option>
-          <option value="WEP">WEP</option>
-          <option value="nopass">Без пароля</option>
-        </select>
-      </FormField>
-
-      <label className="flex items-center gap-2 text-xs text-gray-700">
+      <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
         <input
           type="checkbox"
           className={checkboxClass}

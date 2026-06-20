@@ -12,7 +12,7 @@ import {
 } from "@/lib/qr-generator/storageSerializers";
 import { emptyForm } from "@/lib/qr-generator/qrUtils";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
-import { FormField, inputClass } from "./FormField";
+import { FormField, compactInputClass } from "./FormField";
 import { CapacityIndicator } from "./CapacityIndicator";
 
 interface InventoryFormProps {
@@ -29,10 +29,11 @@ const FIELDS: {
   max: number;
   placeholder?: string;
   type?: "text" | "date";
+  span?: 1 | 2;
 }[] = [
   { key: "inventoryNumber", labelKey: "inventory.number", max: 30, placeholder: "INV-OS-1001" },
   { key: "code", labelKey: "inventory.code", max: 20, placeholder: "OS0001" },
-  { key: "itemName", labelKey: "inventory.itemName", max: 120 },
+  { key: "itemName", labelKey: "inventory.itemName", max: 120, span: 2 },
   { key: "category", labelKey: "inventory.category", max: 80 },
   { key: "department", labelKey: "inventory.department", max: 60 },
   { key: "responsible", labelKey: "inventory.responsible", max: 60 },
@@ -51,21 +52,28 @@ export function InventoryForm({ data, onChange, miniLabel }: InventoryFormProps)
   const capacity = getCapacityInfo(payload, maxBytes);
 
   return (
-    <div className="space-y-3">
-      {FIELDS.map(({ key, labelKey, max, placeholder, type = "text" }) => (
-        <FormField key={key} label={t(labelKey)}>
-          <input
-            className={inputClass}
-            type={type}
-            value={merged[key]}
-            maxLength={max}
-            placeholder={placeholder}
-            onChange={(e) => set({ [key]: clampStorageField(e.target.value, max) })}
-          />
-        </FormField>
-      ))}
+    <div className="max-w-lg space-y-2 pt-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2.5 gap-y-1.5">
+        {FIELDS.map(({ key, labelKey, max, placeholder, type = "text", span = 1 }) => (
+          <FormField
+            key={key}
+            label={t(labelKey)}
+            compact
+            className={span === 2 ? "sm:col-span-2" : undefined}
+          >
+            <input
+              className={compactInputClass}
+              type={type}
+              value={merged[key]}
+              maxLength={max}
+              placeholder={placeholder}
+              onChange={(e) => set({ [key]: clampStorageField(e.target.value, max) })}
+            />
+          </FormField>
+        ))}
+      </div>
 
-      <CapacityIndicator info={capacity} variant="inventory" miniLabel={miniLabel} />
+      <CapacityIndicator info={capacity} variant="inventory" miniLabel={miniLabel} compact />
     </div>
   );
 }

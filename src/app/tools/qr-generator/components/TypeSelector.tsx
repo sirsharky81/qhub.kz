@@ -19,7 +19,7 @@ export function TypeSelector({ value, onChange }: TypeSelectorProps) {
           key={type}
           type="button"
           onClick={() => onChange(type)}
-          className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border transition-colors touch-manipulation ${
+          className={`px-2 py-1 text-[10px] font-medium rounded-md border transition-colors touch-manipulation ${
             value === type
               ? "border-gray-900 bg-gray-900 text-white"
               : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50"

@@ -16,7 +16,7 @@ import {
 } from "@/lib/qr-generator/importStorageItems";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
 import { PickerButton } from "../../random-picker/components/PickerButton";
-import { FormField, inputClass, selectClass, textareaClass } from "./FormField";
+import { FormField, compactFormGrid, compactFormStack, compactInputClass, compactSelectClass, compactTextareaClass } from "./FormField";
 import { CapacityIndicator } from "./CapacityIndicator";
 
 interface StorageFormProps {
@@ -99,8 +99,8 @@ export function StorageForm({ data, onChange, miniLabel }: StorageFormProps) {
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-1.5">
+    <div className={compactFormStack}>
+      <div className="flex flex-wrap gap-1">
         {STORAGE_PRESETS.map((preset) => (
           <PickerButton
             key={preset.id}
@@ -112,64 +112,65 @@ export function StorageForm({ data, onChange, miniLabel }: StorageFormProps) {
         ))}
       </div>
 
-      <FormField label={t("storage.name")}>
-        <input
-          className={inputClass}
-          value={data.name}
-          maxLength={60}
-          onChange={(e) => set({ name: clampStorageField(e.target.value, 60) })}
-        />
-      </FormField>
-
-      <FormField label={t("storage.boxNumber")} hint={t("storage.boxHint")}>
-        <input
-          className={inputClass}
-          value={data.boxNumber}
-          maxLength={20}
-          placeholder="BOX-015"
-          onChange={(e) => set({ boxNumber: clampStorageField(e.target.value, 20) })}
-        />
-      </FormField>
-
-      <FormField label={t("storage.locationType")}>
-        <select
-          className={selectClass}
-          value={data.locationType}
-          onChange={(e) =>
-            set({ locationType: e.target.value as StorageLocationType | "" })
-          }
-        >
-          <option value="">—</option>
-          {LOCATION_TYPES.map((lt) => (
-            <option key={lt} value={lt}>
-              {t(`storage.loc.${lt}`)}
-            </option>
-          ))}
-        </select>
-      </FormField>
-
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label={t("storage.locationNumber")}>
+      <div className={compactFormGrid}>
+        <FormField label={t("storage.name")} compact>
           <input
-            className={inputClass}
+            className={compactInputClass}
+            value={data.name}
+            maxLength={60}
+            onChange={(e) => set({ name: clampStorageField(e.target.value, 60) })}
+          />
+        </FormField>
+        <FormField label={t("storage.boxNumber")} hint={t("storage.boxHint")} compact>
+          <input
+            className={compactInputClass}
+            value={data.boxNumber}
+            maxLength={20}
+            placeholder="BOX-015"
+            onChange={(e) => set({ boxNumber: clampStorageField(e.target.value, 20) })}
+          />
+        </FormField>
+      </div>
+
+      <div className={compactFormGrid}>
+        <FormField label={t("storage.locationType")} compact>
+          <select
+            className={compactSelectClass}
+            value={data.locationType}
+            onChange={(e) =>
+              set({ locationType: e.target.value as StorageLocationType | "" })
+            }
+          >
+            <option value="">—</option>
+            {LOCATION_TYPES.map((lt) => (
+              <option key={lt} value={lt}>
+                {t(`storage.loc.${lt}`)}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label={t("storage.locationNumber")} compact>
+          <input
+            className={compactInputClass}
             value={data.locationNumber}
             maxLength={30}
             onChange={(e) => set({ locationNumber: clampStorageField(e.target.value, 30) })}
           />
         </FormField>
-        <FormField label={t("storage.locationSection")}>
-          <input
-            className={inputClass}
-            value={data.locationSection}
-            maxLength={20}
-            onChange={(e) => set({ locationSection: clampStorageField(e.target.value, 20) })}
-          />
-        </FormField>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
+      <FormField label={t("storage.locationSection")} compact>
+        <input
+          className={compactInputClass}
+          value={data.locationSection}
+          maxLength={20}
+          onChange={(e) => set({ locationSection: clampStorageField(e.target.value, 20) })}
+        />
+      </FormField>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold text-gray-700 uppercase tracking-wide">
             {t("storage.contents")}
           </span>
           <div className="flex gap-1">
@@ -194,13 +195,13 @@ export function StorageForm({ data, onChange, miniLabel }: StorageFormProps) {
         />
 
         {importHeaders.length > 0 && !mapping && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2 text-xs">
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-2 space-y-1.5 text-[10px]">
             <p className="text-amber-900">{t("import.mapColumns")}</p>
             {(["nameCol", "quantityCol"] as const).map((key) => (
               <label key={key} className="flex items-center gap-2">
                 <span className="w-24">{t(`import.${key}`)}</span>
                 <select
-                  className={selectClass}
+                  className={compactSelectClass}
                   defaultValue={0}
                   id={`map-${key}`}
                 >
@@ -229,15 +230,15 @@ export function StorageForm({ data, onChange, miniLabel }: StorageFormProps) {
           </div>
         )}
 
-        <ul className="space-y-2">
+        <ul className="space-y-1.5">
           {data.items.map((item) => (
             <li
               key={item.id}
-              className="rounded-lg border border-gray-200 bg-white p-3 space-y-2"
+              className="rounded-md border border-gray-200 bg-white p-2 space-y-1.5"
             >
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <input
-                  className={`${inputClass} flex-1`}
+                  className={`${compactInputClass} flex-1`}
                   placeholder={t("storage.itemName")}
                   value={item.name}
                   maxLength={60}
@@ -246,17 +247,17 @@ export function StorageForm({ data, onChange, miniLabel }: StorageFormProps) {
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    className="w-8 h-8 rounded border border-gray-200 text-sm"
+                    className="w-7 h-7 rounded border border-gray-200 text-xs"
                     onClick={() =>
                       updateItem(item.id, { quantity: Math.max(1, item.quantity - 1) })
                     }
                   >
                     −
                   </button>
-                  <span className="w-8 text-center text-sm tabular-nums">{item.quantity}</span>
+                  <span className="w-7 text-center text-xs tabular-nums">{item.quantity}</span>
                   <button
                     type="button"
-                    className="w-8 h-8 rounded border border-gray-200 text-sm"
+                    className="w-7 h-7 rounded border border-gray-200 text-xs"
                     onClick={() => updateItem(item.id, { quantity: item.quantity + 1 })}
                   >
                     +
@@ -264,7 +265,7 @@ export function StorageForm({ data, onChange, miniLabel }: StorageFormProps) {
                 </div>
               </div>
               <input
-                className={inputClass}
+                className={compactInputClass}
                 placeholder={t("storage.itemComment")}
                 value={item.comment}
                 maxLength={60}
@@ -289,16 +290,16 @@ export function StorageForm({ data, onChange, miniLabel }: StorageFormProps) {
         </ul>
       </div>
 
-      <FormField label={t("storage.comment")}>
+      <FormField label={t("storage.comment")} compact>
         <textarea
-          className={textareaClass}
+          className={compactTextareaClass}
           value={data.comment}
           maxLength={200}
           onChange={(e) => set({ comment: clampStorageField(e.target.value, 200) })}
         />
       </FormField>
 
-      <CapacityIndicator info={capacity} variant="storage" miniLabel={miniLabel} />
+      <CapacityIndicator info={capacity} variant="storage" miniLabel={miniLabel} compact />
     </div>
   );
 }

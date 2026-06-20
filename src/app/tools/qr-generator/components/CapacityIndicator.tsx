@@ -7,16 +7,21 @@ interface CapacityIndicatorProps {
   info: CapacityInfo;
   variant: "storage" | "inventory";
   miniLabel?: boolean;
+  compact?: boolean;
 }
 
-export function CapacityIndicator({ info, variant, miniLabel }: CapacityIndicatorProps) {
+export function CapacityIndicator({ info, variant, miniLabel, compact }: CapacityIndicatorProps) {
   const { t } = useQrTranslations();
 
   const barColor =
     info.overflow ? "bg-red-500" : info.percent > 85 ? "bg-amber-500" : "bg-emerald-500";
 
   return (
-    <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5">
+    <div
+      className={`rounded-md border border-gray-200 bg-gray-50/80 ${
+        compact ? "space-y-1 px-2 py-1.5" : "space-y-1.5 px-3 py-2.5"
+      }`}
+    >
       <div className="flex justify-between text-[11px] text-gray-600">
         <span>{t("capacity.label")}</span>
         <span>

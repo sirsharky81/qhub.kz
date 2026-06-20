@@ -8,7 +8,13 @@ import {
   isValidLongitude,
 } from "@/lib/qr-generator/qrUtils";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
-import { FormField, inputClass, textareaClass } from "./FormField";
+import {
+  FormField,
+  compactFormGrid,
+  compactFormStack,
+  compactInputClass,
+  compactTextareaClass,
+} from "./FormField";
 import { PaymentDetailsForm } from "./PaymentDetailsForm";
 import { VCardForm } from "./VCardForm";
 import { WifiForm } from "./WifiForm";
@@ -27,16 +33,18 @@ export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
   switch (form.type) {
     case "text":
       return (
-        <FormField label={t("content")}>
-          <textarea
-            className={textareaClass}
-            value={form.data.content}
-            onChange={(e) =>
-              onChange({ type: "text", data: { content: e.target.value } })
-            }
-            placeholder="https://qhub.kz"
-          />
-        </FormField>
+        <div className={compactFormStack}>
+          <FormField label={t("content")} compact>
+            <textarea
+              className={compactTextareaClass}
+              value={form.data.content}
+              onChange={(e) =>
+                onChange({ type: "text", data: { content: e.target.value } })
+              }
+              placeholder="https://qhub.kz"
+            />
+          </FormField>
+        </div>
       );
 
     case "payment":
@@ -61,10 +69,10 @@ export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
       const phoneError =
         form.data.phone && !isValidE164(form.data.phone) ? t("invalidPhone") : null;
       return (
-        <div className="space-y-3">
-          <FormField label={t("phone")} error={phoneError}>
+        <div className={compactFormStack}>
+          <FormField label={t("phone")} error={phoneError} compact>
             <input
-              className={inputClass}
+              className={compactInputClass}
               value={form.data.phone}
               onChange={(e) =>
                 onChange({
@@ -75,9 +83,9 @@ export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
               placeholder={PHONE_PLACEHOLDER}
             />
           </FormField>
-          <FormField label={t("message")}>
+          <FormField label={t("message")} compact>
             <textarea
-              className={textareaClass}
+              className={compactTextareaClass}
               value={form.data.message}
               onChange={(e) =>
                 onChange({
@@ -93,69 +101,75 @@ export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
 
     case "telegram":
       return (
-        <FormField label={t("username")}>
-          <input
-            className={inputClass}
-            value={form.data.username}
-            onChange={(e) =>
-              onChange({
-                type: "telegram",
-                data: { username: e.target.value },
-              })
-            }
-            placeholder="@username"
-          />
-        </FormField>
+        <div className={compactFormStack}>
+          <FormField label={t("username")} compact>
+            <input
+              className={compactInputClass}
+              value={form.data.username}
+              onChange={(e) =>
+                onChange({
+                  type: "telegram",
+                  data: { username: e.target.value },
+                })
+              }
+              placeholder="@username"
+            />
+          </FormField>
+        </div>
       );
 
     case "phone": {
       const phoneError =
         form.data.phone && !isValidE164(form.data.phone) ? t("invalidPhone") : null;
       return (
-        <FormField label={t("phone")} error={phoneError}>
-          <input
-            className={inputClass}
-            value={form.data.phone}
-            onChange={(e) =>
-              onChange({ type: "phone", data: { phone: e.target.value } })
-            }
-            placeholder={PHONE_PLACEHOLDER}
-          />
-        </FormField>
+        <div className={compactFormStack}>
+          <FormField label={t("phone")} error={phoneError} compact>
+            <input
+              className={compactInputClass}
+              value={form.data.phone}
+              onChange={(e) =>
+                onChange({ type: "phone", data: { phone: e.target.value } })
+              }
+              placeholder={PHONE_PLACEHOLDER}
+            />
+          </FormField>
+        </div>
       );
     }
 
     case "email":
       return (
-        <div className="space-y-3">
-          <FormField label={t("email")}>
-            <input
-              className={inputClass}
-              type="email"
-              value={form.data.email}
-              onChange={(e) =>
-                onChange({
-                  type: "email",
-                  data: { ...form.data, email: e.target.value },
-                })
-              }
-            />
-          </FormField>
-          <FormField label={t("subject")}>
-            <input
-              className={inputClass}
-              value={form.data.subject}
-              onChange={(e) =>
-                onChange({
-                  type: "email",
-                  data: { ...form.data, subject: e.target.value },
-                })
-              }
-            />
-          </FormField>
-          <FormField label={t("body")}>
+        <div className={compactFormStack}>
+          <div className={compactFormGrid}>
+            <FormField label={t("email")} compact>
+              <input
+                className={compactInputClass}
+                type="email"
+                value={form.data.email}
+                onChange={(e) =>
+                  onChange({
+                    type: "email",
+                    data: { ...form.data, email: e.target.value },
+                  })
+                }
+              />
+            </FormField>
+            <FormField label={t("subject")} compact>
+              <input
+                className={compactInputClass}
+                value={form.data.subject}
+                onChange={(e) =>
+                  onChange({
+                    type: "email",
+                    data: { ...form.data, subject: e.target.value },
+                  })
+                }
+              />
+            </FormField>
+          </div>
+          <FormField label={t("body")} compact>
             <textarea
-              className={textareaClass}
+              className={compactTextareaClass}
               value={form.data.body}
               onChange={(e) =>
                 onChange({
@@ -178,43 +192,45 @@ export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
           ? t("invalidLng")
           : null;
       return (
-        <div className="space-y-3">
-          <FormField label={t("latitude")} error={latError}>
-            <input
-              className={inputClass}
-              value={form.data.latitude}
-              onChange={(e) =>
-                onChange({
-                  type: "geo",
-                  data: { ...form.data, latitude: e.target.value },
-                })
-              }
-              placeholder="43.238949"
-            />
-          </FormField>
-          <FormField label={t("longitude")} error={lngError}>
-            <input
-              className={inputClass}
-              value={form.data.longitude}
-              onChange={(e) =>
-                onChange({
-                  type: "geo",
-                  data: { ...form.data, longitude: e.target.value },
-                })
-              }
-              placeholder="76.889709"
-            />
-          </FormField>
+        <div className={compactFormStack}>
+          <div className={compactFormGrid}>
+            <FormField label={t("latitude")} error={latError} compact>
+              <input
+                className={compactInputClass}
+                value={form.data.latitude}
+                onChange={(e) =>
+                  onChange({
+                    type: "geo",
+                    data: { ...form.data, latitude: e.target.value },
+                  })
+                }
+                placeholder="43.238949"
+              />
+            </FormField>
+            <FormField label={t("longitude")} error={lngError} compact>
+              <input
+                className={compactInputClass}
+                value={form.data.longitude}
+                onChange={(e) =>
+                  onChange({
+                    type: "geo",
+                    data: { ...form.data, longitude: e.target.value },
+                  })
+                }
+                placeholder="76.889709"
+              />
+            </FormField>
+          </div>
         </div>
       );
     }
 
     case "event":
       return (
-        <div className="space-y-3">
-          <FormField label={t("eventTitle")}>
+        <div className={compactFormStack}>
+          <FormField label={t("eventTitle")} compact>
             <input
-              className={inputClass}
+              className={compactInputClass}
               value={form.data.title}
               onChange={(e) =>
                 onChange({
@@ -224,9 +240,9 @@ export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
               }
             />
           </FormField>
-          <FormField label={t("location")}>
+          <FormField label={t("location")} compact>
             <input
-              className={inputClass}
+              className={compactInputClass}
               value={form.data.location}
               onChange={(e) =>
                 onChange({
@@ -236,35 +252,37 @@ export function TypeForm({ form, onChange, miniLabel }: TypeFormProps) {
               }
             />
           </FormField>
-          <FormField label={t("start")}>
-            <input
-              className={inputClass}
-              type="datetime-local"
-              value={form.data.start}
-              onChange={(e) =>
-                onChange({
-                  type: "event",
-                  data: { ...form.data, start: e.target.value },
-                })
-              }
-            />
-          </FormField>
-          <FormField label={t("end")}>
-            <input
-              className={inputClass}
-              type="datetime-local"
-              value={form.data.end}
-              onChange={(e) =>
-                onChange({
-                  type: "event",
-                  data: { ...form.data, end: e.target.value },
-                })
-              }
-            />
-          </FormField>
-          <FormField label={t("description")}>
+          <div className={compactFormGrid}>
+            <FormField label={t("start")} compact>
+              <input
+                className={compactInputClass}
+                type="datetime-local"
+                value={form.data.start}
+                onChange={(e) =>
+                  onChange({
+                    type: "event",
+                    data: { ...form.data, start: e.target.value },
+                  })
+                }
+              />
+            </FormField>
+            <FormField label={t("end")} compact>
+              <input
+                className={compactInputClass}
+                type="datetime-local"
+                value={form.data.end}
+                onChange={(e) =>
+                  onChange({
+                    type: "event",
+                    data: { ...form.data, end: e.target.value },
+                  })
+                }
+              />
+            </FormField>
+          </div>
+          <FormField label={t("description")} compact>
             <textarea
-              className={textareaClass}
+              className={compactTextareaClass}
               value={form.data.description}
               onChange={(e) =>
                 onChange({

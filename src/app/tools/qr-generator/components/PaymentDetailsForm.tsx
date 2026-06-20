@@ -4,7 +4,14 @@ import type { PaymentFormData } from "@/lib/qr-generator/types";
 import { PHONE_PLACEHOLDER } from "@/lib/qr-generator/constants";
 import { hasSensitivePaymentData } from "@/lib/qr-generator/sensitiveDataGuard";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
-import { FormField, inputClass, checkboxClass } from "./FormField";
+import {
+  FormField,
+  compactFormGrid,
+  compactFormStack,
+  compactInputClass,
+  compactNoticeClass,
+  checkboxClass,
+} from "./FormField";
 
 interface PaymentDetailsFormProps {
   data: PaymentFormData;
@@ -18,57 +25,59 @@ export function PaymentDetailsForm({ data, onChange }: PaymentDetailsFormProps) 
   const set = (patch: Partial<PaymentFormData>) => onChange({ ...data, ...patch });
 
   return (
-    <div className="space-y-3">
-      <p className="text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 leading-snug">
+    <div className={compactFormStack}>
+      <p className={`${compactNoticeClass} text-blue-800 bg-blue-50 border-blue-200`}>
         {t("paymentDisclaimer")}
       </p>
 
-      <FormField label={t("recipientName")}>
+      <FormField label={t("recipientName")} compact>
         <input
-          className={inputClass}
+          className={compactInputClass}
           value={data.recipientName}
           onChange={(e) => set({ recipientName: e.target.value })}
           placeholder="Иванов Иван"
         />
       </FormField>
 
-      <FormField label={t("purpose")}>
-        <input
-          className={inputClass}
-          value={data.purpose}
-          onChange={(e) => set({ purpose: e.target.value })}
-        />
-      </FormField>
+      <div className={compactFormGrid}>
+        <FormField label={t("purpose")} compact>
+          <input
+            className={compactInputClass}
+            value={data.purpose}
+            onChange={(e) => set({ purpose: e.target.value })}
+          />
+        </FormField>
+        <FormField label={t("amount")} compact>
+          <input
+            className={compactInputClass}
+            value={data.amount}
+            onChange={(e) => set({ amount: e.target.value })}
+            placeholder="5000 ₸"
+          />
+        </FormField>
+      </div>
 
-      <FormField label={t("amount")}>
-        <input
-          className={inputClass}
-          value={data.amount}
-          onChange={(e) => set({ amount: e.target.value })}
-          placeholder="5000 ₸"
-        />
-      </FormField>
+      <div className={compactFormGrid}>
+        <FormField label={t("cardOrPhone")} compact>
+          <input
+            className={compactInputClass}
+            value={data.cardOrPhone}
+            onChange={(e) => set({ cardOrPhone: e.target.value })}
+            placeholder={PHONE_PLACEHOLDER}
+          />
+        </FormField>
+        <FormField label={t("iban")} compact>
+          <input
+            className={compactInputClass}
+            value={data.iban}
+            onChange={(e) => set({ iban: e.target.value })}
+          />
+        </FormField>
+      </div>
 
-      <FormField label={t("cardOrPhone")}>
+      <FormField label={t("iinBin")} compact>
         <input
-          className={inputClass}
-          value={data.cardOrPhone}
-          onChange={(e) => set({ cardOrPhone: e.target.value })}
-          placeholder={PHONE_PLACEHOLDER}
-        />
-      </FormField>
-
-      <FormField label={t("iban")}>
-        <input
-          className={inputClass}
-          value={data.iban}
-          onChange={(e) => set({ iban: e.target.value })}
-        />
-      </FormField>
-
-      <FormField label={t("iinBin")}>
-        <input
-          className={inputClass}
+          className={compactInputClass}
           value={data.iinBin}
           onChange={(e) => set({ iinBin: e.target.value })}
         />
@@ -76,10 +85,10 @@ export function PaymentDetailsForm({ data, onChange }: PaymentDetailsFormProps) 
 
       {sensitive && (
         <>
-          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-snug">
+          <p className={`${compactNoticeClass} text-amber-800 bg-amber-50 border-amber-200`}>
             {t("iinWarning")}
           </p>
-          <label className="flex items-start gap-2 text-xs text-gray-700">
+          <label className="flex items-start gap-1.5 text-[11px] text-gray-600">
             <input
               type="checkbox"
               className={`mt-0.5 ${checkboxClass}`}

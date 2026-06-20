@@ -2,7 +2,7 @@
 
 import type { CodeMarkType, LabelFormat, LabelOptions } from "@/lib/qr-generator/types";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
-import { FormField, selectClass } from "./FormField";
+import { FormField, compactSelectClass } from "./FormField";
 
 interface LabelOptionsPanelProps {
   options: LabelOptions;
@@ -27,15 +27,15 @@ export function LabelOptionsPanel({ options, onChange }: LabelOptionsPanelProps)
   const codeType = options.codeType === "both" ? "qr" : options.codeType;
 
   return (
-    <div className="space-y-3">
-      <FormField label={t("label.codeType")} hint={t("label.codeTypeHint")}>
-        <div className="flex gap-1 p-1 rounded-xl bg-gray-100 w-fit">
+    <div className="space-y-2 pt-1">
+      <FormField label={t("label.codeType")} hint={t("label.codeTypeHint")} compact>
+        <div className="flex gap-0.5 p-0.5 rounded-lg bg-gray-100 w-fit">
           {CODE_TYPES.map((ct) => (
             <button
               key={ct}
               type="button"
               onClick={() => set({ codeType: ct })}
-              className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+              className={`px-2.5 py-1.5 text-[11px] font-medium rounded-md transition-colors ${
                 codeType === ct
                   ? "bg-white shadow-sm text-gray-900"
                   : "text-gray-600 hover:text-gray-900"
@@ -47,9 +47,9 @@ export function LabelOptionsPanel({ options, onChange }: LabelOptionsPanelProps)
         </div>
       </FormField>
 
-      <FormField label={t("label.format")}>
+      <FormField label={t("label.format")} compact>
         <select
-          className={selectClass}
+          className={compactSelectClass}
           value={options.labelFormat}
           onChange={(e) => set({ labelFormat: e.target.value as LabelFormat })}
         >

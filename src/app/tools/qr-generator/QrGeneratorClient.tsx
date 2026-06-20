@@ -39,6 +39,7 @@ import { ExportButtons } from "./components/ExportButtons";
 import { HistoryPanel, TemplatesPanel } from "./components/HistoryPanel";
 import { Disclaimer } from "./components/Disclaimer";
 import { ScenarioLinks } from "./components/ScenarioLinks";
+import { FormField, compactInputClass } from "./components/FormField";
 import { LabelOptionsPanel } from "./components/LabelOptionsPanel";
 import { InventoryModeSelector, type InventoryMode } from "./components/InventoryModeSelector";
 import InventoryBatchClient from "./inventory/InventoryBatchClient";
@@ -198,9 +199,9 @@ function QrGeneratorInner({
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-gray-50">
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
-          <div className="space-y-1">
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">
+        <div className="max-w-2xl mx-auto px-4 py-4 space-y-3">
+          <div className="space-y-0.5">
+            <h1 className="text-lg font-bold text-gray-900 tracking-tight">
               {seoTitle ?? (seoTitleKey ? t(seoTitleKey) : t("title"))}
             </h1>
             <p className="text-xs text-gray-500">
@@ -221,7 +222,7 @@ function QrGeneratorInner({
             </p>
           )}
 
-          <PickerSection title={t("typeLabel")} hint={typeHint(form.type, t)}>
+          <PickerSection title={t("typeLabel")} hint={typeHint(form.type, t)} compact>
             <TypeSelector value={form.type} onChange={handleTypeChange} />
             {form.type === "inventory" && (
               <InventoryModeSelector mode={inventoryMode} onChange={handleInventoryModeChange} />
@@ -234,14 +235,14 @@ function QrGeneratorInner({
           </PickerSection>
 
           {isLabelType && (
-            <PickerSection title={t("label.options")}>
+            <PickerSection title={t("label.options")} compact>
               <LabelOptionsPanel options={labelOptions} onChange={setLabelOptions} />
             </PickerSection>
           )}
 
           {!isInventoryBatch && (
             <>
-              <PickerSection title={t("preview")}>
+              <PickerSection title={t("preview")} compact>
                 <QRPreview
                   result={result}
                   generating={generating}
@@ -255,11 +256,11 @@ function QrGeneratorInner({
                 />
               </PickerSection>
 
-              <PickerSection title={t("settings")}>
+              <PickerSection title={t("settings")} compact>
                 <SettingsPanel settings={settings} onChange={setSettings} />
               </PickerSection>
 
-              <PickerSection title={t("export")}>
+              <PickerSection title={t("export")} compact>
                 <FormFieldPrintCaption
                   value={printCaption}
                   onChange={setPrintCaption}
@@ -275,7 +276,7 @@ function QrGeneratorInner({
             />
               </PickerSection>
 
-              <PickerSection title={t("history")}>
+              <PickerSection title={t("history")} compact>
                 <HistoryPanel
                   entries={history}
                   onLoad={(entry) => {
@@ -289,7 +290,7 @@ function QrGeneratorInner({
                 />
               </PickerSection>
 
-              <PickerSection title={t("templates")}>
+              <PickerSection title={t("templates")} compact>
                 <TemplatesPanel
                   templates={templates}
                   onLoad={(id) => {
@@ -330,15 +331,14 @@ function FormFieldPrintCaption({
 }) {
   const { t } = useQrTranslations();
   return (
-    <label className="block space-y-1 mb-3">
-      <span className="text-xs font-medium text-gray-700">{t("printCaption")}</span>
+    <FormField label={t("printCaption")} compact className="mb-2">
       <input
-        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-400 focus:outline-none"
+        className={compactInputClass}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
       />
-    </label>
+    </FormField>
   );
 }
 

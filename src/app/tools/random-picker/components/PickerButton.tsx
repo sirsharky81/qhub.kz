@@ -53,22 +53,38 @@ export function PickerSection({
   title,
   hint,
   children,
+  compact = false,
 }: {
   title: string;
   hint?: string;
   children: React.ReactNode;
+  compact?: boolean;
 }) {
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
-      <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/50">
-        <h3 className="text-xs font-semibold text-gray-800 dark:text-gray-200 uppercase tracking-wide">
+      <div
+        className={`border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/50 ${
+          compact ? "px-2.5 py-1.5" : "px-3 py-2.5"
+        }`}
+      >
+        <h3
+          className={`font-semibold text-gray-800 dark:text-gray-200 uppercase tracking-wide ${
+            compact ? "text-[10px]" : "text-xs"
+          }`}
+        >
           {title}
         </h3>
         {hint && (
-          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">{hint}</p>
+          <p
+            className={`text-gray-500 dark:text-gray-400 leading-snug ${
+              compact ? "text-[10px] mt-0.5" : "text-[11px] mt-0.5"
+            }`}
+          >
+            {hint}
+          </p>
         )}
       </div>
-      <div className="p-3 space-y-3">{children}</div>
+      <div className={compact ? "p-2 space-y-2" : "p-3 space-y-3"}>{children}</div>
     </section>
   );
 }

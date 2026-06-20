@@ -3,7 +3,12 @@
 import type { QrSettings } from "@/lib/qr-generator/types";
 import { MAX_LOGO_AREA_PERCENT } from "@/lib/qr-generator/logoOverlay";
 import { useQrTranslations } from "@/lib/qr-generator/i18n";
-import { FormField, inputClass, selectClass } from "./FormField";
+import {
+  FormField,
+  compactFormGrid,
+  compactFormStack,
+  compactSelectClass,
+} from "./FormField";
 
 interface SettingsPanelProps {
   settings: QrSettings;
@@ -25,42 +30,46 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
   };
 
   return (
-    <div className="space-y-3">
-      <FormField label={t("size")}>
-        <input
-          type="range"
-          min={200}
-          max={1200}
-          step={50}
-          value={settings.size}
-          onChange={(e) => set({ size: parseInt(e.target.value, 10) })}
-          className="w-full accent-gray-900"
-        />
-        <span className="text-xs text-gray-500">{settings.size} px</span>
+    <div className={compactFormStack}>
+      <FormField label={t("size")} compact>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={200}
+            max={1200}
+            step={50}
+            value={settings.size}
+            onChange={(e) => set({ size: parseInt(e.target.value, 10) })}
+            className="flex-1 min-w-0 accent-gray-900 h-4"
+          />
+          <span className="text-[10px] text-gray-500 tabular-nums shrink-0 w-12 text-right">
+            {settings.size}px
+          </span>
+        </div>
       </FormField>
 
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label={t("foreground")}>
+      <div className={compactFormGrid}>
+        <FormField label={t("foreground")} compact>
           <input
             type="color"
             value={settings.foreground}
             onChange={(e) => set({ foreground: e.target.value })}
-            className="w-full h-9 rounded-lg border border-gray-200 cursor-pointer"
+            className="w-full h-7 rounded-md border border-gray-200 cursor-pointer p-0.5"
           />
         </FormField>
-        <FormField label={t("background")}>
+        <FormField label={t("background")} compact>
           <input
             type="color"
             value={settings.background}
             onChange={(e) => set({ background: e.target.value })}
-            className="w-full h-9 rounded-lg border border-gray-200 cursor-pointer"
+            className="w-full h-7 rounded-md border border-gray-200 cursor-pointer p-0.5"
           />
         </FormField>
       </div>
 
-      <FormField label={t("ecc")}>
+      <FormField label={t("ecc")} compact>
         <select
-          className={selectClass}
+          className={compactSelectClass}
           value={settings.errorCorrectionLevel}
           onChange={(e) =>
             set({
@@ -76,18 +85,18 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
         </select>
       </FormField>
 
-      <FormField label={t("logo")} hint={t("logoHint")}>
+      <FormField label={t("logo")} hint={t("logoHint")} compact>
         <input
           type="file"
           accept="image/*"
           onChange={(e) => handleLogoUpload(e.target.files?.[0] ?? null)}
-          className="text-xs text-gray-600 w-full"
+          className="text-[10px] text-gray-600 w-full"
         />
         {settings.logoDataUrl && (
           <button
             type="button"
             onClick={() => set({ logoDataUrl: null })}
-            className="text-[11px] text-red-600 mt-1"
+            className="text-[10px] text-red-600 mt-0.5"
           >
             {t("delete")}
           </button>
@@ -95,16 +104,20 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
       </FormField>
 
       {settings.logoDataUrl && (
-        <FormField label={t("logoSize")}>
-          <input
-            type="range"
-            min={5}
-            max={MAX_LOGO_AREA_PERCENT}
-            value={settings.logoSizePercent}
-            onChange={(e) => set({ logoSizePercent: parseInt(e.target.value, 10) })}
-            className="w-full accent-gray-900"
-          />
-          <span className="text-xs text-gray-500">{settings.logoSizePercent}%</span>
+        <FormField label={t("logoSize")} compact>
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={5}
+              max={MAX_LOGO_AREA_PERCENT}
+              value={settings.logoSizePercent}
+              onChange={(e) => set({ logoSizePercent: parseInt(e.target.value, 10) })}
+              className="flex-1 min-w-0 accent-gray-900 h-4"
+            />
+            <span className="text-[10px] text-gray-500 tabular-nums shrink-0 w-8 text-right">
+              {settings.logoSizePercent}%
+            </span>
+          </div>
         </FormField>
       )}
     </div>
