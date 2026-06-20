@@ -8,10 +8,12 @@ type Messages = Record<string, string>;
 
 const ru: Messages = {
   title: "Audio Extractor",
-  subtitle: "Извлечение аудиодорожки из YouTube, TikTok и Instagram",
+  subtitle: "Извлечение аудиодорожки из YouTube",
   privacy:
+    "Ссылка обрабатывается в вашем браузере. Аудио не сохраняется на сервере QHub.",
+  privacyServer:
     "Ссылка обрабатывается на сервере только на время запроса. Аудио не сохраняется на сервере QHub.",
-  urlPlaceholder: "Вставьте ссылку на видео…",
+  urlPlaceholder: "Вставьте ссылку на YouTube…",
   extract: "Извлечь",
   extractAudio: "Извлечь аудио",
   cancel: "Отмена",
@@ -28,7 +30,7 @@ const ru: Messages = {
   consentLabel: "Я понимаю ограничения и использую сервис только для личных целей",
   disclaimerTitle: "Важно",
   disclaimerBody:
-    "Сервис предназначен для личного некоммерческого использования. Вы несёте ответственность за соблюдение авторских прав и правил платформ (YouTube, TikTok, Meta). QHub не хранит и не распространяет контент. Извлечение DRM-защищённого контента запрещено.",
+    "Сервис предназначен для личного некоммерческого использования. Вы несёте ответственность за соблюдение авторских прав и правил YouTube. QHub не хранит и не распространяет контент. Извлечение DRM-защищённого контента запрещено.",
   saveResult: "Сохранить результат",
   download: "Скачать",
   exporting: "Экспорт…",
@@ -39,7 +41,7 @@ const ru: Messages = {
   back: "Назад",
   newLink: "Новая ссылка",
   errorInvalidUrl: "Некорректная ссылка",
-  errorUnsupported: "Поддерживаются только YouTube, TikTok и Instagram",
+  errorUnsupported: "Поддерживаются только ссылки YouTube",
   errorUnavailable: "Видео недоступно",
   errorTooLong: "Видео длиннее 10 минут",
   errorRateLimit: "Слишком много запросов. Попробуйте через час",
@@ -50,10 +52,8 @@ const ru: Messages = {
 
 const kk: Messages = {
   ...ru,
-  subtitle: "YouTube, TikTok және Instagram ссылкаларынан аудио алу",
-  privacy:
-    "Сілтеме сұрау уақытында ғана серверде өңделеді. Аудио QHub серверінде сақталмайды.",
-  urlPlaceholder: "Бейне сілтемесін қойыңыз…",
+  subtitle: "YouTube ссылkalarından аудио алу",
+  urlPlaceholder: "YouTube сілтемесін қойыңыз…",
   extract: "Алу",
   extractAudio: "Аудионы алу",
   cancel: "Бас тарту",
@@ -65,7 +65,7 @@ const kk: Messages = {
   consentLabel: "Шектеулерді түсінемін және сервисті тек жеке мақсатта пайдаланамын",
   disclaimerTitle: "Маңызды",
   disclaimerBody:
-    "Сервис тек жеке пайдалануға арналған. Авторлық құқық пен платформа ережелерін сақтауға жауаптысыз. QHub контент сақтамайды.",
+    "Сервис тек жеке пайдалануға арналған. Авторлық құқық пен YouTube ережелерін сақтауға жауаптысыз. QHub контент сақтамайды.",
   saveResult: "Нәтижені сақтау",
   download: "Жүктеу",
   exporting: "Экспорт…",
@@ -75,10 +75,12 @@ const kk: Messages = {
 
 const en: Messages = {
   ...ru,
-  subtitle: "Extract audio from YouTube, TikTok, and Instagram links",
+  subtitle: "Extract audio from YouTube links",
   privacy:
+    "The link is processed in your browser. Audio is not stored on QHub servers.",
+  privacyServer:
     "The link is processed on the server only for the duration of the request. Audio is not stored on QHub servers.",
-  urlPlaceholder: "Paste a video link…",
+  urlPlaceholder: "Paste a YouTube link…",
   extract: "Extract",
   extractAudio: "Extract audio",
   cancel: "Cancel",
@@ -90,14 +92,14 @@ const en: Messages = {
   consentLabel: "I understand the limits and use this service for personal purposes only",
   disclaimerTitle: "Important",
   disclaimerBody:
-    "This service is for personal non-commercial use. You are responsible for copyright and platform terms (YouTube, TikTok, Meta). QHub does not store or distribute content.",
+    "This service is for personal non-commercial use. You are responsible for copyright and YouTube terms. QHub does not store or distribute content.",
   saveResult: "Save result",
   download: "Download",
   exporting: "Exporting…",
   back: "Back",
   newLink: "New link",
   errorInvalidUrl: "Invalid link",
-  errorUnsupported: "Only YouTube, TikTok, and Instagram are supported",
+  errorUnsupported: "Only YouTube links are supported",
   errorUnavailable: "Video unavailable",
   errorTooLong: "Video is longer than 10 minutes",
   errorRateLimit: "Too many requests. Try again in an hour",

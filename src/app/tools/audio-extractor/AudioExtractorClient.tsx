@@ -22,7 +22,7 @@ import type { ExtractedAudio, ExtractorStep, VideoMetadata } from "@/lib/audio-e
 function mapClientError(err: unknown, t: (k: string) => string): string {
   if (err instanceof ExtractClientError) {
     if (err.status === 429) return t("errorRateLimit");
-    if (err.status === 404) return t("errorUnavailable");
+    if (err.status === 404) return err.message || t("errorUnavailable");
     if (err.status === 400 && err.message.includes("10")) return t("errorTooLong");
     if (err.status === 503) return t("errorService");
     return err.message || t("errorGeneric");

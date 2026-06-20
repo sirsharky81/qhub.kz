@@ -45,7 +45,7 @@ export const tools: Tool[] = [
     id: "audio-extractor",
     name: "Audio Extractor",
     description:
-      "Извлечение аудиодорожки из YouTube, TikTok и Instagram — waveform и MP3/WAV.",
+      "Извлечение аудиодорожки из YouTube — waveform и MP3/WAV.",
     icon: "Mic",
     category: "audio",
     href: "/tools/audio-extractor",

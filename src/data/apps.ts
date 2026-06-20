@@ -134,7 +134,7 @@ export const apps: App[] = [
     id: "audio-extractor",
     title: "Audio Extractor",
     description:
-      "Извлечение аудиодорожки из YouTube, TikTok и Instagram — waveform и MP3/WAV.",
+      "Извлечение аудиодорожки из YouTube — waveform и MP3/WAV.",
     longDescription:
       "Вставьте ссылку на видео: сервис эфемерно извлекает аудио, показывает waveform, позволяет прослушать и сохранить в MP3 (320 kbps) или WAV. Аудио не хранится на сервере.",
     href: "/tools/audio-extractor",

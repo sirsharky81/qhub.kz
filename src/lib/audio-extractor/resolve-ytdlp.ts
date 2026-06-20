@@ -11,8 +11,11 @@ const TMP_BIN =
 let cachedBinPath: string | null = null;
 
 function bundledCandidates(): string[] {
-  const cwd = process.cwd();
-  return [join(cwd, "bin", YTDLP_BIN_NAME)];
+  const candidates = new Set<string>();
+  candidates.add(join(process.cwd(), "bin", YTDLP_BIN_NAME));
+  const initCwd = process.env.INIT_CWD?.trim();
+  if (initCwd) candidates.add(join(initCwd, "bin", YTDLP_BIN_NAME));
+  return [...candidates];
 }
 
 function ensureTmpBinary(source: string): string {

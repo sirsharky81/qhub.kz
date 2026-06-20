@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { checkAudioExtractorRateLimit, getClientIp } from "@/lib/rate-limit";
 import { validateExtractorUrl } from "@/lib/audio-extractor/url-validator";
 import { YtdlpError } from "@/lib/audio-extractor/ytdlp";
+import { YoutubeResolveError } from "@/lib/audio-extractor/youtube-resolve";
 
 export function jsonError(message: string, status: number, retryAfterSec?: number) {
   return NextResponse.json(
@@ -46,6 +47,19 @@ export async function enforceRateLimit(request: Request): Promise<NextResponse |
 }
 
 export function mapYtdlpError(err: unknown): NextResponse {
+  if (err instanceof YoutubeResolveError) {
+    switch (err.code) {
+      case "too_long":
+        return jsonError(err.message, 400);
+      case "invalid":
+        return jsonError(err.message, 400);
+      case "unavailable":
+      case "blocked":
+        return jsonError(err.message, 404);
+      default:
+        return jsonError(err.message, 502);
+    }
+  }
   if (err instanceof YtdlpError) {
     switch (err.code) {
       case "too_long":

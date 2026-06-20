@@ -74,3 +74,10 @@ export function validateExtractorUrl(raw: string): { url: string; platform: Audi
 
   return { url: normalized, platform };
 }
+
+/** MVP: YouTube-only (TikTok/Instagram kept in server validator for legacy revert). */
+export function validateMvpExtractorUrl(raw: string): { url: string; platform: "youtube" } {
+  const result = validateExtractorUrl(raw);
+  if (result.platform !== "youtube") throw new Error("unsupported_platform");
+  return { url: result.url, platform: "youtube" };
+}

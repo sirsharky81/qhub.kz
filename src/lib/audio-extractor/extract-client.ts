@@ -1,76 +1,56 @@
-import { MAX_STREAM_BYTES } from "./constants";
+import { isClientYoutubeExtraction } from "./extraction-config";
+import { ExtractClientError } from "./extract-errors";
+import {
+  fetchAudioStreamServer,
+  fetchMetadataServer,
+} from "./extract-client-server";
+import {
+  fetchYoutubeAudioClient,
+  fetchYoutubeMetadataClient,
+} from "./youtube-browser";
+import { validateMvpExtractorUrl } from "./url-validator";
 import type { VideoMetadata } from "./types";
 
-export class ExtractClientError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
-    this.name = "ExtractClientError";
-  }
-}
+export { ExtractClientError } from "./extract-errors";
 
-async function parseErrorResponse(res: Response): Promise<string> {
-  try {
-    const data = (await res.json()) as { error?: string };
-    if (data.error) return data.error;
-  } catch {
-    /* ignore */
+function mapValidationError(err: unknown): ExtractClientError {
+  const code = err instanceof Error ? err.message : "invalid_url";
+  if (code === "unsupported_platform") {
+    return new ExtractClientError("Поддерживаются только ссылки YouTube", 400);
   }
-  return "Не удалось выполнить запрос";
+  if (code === "invalid_protocol" || code === "invalid_url") {
+    return new ExtractClientError("Некорректная ссылка", 400);
+  }
+  return new ExtractClientError("Некорректная ссылка", 400);
 }
 
 export async function fetchMetadata(url: string): Promise<VideoMetadata> {
-  const res = await fetch("/api/audio-extractor/metadata", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  });
-
-  if (!res.ok) {
-    throw new ExtractClientError(await parseErrorResponse(res), res.status);
+  let normalized: string;
+  try {
+    normalized = validateMvpExtractorUrl(url).url;
+  } catch (err) {
+    throw mapValidationError(err);
   }
 
-  return (await res.json()) as VideoMetadata;
+  if (isClientYoutubeExtraction()) {
+    return fetchYoutubeMetadataClient(normalized);
+  }
+  return fetchMetadataServer(normalized);
 }
 
 export async function fetchAudioStream(
   url: string,
   onProgress?: (loaded: number, total: number | null) => void,
 ): Promise<Blob> {
-  const res = await fetch("/api/audio-extractor/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  });
-
-  if (!res.ok) {
-    throw new ExtractClientError(await parseErrorResponse(res), res.status);
+  let normalized: string;
+  try {
+    normalized = validateMvpExtractorUrl(url).url;
+  } catch (err) {
+    throw mapValidationError(err);
   }
 
-  const contentLength = res.headers.get("Content-Length");
-  const total = contentLength ? Number(contentLength) : null;
-  const reader = res.body?.getReader();
-  if (!reader) throw new ExtractClientError("Пустой ответ сервера");
-
-  const chunks: Uint8Array[] = [];
-  let loaded = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      loaded += value.length;
-      if (loaded > MAX_STREAM_BYTES) {
-        reader.cancel();
-        throw new ExtractClientError("Файл слишком большой");
-      }
-      chunks.push(value);
-      onProgress?.(loaded, total);
-    }
+  if (isClientYoutubeExtraction()) {
+    return fetchYoutubeAudioClient(normalized, onProgress);
   }
-
-  const mimeType = res.headers.get("Content-Type") ?? "audio/mp4";
-  return new Blob(chunks as BlobPart[], { type: mimeType });
+  return fetchAudioStreamServer(normalized, onProgress);
 }

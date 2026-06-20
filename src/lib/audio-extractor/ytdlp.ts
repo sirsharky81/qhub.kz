@@ -4,6 +4,7 @@ import type { AudioPlatform, VideoMetadata } from "./types";
 import { MAX_DURATION_SEC, MAX_STREAM_BYTES } from "./constants";
 import { resolveCookiesPath, resolveYtdlpBinary } from "./resolve-ytdlp";
 import { fetchYoutubeAudioViaFallback, fetchYoutubeMetadataViaFallback } from "./piped-fallback";
+import { isVercelRuntime } from "./runtime-env";
 import { isYoutubeUrl } from "./youtube-id";
 
 export class YtdlpError extends Error {
@@ -46,11 +47,15 @@ function classifyYtdlpError(stderr: string, stdout: string): YtdlpError {
   const text = `${stderr}\n${stdout}`.toLowerCase();
   console.error("[ytdlp] stderr:", stderr.slice(0, 2000));
 
-  if (text.includes("private video") || text.includes("this video is unavailable")) {
+  if (
+    text.includes("private video") ||
+    text.includes("this video is unavailable") ||
+    text.includes("video unavailable")
+  ) {
     return new YtdlpError("Видео недоступно", "unavailable");
   }
-  if (text.includes("video unavailable") || text.includes("not available")) {
-    return new YtdlpError("Видео недоступно", "unavailable");
+  if (text.includes("format is not available")) {
+    return new YtdlpError("Не удалось обработать ссылку", "unknown");
   }
   if (
     text.includes("geo") ||
@@ -92,6 +97,19 @@ function baseArgs(url: string, youtubeClient?: string): string[] {
   if (cookies) args.push("--cookies", cookies);
 
   return args;
+}
+
+function youtubeClients(): (string | undefined)[] {
+  if (isVercelRuntime()) return YOUTUBE_CLIENTS;
+  // Local dev: default yt-dlp client first (more formats, fewer false failures).
+  return [undefined, ...YOUTUBE_CLIENTS];
+}
+
+function shouldUseYoutubeFallback(err: unknown): boolean {
+  if (!isVercelRuntime()) return false;
+  if (!(err instanceof YtdlpError)) return true;
+  if (err.code === "too_long" || err.code === "unavailable") return false;
+  return true;
 }
 
 function runProcess(args: string[], timeoutMs: number): Promise<{ stdout: Buffer; stderr: string }> {
@@ -150,10 +168,10 @@ function runProcess(args: string[], timeoutMs: number): Promise<{ stdout: Buffer
   });
 }
 
-async function fetchVideoMetadataYtdlp(url: string): Promise<VideoMetadata> {
+export async function fetchVideoMetadataYtdlp(url: string): Promise<VideoMetadata> {
   let lastError: unknown;
 
-  const clients = /youtube\.com|youtu\.be/i.test(url) ? YOUTUBE_CLIENTS : [undefined];
+  const clients = /youtube\.com|youtu\.be/i.test(url) ? youtubeClients() : [undefined];
 
   for (const client of clients) {
     try {
@@ -201,7 +219,7 @@ export async function fetchVideoMetadata(url: string): Promise<VideoMetadata> {
   try {
     return await fetchVideoMetadataYtdlp(url);
   } catch (err) {
-    if (isYoutubeUrl(url)) {
+    if (isYoutubeUrl(url) && shouldUseYoutubeFallback(err)) {
       console.warn("[audio-extractor] yt-dlp failed, trying YouTube fallback:", err);
       return fetchYoutubeMetadataViaFallback(url);
     }
@@ -213,7 +231,7 @@ export async function streamAudio(url: string): Promise<Response> {
   try {
     return await streamAudioYtdlp(url);
   } catch (err) {
-    if (isYoutubeUrl(url)) {
+    if (isYoutubeUrl(url) && shouldUseYoutubeFallback(err)) {
       console.warn("[audio-extractor] yt-dlp stream failed, trying YouTube fallback:", err);
       return fetchYoutubeAudioViaFallback(url);
     }
@@ -224,7 +242,7 @@ export async function streamAudio(url: string): Promise<Response> {
 function streamAudioYtdlp(url: string): Promise<Response> {
   return new Promise((resolve, reject) => {
     const args = [
-      ...baseArgs(url, YOUTUBE_CLIENTS[0]),
+      ...baseArgs(url, isVercelRuntime() ? YOUTUBE_CLIENTS[0] : undefined),
       "-f",
       "bestaudio[ext=m4a]/bestaudio/best",
       "-o",
