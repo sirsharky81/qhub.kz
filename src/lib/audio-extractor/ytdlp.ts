@@ -3,7 +3,7 @@ import { chmodSync } from "node:fs";
 import type { AudioPlatform, VideoMetadata } from "./types";
 import { MAX_DURATION_SEC, MAX_STREAM_BYTES } from "./constants";
 import { resolveCookiesPath, resolveYtdlpBinary } from "./resolve-ytdlp";
-import { fetchYoutubeAudioViaPiped, fetchYoutubeMetadataViaPiped } from "./piped-fallback";
+import { fetchYoutubeAudioViaFallback, fetchYoutubeMetadataViaFallback } from "./piped-fallback";
 import { isYoutubeUrl } from "./youtube-id";
 
 export class YtdlpError extends Error {
@@ -202,8 +202,8 @@ export async function fetchVideoMetadata(url: string): Promise<VideoMetadata> {
     return await fetchVideoMetadataYtdlp(url);
   } catch (err) {
     if (isYoutubeUrl(url)) {
-      console.warn("[audio-extractor] yt-dlp failed, trying Piped fallback:", err);
-      return fetchYoutubeMetadataViaPiped(url);
+      console.warn("[audio-extractor] yt-dlp failed, trying YouTube fallback:", err);
+      return fetchYoutubeMetadataViaFallback(url);
     }
     throw err;
   }
@@ -214,8 +214,8 @@ export async function streamAudio(url: string): Promise<Response> {
     return await streamAudioYtdlp(url);
   } catch (err) {
     if (isYoutubeUrl(url)) {
-      console.warn("[audio-extractor] yt-dlp stream failed, trying Piped fallback:", err);
-      return fetchYoutubeAudioViaPiped(url);
+      console.warn("[audio-extractor] yt-dlp stream failed, trying YouTube fallback:", err);
+      return fetchYoutubeAudioViaFallback(url);
     }
     throw err;
   }
