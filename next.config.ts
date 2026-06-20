@@ -2,8 +2,15 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
-    "/api/audio-extractor/metadata": ["./bin/yt-dlp"],
-    "/api/audio-extractor/stream": ["./bin/yt-dlp"],
+    "/api/audio-extractor/*": ["./bin/yt-dlp", "./bin/yt-dlp.exe"],
+  },
+  outputFileTracingExcludes: {
+    "/api/audio-extractor/*": [
+      "./debug-*.log",
+      "./docs/**",
+      "./.cursor/**",
+      "./public/models/**",
+    ],
   },
   async redirects() {
     return [
