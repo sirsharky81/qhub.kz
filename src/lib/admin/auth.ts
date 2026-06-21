@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
-import { getAdminEmail, verifySessionToken } from "./session";
+import { getAdminEmail } from "./session";
+import { verifySessionToken } from "./session-crypto";
 import { getPasswordHash, setPasswordHash } from "./store";
 import { hashPassword, verifyPassword } from "./password";
 

@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Неверный email или пароль" }, { status: 401 });
   }
 
-  const token = createSessionToken(getAdminEmail());
+  const token = await createSessionToken(getAdminEmail());
   const res = NextResponse.json({ ok: true });
   res.cookies.set(sessionCookieOptions(token));
   return res;
