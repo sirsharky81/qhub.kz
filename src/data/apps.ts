@@ -31,6 +31,8 @@ export interface App {
   comingSoon?: boolean;
   /** Сервис доступен, но расчёты ещё проверяются */
   beta?: boolean;
+  /** Доступен только на localhost (скрыт на production для обычных пользователей) */
+  devOnly?: boolean;
   /** Порядок на главной: меньше = раньше запущен. «Скоро» — в конце */
   sortOrder: number;
 }
@@ -144,6 +146,7 @@ export const apps: App[] = [
     author: "QHub",
     authorType: "qhub",
     beta: true,
+    devOnly: true,
     sortOrder: 7,
   },
   {

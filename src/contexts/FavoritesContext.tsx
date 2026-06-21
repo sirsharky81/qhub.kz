@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { apps, type App } from "@/data/apps";
+import { useCatalog } from "@/contexts/CatalogContext";
 import { loadFavorites, saveFavorites } from "@/lib/favorites/storage";
 
 interface FavoritesContextValue {
@@ -29,6 +30,7 @@ export function useFavorites(): FavoritesContextValue {
 }
 
 export function FavoritesProvider({ children }: { children: ReactNode }) {
+  const { isAppVisible } = useCatalog();
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
@@ -60,8 +62,10 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   const pinnedApps = useMemo(() => {
     const map = new Map(apps.map((a) => [a.id, a]));
-    return pinnedIds.map((id) => map.get(id)).filter((a): a is App => !!a && !a.comingSoon);
-  }, [pinnedIds]);
+    return pinnedIds
+      .map((id) => map.get(id))
+      .filter((a): a is App => !!a && !a.comingSoon && isAppVisible(a));
+  }, [pinnedIds, isAppVisible]);
 
   const value: FavoritesContextValue = {
     pinnedIds,

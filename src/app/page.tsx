@@ -1,14 +1,17 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import Navbar from "@/components/Navbar";
 import { HomePageExtras } from "@/components/home/HomePageExtras";
 import { DevelopersSubmitSection } from "@/components/home/DevelopersSubmitSection";
 import { AppsGrid } from "@/components/home/AppsGrid";
-import { sortedApps } from "@/data/apps";
+import { getCatalogForViewer } from "@/lib/admin/catalog";
 
-const liveCount = sortedApps.filter((a) => !a.comingSoon).length;
-const comingSoonCount = sortedApps.filter((a) => a.comingSoon).length;
+export default async function Home() {
+  const host = (await headers()).get("host");
+  const { apps: visibleApps } = await getCatalogForViewer(host);
+  const liveCount = visibleApps.filter((a) => !a.comingSoon).length;
+  const comingSoonCount = visibleApps.filter((a) => a.comingSoon).length;
 
-export default function Home() {
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-900 pb-16">
       <Navbar />
