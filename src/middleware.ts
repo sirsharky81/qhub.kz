@@ -40,7 +40,8 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    `/${ADMIN_PANEL_PATH}/:path*`,
+    // Must stay in sync with ADMIN_PANEL_PATH in constants.ts (static string required by Next.js)
+    "/qhub-ctrl-7k2m/:path*",
     "/tools/audio-extractor/:path*",
     "/api/audio-extractor/:path*",
   ],
