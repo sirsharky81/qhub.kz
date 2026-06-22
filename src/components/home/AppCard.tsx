@@ -19,6 +19,7 @@ interface AppCardProps {
   showPin?: boolean;
   draggable?: boolean;
   adminHiddenBadge?: boolean;
+  adminHiddenBadgeLabel?: string;
 }
 
 export function AppCard({
@@ -26,6 +27,7 @@ export function AppCard({
   showPin = true,
   draggable = false,
   adminHiddenBadge = false,
+  adminHiddenBadgeLabel = "скрыто",
 }: AppCardProps) {
   const player = useMusicPlayerOptional();
   const isMusicApp = app.id === "music";
@@ -147,7 +149,7 @@ export function AppCard({
               {app.beta && showPin && <TestingBadge />}
               {adminHiddenBadge && (
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
-                  скрыто
+                  {adminHiddenBadgeLabel}
                 </span>
               )}
             </div>

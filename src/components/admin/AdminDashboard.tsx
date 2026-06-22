@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ADMIN_PANEL_PATH } from "@/lib/admin/constants";
@@ -99,13 +100,21 @@ export function AdminDashboard() {
             Скрытые карточки не видны на главной. Админ видит все. Удаление недоступно.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="text-sm text-gray-600 hover:text-gray-900 underline"
-        >
-          Выйти
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/"
+            className="rounded-xl bg-gray-900 text-white px-4 py-2 text-sm font-semibold hover:bg-gray-800 transition-colors"
+          >
+            Все приложения
+          </Link>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="text-sm text-gray-600 hover:text-gray-900 underline px-2"
+          >
+            Выйти
+          </button>
+        </div>
       </div>
 
       {error && (

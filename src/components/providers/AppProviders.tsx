@@ -5,6 +5,7 @@ import { CatalogProvider } from "@/contexts/CatalogContext";
 import { FavoritesProvider } from "@/contexts/FavoritesContext";
 import { MusicPlayerProvider } from "@/contexts/MusicPlayerContext";
 import { GlobalMiniPlayer } from "@/components/music/GlobalMiniPlayer";
+import { AdminViewBadge } from "@/components/admin/AdminViewBadge";
 import type { App } from "@/data/apps";
 
 interface AppProvidersProps {
@@ -32,6 +33,7 @@ export function AppProviders({
       <FavoritesProvider>
         <MusicPlayerProvider>
           {children}
+          <AdminViewBadge />
           <GlobalMiniPlayer />
         </MusicPlayerProvider>
       </FavoritesProvider>

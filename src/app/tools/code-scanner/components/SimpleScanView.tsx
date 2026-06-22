@@ -2,12 +2,13 @@
 
 import { useCallback, useState } from "react";
 import CameraScanner from "./CameraScanner";
-import ManualInputModal from "./ManualInputModal";
 import ScanResultActions from "./ScanResultActions";
 import { useCodeScannerT } from "@/lib/code-scanner/i18n";
 import { parseToTable } from "@/lib/code-scanner/parse-content";
 import type { SimpleScanEntry } from "@/lib/code-scanner/types";
 import { saveSimpleScan } from "@/lib/code-scanner/storage";
+import { extractScannableUrl, openUrlInNewTab } from "@/lib/code-scanner/url-utils";
+import ScannedRawContent from "./ScannedRawContent";
 
 interface Props {
   onBack: () => void;
@@ -18,12 +19,13 @@ type Phase = "idle" | "scanning" | "result";
 export default function SimpleScanView({ onBack }: Props) {
   const { t } = useCodeScannerT();
   const [phase, setPhase] = useState<Phase>("idle");
-  const [manualOpen, setManualOpen] = useState(false);
   const [current, setCurrent] = useState<{ raw: string; table: ReturnType<typeof parseToTable> } | null>(null);
 
   const applyResult = useCallback((raw: string) => {
-    setCurrent({ raw, table: parseToTable(raw) });
+    const url = extractScannableUrl(raw);
+    setCurrent({ raw, table: url ? null : parseToTable(raw) });
     setPhase("result");
+    if (url) openUrlInNewTab(url);
   }, []);
 
   async function handleSave() {
@@ -49,22 +51,13 @@ export default function SimpleScanView({ onBack }: Props) {
       <p className="text-xs text-gray-500">{t("simpleScanHint")}</p>
 
       {phase === "idle" && (
-        <div className="flex flex-col sm:flex-row gap-2">
-          <button
-            type="button"
-            onClick={() => setPhase("scanning")}
-            className="flex-1 px-4 py-3 text-sm font-medium rounded-xl bg-gray-900 text-white"
-          >
-            {t("scan")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setManualOpen(true)}
-            className="flex-1 px-4 py-3 text-sm font-medium rounded-xl border border-gray-200 bg-white"
-          >
-            {t("manualInput")}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setPhase("scanning")}
+          className="w-full px-4 py-3 text-sm font-medium rounded-xl bg-gray-900 text-white"
+        >
+          {t("scan")}
+        </button>
       )}
 
       {phase === "scanning" && (
@@ -75,10 +68,6 @@ export default function SimpleScanView({ onBack }: Props) {
             settings={{ pauseSeconds: 1, conveyorMode: false }}
             onScan={applyResult}
             onSingleScanDone={() => setPhase("result")}
-            onManualInput={() => {
-              setPhase("idle");
-              setManualOpen(true);
-            }}
           />
           <button
             type="button"
@@ -93,9 +82,7 @@ export default function SimpleScanView({ onBack }: Props) {
       {phase === "result" && current && (
         <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
           <h3 className="text-sm font-semibold">{t("rawContent")}</h3>
-          <pre className="text-xs whitespace-pre-wrap break-all bg-gray-50 rounded-lg p-3 max-h-40 overflow-auto">
-            {current.raw}
-          </pre>
+          <ScannedRawContent raw={current.raw} />
           {current.table && (
             <>
               <h4 className="text-xs font-medium text-gray-600">{t("parsedTable")}</h4>
@@ -126,33 +113,18 @@ export default function SimpleScanView({ onBack }: Props) {
             </>
           )}
           <ScanResultActions raw={current.raw} table={current.table} onSave={handleSave} />
-          <div className="flex flex-col sm:flex-row gap-2 pt-1 border-t border-gray-100">
+          <div className="pt-1 border-t border-gray-100">
             <button
               type="button"
               onClick={() => setPhase("scanning")}
-              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-gray-900 text-white"
+              className="w-full px-4 py-2.5 text-sm font-medium rounded-xl bg-gray-900 text-white"
             >
               {t("scanAgain")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setManualOpen(true)}
-              className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200"
-            >
-              {t("manualInput")}
             </button>
           </div>
         </div>
       )}
 
-      <ManualInputModal
-        open={manualOpen}
-        onClose={() => setManualOpen(false)}
-        onSubmit={(raw) => {
-          applyResult(raw);
-          setManualOpen(false);
-        }}
-      />
     </div>
   );
 }
