@@ -4,7 +4,7 @@ import RandomPickerClient from "./RandomPickerClient";
 
 export const metadata: Metadata = {
   title:
-    "QHub Random Picker — случайный выбор участников, жеребьёвка и генератор чисел",
+    "Генератор случайных чисел — жеребьёвка, выбор участников и случайные числа",
   description:
     "Бесплатный инструмент для случайного выбора участников, жеребьёвок, распределения по группам, перемешивания списков и генерации случайных чисел. Без регистрации и полностью в браузере.",
   keywords: [
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     "group generator",
   ],
   openGraph: {
-    title: "QHub Random Picker | QHub",
+    title: "Генератор случайных чисел | QHub",
     description:
       "Случайный выбор участников, жеребьёвка и генератор чисел — полностью локально в браузере.",
     url: "https://qhub.kz/tools/random-picker",
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 const webAppJsonLd = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
-  name: "QHub Random Picker",
+  name: "Генератор случайных чисел",
   url: "https://qhub.kz/tools/random-picker",
   applicationCategory: "UtilitiesApplication",
   operatingSystem: "Any",
@@ -47,7 +47,7 @@ const ICON = "/tools/random-picker/icon-192.png";
 export default function RandomPickerPage() {
   return (
     <PdfToolLayout
-      title="QHub Random Picker"
+      title="Генератор случайных чисел"
       iconSrc={ICON}
       shellClassName="min-h-[100dvh] flex flex-col bg-white dark:bg-gray-950"
       badge={false}

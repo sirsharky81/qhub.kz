@@ -1,6 +1,6 @@
 {
-  "name": "QHub Random Picker",
-  "short_name": "Random Picker",
+  "name": "Генератор случайных чисел",
+  "short_name": "Ген. чисел",
   "description": "Случайный выбор, жеребьёвка и генерация чисел — локально в браузере",
   "start_url": "/tools/random-picker",
   "scope": "/tools/random-picker",

@@ -13,7 +13,7 @@ export interface Tool {
 export const tools: Tool[] = [
   {
     id: "random-picker",
-    name: "QHub Random Picker",
+    name: "Генератор случайных чисел",
     description:
       "Случайный выбор участников, жеребьёвка, колесо, группы и генератор чисел — локально в браузере.",
     icon: "Dices",

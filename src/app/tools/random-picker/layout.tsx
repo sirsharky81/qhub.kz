@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Random Picker",
+    title: "Генератор чисел",
   },
   icons: {
     icon: [

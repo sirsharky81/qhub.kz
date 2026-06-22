@@ -273,7 +273,7 @@ export default function RandomPickerClient() {
         <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
           <div className="space-y-1">
             <h1 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">
-              Random Picker
+              Генератор случайных чисел
             </h1>
             <p className="text-xs text-gray-500">Жеребьёвка и случайный выбор — локально в браузере</p>
             <PrivacyBanner compact />

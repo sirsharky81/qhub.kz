@@ -83,7 +83,7 @@ export function formatShareText(record: VerificationRecord): string {  const lin
     "Verification Hash:",
     record.verificationHash,
     "",
-    "Сформировано сервисом QHub Random Picker",
+    "Сформировано сервисом «Генератор случайных чисел»",
     "",
     "QHub.kz",
     "",

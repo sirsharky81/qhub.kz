@@ -182,7 +182,7 @@ export const apps: App[] = [
   },
   {
     id: "random-picker",
-    title: "QHub Random Picker",
+    title: "Генератор случайных чисел",
     description:
       "Случайный выбор участников, жеребьёвка, колесо, группы и генератор чисел — локально в браузере.",
     longDescription:

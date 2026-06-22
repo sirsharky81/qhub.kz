@@ -30,7 +30,7 @@ export async function generateResultCardPng(
 
   ctx.fillStyle = theme.textSecondary;
   ctx.font = "28px system-ui, sans-serif";
-  ctx.fillText("Random Picker", width / 2, 145);
+  ctx.fillText("Генератор случайных чисел", width / 2, 145);
 
   ctx.fillStyle = theme.textPrimary;
   ctx.font = "36px system-ui, sans-serif";

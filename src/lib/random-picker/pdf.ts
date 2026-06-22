@@ -120,7 +120,7 @@ export async function generateProtocolPdf(record: VerificationRecord): Promise<U
       font,
       color: rgb(0.75, 0.78, 0.85),
     });
-    page.drawText("Random Picker", {
+    page.drawText("Генератор случайных чисел", {
       x: margin,
       y: pageHeight - 56,
       size: 9,
@@ -280,7 +280,7 @@ export async function generateProtocolPdf(record: VerificationRecord): Promise<U
 
   page.drawImage(qrImage, { x: margin, y: y - 56, width: 48, height: 48 });
   page.drawText("Сформировано сервисом", { x: margin + 60, y: y - 18, size: 8, font, color: C.muted });
-  page.drawText("QHub Random Picker", { x: margin + 60, y: y - 32, size: 11, font: fontBold, color: C.ink });
+  page.drawText("Генератор случайных чисел", { x: margin + 60, y: y - 32, size: 11, font: fontBold, color: C.ink });
   page.drawText("https://qhub.kz", { x: margin + 60, y: y - 46, size: 10, font: fontBold, color: C.accent });
   page.drawText(SERVICE_URL, { x: margin + 60, y: y - 58, size: 7.5, font, color: C.muted });
 
