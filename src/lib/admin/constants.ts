@@ -10,3 +10,5 @@ export const REDIS_PASSWORD_HASH_KEY = "qhub:admin:password_hash";
 export const REDIS_HIDDEN_APPS_KEY = "qhub:admin:hidden_apps";
 
 export const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7; // 7 days
+
+export const ADMIN_INSTALL_PROMPT_SHOWN = "qhub_admin_install_prompt_shown";

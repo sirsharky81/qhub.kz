@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v9";
+const CACHE_NAME = "qhub-v10";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
@@ -52,6 +52,7 @@ self.addEventListener("fetch", (event) => {
   if (
     pathname.startsWith("/apps/") ||
     pathname.startsWith("/tools/") ||
+    pathname.startsWith("/qhub-ctrl-7k2m") ||
     pathname.startsWith("/_next/")
   ) {
     event.respondWith(fetch(request));

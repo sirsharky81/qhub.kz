@@ -7,6 +7,7 @@ import {
   isIOS,
   isStandalone,
 } from "@/lib/pwa-utils";
+import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
 
 const DISMISS_KEY = "qhub-install-dismissed";
 
@@ -18,10 +19,12 @@ export default function InstallBanner() {
     useState<BeforeInstallPromptEvent | null>(null);
 
   const isMessengerRoute = pathname?.startsWith("/tools/messenger") ?? false;
+  const isAdminRoute = pathname?.startsWith(`/${ADMIN_PANEL_PATH}`) ?? false;
+  const skipBanner = isMessengerRoute || isAdminRoute;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (isMessengerRoute) return;
+    if (skipBanner) return;
     if (isStandalone()) return;
     if (localStorage.getItem(DISMISS_KEY)) return;
 
@@ -46,7 +49,7 @@ export default function InstallBanner() {
         handleBeforeInstallPrompt,
       );
     };
-  }, [isMessengerRoute]);
+  }, [skipBanner]);
 
   const handleInstall = async () => {
     if (!deferredPrompt) return;
@@ -62,7 +65,7 @@ export default function InstallBanner() {
     setVisible(false);
   };
 
-  if (isMessengerRoute || !visible) return null;
+  if (skipBanner || !visible) return null;
 
   return (
     <div
