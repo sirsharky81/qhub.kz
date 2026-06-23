@@ -50,6 +50,7 @@ export function ChatView({
   const [connection, setConnection] = useState<"online" | "reconnecting" | "offline">("reconnecting");
   const [participantCount, setParticipantCount] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const versionRef = useRef(0);
   const seenIds = useRef(new Set<string>());
 
@@ -135,8 +136,20 @@ export function ChatView({
   }, [channel, ingestMessages, isRoom, onRoomEnded]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || typeof window === "undefined" || !window.visualViewport) return;
+
+    function onViewportResize() {
+      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }
+
+    window.visualViewport.addEventListener("resize", onViewportResize);
+    return () => window.visualViewport?.removeEventListener("resize", onViewportResize);
+  }, []);
 
   async function sendPlain(type: "text" | "image" | "file", plain: PlainMessage) {
     const localId = generateMessageId();
@@ -226,16 +239,24 @@ export function ChatView({
       }
     >
       <div
-        className="flex-1 overflow-y-auto min-h-0 py-3 space-y-2"
+        ref={listRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-contain"
         style={{
           backgroundColor: "#eceff1",
           backgroundImage:
             "radial-gradient(circle at 1px 1px, rgb(15 23 42 / 0.035) 1px, transparent 0)",
           backgroundSize: "18px 18px",
+          WebkitOverflowScrolling: "touch",
         }}
       >
         {messages.length === 0 && (
-          <div className="mx-3 sm:mx-4 max-w-md">
+          <div
+            className="max-w-md"
+            style={{
+              marginLeft: "max(0.75rem, env(safe-area-inset-left))",
+              marginRight: "max(0.75rem, env(safe-area-inset-right))",
+            }}
+          >
             <div className="rounded-2xl border border-amber-200/80 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 shadow-sm">
               <p className="font-medium">Сообщения не сохраняются на сервере</p>
               <p className="text-xs mt-1 text-amber-800/80">
@@ -250,15 +271,23 @@ export function ChatView({
         <div ref={bottomRef} className="h-1" />
       </div>
 
-      <div className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
+      <div
+        className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur"
+        style={{
+          paddingTop: "0.625rem",
+          paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))",
+          paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+          paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+        }}
+      >
         {text.length > 3500 && (
           <p className="text-xs text-amber-600 px-1 mb-1.5">
             {text.length}/{MAX_TEXT_LENGTH}
           </p>
         )}
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 min-w-0 max-w-full">
           <label
-            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            className="mb-0.5 flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
             aria-label="Прикрепить файл"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
@@ -279,36 +308,40 @@ export function ChatView({
               }}
             />
           </label>
-          <div className="flex min-w-0 flex-1 items-end gap-2 rounded-3xl border border-gray-200 bg-gray-50 px-3 py-1.5 focus-within:border-sky-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-sky-100">
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT_LENGTH))}
-              rows={1}
-              placeholder="Сообщение"
-              className="min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-snug max-h-32 focus:outline-none"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-              }}
-            />
-            <button
-              type="button"
-              disabled={!canSend}
-              onClick={() => void handleSend()}
-              aria-label="Отправить"
-              className={`mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
-                canSend
-                  ? "bg-sky-600 text-white hover:bg-sky-700"
-                  : "bg-gray-200 text-gray-400"
-              }`}
-            >
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
-                <path d="M3.4 20.4 21 12 3.4 3.6 3 11l8 1-8 1z" />
-              </svg>
-            </button>
-          </div>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT_LENGTH))}
+            rows={1}
+            placeholder="Сообщение"
+            className="min-w-0 flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-base leading-snug max-h-32 focus:outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
+            style={{ fontSize: "16px" }}
+            onFocus={() => {
+              window.setTimeout(() => {
+                bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+              }, 300);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void handleSend();
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={!canSend}
+            onClick={() => void handleSend()}
+            aria-label="Отправить"
+            className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
+              canSend
+                ? "bg-sky-600 text-white hover:bg-sky-700"
+                : "bg-gray-200 text-gray-400"
+            }`}
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+              <path d="M3.4 20.4 21 12 3.4 3.6 3 11l8 1-8 1z" />
+            </svg>
+          </button>
         </div>
       </div>
     </MessengerShell>

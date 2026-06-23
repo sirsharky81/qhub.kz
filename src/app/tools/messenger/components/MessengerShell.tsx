@@ -30,19 +30,26 @@ export function MessengerShell({
 }: Props) {
   const widthClass = SHELL_WIDTH[variant];
   const framed = variant !== "default";
+  const isChat = variant === "chat";
 
   return (
     <div
-      className={`flex flex-col min-h-[100dvh] text-gray-900 ${
+      className={`flex flex-col h-[100dvh] max-h-[100dvh] overflow-hidden text-gray-900 ${
         framed ? "bg-slate-200/60" : "bg-slate-50"
       }`}
     >
       <div
-        className={`flex flex-col min-h-[100dvh] w-full mx-auto ${
+        className={`flex flex-col h-full max-h-full w-full min-w-0 mx-auto overflow-hidden ${
           widthClass ?? ""
-        } ${framed ? "bg-white shadow-sm md:border-x border-gray-200/70" : ""}`}
+        } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
       >
-        <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 shrink-0">
+        <header
+          className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 shrink-0 pt-[max(0.75rem,env(safe-area-inset-top))]"
+          style={{
+            paddingLeft: "max(1rem, env(safe-area-inset-left))",
+            paddingRight: "max(1rem, env(safe-area-inset-right))",
+          }}
+        >
           {backHref && (
             <Link
               href={backHref}
@@ -58,7 +65,7 @@ export function MessengerShell({
           </div>
           {trailing && <div className="shrink-0">{trailing}</div>}
         </header>
-        <main className="flex-1 flex flex-col min-h-0">{children}</main>
+        <main className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">{children}</main>
       </div>
     </div>
   );

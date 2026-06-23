@@ -17,16 +17,25 @@ interface Props {
 }
 
 export function MessageBubble({ message, onRetry }: Props) {
-  const align = message.mine ? "justify-end" : "justify-start";
-  const bubble = message.mine
-    ? "bg-sky-600 text-white rounded-2xl rounded-br-md"
-    : "bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-bl-md";
-
   return (
-    <div className={`flex ${align} px-3 sm:px-4`}>
-      <div className={`max-w-[min(82%,20rem)] px-3 py-2 shadow-sm ${bubble}`}>
+    <div
+      className={`flex w-full min-w-0 ${message.mine ? "justify-end" : "justify-start"}`}
+      style={{
+        paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+        paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+      }}
+    >
+      <div
+        className={`min-w-0 max-w-[min(82%,18rem)] w-fit px-3 py-2 shadow-sm break-words ${
+          message.mine
+            ? "bg-sky-600 text-white rounded-2xl rounded-br-md"
+            : "bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-bl-md"
+        }`}
+      >
         {message.type === "text" && (
-          <p className="text-sm whitespace-pre-wrap break-words">{message.plain?.text}</p>
+          <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+            {message.plain?.text}
+          </p>
         )}
         {message.type === "image" && message.plain?.data && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -44,7 +53,7 @@ export function MessageBubble({ message, onRetry }: Props) {
                 : "#"
             }
             download={message.plain?.filename ?? "file"}
-            className="text-sm underline"
+            className="text-sm underline break-all"
           >
             📎 {message.plain?.filename ?? "Файл"}
           </a>
