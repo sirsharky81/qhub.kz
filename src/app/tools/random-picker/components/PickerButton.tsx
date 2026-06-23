@@ -52,11 +52,17 @@ export function PickerButton({
 export function PickerSection({
   title,
   hint,
+  tabs,
+  activeTab,
+  onTabChange,
   children,
   compact = false,
 }: {
-  title: string;
+  title?: string;
   hint?: string;
+  tabs?: { id: string; label: string }[];
+  activeTab?: string;
+  onTabChange?: (id: string) => void;
   children: React.ReactNode;
   compact?: boolean;
 }) {
@@ -67,13 +73,37 @@ export function PickerSection({
           compact ? "px-2.5 py-1.5" : "px-3 py-2.5"
         }`}
       >
-        <h3
-          className={`font-semibold text-gray-800 dark:text-gray-200 uppercase tracking-wide ${
-            compact ? "text-[10px]" : "text-xs"
-          }`}
-        >
-          {title}
-        </h3>
+        {tabs && tabs.length > 0 ? (
+          <div className="flex gap-1" role="tablist">
+            {tabs.map((tab) => {
+              const selected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => onTabChange?.(tab.id)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase tracking-wide transition-colors ${
+                    selected
+                      ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <h3
+            className={`font-semibold text-gray-800 dark:text-gray-200 uppercase tracking-wide ${
+              compact ? "text-[10px]" : "text-xs"
+            }`}
+          >
+            {title}
+          </h3>
+        )}
         {hint && (
           <p
             className={`text-gray-500 dark:text-gray-400 leading-snug ${

@@ -78,10 +78,26 @@ export {
   getKeyColumnIndex,
   getKeyColumn,
 } from "./data-table";
-export { importTableFromFile, parseCsvText } from "./import-table";
+export {
+  LOTTO_POOL_MAX,
+  LOTTO_INTERVAL_MIN,
+  LOTTO_INTERVAL_MAX,
+  DEFAULT_LOTTO_SETTINGS,
+  createNewGame,
+  createFullPool,
+  drawBarrel,
+  numberToRussian,
+  lottoSpeechText,
+  speakLottoNumber,
+  loadLottoState,
+  saveLottoState,
+  clearLottoState,
+} from "./lotto";
+export type { LottoGameState, LottoSettings, LottoGameStatus, LottoVoiceMode } from "./lotto";
 export {
   downloadParticipantCsv,
   downloadParticipantXlsx,
   tableToCsv,
 } from "./export-table";
+export { importTableFromFile, parseCsvText } from "./import-table";
 export * from "./types";

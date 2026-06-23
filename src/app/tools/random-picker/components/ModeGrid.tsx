@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { PickerMode, ModeConfig } from "@/lib/random-picker";
 import { PICKER_MODES } from "@/lib/random-picker";
 
@@ -17,7 +18,7 @@ export function ModeGrid({ onSelect, onComingSoon }: ModeGridProps) {
           mode={mode}
           onSelect={() => {
             if (mode.comingSoon) onComingSoon(mode);
-            else onSelect(mode.id);
+            else if (!mode.href) onSelect(mode.id);
           }}
         />
       ))}
@@ -26,13 +27,11 @@ export function ModeGrid({ onSelect, onComingSoon }: ModeGridProps) {
 }
 
 function ModeCard({ mode, onSelect }: { mode: ModeConfig; onSelect: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-label={mode.comingSoon ? `${mode.title} — скоро` : mode.title}
-      className="relative flex items-start gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3 text-left transition-all hover:border-gray-300 hover:shadow-sm active:scale-[0.99] touch-manipulation"
-    >
+  const className =
+    "relative flex items-start gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3 text-left transition-all hover:border-gray-300 hover:shadow-sm active:scale-[0.99] touch-manipulation w-full";
+
+  const content = (
+    <>
       {mode.comingSoon && (
         <span className="absolute top-2 right-2 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500">
           Скоро
@@ -49,6 +48,20 @@ function ModeCard({ mode, onSelect }: { mode: ModeConfig; onSelect: () => void }
           {mode.description}
         </span>
       </div>
+    </>
+  );
+
+  if (mode.href) {
+    return (
+      <Link href={mode.href} className={className} aria-label={mode.title}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onSelect} aria-label={mode.comingSoon ? `${mode.title} — скоро` : mode.title} className={className}>
+      {content}
     </button>
   );
 }

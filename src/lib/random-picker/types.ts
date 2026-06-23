@@ -84,6 +84,7 @@ export interface ModeConfig {
   title: string;
   description: string;
   comingSoon?: boolean;
+  href?: string;
 }
 
 export const PICKER_MODES: ModeConfig[] = [
@@ -113,10 +114,10 @@ export const PICKER_MODES: ModeConfig[] = [
   },
   {
     id: "wheel",
-    emoji: "🎡",
-    title: "Колесо выбора",
-    description: "Анимированное колесо с плавным вращением",
-    comingSoon: true,
+    emoji: "🎱",
+    title: "Русское лото",
+    description: "Замена мешка и бочек для игры в лото",
+    href: "/tools/random-picker/loto",
   },
   {
     id: "groups",

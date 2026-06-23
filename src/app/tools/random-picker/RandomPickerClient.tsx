@@ -327,7 +327,7 @@ export default function RandomPickerClient() {
 
                   {rowCount > PERFORMANCE_WARN_THRESHOLD && (
                     <p className="text-[11px] text-amber-600 dark:text-amber-400" role="status">
-                      Большой список — возможны задержки при работе с колесом (скоро)
+                      Большой список — при очень большом числе участников возможны задержки
                     </p>
                   )}
 
