@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ADMIN_PANEL_PATH } from "@/lib/admin/constants";
+import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
+import { MessengerWhitelistSection } from "@/components/admin/MessengerWhitelistSection";
 
 interface AdminAppRow {
   id: string;
@@ -158,6 +159,8 @@ export function AdminDashboard() {
           </ul>
         )}
       </section>
+
+      <MessengerWhitelistSection />
 
       <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
         <h2 className="text-sm font-semibold text-gray-900">Сменить пароль</h2>

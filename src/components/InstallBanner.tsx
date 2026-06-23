@@ -1,37 +1,27 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  type BeforeInstallPromptEvent,
+  isIOS,
+  isStandalone,
+} from "@/lib/pwa-utils";
 
 const DISMISS_KEY = "qhub-install-dismissed";
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-}
-
-function isStandalone(): boolean {
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    (window.navigator as Navigator & { standalone?: boolean }).standalone ===
-      true
-  );
-}
-
-function isIOS(): boolean {
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) &&
-    !(window as Window & { MSStream?: unknown }).MSStream
-  );
-}
-
 export default function InstallBanner() {
+  const pathname = usePathname();
   const [visible, setVisible] = useState(false);
   const [isIOSDevice, setIsIOSDevice] = useState(false);
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
 
+  const isMessengerRoute = pathname?.startsWith("/tools/messenger") ?? false;
+
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (isMessengerRoute) return;
     if (isStandalone()) return;
     if (localStorage.getItem(DISMISS_KEY)) return;
 
@@ -56,7 +46,7 @@ export default function InstallBanner() {
         handleBeforeInstallPrompt,
       );
     };
-  }, []);
+  }, [isMessengerRoute]);
 
   const handleInstall = async () => {
     if (!deferredPrompt) return;
@@ -72,7 +62,7 @@ export default function InstallBanner() {
     setVisible(false);
   };
 
-  if (!visible) return null;
+  if (isMessengerRoute || !visible) return null;
 
   return (
     <div

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCatalog } from "@/contexts/CatalogContext";
-import { ADMIN_PANEL_PATH } from "@/lib/admin/constants";
+import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
 
 export function AdminViewBadge() {
   const { isAdmin } = useCatalog();

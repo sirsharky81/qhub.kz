@@ -1,0 +1,139 @@
+"use client";
+
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { ChatView } from "../../components/ChatView";
+import {
+  fetchAccessCheck,
+  fetchRoomStatus,
+  joinRoomApi,
+  leaveRoomApi,
+} from "@/lib/messenger/client";
+import { importRoomKeyBase64Url } from "@/lib/messenger/crypto";
+import { cleanupRoomLocalState, upsertLocalDialog } from "@/lib/messenger/dialogs";
+import { getRoomKey } from "@/lib/messenger/room-keys";
+
+export function MessengerRoomClient() {
+  const params = useParams();
+  const router = useRouter();
+  const roomId = String(params.roomId ?? "").toUpperCase();
+  const [myPhone, setMyPhone] = useState("");
+  const [aesKey, setAesKey] = useState<CryptoKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const handleRoomEnded = useCallback(() => {
+    cleanupRoomLocalState(roomId);
+    router.replace("/tools/messenger/home");
+  }, [roomId, router]);
+
+  const handleLeaveRoom = useCallback(
+    async (participantCount: number) => {
+      if (participantCount > 1 && !window.confirm("Покинуть комнату?")) return;
+      await leaveRoomApi(roomId);
+      cleanupRoomLocalState(roomId);
+      router.replace("/tools/messenger/home");
+    },
+    [roomId, router],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      const access = await fetchAccessCheck();
+      if (!access.messengerLoggedIn) {
+        router.replace("/tools/messenger/login");
+        return;
+      }
+      if (!cancelled) setMyPhone(access.phone ?? "");
+
+      const storedKey = getRoomKey(roomId);
+      if (!storedKey) {
+        router.replace(`/tools/messenger/room/join?code=${encodeURIComponent(roomId)}`);
+        return;
+      }
+
+      const status = await fetchRoomStatus(roomId);
+      if (!status) {
+        cleanupRoomLocalState(roomId);
+        if (!cancelled) {
+          setError("Комната завершена");
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const key = await importRoomKeyBase64Url(storedKey);
+        const joined = await joinRoomApi(roomId);
+        if (!joined.ok) {
+          if (!cancelled) {
+            setError(joined.error ?? "Не удалось войти в комнату");
+            setLoading(false);
+          }
+          return;
+        }
+        upsertLocalDialog({
+          id: `room:${roomId}`,
+          kind: "room",
+          title: `Комната ${roomId}`,
+          roomId,
+          createdAt: Date.now(),
+        });
+        if (!cancelled) {
+          setAesKey(key);
+          setLoading(false);
+        }
+      } catch {
+        cleanupRoomLocalState(roomId);
+        if (!cancelled) {
+          setError("Неверный ключ комнаты");
+          setLoading(false);
+        }
+      }
+    }
+
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, router]);
+
+  if (error) {
+    return (
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-4 p-4 text-center">
+        <p className="text-sm text-gray-600">{error}</p>
+        <Link
+          href="/tools/messenger/home"
+          className="rounded-2xl bg-gray-900 text-white px-6 py-2.5 text-sm font-semibold"
+        >
+          На главную
+        </Link>
+      </div>
+    );
+  }
+
+  if (loading || !aesKey || !myPhone) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center text-sm text-gray-500">
+        Вход в комнату…
+      </div>
+    );
+  }
+
+  return (
+    <ChatView
+      channel={`room:${roomId}`}
+      title={`Комната ${roomId}`}
+      backHref="/tools/messenger/home"
+      myPhone={myPhone}
+      aesKey={aesKey}
+      isRoom
+      roomId={roomId}
+      onLeaveRoom={handleLeaveRoom}
+      onRoomEnded={handleRoomEnded}
+    />
+  );
+}

@@ -13,6 +13,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:developers": { requests: 5, window: "15 m" },
   "qhub:audio-extractor": { requests: 10, window: "1 h" },
   "qhub:lotto": { requests: 120, window: "1 m" },
+  "qhub:messenger": { requests: 60, window: "1 m" },
 };
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;
@@ -105,4 +106,10 @@ export async function checkLottoRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:lotto", identifier);
+}
+
+export async function checkMessengerRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:messenger", identifier);
 }

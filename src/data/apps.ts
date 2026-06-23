@@ -33,6 +33,8 @@ export interface App {
   beta?: boolean;
   /** Доступен только на localhost (скрыт на production для обычных пользователей) */
   devOnly?: boolean;
+  /** Виден только пользователям из whitelist мессенджера */
+  whitelistOnly?: boolean;
   /** Порядок на главной: меньше = раньше запущен. «Скоро» — в конце */
   sortOrder: number;
 }
@@ -255,6 +257,22 @@ export const apps: App[] = [
     authorType: "qhub",
     beta: true,
     sortOrder: 4,
+  },
+  {
+    id: "messenger",
+    title: "Мессенджер",
+    description: "Закрытый зашифрованный чат для приглашённых пользователей.",
+    longDescription:
+      "End-to-end шифрование сообщений. История не сохраняется на сервере. Личные чаты и временные комнаты.",
+    href: "/tools/messenger",
+    tags: ["tools", "productivity"],
+    icon: "💬",
+    color: "from-sky-500/10 to-sky-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    devOnly: true,
+    whitelistOnly: true,
+    sortOrder: 50,
   },
   {
     id: "deposit-calculator",

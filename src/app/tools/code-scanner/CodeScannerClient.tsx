@@ -52,7 +52,12 @@ function CodeScannerInner() {
           </>
         )}
 
-        {mode === "simple" && <SimpleScanView onBack={() => setMode(null)} />}
+        {mode === "simple" && (
+          <SimpleScanView
+            onBack={() => setMode(null)}
+            returnTo={searchParams.get("returnTo")}
+          />
+        )}
         {mode === "storage" && <StorageScanView onBack={() => setMode(null)} />}
         {mode === "inventory" && <InventoryView onBack={() => setMode(null)} />}
       </div>

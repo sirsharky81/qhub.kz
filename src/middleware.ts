@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { ADMIN_PANEL_PATH } from "@/lib/admin/constants";
+import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
 import { verifySessionToken } from "@/lib/admin/session-crypto";
 import { shouldHideDevOnlyApps } from "@/lib/admin/runtime";
 

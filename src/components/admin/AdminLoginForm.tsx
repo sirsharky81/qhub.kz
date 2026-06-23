@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ADMIN_PANEL_PATH } from "@/lib/admin/constants";
+import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
 
 export function AdminLoginForm() {
   const router = useRouter();

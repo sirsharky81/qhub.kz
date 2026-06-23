@@ -8,25 +8,34 @@ import { parseToTable } from "@/lib/code-scanner/parse-content";
 import type { SimpleScanEntry } from "@/lib/code-scanner/types";
 import { saveSimpleScan } from "@/lib/code-scanner/storage";
 import { extractScannableUrl, openScannedUrl } from "@/lib/code-scanner/url-utils";
+import { buildReturnRedirect } from "@/lib/code-scanner/scan-return";
 import ScannedRawContent from "./ScannedRawContent";
 
 interface Props {
   onBack: () => void;
+  returnTo?: string | null;
 }
 
 type Phase = "idle" | "scanning" | "result";
 
-export default function SimpleScanView({ onBack }: Props) {
+export default function SimpleScanView({ onBack, returnTo }: Props) {
   const { t } = useCodeScannerT();
   const [phase, setPhase] = useState<Phase>("idle");
   const [current, setCurrent] = useState<{ raw: string; table: ReturnType<typeof parseToTable> } | null>(null);
 
-  const applyResult = useCallback((raw: string) => {
-    const url = extractScannableUrl(raw);
-    setCurrent({ raw, table: url ? null : parseToTable(raw) });
-    setPhase("result");
-    if (url) openScannedUrl(url);
-  }, []);
+  const applyResult = useCallback(
+    (raw: string) => {
+      if (returnTo) {
+        window.location.assign(buildReturnRedirect(returnTo, raw));
+        return;
+      }
+      const url = extractScannableUrl(raw);
+      setCurrent({ raw, table: url ? null : parseToTable(raw) });
+      setPhase("result");
+      if (url) openScannedUrl(url);
+    },
+    [returnTo],
+  );
 
   async function handleSave() {
     if (!current) return;

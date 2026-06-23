@@ -1,5 +1,5 @@
 /** Obscure admin URL segment — not linked from the site. */
-export const ADMIN_PANEL_PATH = "qhub-ctrl-7k2m";
+export { ADMIN_PANEL_PATH } from "./panel-path";
 
 export const ADMIN_SESSION_COOKIE = "qhub_admin_session";
 

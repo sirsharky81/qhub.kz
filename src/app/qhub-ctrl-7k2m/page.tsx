@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AdminDashboard } from "@/components/admin/AdminDashboard";
+import AdminPanelPageClient from "./AdminPanelPageClient";
 
 export const metadata: Metadata = {
   title: "Admin",
@@ -7,11 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function AdminPanelPage() {
-  return (
-    <div className="min-h-screen bg-gray-50 py-10 px-4">
-      <div className="max-w-3xl mx-auto">
-        <AdminDashboard />
-      </div>
-    </div>
-  );
+  return <AdminPanelPageClient />;
 }
