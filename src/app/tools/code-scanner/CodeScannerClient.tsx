@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CodeScannerI18nProvider, LOCALE_OPTIONS, useCodeScannerT } from "@/lib/code-scanner/i18n";
 import type { ScanMode } from "@/lib/code-scanner/types";
 import { PrivacyBanner } from "../file-converter/components/PrivacyBanner";
@@ -9,9 +10,17 @@ import SimpleScanView from "./components/SimpleScanView";
 import StorageScanView from "./components/StorageScanView";
 import InventoryView from "./components/InventoryView";
 
+function parseInitialMode(value: string | null): ScanMode | null {
+  if (value === "simple" || value === "storage" || value === "inventory") return value;
+  return null;
+}
+
 function CodeScannerInner() {
   const { t, locale, setLocale } = useCodeScannerT();
-  const [mode, setMode] = useState<ScanMode | null>(null);
+  const searchParams = useSearchParams();
+  const [mode, setMode] = useState<ScanMode | null>(() =>
+    parseInitialMode(searchParams.get("mode")),
+  );
 
   return (
     <div className="flex flex-col flex-1 min-h-0">

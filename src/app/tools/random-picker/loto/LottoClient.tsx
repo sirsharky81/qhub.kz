@@ -25,9 +25,12 @@ import { PickerButton, PickerSection } from "../components/PickerButton";
 import { LottoParticipants } from "./LottoParticipants";
 import { LottoTicketCard } from "./LottoTicketCard";
 import { LottoJoin } from "./LottoJoin";
+import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
 import {
   createLottoRoomApi,
+  deleteLottoRoomApi,
   loadParticipantSession,
+  parseJoinSearchParams,
   syncLottoRoomApi,
 } from "@/lib/lotto-rooms/client";
 import type { LottoRoomPlayer } from "@/lib/lotto-rooms/types";
@@ -149,7 +152,13 @@ export default function LottoClient() {
   });
   const [fullscreen, setFullscreen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
-  const [prePanelTab, setPrePanelTab] = useState<PrePanelTab>("settings");
+  const [prePanelTab, setPrePanelTab] = useState<PrePanelTab>(() => {
+    if (typeof window === "undefined") return "settings";
+    if (loadParticipantSession() || parseJoinSearchParams(window.location.search)) {
+      return "join";
+    }
+    return "settings";
+  });
   const rootRef = useRef<HTMLDivElement>(null);
   const drawingRef = useRef(false);
   const gameRef = useRef(game);
@@ -164,12 +173,6 @@ export default function LottoClient() {
   useEffect(() => {
     saveLottoState(game);
   }, [game]);
-
-  useEffect(() => {
-    if (loadParticipantSession()) {
-      setPrePanelTab("join");
-    }
-  }, []);
 
   useEffect(() => {
     const onFs = () => setFullscreen(Boolean(document.fullscreenElement));
@@ -434,6 +437,10 @@ export default function LottoClient() {
 
   const handleNewGame = () => {
     setConfirmNew(false);
+    const net = gameRef.current.network;
+    if (net?.roomCode && net.hostSecret) {
+      void deleteLottoRoomApi(net.roomCode, net.hostSecret);
+    }
     setGame(createNewGame(settings));
   };
 

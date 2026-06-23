@@ -58,6 +58,13 @@ export async function createLottoRoomApi(input: {
   }>;
 }
 
+export async function deleteLottoRoomApi(roomCode: string, hostSecret: string): Promise<void> {
+  await fetch(`/api/lotto/rooms/${encodeURIComponent(roomCode)}`, {
+    method: "DELETE",
+    headers: { "X-Lotto-Host-Secret": hostSecret },
+  });
+}
+
 export async function syncLottoRoomApi(
   roomCode: string,
   hostSecret: string,

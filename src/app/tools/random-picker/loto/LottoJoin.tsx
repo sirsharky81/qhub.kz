@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
 import {
   clearParticipantSession,
   joinLottoRoomApi,
@@ -19,6 +21,7 @@ import { LottoTicketCard } from "./LottoTicketCard";
 import { getCompletedLineIndices } from "@/lib/random-picker/lotto-tickets";
 
 export function LottoJoin() {
+  const router = useRouter();
   const [session, setSession] = useState<ParticipantSession | null>(null);
   const [view, setView] = useState<LottoParticipantView | null>(null);
   const [roomCodeInput, setRoomCodeInput] = useState("");
@@ -249,6 +252,13 @@ export function LottoJoin() {
         />
       </div>
       {error && <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>}
+      <PickerButton
+        variant="secondary"
+        className="w-full"
+        onClick={() => router.push(CODE_SCANNER_SIMPLE_URL)}
+      >
+        Сканировать QR
+      </PickerButton>
       <PickerButton
         onClick={() => void handleJoin()}
         className="w-full"

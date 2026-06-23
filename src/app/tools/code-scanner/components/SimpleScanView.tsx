@@ -7,7 +7,7 @@ import { useCodeScannerT } from "@/lib/code-scanner/i18n";
 import { parseToTable } from "@/lib/code-scanner/parse-content";
 import type { SimpleScanEntry } from "@/lib/code-scanner/types";
 import { saveSimpleScan } from "@/lib/code-scanner/storage";
-import { extractScannableUrl, openUrlInNewTab } from "@/lib/code-scanner/url-utils";
+import { extractScannableUrl, openScannedUrl } from "@/lib/code-scanner/url-utils";
 import ScannedRawContent from "./ScannedRawContent";
 
 interface Props {
@@ -25,7 +25,7 @@ export default function SimpleScanView({ onBack }: Props) {
     const url = extractScannableUrl(raw);
     setCurrent({ raw, table: url ? null : parseToTable(raw) });
     setPhase("result");
-    if (url) openUrlInNewTab(url);
+    if (url) openScannedUrl(url);
   }, []);
 
   async function handleSave() {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { checkLottoRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getRoom, saveRoom } from "@/lib/lotto-rooms/store";
 import {
+  deleteLottoRoom,
   findPlayerByCredentials,
   stripJoinTokens,
   updateLottoRoom,
@@ -90,4 +91,28 @@ export async function PATCH(request: Request, context: RouteContext) {
       left: p.left,
     })),
   });
+}
+
+export async function DELETE(request: Request, context: RouteContext) {
+  const { code } = await context.params;
+  const hostSecret = request.headers.get("X-Lotto-Host-Secret");
+  if (!hostSecret) {
+    return Response.json({ error: "Нет доступа ведущего" }, { status: 401 });
+  }
+
+  const ip = getClientIp(request);
+  const { allowed, retryAfterSec } = await checkLottoRateLimit(`host:${ip}`);
+  if (!allowed) {
+    return Response.json(
+      { error: "Слишком много запросов" },
+      { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
+    );
+  }
+
+  const deleted = await deleteLottoRoom(code, hostSecret);
+  if (!deleted) {
+    return Response.json({ error: "Комната не найдена или нет доступа" }, { status: 403 });
+  }
+
+  return Response.json({ ok: true });
 }

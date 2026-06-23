@@ -9,7 +9,7 @@ import {
   type LottoPlayer,
 } from "@/lib/random-picker/lotto-tickets";
 import { generateJoinCode, generateRoomCode, generateSecret } from "./codes";
-import { getRoom, saveRoom } from "./store";
+import { getRoom, saveRoom, deleteRoom } from "./store";
 import type { LottoRoomPlayer, LottoRoomRecord, LottoRoomSnapshot } from "./types";
 
 export function toPublicSnapshot(room: LottoRoomRecord): LottoRoomSnapshot {
@@ -75,6 +75,16 @@ export async function createLottoRoom(input: {
 
   await saveRoom(room);
   return room;
+}
+
+export async function deleteLottoRoom(
+  code: string,
+  hostSecret: string,
+): Promise<boolean> {
+  const room = await getRoom(code);
+  if (!room || room.hostSecret !== hostSecret) return false;
+  await deleteRoom(code);
+  return true;
 }
 
 export async function updateLottoRoom(
