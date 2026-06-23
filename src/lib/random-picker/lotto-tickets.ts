@@ -2,6 +2,8 @@ import { fisherYatesShuffle, getSecureRandomInt, pickRandomMany } from "./crypto
 
 export const LOTTO_TICKET_ROWS = 3;
 export const LOTTO_TICKET_COLS = 9;
+export const LOTTO_MIN_PLAYERS = 2;
+export const LOTTO_MAX_PLAYERS = 8;
 
 /** Допустимые распределения чисел по столбцам (сумма = 15, в каждом столбце 1–3 числа). */
 const COLUMN_HEIGHT_PRESETS: readonly (readonly number[])[] = [

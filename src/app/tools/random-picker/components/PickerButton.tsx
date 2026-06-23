@@ -60,7 +60,7 @@ export function PickerSection({
 }: {
   title?: string;
   hint?: string;
-  tabs?: { id: string; label: string }[];
+  tabs?: { id: string; label: string; shortLabel?: string }[];
   activeTab?: string;
   onTabChange?: (id: string) => void;
   children: React.ReactNode;
@@ -74,9 +74,17 @@ export function PickerSection({
         }`}
       >
         {tabs && tabs.length > 0 ? (
-          <div className="flex gap-1" role="tablist">
+          <div className="grid grid-cols-2 gap-1 sm:flex sm:flex-wrap" role="tablist">
             {tabs.map((tab) => {
               const selected = activeTab === tab.id;
+              const label = tab.shortLabel ? (
+                <>
+                  <span className="sm:hidden">{tab.shortLabel}</span>
+                  <span className="hidden sm:inline">{tab.label}</span>
+                </>
+              ) : (
+                tab.label
+              );
               return (
                 <button
                   key={tab.id}
@@ -84,13 +92,13 @@ export function PickerSection({
                   role="tab"
                   aria-selected={selected}
                   onClick={() => onTabChange?.(tab.id)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase tracking-wide transition-colors ${
+                  className={`rounded-md px-2 py-1.5 text-[10px] sm:text-xs font-semibold uppercase tracking-wide transition-colors text-center leading-tight min-w-0 sm:flex-initial ${
                     selected
                       ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm"
                       : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                   }`}
                 >
-                  {tab.label}
+                  {label}
                 </button>
               );
             })}

@@ -7,6 +7,8 @@ import {
   getCompletedLineIndices,
   printTicket,
   shareTicket,
+  LOTTO_MAX_PLAYERS,
+  LOTTO_MIN_PLAYERS,
   LOTTO_WIN_LABELS,
   type LottoPlayer,
   type LottoWinRules,
@@ -45,12 +47,13 @@ export function LottoParticipants({
   const [generateError, setGenerateError] = useState<string | null>(null);
 
   const canEditPlayers = !isActive;
-  const hasEnoughPlayers = players.length >= 2;
+  const hasEnoughPlayers = players.length >= LOTTO_MIN_PLAYERS;
+  const atPlayerLimit = players.length >= LOTTO_MAX_PLAYERS;
   const hasAnyWinRule = winRules.oneLine || winRules.twoLines || winRules.fullCard;
 
   const addPlayer = () => {
     const name = nameInput.trim();
-    if (!name) return;
+    if (!name || atPlayerLimit) return;
     onPlayersChange([...players, createPlayer(name)]);
     setNameInput("");
   };
@@ -102,11 +105,18 @@ export function LottoParticipants({
               placeholder="Имя игрока"
               className="flex-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xs text-gray-900 dark:text-gray-100"
             />
-            <PickerButton variant="secondary" onClick={addPlayer} disabled={!nameInput.trim()}>
+            <PickerButton
+              variant="secondary"
+              onClick={addPlayer}
+              disabled={!nameInput.trim() || atPlayerLimit}
+              disabledReason={atPlayerLimit ? `Максимум ${LOTTO_MAX_PLAYERS} участников` : undefined}
+            >
               Добавить
             </PickerButton>
           </div>
-          <p className="text-[11px] text-gray-500">Минимум 2 игрока для игры с карточками.</p>
+          <p className="text-[11px] text-gray-500">
+            От {LOTTO_MIN_PLAYERS} до {LOTTO_MAX_PLAYERS} игроков для игры с карточками.
+          </p>
         </div>
       )}
 

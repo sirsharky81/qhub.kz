@@ -496,9 +496,9 @@ export default function LottoClient() {
             <PickerSection
               tabs={[
                 { id: "settings", label: "Игра" },
-                { id: "rules", label: "Правила игры" },
+                { id: "rules", label: "Правила игры", shortLabel: "Правила" },
                 { id: "participants", label: "Участники" },
-                { id: "join", label: "Присоединиться" },
+                { id: "join", label: "Присоединиться", shortLabel: "Войти" },
               ]}
               activeTab={prePanelTab}
               onTabChange={(id) => setPrePanelTab(id as PrePanelTab)}

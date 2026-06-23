@@ -1,6 +1,6 @@
 import { checkLottoRateLimit, getClientIp } from "@/lib/rate-limit";
 import { createLottoRoom } from "@/lib/lotto-rooms/room-service";
-import type { LottoPlayer } from "@/lib/random-picker/lotto-tickets";
+import { LOTTO_MAX_PLAYERS, LOTTO_MIN_PLAYERS, type LottoPlayer } from "@/lib/random-picker/lotto-tickets";
 import type { LottoSettings, LottoWinRules } from "@/lib/random-picker/lotto";
 
 interface CreateBody {
@@ -29,8 +29,11 @@ export async function POST(request: Request) {
     }
 
     const players = Array.isArray(body.players) ? body.players : [];
-    if (players.length < 2) {
-      return Response.json({ error: "Нужно минимум 2 участника" }, { status: 400 });
+    if (players.length < LOTTO_MIN_PLAYERS) {
+      return Response.json({ error: `Нужно минимум ${LOTTO_MIN_PLAYERS} участника` }, { status: 400 });
+    }
+    if (players.length > LOTTO_MAX_PLAYERS) {
+      return Response.json({ error: `Максимум ${LOTTO_MAX_PLAYERS} участников` }, { status: 400 });
     }
 
     const room = await createLottoRoom({

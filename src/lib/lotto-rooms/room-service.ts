@@ -3,8 +3,11 @@ import {
   type LottoSettings,
   type LottoWinRules,
 } from "@/lib/random-picker/lotto";
-import { DEFAULT_LOTTO_WIN_RULES } from "@/lib/random-picker/lotto-tickets";
-import type { LottoPlayer } from "@/lib/random-picker/lotto-tickets";
+import {
+  DEFAULT_LOTTO_WIN_RULES,
+  LOTTO_MAX_PLAYERS,
+  type LottoPlayer,
+} from "@/lib/random-picker/lotto-tickets";
 import { generateJoinCode, generateRoomCode, generateSecret } from "./codes";
 import { getRoom, saveRoom } from "./store";
 import type { LottoRoomPlayer, LottoRoomRecord, LottoRoomSnapshot } from "./types";
@@ -40,6 +43,10 @@ export async function createLottoRoom(input: {
   winRules?: LottoWinRules;
   cardsGenerated: boolean;
 }): Promise<LottoRoomRecord> {
+  if (input.players.length > LOTTO_MAX_PLAYERS) {
+    throw new Error(`Максимум ${LOTTO_MAX_PLAYERS} участников`);
+  }
+
   let roomCode = generateRoomCode();
   for (let i = 0; i < 10; i++) {
     const existing = await getRoom(roomCode);
@@ -89,6 +96,7 @@ export async function updateLottoRoom(
   };
 
   if (patch.players) {
+    if (patch.players.length > LOTTO_MAX_PLAYERS) return null;
     const prevById = new Map(room.players.map((p) => [p.id, p]));
     next.players = patch.players.map((p) => {
       const prev = prevById.get(p.id);
