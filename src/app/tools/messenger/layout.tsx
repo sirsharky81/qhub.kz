@@ -25,6 +25,10 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: "#0f172a",
   viewportFit: "cover",
+  width: "device-width",
+  initialScale: 1,
+  // Keeps layout viewport above the virtual keyboard on supported mobile browsers.
+  interactiveWidget: "resizes-content",
 };
 
 export default function MessengerLayout({ children }: { children: ReactNode }) {

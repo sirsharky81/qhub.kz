@@ -1,7 +1,9 @@
 "use client";
 
+import { useCallback, useRef } from "react";
 import type { PlainMessage } from "@/lib/messenger/crypto";
 import type { DeliveryStatus } from "@/lib/messenger/types";
+import { useSwipeToReply } from "@/lib/messenger/use-swipe-to-reply";
 
 export interface DisplayMessage {
   id: string;
@@ -22,6 +24,8 @@ interface Props {
   senderLabel?: string;
   senderColor?: string;
   quoteAvailable?: boolean;
+  /** Touch / PWA: swipe right to reply instead of tap button */
+  swipeToReply?: boolean;
 }
 
 function DeliveryTicks({ status, mine }: { status?: DeliveryStatus; mine: boolean }) {
@@ -52,7 +56,19 @@ export function MessageBubble({
   senderLabel,
   senderColor,
   quoteAvailable = true,
+  swipeToReply = false,
 }: Props) {
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const handleReply = useCallback(() => {
+    onReply?.(message);
+  }, [message, onReply]);
+
+  const swipe = useSwipeToReply(
+    bubbleRef,
+    onReply ? handleReply : undefined,
+    swipeToReply && Boolean(onReply),
+  );
+
   const quoted = message.plain?.quotedMessageId
     ? {
         id: message.plain.quotedMessageId,
@@ -76,47 +92,68 @@ export function MessageBubble({
             {senderLabel}
           </p>
         )}
-        <div
-          className={`relative group px-3 py-2 shadow-sm break-words ${
-            message.mine
-              ? "bg-sky-600 text-white rounded-2xl rounded-br-md"
-              : "bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-bl-md"
-          }`}
-          onContextMenu={(e) => {
-            if (onReply) {
-              e.preventDefault();
-              onReply(message);
-            }
-          }}
-        >
-          {onReply && (
-            <button
-              type="button"
-              onClick={() => onReply(message)}
-              className={`absolute -left-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded-full ${
-                message.mine ? "bg-sky-700 text-white" : "bg-gray-100 text-gray-600"
-              }`}
-              aria-label="Ответить"
+        <div className="relative flex items-center min-w-0">
+          {swipeToReply && onReply && (
+            <div
+              className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-gray-200/90 text-gray-600 shadow-sm"
+              style={{ opacity: swipe.progress, transform: `scale(${0.85 + swipe.progress * 0.15})` }}
+              aria-hidden
             >
-              ↩
-            </button>
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 14L4 9l5-5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M20 20v-7a4 4 0 0 0-4-4H4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
           )}
-          {quoted && (
-            <button
-              type="button"
-              onClick={() => onQuoteClick?.(quoted.id)}
-              className={`mb-1.5 w-full text-left rounded-lg border-l-2 pl-2 py-1 text-xs ${
-                message.mine
-                  ? "border-sky-200/80 bg-sky-500/30 text-sky-50"
-                  : "border-sky-400 bg-sky-50/80 text-gray-600"
-              }`}
-            >
-              <span className="font-medium block">{quoted.author}</span>
-              <span className="line-clamp-2">
-                {quoteAvailable ? quoted.text || "Вложение" : "Сообщение недоступно"}
-              </span>
-            </button>
-          )}
+          <div
+            ref={bubbleRef}
+            style={swipeToReply ? swipe.style : undefined}
+            className={`relative group min-w-0 px-3 py-2 shadow-sm break-words touch-pan-y ${
+              message.mine
+                ? "bg-sky-600 text-white rounded-2xl rounded-br-md"
+                : "bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-bl-md"
+            }`}
+            onContextMenu={(e) => {
+              if (onReply) {
+                e.preventDefault();
+                onReply(message);
+              }
+            }}
+          >
+            {onReply && !swipeToReply && (
+              <button
+                type="button"
+                onClick={() => onReply(message)}
+                className={`absolute -left-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded-full ${
+                  message.mine ? "bg-sky-700 text-white" : "bg-gray-100 text-gray-600"
+                }`}
+                aria-label="Ответить"
+              >
+                ↩
+              </button>
+            )}
+            {quoted && (
+              <button
+                type="button"
+                onClick={() => onQuoteClick?.(quoted.id)}
+                className={`mb-1.5 w-full text-left rounded-md border-l-[3px] pl-2.5 pr-1 py-1.5 text-xs ${
+                  message.mine
+                    ? "border-white/90 bg-black/25 text-white/95"
+                    : "border-sky-500 bg-gray-100 text-gray-700"
+                }`}
+              >
+                <span
+                  className={`font-semibold block truncate ${
+                    message.mine ? "text-white" : "text-sky-600"
+                  }`}
+                >
+                  {quoted.author}
+                </span>
+                <span className={`line-clamp-2 ${message.mine ? "text-white/85" : "text-gray-600"}`}>
+                  {quoteAvailable ? quoted.text || "Вложение" : "Сообщение недоступно"}
+                </span>
+              </button>
+            )}
           {message.type === "text" && (
             <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
               {message.plain?.text}
@@ -160,6 +197,7 @@ export function MessageBubble({
                 повторить
               </button>
             )}
+          </div>
           </div>
         </div>
       </div>

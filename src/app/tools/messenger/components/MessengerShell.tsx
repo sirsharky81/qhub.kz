@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { useVisualViewportShell } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -31,12 +32,14 @@ export function MessengerShell({
   const widthClass = SHELL_WIDTH[variant];
   const framed = variant !== "default";
   const isChat = variant === "chat";
+  const { style: viewportStyle, active: viewportActive } = useVisualViewportShell(isChat);
 
   return (
     <div
-      className={`flex flex-col h-[100dvh] max-h-[100dvh] overflow-hidden text-gray-900 ${
-        framed ? "bg-slate-200/60" : "bg-slate-50"
-      }`}
+      className={`flex flex-col overflow-hidden text-gray-900 ${
+        viewportActive ? "" : "h-[100dvh] max-h-[100dvh]"
+      } ${framed ? "bg-slate-200/60" : "bg-slate-50"}`}
+      style={viewportActive ? viewportStyle : undefined}
     >
       <div
         className={`flex flex-col h-full max-h-full w-full min-w-0 mx-auto overflow-hidden ${

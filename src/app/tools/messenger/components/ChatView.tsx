@@ -28,8 +28,10 @@ import {
 } from "@/lib/messenger/history-db";
 import type { ChannelEnvelope, EncryptedMessagePayload } from "@/lib/messenger/types";
 import { generateMessageId } from "@/lib/messenger/codes";
+import { useCoarsePointer } from "@/hooks/useCoarsePointer";
 import { blobToBase64, compressImageIfNeeded } from "@/lib/messenger/files";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
+import { scrollChatListToBottom } from "@/lib/messenger/use-visual-viewport";
 import {
   clearRoomUnread,
   incrementRoomUnread,
@@ -73,6 +75,7 @@ export function ChatView({
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [text, setText] = useState("");
   const [replyTo, setReplyTo] = useState<DisplayMessage | null>(null);
+  const swipeToReply = useCoarsePointer();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [connection, setConnection] = useState<"online" | "reconnecting" | "offline">("reconnecting");
@@ -282,16 +285,28 @@ export function ChatView({
   }, [channel, ingestEnvelopes, isRoom, onRoomEnded]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    scrollChatListToBottom(listRef.current);
   }, [messages]);
 
   useEffect(() => {
-    if (!listRef.current || typeof window === "undefined" || !window.visualViewport) return;
-    function onViewportResize() {
-      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    function onViewportChange() {
+      scrollChatListToBottom(listRef.current);
     }
-    window.visualViewport.addEventListener("resize", onViewportResize);
-    return () => window.visualViewport?.removeEventListener("resize", onViewportResize);
+
+    window.visualViewport.addEventListener("resize", onViewportChange);
+    window.visualViewport.addEventListener("scroll", onViewportChange);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", onViewportChange);
+      window.visualViewport?.removeEventListener("scroll", onViewportChange);
+    };
+  }, []);
+
+  const scrollMessagesToBottom = useCallback(() => {
+    scrollChatListToBottom(listRef.current);
+    window.setTimeout(() => scrollChatListToBottom(listRef.current), 120);
+    window.setTimeout(() => scrollChatListToBottom(listRef.current), 350);
   }, []);
 
   useEffect(() => {
@@ -605,6 +620,7 @@ export function ChatView({
             showSender={shouldShowSender(index)}
             senderLabel={m.fromPhone ? labelForPhone(m.fromPhone) : undefined}
             senderColor={m.fromPhone ? senderColorClass(m.fromPhone) : undefined}
+            swipeToReply={swipeToReply}
           />
         ))}
         <div ref={bottomRef} className="h-1" />
@@ -618,11 +634,7 @@ export function ChatView({
         canSend={text.trim().length > 0}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
-        onFocus={() => {
-          window.setTimeout(() => {
-            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-          }, 300);
-        }}
+        onFocus={scrollMessagesToBottom}
       />
     </MessengerShell>
   );
