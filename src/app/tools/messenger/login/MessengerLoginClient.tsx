@@ -18,6 +18,7 @@ import {
 } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { isStandalone } from "@/lib/pwa-utils";
+import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
 type Step = "phone" | "login" | "setPin";
 
@@ -33,6 +34,7 @@ function saveLastPhone(phone: string): void {
 
 export function MessengerLoginClient() {
   const router = useRouter();
+  const { setStorageKeyFromPin } = useMessengerUnlock();
   const [step, setStep] = useState<Step>("phone");
   const [phoneInput, setPhoneInput] = useState("");
   const [phone, setPhone] = useState("");
@@ -113,6 +115,7 @@ export function MessengerLoginClient() {
         return;
       }
       await ensureDeviceKeyPublished().catch(() => {});
+      await setStorageKeyFromPin(pin).catch(() => {});
       router.replace("/tools/messenger/home");
     } finally {
       setLoading(false);
@@ -133,6 +136,7 @@ export function MessengerLoginClient() {
         return;
       }
       await ensureDeviceKeyPublished().catch(() => {});
+      await setStorageKeyFromPin(pin).catch(() => {});
       finishAfterSetPin();
     } finally {
       setLoading(false);
@@ -211,6 +215,11 @@ export function MessengerLoginClient() {
               <h2 className="text-center text-sm font-semibold">
                 {passwordSet || mustChangePin ? "Задайте новый PIN" : "Установите PIN-код"}
               </h2>
+              {(passwordSet || mustChangePin) && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-center">
+                  После смены PIN сохранённая на этом устройстве переписка может стать недоступна.
+                </p>
+              )}
               <div className="space-y-4">
                 <PinInput value={pin} onChange={setPin} autoFocus />
                 <p className="text-xs text-center text-gray-500">Повторите PIN</p>

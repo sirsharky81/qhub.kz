@@ -65,7 +65,7 @@ export function MessengerShell({
           </div>
           {trailing && <div className="shrink-0">{trailing}</div>}
         </header>
-        <main className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">{children}</main>
+        <main className="relative flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">{children}</main>
       </div>
     </div>
   );

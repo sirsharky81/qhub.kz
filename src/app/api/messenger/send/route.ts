@@ -3,8 +3,8 @@ import { checkMessengerRateLimit } from "@/lib/rate-limit";
 import { MAX_RAW_BODY_BYTES, MAX_TEXT_LENGTH } from "@/lib/messenger/constants";
 import { generateMessageId } from "@/lib/messenger/codes";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
-import type { EncryptedMessagePayload, MessageType } from "@/lib/messenger/types";
-import { pushDmMessage, pushRoomMessage } from "@/lib/messenger/store";
+import type { EncryptedMessagePayload, MessageType, ReceiptPayload } from "@/lib/messenger/types";
+import { pushDmEnvelope, pushRoomEnvelope } from "@/lib/messenger/store";
 
 export async function POST(request: Request) {
   try {
@@ -24,11 +24,14 @@ export async function POST(request: Request) {
 
     let body: {
       channel?: string;
+      kind?: "message" | "receipt";
       type?: MessageType;
       ciphertext?: string;
       iv?: string;
       mime?: string;
       filename?: string;
+      refMessageId?: string;
+      receipt?: "delivered" | "read";
     };
     try {
       body = await request.json();
@@ -37,11 +40,40 @@ export async function POST(request: Request) {
     }
 
     const channel = body.channel ?? "";
+    if (!channel) {
+      return NextResponse.json({ error: "Укажите channel" }, { status: 400 });
+    }
+
+    if (body.kind === "receipt") {
+      const refMessageId = body.refMessageId ?? "";
+      const receipt = body.receipt;
+      if (!refMessageId || (receipt !== "delivered" && receipt !== "read")) {
+        return NextResponse.json({ error: "Неполные данные receipt" }, { status: 400 });
+      }
+      const envelope: ReceiptPayload = {
+        kind: "receipt",
+        id: generateMessageId(),
+        refMessageId,
+        receipt,
+        from: phone,
+        ts: Date.now(),
+      };
+      let version: number;
+      if (channel.startsWith("dm:")) {
+        version = await pushDmEnvelope(channel, envelope);
+      } else if (channel.startsWith("room:")) {
+        version = await pushRoomEnvelope(channel.slice(5), envelope);
+      } else {
+        return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });
+      }
+      return NextResponse.json({ ok: true, messageId: envelope.id, version });
+    }
+
     const type = body.type ?? "text";
     const ciphertext = body.ciphertext ?? "";
     const iv = body.iv ?? "";
 
-    if (!channel || !ciphertext || !iv) {
+    if (!ciphertext || !iv) {
       return NextResponse.json({ error: "Неполные данные" }, { status: 400 });
     }
 
@@ -49,7 +81,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Сообщение слишком длинное" }, { status: 400 });
     }
 
-    const msg: EncryptedMessagePayload = {
+    const msg: EncryptedMessagePayload & { kind: "message" } = {
+      kind: "message",
       id: generateMessageId(),
       from: phone,
       ts: Date.now(),
@@ -62,9 +95,9 @@ export async function POST(request: Request) {
 
     let version: number;
     if (channel.startsWith("dm:")) {
-      version = await pushDmMessage(channel, msg);
+      version = await pushDmEnvelope(channel, msg);
     } else if (channel.startsWith("room:")) {
-      version = await pushRoomMessage(channel.slice(5), msg);
+      version = await pushRoomEnvelope(channel.slice(5), msg);
     } else {
       return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });
     }

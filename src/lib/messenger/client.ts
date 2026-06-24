@@ -1,4 +1,9 @@
-import type { EncryptedMessagePayload, MessageType } from "./types";
+import type {
+  ChannelEnvelope,
+  EncryptedMessagePayload,
+  MessageType,
+  ReceiptPayload,
+} from "./types";
 
 export interface AccessCheckResult {
   allowed: boolean;
@@ -92,11 +97,42 @@ export async function fetchPeerPublicKey(phone: string): Promise<string | null> 
   return data.publicKey;
 }
 
-export async function fetchContacts(): Promise<{ phone: string }[]> {
+export async function fetchContacts(): Promise<
+  { phone: string; displayName: string | null; label: string }[]
+> {
   const res = await fetch("/api/messenger/contacts");
   if (!res.ok) return [];
-  const data = (await res.json()) as { contacts: { phone: string }[] };
+  const data = (await res.json()) as {
+    contacts: { phone: string; displayName: string | null; label: string }[];
+  };
   return data.contacts;
+}
+
+export async function fetchProfile(): Promise<{
+  phone: string;
+  displayName: string | null;
+} | null> {
+  const res = await fetch("/api/messenger/profile");
+  if (!res.ok) return null;
+  return res.json() as Promise<{ phone: string; displayName: string | null }>;
+}
+
+export async function updateProfile(displayName: string): Promise<boolean> {
+  const res = await fetch("/api/messenger/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName }),
+  });
+  return res.ok;
+}
+
+export async function fetchProfilesMap(): Promise<Record<string, string>> {
+  const contacts = await fetchContacts();
+  const map: Record<string, string> = {};
+  for (const c of contacts) {
+    map[c.phone] = c.label;
+  }
+  return map;
 }
 
 export async function createRoom(): Promise<{ roomId: string; channel: string } | null> {
@@ -146,9 +182,14 @@ export type PollChannelResult =
   | {
       meta: { version: number };
       messages: EncryptedMessagePayload[];
-      participants?: { phone: string; lastSeen: number }[];
+      envelopes: ChannelEnvelope[];
+      participants?: { phone: string; lastSeen: number; displayName?: string | null }[];
     }
   | { error: "room_gone" };
+
+function isReceiptEnvelope(e: ChannelEnvelope): e is ReceiptPayload {
+  return "kind" in e && e.kind === "receipt";
+}
 
 export async function pollChannel(
   channel: string,
@@ -165,15 +206,41 @@ export async function pollChannel(
     return { error: "room_gone" };
   }
   if (res.status === 304) {
-    return { meta: { version: since }, messages: [] };
+    return { meta: { version: since }, messages: [], envelopes: [] };
   }
   if (!res.ok) return null;
-  return res.json() as Promise<{
+  const data = (await res.json()) as {
     meta: { version: number };
     messages: EncryptedMessagePayload[];
+    envelopes?: ChannelEnvelope[];
     participants?: { phone: string; lastSeen: number }[];
-  }>;
+  };
+  const envelopes =
+    data.envelopes ??
+    (data.messages ?? []).map((m) => ({ ...m, kind: "message" as const }));
+  return { meta: data.meta, messages: data.messages ?? [], envelopes, participants: data.participants };
 }
+
+export async function sendReceipt(input: {
+  channel: string;
+  refMessageId: string;
+  receipt: "delivered" | "read";
+}): Promise<{ messageId: string; version: number } | null> {
+  const res = await fetch("/api/messenger/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      channel: input.channel,
+      kind: "receipt",
+      refMessageId: input.refMessageId,
+      receipt: input.receipt,
+    }),
+  });
+  if (!res.ok) return null;
+  return res.json() as Promise<{ messageId: string; version: number }>;
+}
+
+export { isReceiptEnvelope };
 
 export async function sendEncryptedMessage(input: {
   channel: string;

@@ -6,6 +6,7 @@ import { PinButton } from "@/components/favorites/PinButton";
 import { MusicCardPlayer } from "@/components/music/MusicCardPlayer";
 import { useMusicPlayerOptional } from "@/contexts/MusicPlayerContext";
 import TestingBadge from "@/components/TestingBadge";
+import { useMessengerUnreadTotal } from "@/hooks/useMessengerUnreadTotal";
 import { TAG_LABELS, type App } from "@/data/apps";
 
 /** Единая высота всех карточек */
@@ -31,6 +32,8 @@ export function AppCard({
 }: AppCardProps) {
   const player = useMusicPlayerOptional();
   const isMusicApp = app.id === "music";
+  const messengerUnread = useMessengerUnreadTotal();
+  const isMessengerApp = app.id === "messenger";
   const isMusicActive = isMusicApp && !!player?.currentTrack;
   const musicStatus = player?.status;
   const isPlayingMusic = isMusicActive && musicStatus === "playing";
@@ -125,7 +128,7 @@ export function AppCard({
       ) : (
         <div className="relative z-10 flex flex-col flex-1 min-h-0 gap-2">
           <div className="flex items-center gap-2.5 shrink-0">
-            <div className={`${iconBox} rounded-[22%] shadow-[0_1px_3px_rgba(0,0,0,0.08)]`} aria-hidden>
+            <div className={`${iconBox} rounded-[22%] shadow-[0_1px_3px_rgba(0,0,0,0.08)] relative`} aria-hidden>
               {app.icon.startsWith("/") ? (
                 <Image
                   src={app.icon}
@@ -140,6 +143,11 @@ export function AppCard({
                 />
               ) : (
                 <span className="text-2xl leading-none">{app.icon}</span>
+              )}
+              {isMessengerApp && messengerUnread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-0.5 rounded-full bg-sky-600 text-white text-[9px] font-bold flex items-center justify-center border-2 border-white">
+                  {messengerUnread > 99 ? "99+" : messengerUnread}
+                </span>
               )}
             </div>
             <div className="flex-1 min-w-0 flex items-center gap-2 min-h-10">

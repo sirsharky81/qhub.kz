@@ -9,7 +9,9 @@ import { maskPhone } from "@/lib/messenger/phone-format";
 
 export function MessengerContactsClient() {
   const router = useRouter();
-  const [contacts, setContacts] = useState<{ phone: string }[]>([]);
+  const [contacts, setContacts] = useState<
+    { phone: string; displayName: string | null; label: string }[]
+  >([]);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -24,9 +26,13 @@ export function MessengerContactsClient() {
   }, [router]);
 
   const filtered = contacts.filter((c) => {
-    const q = query.trim();
+    const q = query.trim().toLowerCase();
     if (!q) return true;
-    return c.phone.includes(q) || maskPhone(c.phone).includes(q);
+    return (
+      c.phone.includes(q) ||
+      maskPhone(c.phone).includes(q) ||
+      (c.displayName?.toLowerCase().includes(q) ?? false)
+    );
   });
 
   function openChat(peerPhone: string) {
@@ -44,7 +50,7 @@ export function MessengerContactsClient() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Поиск по номеру"
+          placeholder="Поиск по имени или номеру"
           className="w-full rounded-2xl border border-gray-200 px-4 py-2.5 text-sm"
         />
         <ul className="divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white overflow-hidden">
@@ -53,9 +59,12 @@ export function MessengerContactsClient() {
               <button
                 type="button"
                 onClick={() => openChat(c.phone)}
-                className="w-full text-left px-4 py-3 hover:bg-gray-50 text-sm font-medium"
+                className="w-full text-left px-4 py-3 hover:bg-gray-50"
               >
-                {maskPhone(c.phone)}
+                <p className="text-sm font-medium">{c.label}</p>
+                {c.displayName && (
+                  <p className="text-xs text-gray-400">{maskPhone(c.phone)}</p>
+                )}
               </button>
             </li>
           ))}

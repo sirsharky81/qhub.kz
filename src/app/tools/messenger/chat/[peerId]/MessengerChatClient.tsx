@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatView } from "../../components/ChatView";
 import { DmWaitingView } from "../../components/DmWaitingView";
 import { MessengerShell } from "../../components/MessengerShell";
-import { fetchAccessCheck, fetchPeerPublicKey } from "@/lib/messenger/client";
+import { PinUnlockGate } from "../../components/PinUnlockGate";
+import { fetchAccessCheck, fetchPeerPublicKey, fetchProfilesMap } from "@/lib/messenger/client";
 import { deriveDmAesKey, getOrCreateDeviceKeyPair } from "@/lib/messenger/crypto";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
@@ -20,9 +21,11 @@ export function MessengerChatClient() {
   const router = useRouter();
   const peerPhone = normalizeKzPhone(decodeURIComponent(String(params.peerId ?? "")));
   const [myPhone, setMyPhone] = useState("");
+  const [maskedPhone, setMaskedPhone] = useState("");
   const [aesKey, setAesKey] = useState<CryptoKey | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [checking, setChecking] = useState(false);
+  const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
   const pairRef = useRef<CryptoKeyPair | null>(null);
 
   const tryConnectPeer = useCallback(
@@ -35,11 +38,15 @@ export function MessengerChatClient() {
 
       const key = await deriveDmAesKey(pair.privateKey, peerPub, me, peerPhone);
       const chatId = deriveDmChatId(me, peerPhone);
+      const profiles = await fetchProfilesMap();
+      const peerLabel = profiles[peerPhone] ?? maskPhone(peerPhone);
+      setProfileLabels(profiles);
       upsertLocalDialog({
         id: chatId,
         kind: "dm",
-        title: maskPhone(peerPhone),
+        title: peerLabel,
         peerPhone,
+        displayName: profiles[peerPhone],
         createdAt: Date.now(),
       });
       setAesKey(key);
@@ -62,6 +69,7 @@ export function MessengerChatClient() {
 
       const me = access.phone;
       setMyPhone(me);
+      setMaskedPhone(maskPhone(me));
 
       try {
         await ensureDeviceKeyPublished();
@@ -117,7 +125,7 @@ export function MessengerChatClient() {
     }
   }, [myPhone, checking, tryConnectPeer]);
 
-  const peerTitle = maskPhone(peerPhone);
+  const peerTitle = profileLabels[peerPhone] ?? maskPhone(peerPhone);
 
   if (phase === "auth_error") {
     return (
@@ -154,12 +162,15 @@ export function MessengerChatClient() {
   const channel = deriveDmChatId(myPhone, peerPhone);
 
   return (
-    <ChatView
-      channel={channel}
-      title={peerTitle}
-      backHref="/tools/messenger/home"
-      myPhone={myPhone}
-      aesKey={aesKey}
-    />
+    <PinUnlockGate phone={myPhone} maskedPhone={maskedPhone} title={peerTitle} backHref="/tools/messenger/home">
+      <ChatView
+        channel={channel}
+        title={peerTitle}
+        backHref="/tools/messenger/home"
+        myPhone={myPhone}
+        aesKey={aesKey}
+        profileLabels={profileLabels}
+      />
+    </PinUnlockGate>
   );
 }

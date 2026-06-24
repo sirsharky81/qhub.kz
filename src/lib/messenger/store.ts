@@ -4,14 +4,18 @@ import {
   REDIS_AUTH_PREFIX,
   REDIS_DM_PREFIX,
   REDIS_PUBKEY_PREFIX,
+  REDIS_PROFILES_KEY,
   REDIS_ROOM_PREFIX,
   REDIS_WHITELIST_KEY,
   ROOM_INACTIVE_MS,
 } from "./constants";
 import type {
+  ChannelEnvelope,
   ChannelMeta,
   EncryptedMessagePayload,
   MessengerAuthRecord,
+  MessengerProfile,
+  ReceiptPayload,
   RoomMeta,
   RoomParticipant,
   WhitelistEntry,
@@ -102,6 +106,95 @@ export async function setPublicKey(phone: string, publicKeyJwk: string): Promise
   await redisSet(pubkeyKey(phone), publicKeyJwk);
 }
 
+// --- Profiles ---
+
+export async function loadProfiles(): Promise<Record<string, MessengerProfile>> {
+  const data = await redisGetJson<Record<string, MessengerProfile>>(REDIS_PROFILES_KEY);
+  return data ?? {};
+}
+
+export async function getProfile(phone: string): Promise<MessengerProfile | null> {
+  const all = await loadProfiles();
+  return all[phone] ?? null;
+}
+
+export async function saveProfile(profile: MessengerProfile): Promise<void> {
+  const all = await loadProfiles();
+  all[profile.phone] = profile;
+  await redisSet(REDIS_PROFILES_KEY, JSON.stringify(all));
+}
+
+export function displayNameForPhone(
+  phone: string,
+  profiles: Record<string, MessengerProfile>,
+): string {
+  const name = profiles[phone]?.displayName?.trim();
+  return name || phone;
+}
+
+// --- Envelope helpers ---
+
+export function parseChannelEnvelope(raw: unknown): ChannelEnvelope | null {
+  const parsed = parseRedisJsonValue<ChannelEnvelope>(raw);
+  if (!parsed) return null;
+  if ("kind" in parsed && parsed.kind === "receipt") return parsed as ReceiptPayload;
+  if ("ciphertext" in parsed && "iv" in parsed) {
+    return { ...parsed, kind: "message" } as EncryptedMessagePayload & { kind: "message" };
+  }
+  return null;
+}
+
+function isReceipt(envelope: ChannelEnvelope): envelope is ReceiptPayload {
+  return "kind" in envelope && envelope.kind === "receipt";
+}
+
+async function pushEnvelope(
+  messagesKey: string,
+  metaKey: string,
+  envelope: ChannelEnvelope,
+  getMeta: () => Promise<ChannelMeta | RoomMeta | null>,
+  metaTtl: number,
+  msgTtl: number,
+): Promise<number> {
+  const now = Date.now();
+  const existing = await getMeta();
+  const meta = existing ?? { version: 0, updatedAt: now };
+  meta.version += 1;
+  meta.updatedAt = now;
+  await redisSet(metaKey, JSON.stringify(meta), metaTtl);
+  await redisLpush(messagesKey, JSON.stringify(envelope));
+  await redisExpire(messagesKey, msgTtl);
+  return meta.version;
+}
+
+async function getEnvelopesSince(
+  messagesKey: string,
+  getMeta: () => Promise<ChannelMeta | RoomMeta | null>,
+  sinceVersion: number,
+): Promise<{ meta: ChannelMeta; envelopes: ChannelEnvelope[] }> {
+  const meta = (await getMeta()) ?? { version: 0, updatedAt: Date.now() };
+  if (sinceVersion >= meta.version) {
+    return { meta, envelopes: [] };
+  }
+  const rawList = await redisLrange(messagesKey, 0, -1);
+  const envelopes = rawList
+    .map((r) => parseChannelEnvelope(r))
+    .filter((m): m is ChannelEnvelope => m !== null)
+    .reverse();
+  return { meta, envelopes };
+}
+
+async function ackEnvelope(messagesKey: string, messageId: string): Promise<void> {
+  const rawList = await redisLrange(messagesKey, 0, -1);
+  for (const raw of rawList) {
+    const envelope = parseChannelEnvelope(raw);
+    if (envelope && envelope.id === messageId) {
+      await redisLrem(messagesKey, 1, typeof raw === "string" ? raw : JSON.stringify(raw));
+      break;
+    }
+  }
+}
+
 // --- DM channels ---
 
 function dmMetaKey(chatId: string): string {
@@ -117,44 +210,35 @@ export async function getDmMeta(chatId: string): Promise<ChannelMeta | null> {
 }
 
 export async function pushDmMessage(chatId: string, msg: EncryptedMessagePayload): Promise<number> {
-  const ttl = msgTtlSec();
-  const now = Date.now();
-  const meta = (await getDmMeta(chatId)) ?? { version: 0, updatedAt: now };
-  meta.version += 1;
-  meta.updatedAt = now;
-  await redisSet(dmMetaKey(chatId), JSON.stringify(meta), ttl);
-  await redisLpush(dmMessagesKey(chatId), JSON.stringify(msg));
-  await redisExpire(dmMessagesKey(chatId), ttl);
-  return meta.version;
+  return pushDmEnvelope(chatId, { ...msg, kind: "message" });
+}
+
+export async function pushDmEnvelope(chatId: string, envelope: ChannelEnvelope): Promise<number> {
+  return pushEnvelope(
+    dmMessagesKey(chatId),
+    dmMetaKey(chatId),
+    envelope,
+    () => getDmMeta(chatId),
+    msgTtlSec(),
+    msgTtlSec(),
+  );
 }
 
 export async function getDmMessagesSince(
   chatId: string,
   sinceVersion: number,
-): Promise<{ meta: ChannelMeta; messages: EncryptedMessagePayload[] }> {
-  const meta = (await getDmMeta(chatId)) ?? { version: 0, updatedAt: Date.now() };
-  if (sinceVersion >= meta.version) {
-    return { meta, messages: [] };
-  }
-  const rawList = await redisLrange(dmMessagesKey(chatId), 0, -1);
-  const messages = rawList
-    .map((r) => parseRedisJsonValue<EncryptedMessagePayload>(r))
-    .filter((m): m is EncryptedMessagePayload => m !== null)
-    .reverse();
-  return { meta, messages };
+): Promise<{ meta: ChannelMeta; messages: EncryptedMessagePayload[]; envelopes: ChannelEnvelope[] }> {
+  const { meta, envelopes } = await getEnvelopesSince(
+    dmMessagesKey(chatId),
+    () => getDmMeta(chatId),
+    sinceVersion,
+  );
+  const messages = envelopes.filter((e): e is EncryptedMessagePayload => !isReceipt(e));
+  return { meta, messages, envelopes };
 }
 
 export async function ackDmMessage(chatId: string, messageId: string): Promise<void> {
-  const rawList = await redisLrange(dmMessagesKey(chatId), 0, -1);
-  for (const raw of rawList) {
-    const msg = parseRedisJsonValue<EncryptedMessagePayload>(raw);
-    if (msg) {
-      if (msg.id === messageId) {
-        await redisLrem(dmMessagesKey(chatId), 1, typeof raw === "string" ? raw : JSON.stringify(raw));
-        break;
-      }
-    }
-  }
+  await ackEnvelope(dmMessagesKey(chatId), messageId);
 }
 
 // --- Rooms ---
@@ -263,54 +347,48 @@ export async function deleteRoom(roomId: string): Promise<void> {
 }
 
 export async function pushRoomMessage(roomId: string, msg: EncryptedMessagePayload): Promise<number> {
-  const ttl = msgTtlSec();
-  const roomTtl = roomInactiveTtlSec();
-  const now = Date.now();
-  const meta = (await getRoomMeta(roomId)) ?? {
-    version: 0,
-    updatedAt: now,
-    createdAt: now,
-    createdBy: msg.from,
-  };
-  meta.version += 1;
-  meta.updatedAt = now;
-  await redisSet(roomMetaKey(roomId), JSON.stringify(meta), roomTtl);
-  await redisLpush(roomMessagesKey(roomId), JSON.stringify(msg));
-  await redisExpire(roomMessagesKey(roomId), ttl);
-  return meta.version;
+  return pushRoomEnvelope(roomId, { ...msg, kind: "message" });
+}
+
+export async function pushRoomEnvelope(roomId: string, envelope: ChannelEnvelope): Promise<number> {
+  return pushEnvelope(
+    roomMessagesKey(roomId),
+    roomMetaKey(roomId),
+    envelope,
+    () => getRoomMeta(roomId),
+    roomInactiveTtlSec(),
+    msgTtlSec(),
+  );
 }
 
 export async function getRoomMessagesSince(
   roomId: string,
   sinceVersion: number,
-): Promise<{ meta: RoomMeta | ChannelMeta; messages: EncryptedMessagePayload[]; participants: RoomParticipant[] }> {
+): Promise<{
+  meta: RoomMeta | ChannelMeta;
+  messages: EncryptedMessagePayload[];
+  envelopes: ChannelEnvelope[];
+  participants: RoomParticipant[];
+}> {
   const meta = await getRoomMeta(roomId);
   if (!meta) {
     return {
       meta: { version: 0, updatedAt: Date.now() },
       messages: [],
+      envelopes: [],
       participants: [],
     };
   }
   const participants = await getRoomParticipants(roomId);
-  if (sinceVersion >= meta.version) {
-    return { meta, messages: [], participants };
-  }
-  const rawList = await redisLrange(roomMessagesKey(roomId), 0, -1);
-  const messages = rawList
-    .map((r) => parseRedisJsonValue<EncryptedMessagePayload>(r))
-    .filter((m): m is EncryptedMessagePayload => m !== null)
-    .reverse();
-  return { meta, messages, participants };
+  const { meta: channelMeta, envelopes } = await getEnvelopesSince(
+    roomMessagesKey(roomId),
+    () => getRoomMeta(roomId),
+    sinceVersion,
+  );
+  const messages = envelopes.filter((e): e is EncryptedMessagePayload => !isReceipt(e));
+  return { meta: channelMeta, messages, envelopes, participants };
 }
 
 export async function ackRoomMessage(roomId: string, messageId: string): Promise<void> {
-  const rawList = await redisLrange(roomMessagesKey(roomId), 0, -1);
-  for (const raw of rawList) {
-    const msg = parseRedisJsonValue<EncryptedMessagePayload>(raw);
-    if (msg?.id === messageId) {
-      await redisLrem(roomMessagesKey(roomId), 1, typeof raw === "string" ? raw : JSON.stringify(raw));
-      break;
-    }
-  }
+  await ackEnvelope(roomMessagesKey(roomId), messageId);
 }

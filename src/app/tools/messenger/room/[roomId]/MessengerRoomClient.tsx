@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChatView } from "../../components/ChatView";
 import {
   fetchAccessCheck,
+  fetchProfilesMap,
   fetchRoomStatus,
   joinRoomApi,
   leaveRoomApi,
@@ -22,6 +23,7 @@ export function MessengerRoomClient() {
   const [aesKey, setAesKey] = useState<CryptoKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
 
   const handleRoomEnded = useCallback(() => {
     cleanupRoomLocalState(roomId);
@@ -82,7 +84,9 @@ export function MessengerRoomClient() {
           roomId,
           createdAt: Date.now(),
         });
+        const profiles = await fetchProfilesMap();
         if (!cancelled) {
+          setProfileLabels(profiles);
           setAesKey(key);
           setLoading(false);
         }
@@ -134,6 +138,7 @@ export function MessengerRoomClient() {
       roomId={roomId}
       onLeaveRoom={handleLeaveRoom}
       onRoomEnded={handleRoomEnded}
+      profileLabels={profileLabels}
     />
   );
 }

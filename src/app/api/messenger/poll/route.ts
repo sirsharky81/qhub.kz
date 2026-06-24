@@ -32,11 +32,11 @@ export async function GET(request: Request) {
     }
 
     if (channel.startsWith("dm:")) {
-      const { meta, messages } = await getDmMessagesSince(channel, sinceVersion);
+      const { meta, messages, envelopes } = await getDmMessagesSince(channel, sinceVersion);
       if (sinceVersion >= meta.version) {
         return new NextResponse(null, { status: 304 });
       }
-      return NextResponse.json({ channel, meta, messages });
+      return NextResponse.json({ channel, meta, messages, envelopes });
     }
 
     if (channel.startsWith("room:")) {
@@ -49,14 +49,17 @@ export async function GET(request: Request) {
       if (heartbeat) {
         await updateRoomHeartbeat(roomId, phone);
       }
-      const { meta, messages, participants } = await getRoomMessagesSince(roomId, sinceVersion);
+      const { meta, messages, envelopes, participants } = await getRoomMessagesSince(
+        roomId,
+        sinceVersion,
+      );
       if (sinceVersion >= meta.version && !heartbeat) {
         return new NextResponse(null, { status: 304 });
       }
       if (sinceVersion >= meta.version) {
-        return NextResponse.json({ channel, meta, messages: [], participants });
+        return NextResponse.json({ channel, meta, messages: [], envelopes: [], participants });
       }
-      return NextResponse.json({ channel, meta, messages, participants });
+      return NextResponse.json({ channel, meta, messages, envelopes, participants });
     }
 
     return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });

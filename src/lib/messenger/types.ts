@@ -16,6 +16,27 @@ export interface MessengerAuthRecord {
   lockedUntil: number | null;
 }
 
+export type DeliveryStatus = "pending" | "sent" | "delivered" | "read" | "failed";
+
+export interface ReceiptPayload {
+  kind: "receipt";
+  id: string;
+  refMessageId: string;
+  receipt: "delivered" | "read";
+  from: string;
+  ts: number;
+}
+
+export type ChannelEnvelope =
+  | (EncryptedMessagePayload & { kind?: "message" })
+  | ReceiptPayload;
+
+export interface MessengerProfile {
+  phone: string;
+  displayName: string | null;
+  updatedAt: number;
+}
+
 export type MessageType = "text" | "image" | "file";
 
 export interface EncryptedMessagePayload {
@@ -66,4 +87,5 @@ export interface LocalDialog {
   peerPhone?: string;
   roomId?: string;
   createdAt: number;
+  displayName?: string;
 }

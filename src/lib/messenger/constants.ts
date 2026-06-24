@@ -25,3 +25,12 @@ export const SESSION_DIALOGS_KEY = "qhub_messenger_dialogs";
 export const LAST_PHONE_STORAGE = "qhub_messenger_last_phone";
 export const ROOM_KEY_PREFIX = "qhub_messenger_room_key:";
 export const MESSENGER_INSTALL_PROMPT_SHOWN = "qhub_messenger_install_prompt_shown";
+export const STORAGE_SALT_KEY = "qhub_messenger_storage_salt";
+export const UNREAD_COUNT_KEY = "qhub_messenger_unread";
+export const UNREAD_EVENT = "qhub-messenger-unread-change";
+
+export const REDIS_PROFILES_KEY = "qhub:messenger:profiles";
+
+export const MAX_DISPLAY_NAME_LENGTH = 30;
+export const QUOTE_PREVIEW_LENGTH = 80;
+export const SENDER_GROUP_MS = 5 * 60 * 1000;

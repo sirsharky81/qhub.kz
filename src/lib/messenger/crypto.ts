@@ -128,6 +128,9 @@ export interface PlainMessage {
   data?: string;
   mime?: string;
   filename?: string;
+  quotedMessageId?: string;
+  quotedAuthor?: string;
+  quotedText?: string;
 }
 
 export async function encryptMessage(
@@ -149,6 +152,21 @@ export async function decryptMessage(
   const cipherArr = new Uint8Array(fromBase64Url(ciphertext));
   const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ivArr }, key, cipherArr);
   return JSON.parse(new TextDecoder().decode(plainBuf)) as PlainMessage;
+}
+
+export async function encryptForStorage(
+  key: CryptoKey,
+  plain: PlainMessage,
+): Promise<{ ciphertext: string; iv: string }> {
+  return encryptMessage(key, plain);
+}
+
+export async function decryptFromStorage(
+  key: CryptoKey,
+  ciphertext: string,
+  iv: string,
+): Promise<PlainMessage> {
+  return decryptMessage(key, ciphertext, iv);
 }
 
 export function buildRoomJoinUrl(roomId: string, keyBase64Url: string, origin?: string): string {

@@ -1,23 +1,40 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChatComposer } from "./ChatComposer";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { MessageBubble, type DisplayMessage } from "./MessageBubble";
 import { MessengerShell } from "./MessengerShell";
-import { MAX_TEXT_LENGTH } from "@/lib/messenger/constants";
+import { useMessengerUnlock } from "./MessengerUnlockProvider";
+import { SENDER_GROUP_MS } from "@/lib/messenger/constants";
 import {
   ackMessage,
+  isReceiptEnvelope,
   pollChannel,
   sendEncryptedMessage,
+  sendReceipt,
 } from "@/lib/messenger/client";
 import {
   decryptMessage,
   encryptMessage,
   type PlainMessage,
 } from "@/lib/messenger/crypto";
-import type { EncryptedMessagePayload } from "@/lib/messenger/types";
+import { senderColorClass, truncateQuote, messagePreview } from "@/lib/messenger/display";
+import {
+  clearChatHistory,
+  loadChatHistory,
+  saveHistoryMessage,
+  updateHistoryDeliveryStatus,
+} from "@/lib/messenger/history-db";
+import type { ChannelEnvelope, EncryptedMessagePayload } from "@/lib/messenger/types";
 import { generateMessageId } from "@/lib/messenger/codes";
 import { blobToBase64, compressImageIfNeeded } from "@/lib/messenger/files";
+import { refreshAppBadge } from "@/lib/messenger/app-badge";
+import {
+  clearRoomUnread,
+  incrementRoomUnread,
+  setActiveChatChannel,
+} from "@/lib/messenger/unread";
 
 interface Props {
   channel: string;
@@ -30,6 +47,11 @@ interface Props {
   roomId?: string;
   onLeaveRoom?: (participantCount: number) => void | Promise<void>;
   onRoomEnded?: () => void;
+  profileLabels?: Record<string, string>;
+}
+
+function isMessageEnvelope(e: ChannelEnvelope): e is EncryptedMessagePayload {
+  return !("kind" in e) || e.kind === "message" || !e.kind;
 }
 
 export function ChatView({
@@ -43,16 +65,97 @@ export function ChatView({
   roomId,
   onLeaveRoom,
   onRoomEnded,
+  profileLabels = {},
 }: Props) {
+  const { storageKey, isUnlocked } = useMessengerUnlock();
+  const persistDm = !isRoom && isUnlocked && storageKey !== null;
+
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [text, setText] = useState("");
-  const [version, setVersion] = useState(0);
+  const [replyTo, setReplyTo] = useState<DisplayMessage | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [connection, setConnection] = useState<"online" | "reconnecting" | "offline">("reconnecting");
   const [participantCount, setParticipantCount] = useState<number | null>(null);
+  const [historyLoaded, setHistoryLoaded] = useState(isRoom);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const versionRef = useRef(0);
   const seenIds = useRef(new Set<string>());
+  const sentReceipts = useRef(new Set<string>());
+  const readSentRef = useRef(new Set<string>());
+  const messagesRef = useRef<DisplayMessage[]>([]);
+  const storageKeyRef = useRef(storageKey);
+  storageKeyRef.current = storageKey;
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const labelForPhone = useCallback(
+    (phone: string) => profileLabels[phone] ?? phone,
+    [profileLabels],
+  );
+
+  const persistMessage = useCallback(
+    async (msg: DisplayMessage) => {
+      const key = storageKeyRef.current;
+      if (!key || !msg.plain) return;
+      await saveHistoryMessage(key, {
+        id: msg.id,
+        chatId: channel,
+        ts: msg.ts,
+        mine: msg.mine,
+        type: msg.type,
+        deliveryStatus: msg.status ?? "sent",
+        fromPhone: msg.fromPhone,
+        plain: msg.plain,
+      });
+      void refreshAppBadge();
+    },
+    [channel],
+  );
+
+
+  useEffect(() => {
+    if (isRoom) return;
+    if (!persistDm || !storageKey) {
+      setHistoryLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    void loadChatHistory(storageKey, channel).then((history) => {
+      if (cancelled) return;
+      const loaded: DisplayMessage[] = history.map((h) => ({
+        id: h.id,
+        mine: h.mine,
+        ts: h.ts,
+        plain: h.plain,
+        type: h.type,
+        status: h.deliveryStatus,
+        fromPhone: h.fromPhone,
+      }));
+      for (const m of loaded) seenIds.current.add(m.id);
+      setMessages(loaded);
+      setHistoryLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [channel, isRoom, persistDm, storageKey]);
+
+  useEffect(() => {
+    setActiveChatChannel(channel);
+    return () => setActiveChatChannel(null);
+  }, [channel]);
+
+  useEffect(() => {
+    if (isRoom && roomId) {
+      clearRoomUnread(`room:${roomId}`);
+    }
+    void refreshAppBadge();
+  }, [isRoom, roomId]);
 
   const decryptPayload = useCallback(
     async (msg: EncryptedMessagePayload): Promise<DisplayMessage | null> => {
@@ -64,7 +167,8 @@ export function ChatView({
           ts: msg.ts,
           plain,
           type: msg.type,
-          status: "sent",
+          status: "delivered",
+          fromPhone: msg.from,
         };
       } catch {
         return null;
@@ -73,33 +177,75 @@ export function ChatView({
     [aesKey, myPhone],
   );
 
-  const ingestMessages = useCallback(
-    async (incoming: EncryptedMessagePayload[]) => {
-      for (const msg of incoming) {
+  const handleReceipt = useCallback(
+    async (receipt: { refMessageId: string; receipt: "delivered" | "read"; from: string }) => {
+      if (receipt.from === myPhone) return;
+      setMessages((prev) => {
+        const target = prev.find((m) => m.id === receipt.refMessageId && m.mine);
+        if (!target) return prev;
+        const nextStatus = receipt.receipt === "read" ? "read" : "delivered";
+        if (target.status === "read") return prev;
+        if (target.status === "delivered" && nextStatus === "delivered") return prev;
+        return prev.map((m) =>
+          m.id === receipt.refMessageId ? { ...m, status: nextStatus } : m,
+        );
+      });
+      const target = messagesRef.current.find((m) => m.id === receipt.refMessageId && m.mine);
+      if (target && persistDm) {
+        const nextStatus = receipt.receipt === "read" ? "read" : "delivered";
+        await updateHistoryDeliveryStatus(receipt.refMessageId, nextStatus);
+      }
+    },
+    [myPhone, persistDm],
+  );
+
+  const ingestEnvelopes = useCallback(
+    async (envelopes: ChannelEnvelope[]) => {
+      for (const envelope of envelopes) {
+        if (isReceiptEnvelope(envelope)) {
+          if (seenIds.current.has(envelope.id)) continue;
+          seenIds.current.add(envelope.id);
+          await handleReceipt(envelope);
+          void ackMessage(channel, envelope.id);
+          continue;
+        }
+        if (!isMessageEnvelope(envelope)) continue;
+        const msg = envelope;
         if (seenIds.current.has(msg.id)) continue;
         if (msg.from === myPhone) {
           seenIds.current.add(msg.id);
           continue;
         }
         const display = await decryptPayload(msg);
-        if (display) {
-          seenIds.current.add(msg.id);
-          setMessages((prev) => [...prev, display]);
-          void ackMessage(channel, msg.id);
+        if (!display) continue;
+        seenIds.current.add(msg.id);
+        setMessages((prev) => [...prev, display]);
+        if (persistDm) await persistMessage(display);
+        if (isRoom && roomId) {
+          incrementRoomUnread(`room:${roomId}`, channel);
         }
+        void refreshAppBadge();
+
+        const deliveredKey = `delivered:${msg.id}`;
+        if (!sentReceipts.current.has(deliveredKey)) {
+          sentReceipts.current.add(deliveredKey);
+          void sendReceipt({ channel, refMessageId: msg.id, receipt: "delivered" }).then((r) => {
+            if (r) {
+              versionRef.current = Math.max(versionRef.current, r.version);
+            }
+          });
+        }
+        void ackMessage(channel, msg.id);
       }
     },
-    [channel, decryptPayload, myPhone],
+    [channel, decryptPayload, handleReceipt, isRoom, myPhone, persistDm, persistMessage, roomId],
   );
 
   useEffect(() => {
     let cancelled = false;
-    let intervalMs = 2000;
+    const intervalMs = () => (document.hidden ? 12000 : 2000);
 
     async function tick() {
-      if (document.hidden) intervalMs = 12000;
-      else intervalMs = 2000;
-
       try {
         const data = await pollChannel(channel, versionRef.current, !!isRoom);
         if (cancelled) return;
@@ -114,13 +260,13 @@ export function ChatView({
         setConnection("online");
         if (data.meta.version > versionRef.current) {
           versionRef.current = data.meta.version;
-          setVersion(data.meta.version);
         }
         if (data.participants) {
           setParticipantCount(data.participants.length);
         }
-        if (data.messages.length) {
-          await ingestMessages(data.messages);
+        const envelopes = data.envelopes ?? data.messages;
+        if (envelopes.length) {
+          await ingestEnvelopes(envelopes);
         }
       } catch {
         setConnection("reconnecting");
@@ -128,64 +274,136 @@ export function ChatView({
     }
 
     void tick();
-    const id = window.setInterval(() => void tick(), intervalMs);
+    const id = window.setInterval(() => void tick(), intervalMs());
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [channel, ingestMessages, isRoom, onRoomEnded]);
+  }, [channel, ingestEnvelopes, isRoom, onRoomEnded]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
   useEffect(() => {
-    const list = listRef.current;
-    if (!list || typeof window === "undefined" || !window.visualViewport) return;
-
+    if (!listRef.current || typeof window === "undefined" || !window.visualViewport) return;
     function onViewportResize() {
       bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     }
-
     window.visualViewport.addEventListener("resize", onViewportResize);
     return () => window.visualViewport?.removeEventListener("resize", onViewportResize);
   }, []);
 
-  async function sendPlain(type: "text" | "image" | "file", plain: PlainMessage) {
-    const localId = generateMessageId();
-    const optimistic: DisplayMessage = {
-      id: localId,
-      mine: true,
-      ts: Date.now(),
-      plain,
-      type,
-      status: "pending",
-    };
-    setMessages((prev) => [...prev, optimistic]);
+  useEffect(() => {
+    const root = listRef.current;
+    if (!root) return;
 
-    try {
-      const { ciphertext, iv } = await encryptMessage(aesKey, plain);
-      const result = await sendEncryptedMessage({
-        channel,
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = (entry.target as HTMLElement).dataset.messageId;
+          if (!id) continue;
+          const msg = messagesRef.current.find((m) => m.id === id);
+          if (!msg || msg.mine) continue;
+
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.7) {
+            if (readSentRef.current.has(id)) continue;
+            const existing = timers.get(id);
+            if (existing) clearTimeout(existing);
+            timers.set(
+              id,
+              setTimeout(() => {
+                readSentRef.current.add(id);
+                if (persistDm) {
+                  void updateHistoryDeliveryStatus(id, "read").then(() => refreshAppBadge());
+                }
+                void sendReceipt({ channel, refMessageId: id, receipt: "read" });
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === id ? { ...m, status: "read" } : m)),
+                );
+              }, 400),
+            );
+          } else {
+            const existing = timers.get(id);
+            if (existing) {
+              clearTimeout(existing);
+              timers.delete(id);
+            }
+          }
+        }
+      },
+      { root, threshold: [0, 0.7, 1] },
+    );
+
+    root.querySelectorAll("[data-message-id]").forEach((el) => observer.observe(el));
+    return () => {
+      observer.disconnect();
+      timers.forEach((t) => clearTimeout(t));
+    };
+  }, [channel, messages, persistDm]);
+
+  const buildPlain = useCallback(
+    (base: PlainMessage): PlainMessage => {
+      if (!replyTo?.plain) return base;
+      const preview = truncateQuote(messagePreview({ ...base, text: base.text ?? replyTo.plain?.text }));
+      return {
+        ...base,
+        quotedMessageId: replyTo.id,
+        quotedAuthor: replyTo.mine ? "Вы" : labelForPhone(replyTo.fromPhone ?? title),
+        quotedText: preview,
+      };
+    },
+    [labelForPhone, replyTo, title],
+  );
+
+  const sendPlain = useCallback(
+    async (type: "text" | "image" | "file", plain: PlainMessage) => {
+      const fullPlain = buildPlain(plain);
+      const localId = generateMessageId();
+      const optimistic: DisplayMessage = {
+        id: localId,
+        mine: true,
+        ts: Date.now(),
+        plain: fullPlain,
         type,
-        ciphertext,
-        iv,
-        mime: plain.mime,
-        filename: plain.filename,
-      });
-      if (!result) throw new Error("send failed");
-      versionRef.current = result.version;
-      setVersion(result.version);
-      seenIds.current.add(result.messageId);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === localId ? { ...m, id: result.messageId, status: "sent" } : m)),
-      );
-    } catch {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === localId ? { ...m, status: "failed" } : m)),
-      );
-    }
-  }
+        status: "pending",
+        fromPhone: myPhone,
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      setReplyTo(null);
+
+      try {
+        const { ciphertext, iv } = await encryptMessage(aesKey, fullPlain);
+        const result = await sendEncryptedMessage({
+          channel,
+          type,
+          ciphertext,
+          iv,
+          mime: fullPlain.mime,
+          filename: fullPlain.filename,
+        });
+        if (!result) throw new Error("send failed");
+        versionRef.current = result.version;
+        seenIds.current.add(result.messageId);
+        const sent: DisplayMessage = {
+          ...optimistic,
+          id: result.messageId,
+          status: "sent",
+        };
+        setMessages((prev) =>
+          prev.map((m) => (m.id === localId ? sent : m)),
+        );
+        if (persistDm) await persistMessage(sent);
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === localId ? { ...m, status: "failed" } : m)),
+        );
+      }
+    },
+    [aesKey, buildPlain, channel, myPhone, persistDm, persistMessage],
+  );
 
   async function handleSend() {
     const trimmed = text.trim();
@@ -196,9 +414,7 @@ export function ChatView({
 
   async function handleFile(file: File) {
     const { blob, compressed } = await compressImageIfNeeded(file);
-    if (compressed) {
-      alert("Изображение сжато для отправки");
-    }
+    if (compressed) alert("Изображение сжато для отправки");
     const data = await blobToBase64(blob);
     const type = file.type.startsWith("image/") ? "image" : "file";
     await sendPlain(type, {
@@ -206,6 +422,38 @@ export function ChatView({
       mime: blob.type || file.type,
       filename: file.name,
     });
+  }
+
+  async function handleRetry(id: string) {
+    const msg = messages.find((m) => m.id === id);
+    if (!msg?.plain) return;
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    await sendPlain(msg.type, msg.plain);
+  }
+
+  async function handleClearChat() {
+    if (!persistDm) return;
+    await clearChatHistory(channel);
+    setMessages([]);
+    seenIds.current.clear();
+    setShowClearConfirm(false);
+    setShowMenu(false);
+    void refreshAppBadge();
+  }
+
+  function scrollToMessage(messageId: string) {
+    const el = listRef.current?.querySelector(`[data-message-id="${messageId}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function shouldShowSender(index: number): boolean {
+    if (!isRoom) return false;
+    const msg = messages[index];
+    if (msg.mine) return false;
+    const prev = messages[index - 1];
+    if (!prev || prev.mine) return true;
+    if (prev.fromPhone !== msg.fromPhone) return true;
+    return msg.ts - prev.ts > SENDER_GROUP_MS;
   }
 
   const headerSubtitle = (
@@ -218,7 +466,57 @@ export function ChatView({
     </div>
   );
 
-  const canSend = text.trim().length > 0;
+  const messageIds = new Set(messages.map((m) => m.id));
+
+  const headerTrailing = (
+    <div className="flex items-center gap-1">
+      {isRoom && onLeaveRoom && (
+        <button
+          type="button"
+          onClick={() => void onLeaveRoom(participantCount ?? 1)}
+          className="rounded-full px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+        >
+          Выйти
+        </button>
+      )}
+      {!isRoom && persistDm && (
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowMenu((v) => !v)}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
+            aria-label="Меню чата"
+          >
+            ⋮
+          </button>
+          {showMenu && (
+            <div className="absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border border-gray-200 bg-white shadow-lg py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMenu(false);
+                  setShowClearConfirm(true);
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+              >
+                Очистить чат
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  if (!historyLoaded) {
+    return (
+      <MessengerShell variant="chat" title={title} backHref={backHref}>
+        <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+          Загрузка истории…
+        </div>
+      </MessengerShell>
+    );
+  }
 
   return (
     <MessengerShell
@@ -226,21 +524,38 @@ export function ChatView({
       title={title}
       subtitle={headerSubtitle}
       backHref={backHref}
-      trailing={
-        isRoom && onLeaveRoom ? (
-          <button
-            type="button"
-            onClick={() => void onLeaveRoom(participantCount ?? 1)}
-            className="rounded-full px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-          >
-            Выйти
-          </button>
-        ) : undefined
-      }
+      trailing={headerTrailing}
     >
+      {showClearConfirm && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 px-6">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-4">
+            <p className="text-sm text-gray-800">
+              Удалить всю историю переписки с {title}? Это нельзя отменить. У собеседника история
+              останется.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleClearChat()}
+                className="flex-1 rounded-xl bg-red-600 text-white py-2.5 text-sm font-semibold"
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         ref={listRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-contain"
+        className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-contain relative"
         style={{
           backgroundColor: "#eceff1",
           backgroundImage:
@@ -249,7 +564,7 @@ export function ChatView({
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {messages.length === 0 && (
+        {messages.length === 0 && isRoom && (
           <div
             className="max-w-md"
             style={{
@@ -260,90 +575,55 @@ export function ChatView({
             <div className="rounded-2xl border border-amber-200/80 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 shadow-sm">
               <p className="font-medium">Сообщения не сохраняются на сервере</p>
               <p className="text-xs mt-1 text-amber-800/80">
-                История недоступна после перезагрузки страницы.
+                История комнаты недоступна после выхода или перезагрузки.
               </p>
             </div>
           </div>
         )}
-        {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
+        {messages.length === 0 && !isRoom && persistDm && (
+          <div
+            className="max-w-md"
+            style={{
+              marginLeft: "max(0.75rem, env(safe-area-inset-left))",
+              marginRight: "max(0.75rem, env(safe-area-inset-right))",
+            }}
+          >
+            <div className="rounded-2xl border border-sky-200/80 bg-sky-50/95 px-4 py-3 text-sm text-sky-900 shadow-sm">
+              <p className="font-medium">Переписка хранится на этом устройстве</p>
+              <p className="text-xs mt-1 text-sky-800/80">Зашифровано вашим PIN. Сервер не хранит текст.</p>
+            </div>
+          </div>
+        )}
+        {messages.map((m, index) => (
+          <MessageBubble
+            key={m.id}
+            message={m}
+            onRetry={(id) => void handleRetry(id)}
+            onReply={setReplyTo}
+            onQuoteClick={scrollToMessage}
+            quoteAvailable={!m.plain?.quotedMessageId || messageIds.has(m.plain.quotedMessageId)}
+            showSender={shouldShowSender(index)}
+            senderLabel={m.fromPhone ? labelForPhone(m.fromPhone) : undefined}
+            senderColor={m.fromPhone ? senderColorClass(m.fromPhone) : undefined}
+          />
         ))}
         <div ref={bottomRef} className="h-1" />
       </div>
 
-      <div
-        className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur"
-        style={{
-          paddingTop: "0.625rem",
-          paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))",
-          paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
-          paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+      <ChatComposer
+        text={text}
+        onTextChange={setText}
+        onSend={() => void handleSend()}
+        onFile={(f) => void handleFile(f)}
+        canSend={text.trim().length > 0}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+        onFocus={() => {
+          window.setTimeout(() => {
+            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+          }, 300);
         }}
-      >
-        {text.length > 3500 && (
-          <p className="text-xs text-amber-600 px-1 mb-1.5">
-            {text.length}/{MAX_TEXT_LENGTH}
-          </p>
-        )}
-        <div className="flex items-end gap-2 min-w-0 max-w-full">
-          <label
-            className="mb-0.5 flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-            aria-label="Прикрепить файл"
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
-              />
-            </svg>
-            <input
-              type="file"
-              accept="image/*,.pdf"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleFile(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT_LENGTH))}
-            rows={1}
-            placeholder="Сообщение"
-            className="min-w-0 flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-base leading-snug max-h-32 focus:outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
-            style={{ fontSize: "16px" }}
-            onFocus={() => {
-              window.setTimeout(() => {
-                bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-              }, 300);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void handleSend();
-              }
-            }}
-          />
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={() => void handleSend()}
-            aria-label="Отправить"
-            className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
-              canSend
-                ? "bg-sky-600 text-white hover:bg-sky-700"
-                : "bg-gray-200 text-gray-400"
-            }`}
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
-              <path d="M3.4 20.4 21 12 3.4 3.6 3 11l8 1-8 1z" />
-            </svg>
-          </button>
-        </div>
-      </div>
+      />
     </MessengerShell>
   );
 }
