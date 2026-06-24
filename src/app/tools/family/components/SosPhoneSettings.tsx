@@ -38,9 +38,9 @@ export function SosPhoneSettings({ session, sosPhone, onSaved }: Props) {
   }
 
   return (
-    <div className="space-y-2 rounded-xl border border-gray-200 p-4">
-      <p className="text-sm font-medium text-gray-800">Доверенный номер SOS</p>
-      <p className="text-xs text-gray-500 leading-relaxed">
+    <div className="space-y-1.5 rounded-lg border border-gray-200 p-3">
+      <p className="text-xs font-medium text-gray-800">Доверенный номер SOS</p>
+      <p className="text-[11px] text-gray-500 leading-relaxed">
         Участник нажимает кнопку SOS и сразу звонит на этот номер. Указывает только создатель семьи.
       </p>
       <input
@@ -59,7 +59,7 @@ export function SosPhoneSettings({ session, sosPhone, onSaved }: Props) {
         type="button"
         onClick={handleSave}
         disabled={loading}
-        className="w-full rounded-lg bg-gray-900 text-white py-2 text-sm font-medium disabled:opacity-50"
+        className="w-full rounded-lg bg-gray-900 text-white py-2 text-xs font-medium disabled:opacity-50"
       >
         {loading ? "Сохранение…" : "Сохранить номер"}
       </button>

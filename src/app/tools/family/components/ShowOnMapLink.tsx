@@ -11,7 +11,7 @@ export function ShowOnMapLink({ href }: Props) {
     <Link
       href={href}
       onClick={(e) => e.stopPropagation()}
-      className="shrink-0 inline-flex items-center min-h-[44px] text-[11px] sm:text-xs text-sky-600 underline whitespace-nowrap py-2 pl-2 pr-3 self-center touch-manipulation"
+      className="shrink-0 inline-flex items-center min-h-[40px] text-[10px] text-sky-600 underline whitespace-nowrap py-1.5 pl-1.5 pr-2 self-center touch-manipulation"
     >
       На карте
     </Link>

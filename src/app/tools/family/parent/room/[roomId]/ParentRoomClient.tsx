@@ -214,17 +214,18 @@ export function ParentRoomClient({ roomId }: Props) {
         />
       }
     >
-      <div className="flex flex-col min-h-full pb-8">
-        <div className="p-4 flex gap-2">
+      <div className="flex flex-col min-h-full min-w-0 max-w-full pb-8">
+        <div className="px-3 grid grid-cols-[minmax(0,1fr)_auto] gap-1.5 min-w-0 w-full">
           <Link
             href="/tools/family/parent/scan"
-            className="flex-1 rounded-xl bg-gray-900 text-white py-2.5 text-center text-sm font-semibold"
+            className="min-w-0 rounded-lg bg-gray-900 text-white py-2 px-2 text-center text-xs font-medium touch-manipulation active:opacity-90"
           >
-            + Добавить участника
+            <span className="sm:hidden">+ Участник</span>
+            <span className="hidden sm:inline">+ Добавить участника</span>
           </Link>
           <Link
             href={`/tools/family/parent/map/${roomId}${selectedChildId ? `?member=${selectedChildId}` : ""}`}
-            className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold"
+            className="shrink-0 rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-medium touch-manipulation active:bg-gray-50"
           >
             Карта
           </Link>
@@ -239,8 +240,8 @@ export function ParentRoomClient({ roomId }: Props) {
           onShareWithParents={(v) => void handleShareToggle("parents", v)}
         />
 
-        <div className="px-4 pb-4">
-          <div className="rounded-xl overflow-hidden border border-gray-200 h-48">
+        <div className="px-3 pb-3">
+          <div className="rounded-lg overflow-hidden border border-gray-200 h-40">
             <MiniMap
               locations={locations}
               members={mapMembers}
@@ -282,7 +283,7 @@ export function ParentRoomClient({ roomId }: Props) {
         />
 
         {showSettings && session && (
-          <div className="p-4 space-y-4 border-t border-gray-100">
+          <div className="p-3 space-y-3 border-t border-gray-100">
             {isOwner && (
               <SosPhoneSettings
                 session={session}
@@ -296,11 +297,11 @@ export function ParentRoomClient({ roomId }: Props) {
               onLinked={() => void poll()}
             />
             {isOwner ? (
-              <button type="button" onClick={handleDeleteRoom} className="w-full text-sm text-red-600 underline">
+              <button type="button" onClick={handleDeleteRoom} className="w-full text-xs text-red-600 underline">
                 Удалить семью
               </button>
             ) : (
-              <button type="button" onClick={handleLeaveFamily} className="w-full text-sm text-red-600 underline">
+              <button type="button" onClick={handleLeaveFamily} className="w-full text-xs text-red-600 underline">
                 Покинуть семью
               </button>
             )}
@@ -310,7 +311,7 @@ export function ParentRoomClient({ roomId }: Props) {
                 clearParentSession();
                 router.replace("/tools/family");
               }}
-              className="w-full rounded-xl border border-gray-200 py-2 text-sm"
+              className="w-full rounded-lg border border-gray-200 py-1.5 text-xs"
             >
               Выйти с устройства
             </button>

@@ -69,33 +69,33 @@ export function ParentScanClient() {
 
   return (
     <FamilyShell title="Добавить участника" subtitle="Сканируйте QR с устройства участника" backHref={backHref}>
-      <div className="p-4 space-y-4">
-        <p className="text-sm text-gray-600">
+      <div className="p-3 space-y-3">
+        <p className="text-[11px] text-gray-600 leading-relaxed">
           Попросите участника открыть приложение и показать QR. Отсканируйте его здесь.
         </p>
-        <Link href={scanHref} className="block text-center text-sm text-sky-600 underline">
+        <Link href={scanHref} className="block text-center text-[11px] text-sky-600 underline">
           Открыть сканер QR
         </Link>
         <input
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Токен из QR"
-          className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-mono text-xs"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-mono"
         />
         <input
           value={childName}
           onChange={(e) => setChildName(e.target.value)}
           placeholder="Имя участника (необязательно)"
-          className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
         <MemberTypeSelect value={memberType} onChange={setMemberType} />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && <p className="text-sm text-emerald-600">{success}</p>}
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        {success && <p className="text-xs text-emerald-600">{success}</p>}
         <button
           type="button"
           onClick={handleAdopt}
           disabled={loading}
-          className="w-full rounded-xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
+          className="w-full rounded-lg bg-gray-900 text-white py-2 text-xs font-medium disabled:opacity-50"
         >
           {loading ? "Добавление…" : "Добавить в семью"}
         </button>

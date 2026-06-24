@@ -32,7 +32,7 @@ export function ChildrenList({
 
   if (children.length === 0) {
     return (
-      <p className="px-4 py-6 text-sm text-gray-500 text-center">
+      <p className="px-3 py-4 text-[11px] text-gray-500 text-center leading-relaxed">
         Пока нет привязанных участников. Нажмите «Добавить участника» и отсканируйте QR с его устройства.
       </p>
     );
@@ -40,7 +40,7 @@ export function ChildrenList({
 
   return (
     <div>
-      <p className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Участники:</p>
+      <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Участники:</p>
       <ul className="divide-y divide-gray-100">
         {children.map((child) => {
           const loc = locMap.get(child.memberId);
@@ -51,25 +51,25 @@ export function ChildrenList({
           return (
             <li key={child.memberId}>
               <div
-                className={`flex items-stretch min-h-[3.25rem] ${isSelected ? "bg-sky-50" : ""}`}
+                className={`flex items-stretch min-h-[2.75rem] ${isSelected ? "bg-sky-50" : ""}`}
               >
                 <button
                   type="button"
                   onClick={() => onSelect(child.memberId)}
-                  className="flex-1 min-w-0 flex items-center justify-between gap-2 py-2.5 px-4 text-left hover:bg-gray-50 active:bg-gray-50 transition-colors touch-manipulation"
+                  className="flex-1 min-w-0 flex items-center justify-between gap-2 py-2 px-3 text-left hover:bg-gray-50 active:bg-gray-50 transition-colors touch-manipulation"
                 >
                   <div className="min-w-0">
-                    <p className="font-medium truncate">
+                    <p className="text-xs font-medium truncate">
                       {child.name}
                       {sosState?.active && (
-                        <span className="ml-2 text-xs font-bold text-red-600 uppercase">SOS</span>
+                        <span className="ml-1.5 text-[10px] font-bold text-red-600 uppercase">SOS</span>
                       )}
                     </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
+                    <p className="text-[11px] text-gray-400 mt-0.5">
                       {MEMBER_TYPE_LABELS[normalizeMemberType(child.memberType)]}
                     </p>
                     {loc && sharesLocation ? (
-                      <p className="text-xs text-gray-400 mt-0.5">
+                      <p className="text-[11px] text-gray-400 mt-0.5">
                         Обновлено {new Date(loc.updatedAt).toLocaleTimeString("ru-RU")}
                       </p>
                     ) : null}
@@ -85,7 +85,7 @@ export function ChildrenList({
                 {mapHref && <ShowOnMapLink href={mapHref} />}
               </div>
               {(onClearSos && sosState?.active) || onRemove ? (
-                <div className="px-4 pb-2 flex gap-3">
+                <div className="px-3 pb-1.5 flex gap-3">
                   {sosState?.active && onClearSos && (
                     <button
                       type="button"

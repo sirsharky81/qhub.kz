@@ -21,25 +21,25 @@ export function FamilyShell({ title, subtitle, backHref, trailing, children, ful
         } bg-white shadow-sm md:border-x border-gray-200/70`}
       >
         <header
-          className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-2.5 flex items-center gap-2 shrink-0 pt-[max(0.625rem,env(safe-area-inset-top))]"
+          className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur px-3 py-2 flex items-center gap-1.5 shrink-0 pt-[max(0.5rem,env(safe-area-inset-top))]"
           style={{
-            paddingLeft: "max(1rem, env(safe-area-inset-left))",
-            paddingRight: "max(1rem, env(safe-area-inset-right))",
+            paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+            paddingRight: "max(0.75rem, env(safe-area-inset-right))",
           }}
         >
           {backHref && (
             <Link
               href={backHref}
-              className="flex h-10 w-10 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-100 shrink-0 touch-manipulation"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-100 shrink-0 touch-manipulation text-sm"
               aria-label="Назад"
             >
               ←
             </Link>
           )}
           <div className="min-w-0 flex-1">
-            <h1 className="text-base font-semibold truncate leading-tight">{title}</h1>
+            <h1 className="text-sm font-semibold truncate leading-tight">{title}</h1>
             {subtitle && (
-              <p className="text-xs text-gray-500 truncate leading-snug mt-0.5">{subtitle}</p>
+              <p className="text-[11px] text-gray-500 truncate leading-snug mt-0.5">{subtitle}</p>
             )}
           </div>
           {trailing}

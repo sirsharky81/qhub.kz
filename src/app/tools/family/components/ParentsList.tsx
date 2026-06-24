@@ -32,7 +32,7 @@ export function ParentsList({
 
   return (
     <div className="mt-2">
-      <p className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Родители:</p>
+      <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Родители:</p>
       <ul className="divide-y divide-gray-100">
         {parents.map((parent) => {
           const isSelected = selectedId === parent.memberId;
@@ -42,17 +42,17 @@ export function ParentsList({
             <>
               <div className="flex items-center justify-between gap-3 min-w-0 flex-1">
                 <div className="min-w-0">
-                  <p className="font-medium truncate">
+                  <p className="text-xs font-medium truncate">
                     {parent.name}
                     {parent.isCreator && (
-                      <span className="ml-2 text-xs font-normal text-gray-400">создатель</span>
+                      <span className="ml-1.5 text-[10px] font-normal text-gray-400">создатель</span>
                     )}
                   </p>
                   {showSharingStatus && parent.shareLocationWithChildren && (
-                    <p className="text-xs text-emerald-600 mt-0.5">На карте</p>
+                    <p className="text-[11px] text-emerald-600 mt-0.5">На карте</p>
                   )}
                   {showSharingStatus && !parent.shareLocationWithChildren && (
-                    <p className="text-xs text-gray-400 mt-0.5">Геопозиция скрыта</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">Геопозиция скрыта</p>
                   )}
                 </div>
                 {canRemoveParent && !parent.isCreator && onRemoveParent && (
@@ -62,7 +62,7 @@ export function ParentsList({
                       e.stopPropagation();
                       onRemoveParent(parent.memberId);
                     }}
-                    className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 active:bg-red-50 text-lg leading-none touch-manipulation"
+                    className="shrink-0 w-8 h-8 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 active:bg-red-50 text-base leading-none touch-manipulation"
                     aria-label={`Удалить ${parent.name}`}
                   >
                     ×
@@ -73,17 +73,17 @@ export function ParentsList({
           );
 
           const rowWithMap = (
-            <div className={`flex items-stretch min-h-[3.25rem] ${isSelected ? "bg-sky-50" : ""}`}>
+            <div className={`flex items-stretch min-h-[2.75rem] ${isSelected ? "bg-sky-50" : ""}`}>
               {onSelect && selectable ? (
                 <button
                   type="button"
                   onClick={() => onSelect(parent.memberId)}
-                  className="flex-1 min-w-0 py-2.5 px-4 text-left hover:bg-gray-50 active:bg-gray-50 transition-colors touch-manipulation"
+                  className="flex-1 min-w-0 py-2 px-3 text-left hover:bg-gray-50 active:bg-gray-50 transition-colors touch-manipulation"
                 >
                   {row}
                 </button>
               ) : (
-                <div className={`flex-1 py-2.5 px-4 ${!selectable && onSelect ? "opacity-70" : ""}`}>
+                <div className={`flex-1 py-2 px-3 ${!selectable && onSelect ? "opacity-70" : ""}`}>
                   {row}
                 </div>
               )}
@@ -97,9 +97,9 @@ export function ParentsList({
           <li>
             <a
               href={inviteHref}
-              className="flex items-center gap-2 py-2.5 px-4 text-sm font-medium text-sky-700 hover:bg-sky-50 active:bg-sky-50 min-h-[44px] touch-manipulation"
+              className="flex items-center gap-1.5 py-2 px-3 text-xs font-medium text-sky-700 hover:bg-sky-50 active:bg-sky-50 min-h-[40px] touch-manipulation"
             >
-              <span className="text-lg leading-none">+</span>
+              <span className="text-sm leading-none">+</span>
               Пригласить второго родителя
             </a>
           </li>

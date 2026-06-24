@@ -76,37 +76,37 @@ function JoinInner() {
 
   return (
     <FamilyShell title="Присоединиться" subtitle="Второй родитель в семье" backHref="/tools/family">
-      <div className="p-4 space-y-4">
-        <p className="text-sm text-gray-600 leading-relaxed">
+      <div className="p-3 space-y-3">
+        <p className="text-[11px] text-gray-600 leading-relaxed">
           Попросите создателя семьи отправить вам QR или ссылку-приглашение. После присоединения у вас будет
           такой же доступ к карте и участникам, как у создателя.
         </p>
-        <label className="block text-sm font-medium text-gray-700">Ваше имя</label>
+        <label className="block text-xs font-medium text-gray-700">Ваше имя</label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Как вас называть в семье"
-          className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
-        <Link href={scanHref} className="block text-center text-sm text-sky-600 underline">
+        <Link href={scanHref} className="block text-center text-[11px] text-sky-600 underline">
           Открыть сканер QR
         </Link>
         <input
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Код из приглашения"
-          className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-mono text-xs"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-mono"
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-xs text-red-600">{error}</p>}
         <button
           type="button"
           onClick={handleJoin}
           disabled={loading}
-          className="w-full rounded-xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
+          className="w-full rounded-lg bg-gray-900 text-white py-2 text-xs font-medium disabled:opacity-50"
         >
           {loading ? "Присоединение…" : "Войти в семью"}
         </button>
-        <Link href="/tools/family/parent" className="block text-center text-sm text-gray-500 underline">
+        <Link href="/tools/family/parent" className="block text-center text-xs text-gray-500 underline">
           Создать свою семью
         </Link>
       </div>

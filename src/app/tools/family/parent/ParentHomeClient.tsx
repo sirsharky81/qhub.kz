@@ -7,6 +7,11 @@ import { FamilyShell } from "../components/FamilyShell";
 import { createFamilyRoomApi } from "@/lib/family/client";
 import { clearParentSession, loadParentSession, saveParentSession } from "@/lib/family/session";
 
+const inputClass = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm";
+const btnPrimary = "w-full rounded-lg bg-gray-900 text-white py-2 text-xs font-medium disabled:opacity-50";
+const btnSecondary =
+  "block w-full rounded-lg border border-gray-200 py-2 text-center text-xs font-medium";
+
 export function ParentHomeClient() {
   const router = useRouter();
   const [name, setName] = useState("Семья");
@@ -36,34 +41,26 @@ export function ParentHomeClient() {
 
   return (
     <FamilyShell title="Родитель" subtitle="Создайте семейную комнату" backHref="/tools/family">
-      <div className="p-4 space-y-4">
-        <label className="block text-sm font-medium text-gray-700">Ваше имя</label>
+      <div className="p-3 space-y-3">
+        <label className="block text-xs font-medium text-gray-700">Ваше имя</label>
         <input
           value={parentName}
           onChange={(e) => setParentName(e.target.value)}
-          className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm"
+          className={inputClass}
           placeholder="Родитель"
         />
-        <label className="block text-sm font-medium text-gray-700">Название семьи</label>
+        <label className="block text-xs font-medium text-gray-700">Название семьи</label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm"
+          className={inputClass}
           placeholder="Семья"
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="button"
-          onClick={handleCreate}
-          disabled={loading}
-          className="w-full rounded-xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
-        >
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <button type="button" onClick={handleCreate} disabled={loading} className={btnPrimary}>
           {loading ? "Создание…" : "Создать семью"}
         </button>
-        <Link
-          href="/tools/family/parent/join"
-          className="block w-full rounded-xl border border-gray-200 py-3 text-center text-sm font-semibold"
-        >
+        <Link href="/tools/family/parent/join" className={btnSecondary}>
           Присоединиться по приглашению
         </Link>
         <button
@@ -72,7 +69,7 @@ export function ParentHomeClient() {
             clearParentSession();
             router.replace("/tools/family");
           }}
-          className="w-full text-sm text-gray-500 underline"
+          className="w-full text-xs text-gray-500 underline"
         >
           Назад к выбору роли
         </button>

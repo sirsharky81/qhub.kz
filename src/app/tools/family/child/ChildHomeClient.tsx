@@ -235,28 +235,28 @@ export function ChildHomeClient() {
   if (view === "onboarding") {
     return (
       <FamilyShell title="Участник" subtitle="Созависимое лицо" backHref="/tools/family">
-        <div className="p-4 space-y-4">
-          <p className="text-sm text-gray-600">
+        <div className="p-3 space-y-3">
+          <p className="text-[11px] text-gray-600 leading-relaxed">
             Введите имя и покажите QR родителю. После сканирования вы будете привязаны к семье.
           </p>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ваше имя"
-            className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
           />
-          {geoError && <p className="text-sm text-red-600">{geoError}</p>}
+          {geoError && <p className="text-xs text-red-600">{geoError}</p>}
           <button
             type="button"
             onClick={handleStartPairing}
             disabled={loading}
-            className="w-full rounded-xl bg-rose-600 text-white py-3 text-sm font-semibold disabled:opacity-50"
+            className="w-full rounded-lg bg-rose-600 text-white py-2 text-xs font-medium disabled:opacity-50"
           >
             {loading ? "Создание QR…" : "Показать QR для родителя"}
           </button>
           <a
             href="/tools/family-child/manifest.json"
-            className="block text-center text-xs text-sky-600 underline"
+            className="block text-center text-[11px] text-sky-600 underline"
           >
             Установить как отдельное приложение (PWA)
           </a>
@@ -274,8 +274,8 @@ export function ChildHomeClient() {
     return (
       <FamilyShell title="Ожидание" subtitle="Покажите QR родителю" backHref="/tools/family">
         <ChildPairQr qrUrl={qrUrl} childName={pairing.name} />
-        <p className="text-center text-sm text-gray-500 pb-8 animate-pulse">Ожидание привязки…</p>
-        {geoError && <p className="text-sm text-red-600 text-center px-4">{geoError}</p>}
+        <p className="text-center text-[11px] text-gray-500 pb-6 animate-pulse">Ожидание привязки…</p>
+        {geoError && <p className="text-xs text-red-600 text-center px-3">{geoError}</p>}
       </FamilyShell>
     );
   }
@@ -283,9 +283,9 @@ export function ChildHomeClient() {
   return (
     <FamilyShell title={session?.roomName ?? "Семья"} subtitle="Участник" backHref="/tools/family">
       <div className="flex flex-col min-h-full pb-6">
-        <div className="p-4 space-y-3">
-          {geoError && <p className="text-xs text-red-600">{geoError}</p>}
-          <div className="rounded-xl overflow-hidden border border-gray-200 h-40">
+        <div className="p-3 space-y-2">
+          {geoError && <p className="text-[11px] text-red-600">{geoError}</p>}
+          <div className="rounded-lg overflow-hidden border border-gray-200 h-36">
             {mapLocations.length > 0 ? (
               <MiniMap
                 locations={mapLocations}
@@ -296,7 +296,7 @@ export function ChildHomeClient() {
                 parentMemberIds={parents.map((p) => p.memberId)}
               />
             ) : (
-              <div className="h-full flex items-center justify-center text-sm text-gray-500 text-center px-4">
+              <div className="h-full flex items-center justify-center text-[11px] text-gray-500 text-center px-3">
                 {shareWithParents ? "Ожидание GPS…" : "Геопозиция скрыта от родителей"}
               </div>
             )}
@@ -337,7 +337,7 @@ export function ChildHomeClient() {
           />
         </div>
 
-        <div className="mx-4 mt-2 space-y-3 rounded-xl border border-gray-200 bg-gray-50/80 p-3 pb-4">
+        <div className="mx-3 mt-1 space-y-2 rounded-lg border border-gray-200 bg-gray-50/80 p-2.5 pb-3">
           <EmergencyCallButton phone={sosPhone} />
           <button
             type="button"
@@ -347,7 +347,7 @@ export function ChildHomeClient() {
               setView("onboarding");
               router.replace("/tools/family");
             }}
-            className="w-full text-sm text-gray-500 underline"
+            className="w-full text-xs text-gray-500 underline"
           >
             Выйти
           </button>

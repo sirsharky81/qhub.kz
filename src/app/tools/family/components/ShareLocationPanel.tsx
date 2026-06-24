@@ -10,10 +10,10 @@ interface ToggleProps {
 
 function LocationToggle({ label, hint, enabled, loading, onChange }: ToggleProps) {
   return (
-    <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 min-w-0">
-      <div className="min-w-0 flex-1 pr-2">
-        <p className="text-sm font-medium leading-snug">{label}</p>
-        <p className="text-xs text-gray-500 mt-0.5 leading-snug">{hint}</p>
+    <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2 min-w-0">
+      <div className="min-w-0 flex-1 pr-1.5">
+        <p className="text-xs font-medium leading-snug">{label}</p>
+        <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">{hint}</p>
       </div>
       <button
         type="button"
@@ -21,13 +21,13 @@ function LocationToggle({ label, hint, enabled, loading, onChange }: ToggleProps
         aria-checked={enabled}
         disabled={loading}
         onClick={() => onChange(!enabled)}
-        className={`relative inline-flex h-7 w-12 shrink-0 rounded-full transition-colors ${
+        className={`relative inline-flex h-6 w-10 shrink-0 rounded-full transition-colors ${
           enabled ? "bg-emerald-500" : "bg-gray-200"
         } disabled:opacity-50`}
       >
         <span
-          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform mt-1 ${
-            enabled ? "translate-x-6" : "translate-x-1"
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform mt-1 ${
+            enabled ? "translate-x-5" : "translate-x-1"
           }`}
         />
       </button>
@@ -53,7 +53,7 @@ export function ShareLocationPanel({
   onShareWithParents,
 }: Props) {
   return (
-    <div className="px-4 pb-2 space-y-2">
+    <div className="px-3 pb-1.5 space-y-1.5">
       <LocationToggle
         label="Для участников"
         hint="Участники увидят вас на карте"

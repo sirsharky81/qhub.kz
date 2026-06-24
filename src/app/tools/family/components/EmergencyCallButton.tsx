@@ -16,7 +16,7 @@ export function EmergencyCallButton({ phone }: Props) {
   return (
     <a
       href={`tel:${phone}`}
-      className="flex w-full min-h-[48px] items-center justify-center gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm font-semibold text-red-700 active:bg-red-100 touch-manipulation"
+      className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 active:bg-red-100 touch-manipulation"
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-600 text-white text-[11px] font-bold">
         SOS
