@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { SettingsHeaderLink } from "@/components/SettingsHeaderButton";
 import { MessengerShell } from "../components/MessengerShell";
 import { fetchAccessCheck, logoutMessenger } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
@@ -91,13 +92,7 @@ export function MessengerHomeClient() {
       backHref="/"
       trailing={
         <div className="flex items-center gap-2">
-          <Link
-            href="/tools/messenger/settings"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
-            aria-label="Настройки"
-          >
-            ⚙
-          </Link>
+          <SettingsHeaderLink href="/tools/messenger/settings" />
           <button type="button" onClick={() => void handleLogout()} className="text-xs text-gray-500">
             Выйти
           </button>

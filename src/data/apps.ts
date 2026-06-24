@@ -275,6 +275,21 @@ export const apps: App[] = [
     sortOrder: 50,
   },
   {
+    id: "family",
+    title: "Семья",
+    description: "Геолокация детей и SOS: режим родителя и участника.",
+    longDescription:
+      "Родитель создаёт семью и сканирует QR с устройства ребёнка. Участник передаёт геолокацию и может отправить SOS. Координаты на сервере не дольше 24 часов.",
+    href: "/tools/family",
+    tags: ["lifestyle", "tools"],
+    icon: "👨‍👩‍👧",
+    color: "from-rose-500/10 to-rose-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    beta: true,
+    sortOrder: 51,
+  },
+  {
     id: "deposit-calculator",
     title: "Калькулятор депозита",
     description: "Считайте доходность депозитов с учётом ГФСС и капитализации.",
