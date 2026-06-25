@@ -2,9 +2,31 @@
 
 import { useEffect, useState } from "react";
 
-/** Space covered by the virtual keyboard from the bottom of the layout viewport. */
-export function useKeyboardInset(enabled: boolean): number {
-  const [inset, setInset] = useState(0);
+export interface ChatViewportLayout {
+  top: number;
+  height: number;
+  keyboardOpen: boolean;
+}
+
+const KEYBOARD_OPEN_DELTA_PX = 80;
+
+function readViewportLayout(): ChatViewportLayout {
+  if (typeof window === "undefined") {
+    return { top: 0, height: 0, keyboardOpen: false };
+  }
+  const vv = window.visualViewport;
+  const height = Math.round(vv?.height ?? window.innerHeight);
+  const top = Math.max(0, Math.round(vv?.offsetTop ?? 0));
+  return {
+    top,
+    height,
+    keyboardOpen: height < window.innerHeight - KEYBOARD_OPEN_DELTA_PX,
+  };
+}
+
+/** Tracks the visible viewport on iOS — keeps header pinned when the keyboard opens. */
+export function useChatViewportLayout(enabled: boolean): ChatViewportLayout {
+  const [layout, setLayout] = useState<ChatViewportLayout>(readViewportLayout);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
@@ -17,8 +39,7 @@ export function useKeyboardInset(enabled: boolean): number {
     const update = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        const next = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-        setInset(next);
+        setLayout(readViewportLayout());
       });
     };
 
@@ -31,7 +52,7 @@ export function useKeyboardInset(enabled: boolean): number {
     };
   }, [enabled]);
 
-  return inset;
+  return layout;
 }
 
 export function scrollChatListToBottom(listEl: HTMLElement | null): void {

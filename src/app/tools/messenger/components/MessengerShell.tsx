@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useKeyboardInset } from "@/lib/messenger/use-visual-viewport";
+import { useChatViewportLayout } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -14,7 +14,7 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
-  /** Lift content above the iOS virtual keyboard; keeps header fixed at the top. */
+  /** Pin header and resize chat area when the iOS keyboard opens. */
   keyboardAware?: boolean;
 }
 
@@ -23,6 +23,31 @@ const SHELL_WIDTH: Record<ShellVariant, string | undefined> = {
   app: "max-w-lg",
   chat: "max-w-2xl",
 };
+
+function lockDocumentScroll() {
+  const scrollY = window.scrollY;
+  const html = document.documentElement;
+  const body = document.body;
+
+  html.style.overflow = "hidden";
+  body.style.overflow = "hidden";
+  body.style.position = "fixed";
+  body.style.top = `-${scrollY}px`;
+  body.style.left = "0";
+  body.style.right = "0";
+  body.style.width = "100%";
+
+  return () => {
+    body.style.position = "";
+    body.style.top = "";
+    body.style.left = "";
+    body.style.right = "";
+    body.style.width = "";
+    body.style.overflow = "";
+    html.style.overflow = "";
+    window.scrollTo(0, scrollY);
+  };
+}
 
 export function MessengerShell({
   title,
@@ -37,54 +62,107 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
-  const keyboardInset = useKeyboardInset(trackKeyboard);
+  const viewport = useChatViewportLayout(trackKeyboard);
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
   useEffect(() => {
     if (!trackKeyboard) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
+    return lockDocumentScroll();
   }, [trackKeyboard]);
+
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+
+    const measure = () => setHeaderHeight(el.offsetHeight);
+    measure();
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [trackKeyboard, title, subtitle, trailing]);
+
+  const headerInner = (
+    <>
+      {backHref && (
+        <Link
+          href={backHref}
+          className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 shrink-0"
+          aria-label="Назад"
+        >
+          ←
+        </Link>
+      )}
+      <div className="flex-1 min-w-0">
+        <h1 className="text-base font-semibold truncate">{title}</h1>
+        {subtitle && <div className="text-xs text-gray-500 mt-0.5">{subtitle}</div>}
+      </div>
+      {trailing && <div className="shrink-0">{trailing}</div>}
+    </>
+  );
+
+  if (trackKeyboard) {
+    const effectiveHeaderH = headerHeight > 0 ? headerHeight : 64;
+    const contentTop = viewport.top + effectiveHeaderH;
+    const contentHeight = Math.max(0, viewport.height - effectiveHeaderH);
+
+    return (
+      <div className={`text-gray-900 ${framed ? "bg-slate-200/60" : "bg-slate-50"}`}>
+        <header
+          ref={headerRef}
+          className="fixed inset-x-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur"
+          style={{ top: viewport.top }}
+        >
+          <div
+            className={`mx-auto flex w-full min-w-0 items-center gap-3 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] ${widthClass ?? ""}`}
+            style={{
+              paddingLeft: "max(1rem, env(safe-area-inset-left))",
+              paddingRight: "max(1rem, env(safe-area-inset-right))",
+            }}
+          >
+            {headerInner}
+          </div>
+        </header>
+
+        <div
+          className="fixed inset-x-0 z-40 overflow-hidden"
+          style={{ top: contentTop, height: contentHeight }}
+        >
+          <div
+            className={`mx-auto flex h-full max-h-full w-full min-w-0 flex-col overflow-hidden ${
+              widthClass ?? ""
+            } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
+          >
+            <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
-      className={`flex flex-col overflow-hidden text-gray-900 ${
-        trackKeyboard
-          ? "fixed inset-x-0 top-0 z-40 h-[100dvh] max-h-[100dvh]"
-          : "min-h-[100dvh] max-h-[100dvh]"
-      } ${framed ? "bg-slate-200/60" : "bg-slate-50"}`}
-      style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
+      className={`flex min-h-[100dvh] max-h-[100dvh] flex-col overflow-hidden text-gray-900 ${
+        framed ? "bg-slate-200/60" : "bg-slate-50"
+      }`}
     >
       <div
-        className={`flex flex-col h-full max-h-full w-full min-w-0 mx-auto overflow-hidden ${
+        className={`mx-auto flex h-full max-h-full w-full min-w-0 flex-col overflow-hidden ${
           widthClass ?? ""
         } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
       >
         <header
+          ref={headerRef}
           className="z-10 shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
           style={{
             paddingLeft: "max(1rem, env(safe-area-inset-left))",
             paddingRight: "max(1rem, env(safe-area-inset-right))",
           }}
         >
-          {backHref && (
-            <Link
-              href={backHref}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 shrink-0"
-              aria-label="Назад"
-            >
-              ←
-            </Link>
-          )}
-          <div className="flex-1 min-w-0">
-            <h1 className="text-base font-semibold truncate">{title}</h1>
-            {subtitle && <div className="text-xs text-gray-500 mt-0.5">{subtitle}</div>}
-          </div>
-          {trailing && <div className="shrink-0">{trailing}</div>}
+          {headerInner}
         </header>
-        <main className="relative flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">{children}</main>
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
       </div>
     </div>
   );

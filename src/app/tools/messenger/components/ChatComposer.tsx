@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
-import { useKeyboardInset } from "@/lib/messenger/use-visual-viewport";
+import { useChatViewportLayout } from "@/lib/messenger/use-visual-viewport";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import {
   canRecordMedia,
@@ -62,7 +62,7 @@ export function ChatComposer({
   const [startingMode, setStartingMode] = useState<RecordMode>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
-  const keyboardInset = useKeyboardInset(true);
+  const { keyboardOpen } = useChatViewportLayout(true);
   const trimmed = text.trim();
   const showMediaButtons = !trimmed && !recordMode && !startingMode;
 
@@ -156,7 +156,7 @@ export function ChatComposer({
       style={{
         paddingTop: "0.625rem",
         paddingBottom:
-          keyboardInset > 0 ? "0.625rem" : "max(0.625rem, env(safe-area-inset-bottom))",
+          keyboardOpen ? "0.625rem" : "max(0.625rem, env(safe-area-inset-bottom))",
         paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
         paddingRight: "max(0.75rem, env(safe-area-inset-right))",
       }}
