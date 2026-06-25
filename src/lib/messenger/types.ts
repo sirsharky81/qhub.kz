@@ -37,7 +37,7 @@ export interface MessengerProfile {
   updatedAt: number;
 }
 
-export type MessageType = "text" | "image" | "file";
+export type MessageType = "text" | "image" | "file" | "audio" | "video";
 
 export interface EncryptedMessagePayload {
   id: string;

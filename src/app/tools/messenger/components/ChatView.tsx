@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChatComposer } from "./ChatComposer";
+import { ChatComposer, type MediaSendPayload } from "./ChatComposer";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { MessageBubble, type DisplayMessage } from "./MessageBubble";
 import { MessengerShell } from "./MessengerShell";
@@ -378,7 +378,14 @@ export function ChatView({
   const buildPlain = useCallback(
     (base: PlainMessage): PlainMessage => {
       if (!replyTo?.plain) return base;
-      const preview = truncateQuote(messagePreview({ ...base, text: base.text ?? replyTo.plain?.text }));
+      const preview = truncateQuote(
+        messagePreview({
+          ...base,
+          text: base.text ?? replyTo.plain?.text,
+          type: replyTo.type,
+          mime: replyTo.plain?.mime,
+        }),
+      );
       return {
         ...base,
         quotedMessageId: replyTo.id,
@@ -390,7 +397,7 @@ export function ChatView({
   );
 
   const sendPlain = useCallback(
-    async (type: "text" | "image" | "file", plain: PlainMessage) => {
+    async (type: "text" | "image" | "file" | "audio" | "video", plain: PlainMessage) => {
       const fullPlain = buildPlain(plain);
       const localId = generateMessageId();
       const optimistic: DisplayMessage = {
@@ -452,6 +459,17 @@ export function ChatView({
       data,
       mime: blob.type || file.type,
       filename: file.name,
+    });
+  }
+
+  async function handleSendMedia(payload: MediaSendPayload) {
+    const data = await blobToBase64(payload.blob);
+    await sendPlain(payload.type, {
+      data,
+      mime: payload.mime,
+      durationMs: payload.durationMs,
+      waveformPeaks: payload.waveformPeaks,
+      filename: payload.type === "audio" ? "voice.webm" : "video.webm",
     });
   }
 
@@ -637,6 +655,7 @@ export function ChatView({
         onTextChange={setText}
         onSend={() => void handleSend()}
         onFile={(f) => void handleFile(f)}
+        onSendMedia={(p) => void handleSendMedia(p)}
         canSend={text.trim().length > 0}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}

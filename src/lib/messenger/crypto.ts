@@ -128,6 +128,8 @@ export interface PlainMessage {
   data?: string;
   mime?: string;
   filename?: string;
+  durationMs?: number;
+  waveformPeaks?: number[];
   quotedMessageId?: string;
   quotedAuthor?: string;
   quotedText?: string;

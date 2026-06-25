@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkMessengerRateLimit } from "@/lib/rate-limit";
-import { MAX_RAW_BODY_BYTES, MAX_TEXT_LENGTH } from "@/lib/messenger/constants";
+import { MAX_ENCRYPTED_FILE_BYTES, MAX_MEDIA_RAW_BODY_BYTES, MAX_TEXT_LENGTH } from "@/lib/messenger/constants";
 import { generateMessageId } from "@/lib/messenger/codes";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import type { EncryptedMessagePayload, MessageType, ReceiptPayload } from "@/lib/messenger/types";
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     }
 
     const contentLength = Number(request.headers.get("content-length") ?? "0");
-    if (contentLength > MAX_RAW_BODY_BYTES) {
+    if (contentLength > MAX_MEDIA_RAW_BODY_BYTES) {
       return NextResponse.json({ error: "Слишком большой запрос" }, { status: 413 });
     }
 
@@ -78,8 +78,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Неполные данные" }, { status: 400 });
     }
 
+    const isMedia = type === "audio" || type === "video";
+    const maxCiphertextLen = isMedia ? MAX_MEDIA_RAW_BODY_BYTES : MAX_ENCRYPTED_FILE_BYTES * 2;
+
     if (type === "text" && ciphertext.length > MAX_TEXT_LENGTH * 2) {
       return NextResponse.json({ error: "Сообщение слишком длинное" }, { status: 400 });
+    }
+
+    if (ciphertext.length > maxCiphertextLen) {
+      return NextResponse.json({ error: "Вложение слишком большое" }, { status: 413 });
     }
 
     const msg: EncryptedMessagePayload & { kind: "message" } = {

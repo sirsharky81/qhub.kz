@@ -12,6 +12,8 @@ const MESSENGER_ICON = "/tools/messenger/icon-192.png";
 
 function messagePreview(type: MessageType): string {
   if (type === "image") return "Фото";
+  if (type === "audio") return "Голосовое сообщение";
+  if (type === "video") return "Видео";
   if (type === "file") return "Файл";
   return "Сообщение";
 }

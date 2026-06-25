@@ -4,6 +4,8 @@ import { useCallback, useRef } from "react";
 import type { PlainMessage } from "@/lib/messenger/crypto";
 import type { DeliveryStatus } from "@/lib/messenger/types";
 import { useSwipeToReply } from "@/lib/messenger/use-swipe-to-reply";
+import { AudioMessagePlayer } from "./AudioMessagePlayer";
+import { VideoMessagePlayer } from "./VideoMessagePlayer";
 
 export interface DisplayMessage {
   id: string;
@@ -11,7 +13,7 @@ export interface DisplayMessage {
   ts: number;
   status?: DeliveryStatus;
   plain?: PlainMessage;
-  type: "text" | "image" | "file";
+  type: "text" | "image" | "file" | "audio" | "video";
   fromPhone?: string;
 }
 
@@ -179,6 +181,22 @@ export function MessageBubble({
             >
               📎 {message.plain?.filename ?? "Файл"}
             </a>
+          )}
+          {message.type === "audio" && message.plain?.data && (
+            <AudioMessagePlayer
+              src={`data:${message.plain.mime ?? "audio/webm"};base64,${message.plain.data}`}
+              mime={message.plain.mime}
+              durationMs={message.plain.durationMs}
+              waveformPeaks={message.plain.waveformPeaks}
+              mine={message.mine}
+            />
+          )}
+          {message.type === "video" && message.plain?.data && (
+            <VideoMessagePlayer
+              src={`data:${message.plain.mime ?? "video/webm"};base64,${message.plain.data}`}
+              mime={message.plain.mime}
+              mine={message.mine}
+            />
           )}
           <div
             className={`text-[10px] mt-1 flex items-center justify-end gap-0.5 ${

@@ -14,6 +14,12 @@ export const PIN_LOCKOUT_MS = 15 * 60 * 1000;
 export const MAX_TEXT_LENGTH = 4000;
 export const MAX_ENCRYPTED_FILE_BYTES = 1024 * 1024; // 1 MB after encryption
 export const MAX_RAW_BODY_BYTES = 1.5 * 1024 * 1024;
+export const MAX_AUDIO_BLOB_BYTES = 1024 * 1024;
+export const MAX_VIDEO_BLOB_BYTES = 4 * 1024 * 1024;
+export const MAX_MEDIA_RAW_BODY_BYTES = 6 * 1024 * 1024;
+export const MAX_VOICE_DURATION_MS = 3 * 60 * 1000;
+export const MAX_VIDEO_DURATION_MS = 60 * 1000;
+export const MIN_MEDIA_DURATION_MS = 500;
 
 export const DEFAULT_MSG_TTL_HOURS = 48;
 export const DEFAULT_ROOM_INACTIVE_TTL_HOURS = 1;

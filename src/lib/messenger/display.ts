@@ -28,8 +28,11 @@ export function messagePreview(plain: {
   filename?: string;
   mime?: string;
   type?: string;
+  durationMs?: number;
 }): string {
   if (plain.text) return plain.text;
+  if (plain.type === "audio" || plain.mime?.startsWith("audio/")) return "Голосовое сообщение";
+  if (plain.type === "video" || plain.mime?.startsWith("video/")) return "Видео";
   if (plain.mime?.startsWith("image/")) return "Фото";
   if (plain.filename) return plain.filename;
   return "Вложение";
