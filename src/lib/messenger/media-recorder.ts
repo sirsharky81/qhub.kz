@@ -15,6 +15,8 @@ const AUDIO_MIME_CANDIDATES = [
   "audio/aac",
 ];
 
+const AUDIO_MIME_IOS = ["audio/mp4", "audio/aac", "audio/webm;codecs=opus", "audio/webm"];
+
 const VIDEO_MIME_CANDIDATES = [
   "video/webm;codecs=vp8,opus",
   "video/webm;codecs=vp9,opus",
@@ -22,9 +24,26 @@ const VIDEO_MIME_CANDIDATES = [
   "video/mp4",
 ];
 
+const VIDEO_MIME_IOS = ["video/mp4", "video/webm;codecs=vp8,opus", "video/webm", "video/webm;codecs=vp9,opus"];
+
+function isAppleMobile(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function mimeCandidates(mode: MediaRecordMode): string[] {
+  if (isAppleMobile()) {
+    return mode === "audio" ? AUDIO_MIME_IOS : VIDEO_MIME_IOS;
+  }
+  return mode === "audio" ? AUDIO_MIME_CANDIDATES : VIDEO_MIME_CANDIDATES;
+}
+
 export function pickAudioMime(): string | null {
   if (typeof MediaRecorder === "undefined") return null;
-  for (const mime of AUDIO_MIME_CANDIDATES) {
+  for (const mime of mimeCandidates("audio")) {
     if (MediaRecorder.isTypeSupported(mime)) return mime;
   }
   return null;
@@ -32,10 +51,34 @@ export function pickAudioMime(): string | null {
 
 export function pickVideoMime(): string | null {
   if (typeof MediaRecorder === "undefined") return null;
-  for (const mime of VIDEO_MIME_CANDIDATES) {
+  for (const mime of mimeCandidates("video")) {
     if (MediaRecorder.isTypeSupported(mime)) return mime;
   }
   return null;
+}
+
+export function canRecordMedia(mode: MediaRecordMode): boolean {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
+  if (typeof MediaRecorder === "undefined") return false;
+  return mode === "audio" ? pickAudioMime() !== null : pickVideoMime() !== null;
+}
+
+export function mediaRecordingErrorMessage(err: unknown, mode: MediaRecordMode): string {
+  if (err instanceof DOMException) {
+    if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      return mode === "audio"
+        ? "Нет доступа к микрофону — разрешите в Настройки → Safari → Микрофон"
+        : "Нет доступа к камере — разрешите в Настройки → Safari → Камера";
+    }
+    if (err.name === "NotFoundError") {
+      return mode === "audio" ? "Микрофон не найден" : "Камера не найдена";
+    }
+    if (err.name === "NotReadableError") {
+      return "Устройство занято другим приложением";
+    }
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return "Не удалось начать запись";
 }
 
 export function formatDurationMs(ms: number): string {
@@ -101,6 +144,10 @@ export async function createMediaRecorderSession(options: {
     throw new Error("Запись не поддерживается в этом браузере");
   }
 
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Запись не поддерживается в этом браузере");
+  }
+
   async function attachStream(nextFacing: FacingMode) {
     if (stream) {
       stream.getTracks().forEach((t) => t.stop());
@@ -117,7 +164,12 @@ export async function createMediaRecorderSession(options: {
   async function startRecorder(clearChunks = true) {
     if (!stream) await attachStream(facingMode);
     if (clearChunks) chunks = [];
-    recorder = new MediaRecorder(stream!, { mimeType: mime! });
+    try {
+      recorder = new MediaRecorder(stream!, { mimeType: mime! });
+    } catch {
+      recorder = new MediaRecorder(stream!);
+      if (recorder.mimeType) mime = recorder.mimeType;
+    }
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
     };

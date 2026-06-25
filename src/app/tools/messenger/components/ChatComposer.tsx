@@ -3,7 +3,13 @@
 import { useCallback, useRef, useState } from "react";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
-import { extractWaveformPeaks, type MediaRecorderSession } from "@/lib/messenger/media-recorder";
+import {
+  canRecordMedia,
+  createMediaRecorderSession,
+  extractWaveformPeaks,
+  mediaRecordingErrorMessage,
+  type MediaRecorderSession,
+} from "@/lib/messenger/media-recorder";
 import type { DisplayMessage } from "./MessageBubble";
 import { MediaRecordBar } from "./MediaRecordBar";
 
@@ -49,20 +55,40 @@ export function ChatComposer({
   onFocus,
 }: Props) {
   const [recordMode, setRecordMode] = useState<RecordMode>(null);
+  const [activeSession, setActiveSession] = useState<MediaRecorderSession | null>(null);
+  const [startingMode, setStartingMode] = useState<RecordMode>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
   const trimmed = text.trim();
-  const showMediaButtons = !trimmed && !recordMode;
+  const showMediaButtons = !trimmed && !recordMode && !startingMode;
 
   const exitRecording = useCallback(() => {
     sessionRef.current?.dispose();
     sessionRef.current = null;
+    setActiveSession(null);
     setRecordMode(null);
+    setStartingMode(null);
     setMediaError(null);
   }, []);
 
-  const handleSessionReady = useCallback((session: MediaRecorderSession) => {
-    sessionRef.current = session;
+  const handleStartRecording = useCallback(async (mode: Exclude<RecordMode, null>) => {
+    setMediaError(null);
+    if (!canRecordMedia(mode)) {
+      setMediaError("Запись не поддерживается в этом браузере");
+      return;
+    }
+    setStartingMode(mode);
+    try {
+      const session = await createMediaRecorderSession({ mode });
+      await session.start();
+      sessionRef.current = session;
+      setActiveSession(session);
+      setRecordMode(mode);
+    } catch (err) {
+      setMediaError(mediaRecordingErrorMessage(err, mode));
+    } finally {
+      setStartingMode(null);
+    }
   }, []);
 
   const handleSendRecording = useCallback(async () => {
@@ -94,6 +120,7 @@ export function ChatComposer({
         recordMode === "audio" ? await extractWaveformPeaks(finalBlob) : undefined;
       sessionRef.current?.dispose();
       sessionRef.current = null;
+      setActiveSession(null);
       setRecordMode(null);
       await onSendMedia({
         blob: finalBlob,
@@ -139,14 +166,19 @@ export function ChatComposer({
         </p>
       )}
 
-      {recordMode ? (
+      {recordMode && activeSession ? (
         <MediaRecordBar
           mode={recordMode}
+          session={activeSession}
           onDiscard={exitRecording}
           onSend={() => void handleSendRecording()}
-          onSessionReady={handleSessionReady}
           error={mediaError}
         />
+      ) : startingMode ? (
+        <div className="flex items-center justify-center gap-2 py-2 text-sm text-gray-500">
+          <span className="h-4 w-4 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+          {startingMode === "audio" ? "Подключение микрофона…" : "Подключение камеры…"}
+        </div>
       ) : (
         <div className="flex items-end gap-2 min-w-0 max-w-full">
           <label
@@ -176,8 +208,9 @@ export function ChatComposer({
             <>
               <button
                 type="button"
-                onClick={() => setRecordMode("audio")}
-                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-sky-600"
+                disabled={!!startingMode}
+                onClick={() => void handleStartRecording("audio")}
+                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
                 aria-label="Голосовое сообщение"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
@@ -186,8 +219,9 @@ export function ChatComposer({
               </button>
               <button
                 type="button"
-                onClick={() => setRecordMode("video")}
-                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-sky-600"
+                disabled={!!startingMode}
+                onClick={() => void handleStartRecording("video")}
+                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
                 aria-label="Видеосообщение"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
@@ -227,6 +261,9 @@ export function ChatComposer({
             </svg>
           </button>
         </div>
+      )}
+      {mediaError && !recordMode && !startingMode && (
+        <p className="text-xs text-red-600 text-center mt-1.5 px-1">{mediaError}</p>
       )}
     </div>
   );

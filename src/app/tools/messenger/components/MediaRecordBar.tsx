@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  createMediaRecorderSession,
   formatDurationMs,
   type MediaRecorderSession,
   type MediaRecordMode,
@@ -12,64 +11,36 @@ const TRASH_SWIPE_PX = 80;
 
 interface Props {
   mode: MediaRecordMode;
+  session: MediaRecorderSession;
   onDiscard: () => void;
   onSend: () => void;
-  onSessionReady: (session: MediaRecorderSession) => void;
   error: string | null;
 }
 
-export function MediaRecordBar({ mode, onDiscard, onSend, onSessionReady, error }: Props) {
-  const [elapsedMs, setElapsedMs] = useState(0);
+export function MediaRecordBar({ mode, session, onDiscard, onSend, error }: Props) {
+  const [elapsedMs, setElapsedMs] = useState(() => session.getElapsedMs());
   const [dragX, setDragX] = useState(0);
   const [flipping, setFlipping] = useState(false);
-  const sessionRef = useRef<MediaRecorderSession | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
   const dragStartX = useRef(0);
   const dragXRef = useRef(0);
   const dragging = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
+    const timer = setInterval(() => {
+      setElapsedMs(session.getElapsedMs());
+    }, 200);
 
-    void (async () => {
-      try {
-        const session = await createMediaRecorderSession({
-          mode,
-          onAutoStop: () => setElapsedMs(session.getElapsedMs()),
-        });
-        if (cancelled) {
-          session.dispose();
-          return;
-        }
-        sessionRef.current = session;
-        await session.start();
-        onSessionReady(session);
+    if (mode === "video" && previewRef.current) {
+      previewRef.current.srcObject = session.getStream();
+      void previewRef.current.play().catch(() => {});
+    }
 
-        if (mode === "video" && previewRef.current) {
-          previewRef.current.srcObject = session.getStream();
-          void previewRef.current.play().catch(() => {});
-        }
-
-        timer = setInterval(() => {
-          setElapsedMs(session.getElapsedMs());
-        }, 200);
-      } catch {
-        onDiscard();
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (timer) clearInterval(timer);
-      sessionRef.current?.dispose();
-      sessionRef.current = null;
-    };
-  }, [mode, onDiscard, onSessionReady]);
+    return () => clearInterval(timer);
+  }, [mode, session]);
 
   const handleFlip = useCallback(async () => {
-    const session = sessionRef.current;
-    if (!session || mode !== "video") return;
+    if (mode !== "video") return;
     setFlipping(true);
     try {
       await session.switchCamera();
@@ -80,7 +51,7 @@ export function MediaRecordBar({ mode, onDiscard, onSend, onSessionReady, error 
     } finally {
       setFlipping(false);
     }
-  }, [mode]);
+  }, [mode, session]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     dragging.current = true;
@@ -107,7 +78,7 @@ export function MediaRecordBar({ mode, onDiscard, onSend, onSessionReady, error 
       <button
         type="button"
         onClick={onDiscard}
-        className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50"
+        className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50 touch-manipulation"
         aria-label="Удалить запись"
       >
         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
@@ -129,6 +100,7 @@ export function MediaRecordBar({ mode, onDiscard, onSend, onSessionReady, error 
             ref={previewRef}
             muted
             playsInline
+            autoPlay
             className="h-12 w-16 rounded-lg object-cover bg-black shrink-0"
           />
         ) : (
@@ -152,7 +124,7 @@ export function MediaRecordBar({ mode, onDiscard, onSend, onSessionReady, error 
           type="button"
           disabled={flipping}
           onClick={() => void handleFlip()}
-          className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+          className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 disabled:opacity-50 touch-manipulation"
           aria-label="Перевернуть камеру"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
@@ -167,7 +139,7 @@ export function MediaRecordBar({ mode, onDiscard, onSend, onSessionReady, error 
         type="button"
         onClick={onSend}
         aria-label="Отправить запись"
-        className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white hover:bg-sky-700"
+        className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white hover:bg-sky-700 touch-manipulation"
       >
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
           <path d="M3.4 20.4 21 12 3.4 3.6 3 11l8 1-8 1z" />
