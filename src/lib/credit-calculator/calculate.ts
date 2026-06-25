@@ -101,7 +101,7 @@ export function runCalculation(input: LoanInput): CalculationResult {
     input,
     annuity,
     diff,
-    annuityEIR: calcEIR(netPrincipal, annuity.rows, disbursement),
-    diffEIR: calcEIR(netPrincipal, diff.rows, disbursement),
+    annuityEIR: calcEIR(netPrincipal, annuity.rows, disbursement, dayBasis),
+    diffEIR: calcEIR(netPrincipal, diff.rows, disbursement, dayBasis),
   };
 }

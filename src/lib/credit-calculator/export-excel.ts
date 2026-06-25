@@ -1,5 +1,5 @@
-import type { AnnuityResult, DiffResult, LoanInput, ScheduleRow } from "./types";
-import { dayBasisLabel, paymentDate } from "./calculations";
+import type { AnnuityResult, CalculationResult, DiffResult, LoanInput, RegulatoryMeta, ScheduleRow } from "./types";
+import { dayBasisLabel, paymentDate, withDisbursementRow } from "./calculations";
 
 const FMT_CURRENCY = '#,##0" ₸"';
 const FMT_PERCENT = '0.0"%"';
@@ -186,7 +186,7 @@ function buildScheduleSheet(
     row.getCell(2).value = toExcelDate(item.date);
     row.getCell(2).numFmt = FMT_DATE;
     row.getCell(3).value = item.payment;
-    row.getCell(4).value = item.principal;
+    row.getCell(4).value = item.isGrace ? null : item.principal;
     const pureInterest = item.isGrace
       ? item.interest
       : Math.max(0, item.interest - (item.deferred || 0));
@@ -198,21 +198,13 @@ function buildScheduleSheet(
   sheet.autoFilter = `A4:${lastCol}4`;
 }
 
-export type LoanExportData = {
-  input: LoanInput;
-  annuity: AnnuityResult;
-  diff: DiffResult;
-  annuityEIR: number | null;
-  diffEIR: number | null;
+export type LoanExportData = CalculationResult & {
+  regulatoryMeta?: RegulatoryMeta;
 };
-
-function loanExportFilename(): string {
-  return "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".xlsx";
-}
 
 async function buildLoanWorkbook(data: LoanExportData) {
   const ExcelJS = (await import("exceljs")).default;
-  const { input, annuity, diff, annuityEIR, diffEIR } = data;
+  const { input, annuity, diff, annuityEIR, diffEIR, regulatoryMeta } = data;
   const { disbursement, dayBasis, freq } = input;
 
   const workbook = new ExcelJS.Workbook();
@@ -234,7 +226,50 @@ async function buildLoanWorkbook(data: LoanExportData) {
     diff.rows
   );
 
+  if (regulatoryMeta) {
+    const method = regulatoryMeta.repaymentMethod;
+    const schedule = method === "annuity" ? annuity : diff;
+    const sheet = workbook.addWorksheet("График НБ");
+    sheet.mergeCells("A1:E1");
+    sheet.getCell("A1").value = "График погашения займа (форма НБ РК)";
+    sheet.getCell("A1").font = { bold: true, size: 12 };
+    const head = sheet.getRow(3);
+    head.values = ["Дата", "Платёж", "Вознаграждение", "Основной долг", "Остаток"];
+    head.font = { bold: true };
+    const scheduleRows = withDisbursementRow(
+      schedule.rows,
+      input.disbursement,
+      input.principal
+    );
+    let r = 4;
+    scheduleRows.forEach((row) => {
+      const line = sheet.getRow(r);
+      line.getCell(1).value = toExcelDate(row.date);
+      line.getCell(1).numFmt = FMT_DATE;
+      if (row.isDisbursement) {
+        line.getCell(5).value = row.balance;
+      } else if (!row.isGrace) {
+        line.getCell(2).value = row.payment;
+        line.getCell(3).value = Math.max(0, row.interest - (row.deferred || 0));
+        line.getCell(4).value = row.principal;
+        line.getCell(5).value = row.balance;
+      }
+      r++;
+    });
+    const totals = schedule.totals;
+    const tot = sheet.getRow(r);
+    tot.getCell(1).value = "Итого:";
+    tot.getCell(2).value = totals.totalPayment;
+    tot.getCell(3).value = totals.totalInterest;
+    tot.getCell(4).value = totals.totalPrincipal;
+    tot.font = { bold: true };
+  }
+
   return workbook;
+}
+
+function loanExportFilename(): string {
+  return "grafik-platezhey-" + new Date().toISOString().slice(0, 10) + ".xlsx";
 }
 
 export async function buildLoanExcelBlob(

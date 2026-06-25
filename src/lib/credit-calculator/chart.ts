@@ -51,7 +51,8 @@ export function drawBreakdownChart(
   const wrap = canvas.parentElement;
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   const step = Math.max(1, Math.ceil(rows.length / CHART_MAX_BARS));
-  const sampled = rows.filter((_, i) => i % step === 0 || i === rows.length - 1);
+  const chartRows = rows.filter((r) => !r.isGrace);
+  const sampled = chartRows.filter((_, i) => i % step === 0 || i === chartRows.length - 1);
   if (!sampled.length) return;
 
   const containerW = wrap && wrap.clientWidth > 0 ? wrap.clientWidth : 320;

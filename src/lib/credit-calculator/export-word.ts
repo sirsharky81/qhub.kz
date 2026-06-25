@@ -334,12 +334,24 @@ function buildLoanWordHtml(result: CalculationResult, lang: Lang): string {
       "</table>"
     : "";
 
-  function schedHtml(rows: typeof annuity.rows, title: string, subtitle: string) {
+  function schedHtml(
+    rows: typeof annuity.rows,
+    title: string,
+    subtitle: string,
+    totals: import("./types").ScheduleTotals
+  ) {
     const def = rows.some((r) => (r.deferred || 0) > 0);
-    const colWidths = def ? [4, 10, 15, 15, 13, 12, 31] : [4, 11, 17, 17, 15, 36];
+    const colWidths = def ? [4, 10, 14, 14, 13, 12, 33] : [4, 11, 16, 16, 15, 38];
     const cols = colWidths.map((w) => "<col style='width:" + w + "%'/>").join("");
     const th = (txt: string, cls?: string) =>
       "<th" + (cls ? " class='" + cls + "'" : "") + ">" + txt + "</th>";
+
+    const totPay = totals.totalPayment;
+    const totPrinc = totals.totalPrincipal;
+    const totInt = totals.totalInterest;
+    const totDef = rows
+      .filter((r) => !r.isGrace)
+      .reduce((s, r) => s + (r.deferred || 0), 0);
     const headRow =
       "<tr>" +
       th(t(lang, "th.num"), "c") +
@@ -351,20 +363,10 @@ function buildLoanWordHtml(result: CalculationResult, lang: Lang): string {
       th(t(lang, "th.balance") + ", ₸") +
       "</tr>";
 
-    let totPay = 0,
-      totPrinc = 0,
-      totInt = 0,
-      totDef = 0;
     const bodyRows = rows
       .map((r, idx) => {
         const g = !!r.isGrace;
-        if (!g) {
-          totPay += r.payment;
-          totPrinc += r.principal;
-          totDef += r.deferred || 0;
-        }
         const pureInt = g ? r.interest : Math.max(0, r.interest - (r.deferred || 0));
-        totInt += pureInt;
         const td = (txt: string, cls?: string) =>
           "<td" + (cls ? " class='" + cls + "'" : "") + ">" + txt + "</td>";
         const trCls = g ? " class='grace'" : idx % 2 === 1 ? " class='alt'" : "";
@@ -431,12 +433,14 @@ function buildLoanWordHtml(result: CalculationResult, lang: Lang): string {
     schedHtml(
       annuity.rows,
       t(lang, "word.annuitySchedule"),
-      freqLabel + " · " + dayBasisLabel(input.dayBasis)
+      freqLabel + " · " + dayBasisLabel(input.dayBasis),
+      annuity.totals
     ) +
     schedHtml(
       diff.rows,
       t(lang, "word.diffSchedule"),
-      freqLabel + " · " + dayBasisLabel(input.dayBasis)
+      freqLabel + " · " + dayBasisLabel(input.dayBasis),
+      diff.totals
     ) +
     "</body></html>"
   );

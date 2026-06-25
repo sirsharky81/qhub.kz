@@ -6,6 +6,31 @@ export function formatMoney(n: number): string {
   }).format(n);
 }
 
+export function formatMoney2(n: number): string {
+  return new Intl.NumberFormat("kk-KZ", {
+    style: "currency",
+    currency: "KZT",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+export function formatNum2(n: number): string {
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+export function formatDash(): string {
+  return "—";
+}
+
+export function formatPlaceholder(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : "___________";
+}
+
 export function parseAmountInput(value: string): number {
   const digits = String(value).replace(/\D/g, "");
   return digits === "" ? NaN : Number(digits);

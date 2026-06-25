@@ -5,6 +5,7 @@ import { runCalculation, validateInputs, type FormValues } from "@/lib/credit-ca
 import { dayBasisLabel, interestSharePercent, paymentDate, round2, todayISODate } from "@/lib/credit-calculator/calculations";
 import { drawBreakdownChart } from "@/lib/credit-calculator/chart";
 import { buildLoanExcelBlob, exportLoanToExcel } from "@/lib/credit-calculator/export-excel";
+import { exportRegulatorySchedule } from "@/lib/credit-calculator/export-regulatory";
 import { buildLoanShareText, exportLoanToWord } from "@/lib/credit-calculator/export-word";
 import {
   formatAmountInput,
@@ -21,6 +22,8 @@ import type {
   ChartView,
   CommissionType,
   Lang,
+  RegulatoryMeta,
+  RepaymentMethod,
   ScheduleRow,
   TabId,
 } from "@/lib/credit-calculator/types";
@@ -82,6 +85,15 @@ function buildDateInfo(result: CalculationResult, lang: Lang): string {
   }
   return info;
 }
+
+const DEFAULT_REGULATORY: RegulatoryMeta = {
+  borrowerName: "",
+  borrowerId: "",
+  contractNumber: "",
+  contractDate: "",
+  scheduleDate: todayISODate(),
+  repaymentMethod: "annuity",
+};
 
 function ScheduleTable({
   rows,
@@ -153,6 +165,8 @@ export default function CreditCalculatorClient() {
   const [chartType, setChartType] = useState<ChartType>("annuity");
   const [exporting, setExporting] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [regulatoryOpen, setRegulatoryOpen] = useState(false);
+  const [regulatory, setRegulatory] = useState<RegulatoryMeta>(DEFAULT_REGULATORY);
 
   const canShare = typeof navigator !== "undefined" && "share" in navigator;
 
@@ -239,6 +253,18 @@ export default function CreditCalculatorClient() {
       return;
     }
     exportLoanToWord(result, lang);
+  }
+
+  function handleRegulatoryExport() {
+    if (!result) {
+      setError(t(lang, "err.noCalc"));
+      return;
+    }
+    exportRegulatorySchedule(result, regulatory, lang);
+  }
+
+  function updateRegulatory<K extends keyof RegulatoryMeta>(key: K, value: RegulatoryMeta[K]) {
+    setRegulatory((r) => ({ ...r, [key]: value }));
   }
 
   async function handleShare() {
@@ -392,7 +418,7 @@ export default function CreditCalculatorClient() {
                 className={inputClass}
               >
                 <option value="360">{t(lang, "opt.act360")}</option>
-                <option value="365">{t(lang, "opt.act365")}</option>
+                <option value="365_366">{t(lang, "opt.act365")}</option>
                 <option value="30_360">{t(lang, "opt.30_360")}</option>
               </select>
             </div>
@@ -526,6 +552,9 @@ export default function CreditCalculatorClient() {
             <button type="button" onClick={handleWordExport} className={btnSecondary}>
               📄 {t(lang, "btn.word")}
             </button>
+            <button type="button" onClick={handleRegulatoryExport} disabled={!result} className={btnSecondary}>
+              📋 {t(lang, "btn.regulatory")}
+            </button>
             <button type="button" onClick={() => window.print()} className={btnSecondary}>
               🖨 {t(lang, "btn.pdf")}
             </button>
@@ -533,6 +562,83 @@ export default function CreditCalculatorClient() {
           {canShare && (
             <p className="text-xs text-gray-400 mt-3 md:hidden">{t(lang, "share.hint")}</p>
           )}
+
+          <details
+            className="mt-6 border border-gray-100 rounded-xl overflow-hidden"
+            open={regulatoryOpen}
+            onToggle={(e) => setRegulatoryOpen((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="px-4 py-3 text-sm font-semibold text-gray-700 bg-gray-50 cursor-pointer select-none">
+              {t(lang, "section.regulatory")}
+            </summary>
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass} htmlFor="borrowerName">{t(lang, "lbl.borrowerName")}</label>
+                <input
+                  id="borrowerName"
+                  type="text"
+                  value={regulatory.borrowerName}
+                  onChange={(e) => updateRegulatory("borrowerName", e.target.value)}
+                  className={inputClass}
+                  placeholder="___________"
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="borrowerId">{t(lang, "lbl.borrowerId")}</label>
+                <input
+                  id="borrowerId"
+                  type="text"
+                  value={regulatory.borrowerId}
+                  onChange={(e) => updateRegulatory("borrowerId", e.target.value)}
+                  className={inputClass}
+                  placeholder="___________"
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="contractNumber">{t(lang, "lbl.contractNumber")}</label>
+                <input
+                  id="contractNumber"
+                  type="text"
+                  value={regulatory.contractNumber}
+                  onChange={(e) => updateRegulatory("contractNumber", e.target.value)}
+                  className={inputClass}
+                  placeholder="___________"
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="contractDate">{t(lang, "lbl.contractDate")}</label>
+                <input
+                  id="contractDate"
+                  type="date"
+                  value={regulatory.contractDate}
+                  onChange={(e) => updateRegulatory("contractDate", e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="scheduleDate">{t(lang, "lbl.scheduleDate")}</label>
+                <input
+                  id="scheduleDate"
+                  type="date"
+                  value={regulatory.scheduleDate}
+                  onChange={(e) => updateRegulatory("scheduleDate", e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="repaymentMethod">{t(lang, "lbl.repaymentMethod")}</label>
+                <select
+                  id="repaymentMethod"
+                  value={regulatory.repaymentMethod}
+                  onChange={(e) => updateRegulatory("repaymentMethod", e.target.value as RepaymentMethod)}
+                  className={inputClass}
+                >
+                  <option value="annuity">{t(lang, "opt.repayAnnuity")}</option>
+                  <option value="differentiated">{t(lang, "opt.repayDiff")}</option>
+                </select>
+              </div>
+            </div>
+          </details>
         </section>
 
         {/* Summary */}

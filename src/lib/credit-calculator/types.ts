@@ -1,6 +1,6 @@
 export type Lang = "ru" | "kk" | "en";
 
-export type DayBasisType = "act360" | "act365" | "30_360";
+export type DayBasisType = "act360" | "act365_366" | "d30_360";
 
 export interface DayBasis {
   type: DayBasisType;
@@ -8,6 +8,17 @@ export interface DayBasis {
 }
 
 export type CommissionType = "sum" | "pct";
+
+export type RepaymentMethod = "annuity" | "differentiated";
+
+export interface RegulatoryMeta {
+  borrowerName: string;
+  borrowerId: string;
+  contractNumber: string;
+  contractDate: string;
+  scheduleDate: string;
+  repaymentMethod: RepaymentMethod;
+}
 
 export interface LoanInput {
   principal: number;
@@ -34,6 +45,14 @@ export interface ScheduleRow {
   deferred: number;
   balance: number;
   isGrace: boolean;
+  isDisbursement?: boolean;
+  periodIndex?: number;
+}
+
+export interface ScheduleTotals {
+  totalPayment: number;
+  totalInterest: number;
+  totalPrincipal: number;
 }
 
 export interface AnnuityResult {
@@ -41,6 +60,7 @@ export interface AnnuityResult {
   payment: number;
   totalPaid: number;
   deferredTotal: number;
+  totals: ScheduleTotals;
 }
 
 export interface DiffResult {
@@ -49,6 +69,7 @@ export interface DiffResult {
   lastPayment: number;
   totalPaid: number;
   deferredTotal: number;
+  totals: ScheduleTotals;
 }
 
 export interface CalculationResult {
