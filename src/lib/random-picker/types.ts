@@ -4,7 +4,8 @@ export type PickerMode =
   | "shuffle"
   | "wheel"
   | "groups"
-  | "dice";
+  | "dice"
+  | "coin";
 
 export type ProtocolTitle =
   | "ПРОТОКОЛ СЛУЧАЙНОГО ВЫБОРА"
@@ -99,6 +100,12 @@ export const PICKER_MODES: ModeConfig[] = [
     emoji: "🎲",
     title: "Бросок кубиков",
     description: "Один или два кубика для настольных игр на телефоне",
+  },
+  {
+    id: "coin",
+    emoji: "🪙",
+    title: "Бросить монетку",
+    description: "Выпадение орла или решки",
   },
   {
     id: "number",

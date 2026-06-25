@@ -51,6 +51,7 @@ import { Toast, useToast } from "./components/Toast";
 import { PickerButton, PickerSection } from "./components/PickerButton";
 import { ParticipantTableEditor } from "./components/ParticipantTableEditor";
 import { DiceRoller } from "./components/DiceRoller";
+import { CoinFlipper } from "./components/CoinFlipper";
 
 const EMPTY_EVENT: EventInfo = { eventName: "", description: "", contact: "" };
 
@@ -113,7 +114,7 @@ export default function RandomPickerClient() {
     else if (duplicateDecision === null) setDuplicateDecision("pending");
   }, [duplicates.length, duplicateDecision]);
 
-  const needsEvent = mode !== null && mode !== "number" && mode !== "dice";
+  const needsEvent = mode !== null && mode !== "number" && mode !== "dice" && mode !== "coin";
   const eventValid = isEventInfoValid(event);
   const groupCountNum = parseInt(groupCount, 10) || 0;
 
@@ -301,6 +302,7 @@ export default function RandomPickerClient() {
 
               {mode === "number" && <NumberGenerator />}
               {mode === "dice" && <DiceRoller />}
+              {mode === "coin" && <CoinFlipper />}
 
               {needsEvent && (
                 <>
