@@ -13,6 +13,8 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
+  /** iOS keyboard viewport tracking — off for static screens like PIN unlock. */
+  keyboardAware?: boolean;
 }
 
 const SHELL_WIDTH: Record<ShellVariant, string | undefined> = {
@@ -28,11 +30,13 @@ export function MessengerShell({
   trailing,
   children,
   variant = "default",
+  keyboardAware,
 }: Props) {
   const widthClass = SHELL_WIDTH[variant];
   const framed = variant !== "default";
   const isChat = variant === "chat";
-  const { style: viewportStyle, active: viewportActive } = useVisualViewportShell(isChat);
+  const trackViewport = keyboardAware ?? isChat;
+  const { style: viewportStyle, active: viewportActive } = useVisualViewportShell(trackViewport);
 
   return (
     <div

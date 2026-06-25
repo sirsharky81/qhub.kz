@@ -9,6 +9,8 @@ interface ViewportLayout {
   left: number;
 }
 
+const KEYBOARD_HEIGHT_DELTA_PX = 80;
+
 export function useVisualViewportShell(enabled: boolean): {
   style: CSSProperties;
   active: boolean;
@@ -21,28 +23,36 @@ export function useVisualViewportShell(enabled: boolean): {
     const vv = window.visualViewport;
     if (!vv) return;
 
-    const update = () => {
-      setLayout({
-        height: vv.height,
-        top: vv.offsetTop,
-        width: vv.width,
-        left: vv.offsetLeft,
-      });
+    let raf = 0;
+    let lastHeight = vv.height;
 
-      if (vv.offsetTop > 0 || window.scrollY > 0) {
-        window.scrollTo(0, 0);
-      }
+    const update = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const height = vv.height;
+        const keyboardOpening = lastHeight - height > KEYBOARD_HEIGHT_DELTA_PX;
+
+        setLayout({
+          height,
+          top: vv.offsetTop,
+          width: vv.width,
+          left: vv.offsetLeft,
+        });
+
+        if (keyboardOpening && (vv.offsetTop > 0 || window.scrollY > 0)) {
+          window.scrollTo(0, 0);
+        }
+
+        lastHeight = height;
+      });
     };
 
     update();
     vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    window.addEventListener("orientationchange", update);
 
     return () => {
+      cancelAnimationFrame(raf);
       vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      window.removeEventListener("orientationchange", update);
     };
   }, [enabled]);
 
@@ -65,9 +75,12 @@ export function useVisualViewportShell(enabled: boolean): {
 
 export function scrollChatListToBottom(listEl: HTMLElement | null): void {
   if (!listEl) return;
-  const run = () => {
+  requestAnimationFrame(() => {
     listEl.scrollTop = listEl.scrollHeight;
-  };
-  run();
-  requestAnimationFrame(run);
+  });
+}
+
+export function isChatListNearBottom(listEl: HTMLElement | null, thresholdPx = 120): boolean {
+  if (!listEl) return true;
+  return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight <= thresholdPx;
 }

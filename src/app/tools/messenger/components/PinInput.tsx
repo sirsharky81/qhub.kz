@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useId, useRef } from "react";
 import { PIN_LENGTH } from "@/lib/messenger/constants";
 
 interface Props {
@@ -11,47 +11,52 @@ interface Props {
 }
 
 export function PinInput({ value, onChange, disabled, autoFocus }: Props) {
-  const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
-  const digits = value.padEnd(PIN_LENGTH, " ").slice(0, PIN_LENGTH).split("");
-
-  function updateAt(index: number, char: string) {
-    const next = digits.map((d, i) => (i === index ? char : d === " " ? "" : d)).join("");
-    onChange(next.replace(/\s/g, "").slice(0, PIN_LENGTH));
-    if (char && index < PIN_LENGTH - 1) {
-      inputsRef.current[index + 1]?.focus();
-    }
-  }
-
-  function handleKeyDown(index: number, e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Backspace" && !digits[index]?.trim() && index > 0) {
-      inputsRef.current[index - 1]?.focus();
-    }
-  }
+  const inputRef = useRef<HTMLInputElement>(null);
+  const labelId = useId();
 
   return (
-    <div className="flex gap-3 justify-center">
-      {Array.from({ length: PIN_LENGTH }).map((_, i) => (
-        <input
-          key={i}
-          ref={(el) => {
-            inputsRef.current[i] = el;
-          }}
-          type="password"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={1}
-          autoFocus={autoFocus && i === 0}
-          disabled={disabled}
-          value={digits[i]?.trim() ?? ""}
-          onChange={(e) => {
-            const v = e.target.value.replace(/\D/g, "").slice(-1);
-            updateAt(i, v);
-          }}
-          onKeyDown={(e) => handleKeyDown(i, e)}
-          className="w-14 h-16 text-center text-2xl font-semibold rounded-2xl border border-gray-200 bg-white focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 outline-none"
-          aria-label={`Цифра PIN ${i + 1}`}
-        />
-      ))}
+    <div className="w-full">
+      <input
+        ref={inputRef}
+        id={labelId}
+        type="password"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        pattern="[0-9]*"
+        maxLength={PIN_LENGTH}
+        autoFocus={autoFocus}
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, PIN_LENGTH))}
+        className="sr-only"
+        aria-label="PIN"
+      />
+      <div
+        role="group"
+        aria-labelledby={labelId}
+        className="flex gap-3 justify-center touch-manipulation"
+        onClick={() => inputRef.current?.focus()}
+      >
+        {Array.from({ length: PIN_LENGTH }).map((_, i) => {
+          const filled = i < value.length;
+          const active = i === value.length;
+          return (
+            <div
+              key={i}
+              aria-hidden
+              className={`w-14 h-16 flex items-center justify-center text-2xl font-semibold rounded-2xl border bg-white transition-colors ${
+                active
+                  ? "border-gray-900 ring-2 ring-gray-900/10"
+                  : filled
+                    ? "border-gray-300"
+                    : "border-gray-200"
+              } ${disabled ? "opacity-50" : ""}`}
+            >
+              {filled ? "•" : ""}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -31,7 +31,7 @@ import { generateMessageId } from "@/lib/messenger/codes";
 import { useCoarsePointer } from "@/hooks/useCoarsePointer";
 import { blobToBase64, compressImageIfNeeded } from "@/lib/messenger/files";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
-import { scrollChatListToBottom } from "@/lib/messenger/use-visual-viewport";
+import { scrollChatListToBottom, isChatListNearBottom } from "@/lib/messenger/use-visual-viewport";
 import {
   clearRoomUnread,
   incrementRoomUnread,
@@ -309,28 +309,39 @@ export function ChatView({
   }, [channel, ingestEnvelopes, isRoom, onRoomEnded]);
 
   useEffect(() => {
-    scrollChatListToBottom(listRef.current);
+    const el = listRef.current;
+    if (!el || !isChatListNearBottom(el)) return;
+    scrollChatListToBottom(el);
   }, [messages]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
 
-    function onViewportChange() {
-      scrollChatListToBottom(listRef.current);
+    const vv = window.visualViewport;
+    let raf = 0;
+    let lastHeight = vv.height;
+
+    function onViewportResize() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const keyboardOpening = lastHeight - vv.height > 80;
+        if (keyboardOpening) {
+          scrollChatListToBottom(listRef.current);
+        }
+        lastHeight = vv.height;
+      });
     }
 
-    window.visualViewport.addEventListener("resize", onViewportChange);
-    window.visualViewport.addEventListener("scroll", onViewportChange);
+    vv.addEventListener("resize", onViewportResize);
     return () => {
-      window.visualViewport?.removeEventListener("resize", onViewportChange);
-      window.visualViewport?.removeEventListener("scroll", onViewportChange);
+      cancelAnimationFrame(raf);
+      vv.removeEventListener("resize", onViewportResize);
     };
   }, []);
 
   const scrollMessagesToBottom = useCallback(() => {
     scrollChatListToBottom(listRef.current);
-    window.setTimeout(() => scrollChatListToBottom(listRef.current), 120);
-    window.setTimeout(() => scrollChatListToBottom(listRef.current), 350);
+    requestAnimationFrame(() => scrollChatListToBottom(listRef.current));
   }, []);
 
   useEffect(() => {
@@ -619,7 +630,7 @@ export function ChatView({
 
       <div
         ref={listRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-contain relative"
+        className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-y-contain touch-pan-y relative"
         style={{
           backgroundColor: "#eceff1",
           backgroundImage:

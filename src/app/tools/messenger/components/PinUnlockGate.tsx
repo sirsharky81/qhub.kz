@@ -39,7 +39,7 @@ export function PinUnlockGate({ phone, maskedPhone, title, backHref, children }:
   }
 
   return (
-    <MessengerShell variant="chat" title={title} backHref={backHref}>
+    <MessengerShell variant="chat" title={title} backHref={backHref} keyboardAware={false}>
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-8">
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
