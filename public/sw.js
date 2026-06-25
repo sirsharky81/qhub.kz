@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v11";
+const CACHE_NAME = "qhub-v12";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
@@ -126,7 +126,13 @@ async function handleNavigate(request) {
 }
 
 self.addEventListener("push", (event) => {
-  let data = { title: "Семья", body: "Новое уведомление", url: "/tools/family" };
+  let data = {
+    title: "QHub",
+    body: "Новое уведомление",
+    url: "/",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+  };
   try {
     if (event.data) {
       data = { ...data, ...event.data.json() };
@@ -138,8 +144,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: "/tools/family/icon-192.png",
-      badge: "/icon-192.png",
+      icon: data.icon || "/icon-192.png",
+      badge: data.badge || "/icon-192.png",
       data: { url: data.url },
     }),
   );
@@ -147,7 +153,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || "/tools/family";
+  const url = event.notification.data?.url || "/";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {

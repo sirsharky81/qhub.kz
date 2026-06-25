@@ -10,6 +10,7 @@ import {
   pruneStaleRoomParticipants,
   updateRoomHeartbeat,
 } from "@/lib/messenger/store";
+import { setMessengerPresence } from "@/lib/messenger/push-store";
 
 export async function GET(request: Request) {
   try {
@@ -30,6 +31,8 @@ export async function GET(request: Request) {
     if (!channel) {
       return NextResponse.json({ error: "Укажите channel" }, { status: 400 });
     }
+
+    await setMessengerPresence(phone, channel);
 
     if (channel.startsWith("dm:")) {
       const { meta, messages, envelopes } = await getDmMessagesSince(channel, sinceVersion);

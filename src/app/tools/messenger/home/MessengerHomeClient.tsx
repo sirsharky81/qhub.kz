@@ -11,6 +11,7 @@ import { syncRoomDialogs } from "@/lib/messenger/dialogs";
 import { countAllUnreadDm, countUnreadInChat } from "@/lib/messenger/history-db";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
+import { ensureMessengerPushSubscription, subscribeMessengerPush, getPushSupportStatus } from "@/lib/messenger/push";
 import { getRoomUnread, subscribeUnreadChange, totalRoomUnread } from "@/lib/messenger/unread";
 import type { LocalDialog } from "@/lib/messenger/types";
 
@@ -55,6 +56,11 @@ export function MessengerHomeClient() {
       }
       setPhone(data.phone ?? "");
       void ensureDeviceKeyPublished().catch(() => {});
+      if (getPushSupportStatus() === "granted") {
+        void ensureMessengerPushSubscription();
+      } else if (getPushSupportStatus() === "default") {
+        void subscribeMessengerPush().catch(() => {});
+      }
       const synced = await syncRoomDialogs();
       setDialogs(synced);
       void refreshUnread(synced);

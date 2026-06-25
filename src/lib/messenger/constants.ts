@@ -30,6 +30,11 @@ export const UNREAD_COUNT_KEY = "qhub_messenger_unread";
 export const UNREAD_EVENT = "qhub-messenger-unread-change";
 
 export const REDIS_PROFILES_KEY = "qhub:messenger:profiles";
+export const REDIS_MESSENGER_PUSH_PREFIX = "qhub:messenger:push:";
+export const REDIS_MESSENGER_PRESENCE_PREFIX = "qhub:messenger:presence:";
+export const MESSENGER_PUSH_TTL_SEC = 60 * 60 * 24 * 30;
+export const MESSENGER_PRESENCE_TTL_SEC = 45;
+export const MESSENGER_PUSH_PREFS_KEY = "qhub_messenger_push_enabled";
 
 export const MAX_DISPLAY_NAME_LENGTH = 30;
 export const QUOTE_PREVIEW_LENGTH = 80;

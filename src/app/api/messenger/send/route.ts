@@ -4,7 +4,8 @@ import { MAX_RAW_BODY_BYTES, MAX_TEXT_LENGTH } from "@/lib/messenger/constants";
 import { generateMessageId } from "@/lib/messenger/codes";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import type { EncryptedMessagePayload, MessageType, ReceiptPayload } from "@/lib/messenger/types";
-import { pushDmEnvelope, pushRoomEnvelope } from "@/lib/messenger/store";
+import { pushDmEnvelope, pushRoomEnvelope, getRoomParticipants } from "@/lib/messenger/store";
+import { notifyDmMessage, notifyRoomMessage } from "@/lib/messenger/push-notify";
 
 export async function POST(request: Request) {
   try {
@@ -96,8 +97,18 @@ export async function POST(request: Request) {
     let version: number;
     if (channel.startsWith("dm:")) {
       version = await pushDmEnvelope(channel, msg);
+      void notifyDmMessage({ channel, fromPhone: phone, type });
     } else if (channel.startsWith("room:")) {
-      version = await pushRoomEnvelope(channel.slice(5), msg);
+      const roomId = channel.slice(5);
+      version = await pushRoomEnvelope(roomId, msg);
+      const participants = await getRoomParticipants(roomId);
+      void notifyRoomMessage({
+        roomId,
+        channel,
+        fromPhone: phone,
+        type,
+        recipientPhones: participants.map((p) => p.phone).filter((p) => p !== phone),
+      });
     } else {
       return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });
     }
