@@ -1,5 +1,6 @@
 import { SESSION_DIALOGS_KEY } from "./constants";
 import { fetchRoomStatus } from "./client";
+import { clearChatHistory } from "./history-db";
 import { getRoomKey, removeRoomKey } from "./room-keys";
 import type { LocalDialog } from "./types";
 
@@ -48,9 +49,11 @@ export function removeRoomDialog(roomId: string): void {
   removeLocalDialog(`room:${roomId.toUpperCase()}`);
 }
 
-export function cleanupRoomLocalState(roomId: string): void {
-  removeRoomDialog(roomId);
-  removeRoomKey(roomId);
+export async function cleanupRoomLocalState(roomId: string): Promise<void> {
+  const id = roomId.toUpperCase();
+  await clearChatHistory(`room:${id}`);
+  removeRoomDialog(id);
+  removeRoomKey(id);
 }
 
 export async function syncRoomDialogs(): Promise<LocalDialog[]> {
@@ -66,6 +69,7 @@ export async function syncRoomDialogs(): Promise<LocalDialog[]> {
 
     if (!getRoomKey(roomId)) {
       removeIds.add(dialog.id);
+      await clearChatHistory(`room:${roomId}`);
       changed = true;
       continue;
     }
@@ -74,6 +78,7 @@ export async function syncRoomDialogs(): Promise<LocalDialog[]> {
     if (!status) {
       removeIds.add(dialog.id);
       removeRoomKey(roomId);
+      await clearChatHistory(`room:${roomId}`);
       changed = true;
       continue;
     }
@@ -81,6 +86,7 @@ export async function syncRoomDialogs(): Promise<LocalDialog[]> {
     if (!status.isMember && status.otherCount === 0) {
       removeIds.add(dialog.id);
       removeRoomKey(roomId);
+      await clearChatHistory(`room:${roomId}`);
       changed = true;
     }
   }

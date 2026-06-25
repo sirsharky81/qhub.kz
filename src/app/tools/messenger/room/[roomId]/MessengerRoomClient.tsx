@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ChatView } from "../../components/ChatView";
+import { PinUnlockGate } from "../../components/PinUnlockGate";
 import {
   fetchAccessCheck,
   fetchProfilesMap,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/messenger/client";
 import { importRoomKeyBase64Url } from "@/lib/messenger/crypto";
 import { cleanupRoomLocalState, upsertLocalDialog } from "@/lib/messenger/dialogs";
+import { maskPhone } from "@/lib/messenger/phone-format";
 import { getRoomKey } from "@/lib/messenger/room-keys";
 
 export function MessengerRoomClient() {
@@ -26,15 +28,16 @@ export function MessengerRoomClient() {
   const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
 
   const handleRoomEnded = useCallback(() => {
-    cleanupRoomLocalState(roomId);
-    router.replace("/tools/messenger/home");
+    void cleanupRoomLocalState(roomId).then(() => {
+      router.replace("/tools/messenger/home");
+    });
   }, [roomId, router]);
 
   const handleLeaveRoom = useCallback(
     async (participantCount: number) => {
       if (participantCount > 1 && !window.confirm("Покинуть комнату?")) return;
       await leaveRoomApi(roomId);
-      cleanupRoomLocalState(roomId);
+      await cleanupRoomLocalState(roomId);
       router.replace("/tools/messenger/home");
     },
     [roomId, router],
@@ -59,7 +62,7 @@ export function MessengerRoomClient() {
 
       const status = await fetchRoomStatus(roomId);
       if (!status) {
-        cleanupRoomLocalState(roomId);
+        await cleanupRoomLocalState(roomId);
         if (!cancelled) {
           setError("Комната завершена");
           setLoading(false);
@@ -91,7 +94,7 @@ export function MessengerRoomClient() {
           setLoading(false);
         }
       } catch {
-        cleanupRoomLocalState(roomId);
+        await cleanupRoomLocalState(roomId);
         if (!cancelled) {
           setError("Неверный ключ комнаты");
           setLoading(false);
@@ -128,17 +131,24 @@ export function MessengerRoomClient() {
   }
 
   return (
-    <ChatView
-      channel={`room:${roomId}`}
+    <PinUnlockGate
+      phone={myPhone}
+      maskedPhone={maskPhone(myPhone)}
       title={`Комната ${roomId}`}
       backHref="/tools/messenger/home"
-      myPhone={myPhone}
-      aesKey={aesKey}
-      isRoom
-      roomId={roomId}
-      onLeaveRoom={handleLeaveRoom}
-      onRoomEnded={handleRoomEnded}
-      profileLabels={profileLabels}
-    />
+    >
+      <ChatView
+        channel={`room:${roomId}`}
+        title={`Комната ${roomId}`}
+        backHref="/tools/messenger/home"
+        myPhone={myPhone}
+        aesKey={aesKey}
+        isRoom
+        roomId={roomId}
+        onLeaveRoom={handleLeaveRoom}
+        onRoomEnded={handleRoomEnded}
+        profileLabels={profileLabels}
+      />
+    </PinUnlockGate>
   );
 }

@@ -70,7 +70,7 @@ export function ChatView({
   profileLabels = {},
 }: Props) {
   const { storageKey, isUnlocked } = useMessengerUnlock();
-  const persistDm = !isRoom && isUnlocked && storageKey !== null;
+  const persistHistory = isUnlocked && storageKey !== null;
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [text, setText] = useState("");
@@ -80,10 +80,11 @@ export function ChatView({
   const [showMenu, setShowMenu] = useState(false);
   const [connection, setConnection] = useState<"online" | "reconnecting" | "offline">("reconnecting");
   const [participantCount, setParticipantCount] = useState<number | null>(null);
-  const [historyLoaded, setHistoryLoaded] = useState(isRoom);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const versionRef = useRef(0);
   const seenIds = useRef(new Set<string>());
   const sentReceipts = useRef(new Set<string>());
@@ -122,8 +123,7 @@ export function ChatView({
 
 
   useEffect(() => {
-    if (isRoom) return;
-    if (!persistDm || !storageKey) {
+    if (!persistHistory || !storageKey) {
       setHistoryLoaded(true);
       return;
     }
@@ -146,7 +146,23 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [channel, isRoom, persistDm, storageKey]);
+  }, [channel, persistHistory, storageKey]);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    function handleOutside(event: MouseEvent | TouchEvent) {
+      const target = event.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
+        setShowMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("touchstart", handleOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("touchstart", handleOutside);
+    };
+  }, [showMenu]);
 
   useEffect(() => {
     setActiveChatChannel(channel);
@@ -194,12 +210,12 @@ export function ChatView({
         );
       });
       const target = messagesRef.current.find((m) => m.id === receipt.refMessageId && m.mine);
-      if (target && persistDm) {
+      if (target && persistHistory) {
         const nextStatus = receipt.receipt === "read" ? "read" : "delivered";
         await updateHistoryDeliveryStatus(receipt.refMessageId, nextStatus);
       }
     },
-    [myPhone, persistDm],
+    [myPhone, persistHistory],
   );
 
   const ingestEnvelopes = useCallback(
@@ -223,7 +239,7 @@ export function ChatView({
         if (!display) continue;
         seenIds.current.add(msg.id);
         setMessages((prev) => [...prev, display]);
-        if (persistDm) await persistMessage(display);
+        if (persistHistory) await persistMessage(display);
         if (isRoom && roomId) {
           incrementRoomUnread(`room:${roomId}`, channel);
         }
@@ -241,7 +257,7 @@ export function ChatView({
         void ackMessage(channel, msg.id);
       }
     },
-    [channel, decryptPayload, handleReceipt, isRoom, myPhone, persistDm, persistMessage, roomId],
+    [channel, decryptPayload, handleReceipt, isRoom, myPhone, persistHistory, persistMessage, roomId],
   );
 
   useEffect(() => {
@@ -331,7 +347,7 @@ export function ChatView({
               id,
               setTimeout(() => {
                 readSentRef.current.add(id);
-                if (persistDm) {
+                if (persistHistory) {
                   void updateHistoryDeliveryStatus(id, "read").then(() => refreshAppBadge());
                 }
                 void sendReceipt({ channel, refMessageId: id, receipt: "read" });
@@ -357,7 +373,7 @@ export function ChatView({
       observer.disconnect();
       timers.forEach((t) => clearTimeout(t));
     };
-  }, [channel, messages, persistDm]);
+  }, [channel, messages, persistHistory]);
 
   const buildPlain = useCallback(
     (base: PlainMessage): PlainMessage => {
@@ -410,14 +426,14 @@ export function ChatView({
         setMessages((prev) =>
           prev.map((m) => (m.id === localId ? sent : m)),
         );
-        if (persistDm) await persistMessage(sent);
+        if (persistHistory) await persistMessage(sent);
       } catch {
         setMessages((prev) =>
           prev.map((m) => (m.id === localId ? { ...m, status: "failed" } : m)),
         );
       }
     },
-    [aesKey, buildPlain, channel, myPhone, persistDm, persistMessage],
+    [aesKey, buildPlain, channel, myPhone, persistHistory, persistMessage],
   );
 
   async function handleSend() {
@@ -447,7 +463,7 @@ export function ChatView({
   }
 
   async function handleClearChat() {
-    if (!persistDm) return;
+    if (!persistHistory) return;
     await clearChatHistory(channel);
     setMessages([]);
     seenIds.current.clear();
@@ -494,13 +510,14 @@ export function ChatView({
           Выйти
         </button>
       )}
-      {!isRoom && persistDm && (
-        <div className="relative">
+      {persistHistory && (
+        <div className="relative" ref={menuRef}>
           <button
             type="button"
             onClick={() => setShowMenu((v) => !v)}
             className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
             aria-label="Меню чата"
+            aria-expanded={showMenu}
           >
             ⋮
           </button>
@@ -545,8 +562,9 @@ export function ChatView({
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 px-6">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-4">
             <p className="text-sm text-gray-800">
-              Удалить всю историю переписки с {title}? Это нельзя отменить. У собеседника история
-              останется.
+              {isRoom
+                ? `Удалить историю комнаты ${title} на этом устройстве? Это нельзя отменить.`
+                : `Удалить всю историю переписки с ${title}? Это нельзя отменить. У собеседника история останется.`}
             </p>
             <div className="flex gap-2">
               <button
@@ -579,23 +597,7 @@ export function ChatView({
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {messages.length === 0 && isRoom && (
-          <div
-            className="max-w-md"
-            style={{
-              marginLeft: "max(0.75rem, env(safe-area-inset-left))",
-              marginRight: "max(0.75rem, env(safe-area-inset-right))",
-            }}
-          >
-            <div className="rounded-2xl border border-amber-200/80 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 shadow-sm">
-              <p className="font-medium">Сообщения не сохраняются на сервере</p>
-              <p className="text-xs mt-1 text-amber-800/80">
-                История комнаты недоступна после выхода или перезагрузки.
-              </p>
-            </div>
-          </div>
-        )}
-        {messages.length === 0 && !isRoom && persistDm && (
+        {messages.length === 0 && persistHistory && (
           <div
             className="max-w-md"
             style={{
@@ -605,7 +607,11 @@ export function ChatView({
           >
             <div className="rounded-2xl border border-sky-200/80 bg-sky-50/95 px-4 py-3 text-sm text-sky-900 shadow-sm">
               <p className="font-medium">Переписка хранится на этом устройстве</p>
-              <p className="text-xs mt-1 text-sky-800/80">Зашифровано вашим PIN. Сервер не хранит текст.</p>
+              <p className="text-xs mt-1 text-sky-800/80">
+                {isRoom
+                  ? "Зашифровано вашим PIN. Очищается при выходе из комнаты."
+                  : "Зашифровано вашим PIN. Сервер не хранит текст."}
+              </p>
             </div>
           </div>
         )}
