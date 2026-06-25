@@ -88,13 +88,17 @@ export function MessageBubble({
       }}
       data-message-id={message.id}
     >
-      <div className={`min-w-0 max-w-[min(82%,18rem)] w-fit ${message.mine ? "items-end" : "items-start"} flex flex-col`}>
+      <div
+        className={`min-w-0 max-w-[85%] shrink flex flex-col ${
+          message.mine ? "items-end" : "items-start"
+        }`}
+      >
         {showSender && senderLabel && (
           <p className={`text-[11px] font-medium mb-0.5 px-1 ${senderColor ?? "text-gray-500"}`}>
             {senderLabel}
           </p>
         )}
-        <div className="relative flex items-center min-w-0">
+        <div className="relative flex items-center min-w-0 w-full max-w-full">
           {swipeToReply && onReply && (
             <div
               className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-gray-200/90 text-gray-600 shadow-sm"
@@ -110,7 +114,7 @@ export function MessageBubble({
           <div
             ref={bubbleRef}
             style={swipeToReply ? swipe.style : undefined}
-            className={`relative group min-w-0 px-3 py-2 shadow-sm break-words touch-pan-y ${
+            className={`relative group min-w-0 w-full max-w-full overflow-hidden px-3 py-2 shadow-sm touch-pan-y ${
               message.mine
                 ? "bg-sky-600 text-white rounded-2xl rounded-br-md"
                 : "bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-bl-md"
@@ -151,13 +155,17 @@ export function MessageBubble({
                 >
                   {quoted.author}
                 </span>
-                <span className={`line-clamp-2 ${message.mine ? "text-white/85" : "text-gray-600"}`}>
+                <span
+                  className={`line-clamp-2 break-all [overflow-wrap:anywhere] ${
+                    message.mine ? "text-white/85" : "text-gray-600"
+                  }`}
+                >
                   {quoteAvailable ? quoted.text || "Вложение" : "Сообщение недоступно"}
                 </span>
               </button>
             )}
           {message.type === "text" && (
-            <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+            <p className="text-sm whitespace-pre-wrap break-all [overflow-wrap:anywhere] max-w-full">
               {message.plain?.text}
             </p>
           )}
