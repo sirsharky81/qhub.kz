@@ -105,7 +105,6 @@ export function MessengerShell({
   if (trackKeyboard) {
     const effectiveHeaderH = headerHeight > 0 ? headerHeight : 64;
     const contentTop = viewport.top + effectiveHeaderH;
-    const contentHeight = Math.max(0, viewport.height - effectiveHeaderH);
 
     return (
       <div className={`text-gray-900 ${framed ? "bg-slate-200/60" : "bg-slate-50"}`}>
@@ -127,7 +126,7 @@ export function MessengerShell({
 
         <div
           className="fixed inset-x-0 z-40 overflow-hidden"
-          style={{ top: contentTop, height: contentHeight }}
+          style={{ top: contentTop, bottom: viewport.bottomInset }}
         >
           <div
             className={`mx-auto flex h-full max-h-full w-full min-w-0 flex-col overflow-hidden ${

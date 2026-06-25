@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 export interface ChatViewportLayout {
   top: number;
   height: number;
+  bottomInset: number;
   keyboardOpen: boolean;
 }
 
@@ -12,15 +13,17 @@ const KEYBOARD_OPEN_DELTA_PX = 80;
 
 function readViewportLayout(): ChatViewportLayout {
   if (typeof window === "undefined") {
-    return { top: 0, height: 0, keyboardOpen: false };
+    return { top: 0, height: 0, bottomInset: 0, keyboardOpen: false };
   }
   const vv = window.visualViewport;
   const height = Math.round(vv?.height ?? window.innerHeight);
   const top = Math.max(0, Math.round(vv?.offsetTop ?? 0));
+  const bottomInset = Math.max(0, Math.round(window.innerHeight - top - height));
   return {
     top,
     height,
-    keyboardOpen: height < window.innerHeight - KEYBOARD_OPEN_DELTA_PX,
+    bottomInset,
+    keyboardOpen: bottomInset > 0 || height < window.innerHeight - KEYBOARD_OPEN_DELTA_PX,
   };
 }
 

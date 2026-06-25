@@ -154,9 +154,8 @@ export function ChatComposer({
     <div
       className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur"
       style={{
-        paddingTop: "0.625rem",
-        paddingBottom:
-          keyboardOpen ? "0.625rem" : "max(0.625rem, env(safe-area-inset-bottom))",
+        paddingTop: "0.5rem",
+        paddingBottom: keyboardOpen ? "0.5rem" : "env(safe-area-inset-bottom, 0.5rem)",
         paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
         paddingRight: "max(0.75rem, env(safe-area-inset-right))",
       }}
