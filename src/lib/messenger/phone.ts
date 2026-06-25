@@ -30,3 +30,15 @@ export function deriveDmChatId(phoneA: string, phoneB: string): string {
   const sorted = [normalizeKzPhone(phoneA), normalizeKzPhone(phoneB)].sort();
   return `dm:${sorted[0]}:${sorted[1]}`;
 }
+
+export function peerFromDmChannel(channel: string, myPhone: string): string | null {
+  if (!channel.startsWith("dm:")) return null;
+  const parts = channel.split(":");
+  if (parts.length !== 3) return null;
+  const me = normalizeKzPhone(myPhone);
+  const a = normalizeKzPhone(parts[1]);
+  const b = normalizeKzPhone(parts[2]);
+  if (a === me) return b;
+  if (b === me) return a;
+  return null;
+}

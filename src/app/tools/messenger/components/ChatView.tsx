@@ -79,6 +79,7 @@ export function ChatView({
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [connection, setConnection] = useState<"online" | "reconnecting" | "offline">("reconnecting");
+  const [peerOnline, setPeerOnline] = useState<boolean | null>(null);
   const [participantCount, setParticipantCount] = useState<number | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
@@ -168,6 +169,10 @@ export function ChatView({
     setActiveChatChannel(channel);
     return () => setActiveChatChannel(null);
   }, [channel]);
+
+  useEffect(() => {
+    if (!isRoom) setPeerOnline(null);
+  }, [channel, isRoom]);
 
   useEffect(() => {
     if (isRoom && roomId) {
@@ -277,6 +282,9 @@ export function ChatView({
           return;
         }
         setConnection("online");
+        if (!isRoom && typeof data.peerOnline === "boolean") {
+          setPeerOnline(data.peerOnline);
+        }
         if (data.meta.version > versionRef.current) {
           versionRef.current = data.meta.version;
         }
@@ -506,8 +514,13 @@ export function ChatView({
   }
 
   const headerSubtitle = (
-    <div className="flex items-center gap-2">
-      <ConnectionStatus status={connection} />
+    <div className="flex items-center gap-2 flex-wrap">
+      {!isRoom && peerOnline !== null && (
+        <ConnectionStatus status={peerOnline ? "online" : "offline"} variant="peer" />
+      )}
+      {connection !== "online" && (
+        <ConnectionStatus status={connection} variant="connection" />
+      )}
       {isRoom && participantCount !== null && (
         <span className="text-xs text-gray-400">· {participantCount} уч.</span>
       )}

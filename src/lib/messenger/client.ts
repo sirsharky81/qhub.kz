@@ -184,6 +184,7 @@ export type PollChannelResult =
       messages: EncryptedMessagePayload[];
       envelopes: ChannelEnvelope[];
       participants?: { phone: string; lastSeen: number; displayName?: string | null }[];
+      peerOnline?: boolean;
     }
   | { error: "room_gone" };
 
@@ -214,11 +215,18 @@ export async function pollChannel(
     messages: EncryptedMessagePayload[];
     envelopes?: ChannelEnvelope[];
     participants?: { phone: string; lastSeen: number }[];
+    peerOnline?: boolean;
   };
   const envelopes =
     data.envelopes ??
     (data.messages ?? []).map((m) => ({ ...m, kind: "message" as const }));
-  return { meta: data.meta, messages: data.messages ?? [], envelopes, participants: data.participants };
+  return {
+    meta: data.meta,
+    messages: data.messages ?? [],
+    envelopes,
+    participants: data.participants,
+    peerOnline: data.peerOnline,
+  };
 }
 
 export async function sendReceipt(input: {
