@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { useVisualViewportShell } from "@/lib/messenger/use-visual-viewport";
+import { useKeyboardInset } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -13,7 +14,7 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
-  /** iOS keyboard viewport tracking — off for static screens like PIN unlock. */
+  /** Lift content above the iOS virtual keyboard; keeps header fixed at the top. */
   keyboardAware?: boolean;
 }
 
@@ -35,15 +36,26 @@ export function MessengerShell({
   const widthClass = SHELL_WIDTH[variant];
   const framed = variant !== "default";
   const isChat = variant === "chat";
-  const trackViewport = keyboardAware ?? isChat;
-  const { style: viewportStyle, active: viewportActive } = useVisualViewportShell(trackViewport);
+  const trackKeyboard = keyboardAware ?? isChat;
+  const keyboardInset = useKeyboardInset(trackKeyboard);
+
+  useEffect(() => {
+    if (!trackKeyboard) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [trackKeyboard]);
 
   return (
     <div
       className={`flex flex-col overflow-hidden text-gray-900 ${
-        viewportActive ? "" : "h-[100dvh] max-h-[100dvh]"
+        trackKeyboard
+          ? "fixed inset-x-0 top-0 z-40 h-[100dvh] max-h-[100dvh]"
+          : "min-h-[100dvh] max-h-[100dvh]"
       } ${framed ? "bg-slate-200/60" : "bg-slate-50"}`}
-      style={viewportActive ? viewportStyle : undefined}
+      style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
     >
       <div
         className={`flex flex-col h-full max-h-full w-full min-w-0 mx-auto overflow-hidden ${
@@ -51,7 +63,7 @@ export function MessengerShell({
         } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
       >
         <header
-          className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 shrink-0 pt-[max(0.75rem,env(safe-area-inset-top))]"
+          className="z-10 shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
           style={{
             paddingLeft: "max(1rem, env(safe-area-inset-left))",
             paddingRight: "max(1rem, env(safe-area-inset-right))",

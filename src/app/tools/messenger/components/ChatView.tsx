@@ -325,7 +325,7 @@ export function ChatView({
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const keyboardOpening = lastHeight - vv.height > 80;
-        if (keyboardOpening) {
+        if (keyboardOpening && isChatListNearBottom(listRef.current)) {
           scrollChatListToBottom(listRef.current);
         }
         lastHeight = vv.height;

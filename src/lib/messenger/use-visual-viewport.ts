@@ -1,21 +1,10 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 
-interface ViewportLayout {
-  height: number;
-  top: number;
-  width: number;
-  left: number;
-}
-
-const KEYBOARD_HEIGHT_DELTA_PX = 80;
-
-export function useVisualViewportShell(enabled: boolean): {
-  style: CSSProperties;
-  active: boolean;
-} {
-  const [layout, setLayout] = useState<ViewportLayout | null>(null);
+/** Space covered by the virtual keyboard from the bottom of the layout viewport. */
+export function useKeyboardInset(enabled: boolean): number {
+  const [inset, setInset] = useState(0);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
@@ -24,26 +13,12 @@ export function useVisualViewportShell(enabled: boolean): {
     if (!vv) return;
 
     let raf = 0;
-    let lastHeight = vv.height;
 
     const update = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        const height = vv.height;
-        const keyboardOpening = lastHeight - height > KEYBOARD_HEIGHT_DELTA_PX;
-
-        setLayout({
-          height,
-          top: vv.offsetTop,
-          width: vv.width,
-          left: vv.offsetLeft,
-        });
-
-        if (keyboardOpening && (vv.offsetTop > 0 || window.scrollY > 0)) {
-          window.scrollTo(0, 0);
-        }
-
-        lastHeight = height;
+        const next = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+        setInset(next);
       });
     };
 
@@ -56,21 +31,7 @@ export function useVisualViewportShell(enabled: boolean): {
     };
   }, [enabled]);
 
-  if (!enabled || !layout) {
-    return { style: {}, active: false };
-  }
-
-  return {
-    active: true,
-    style: {
-      position: "fixed",
-      top: layout.top,
-      left: layout.left,
-      width: layout.width,
-      height: layout.height,
-      maxHeight: layout.height,
-    },
-  };
+  return inset;
 }
 
 export function scrollChatListToBottom(listEl: HTMLElement | null): void {
