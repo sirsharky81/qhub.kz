@@ -1,27 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   formatDurationMs,
   type MediaRecorderSession,
-  type MediaRecordMode,
 } from "@/lib/messenger/media-recorder";
 
 const TRASH_SWIPE_PX = 80;
 
 interface Props {
-  mode: MediaRecordMode;
   session: MediaRecorderSession;
   onDiscard: () => void;
   onSend: () => void;
   error: string | null;
 }
 
-export function MediaRecordBar({ mode, session, onDiscard, onSend, error }: Props) {
+/** Compact voice-note bar in the composer (video uses VideoRecordOverlay). */
+export function MediaRecordBar({ session, onDiscard, onSend, error }: Props) {
   const [elapsedMs, setElapsedMs] = useState(() => session.getElapsedMs());
   const [dragX, setDragX] = useState(0);
-  const [flipping, setFlipping] = useState(false);
-  const previewRef = useRef<HTMLVideoElement>(null);
   const dragStartX = useRef(0);
   const dragXRef = useRef(0);
   const dragging = useRef(false);
@@ -30,28 +27,8 @@ export function MediaRecordBar({ mode, session, onDiscard, onSend, error }: Prop
     const timer = setInterval(() => {
       setElapsedMs(session.getElapsedMs());
     }, 200);
-
-    if (mode === "video" && previewRef.current) {
-      previewRef.current.srcObject = session.getStream();
-      void previewRef.current.play().catch(() => {});
-    }
-
     return () => clearInterval(timer);
-  }, [mode, session]);
-
-  const handleFlip = useCallback(async () => {
-    if (mode !== "video") return;
-    setFlipping(true);
-    try {
-      await session.switchCamera();
-      if (previewRef.current) {
-        previewRef.current.srcObject = session.getStream();
-        void previewRef.current.play().catch(() => {});
-      }
-    } finally {
-      setFlipping(false);
-    }
-  }, [mode, session]);
+  }, [session]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     dragging.current = true;
@@ -95,45 +72,19 @@ export function MediaRecordBar({ mode, session, onDiscard, onSend, error }: Prop
         onPointerCancel={onPointerUp}
       >
         <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shrink-0" />
-        {mode === "video" ? (
-          <video
-            ref={previewRef}
-            muted
-            playsInline
-            autoPlay
-            className="h-12 w-16 rounded-lg object-cover bg-black shrink-0"
-          />
-        ) : (
-          <div className="flex-1 flex items-end gap-0.5 h-8 min-w-0">
-            {Array.from({ length: 20 }, (_, i) => (
-              <div
-                key={i}
-                className="flex-1 bg-red-300/80 rounded-sm"
-                style={{ height: `${20 + Math.abs(Math.sin(i + elapsedMs / 200)) * 80}%` }}
-              />
-            ))}
-          </div>
-        )}
+        <div className="flex-1 flex items-end gap-0.5 h-8 min-w-0">
+          {Array.from({ length: 20 }, (_, i) => (
+            <div
+              key={i}
+              className="flex-1 bg-red-300/80 rounded-sm"
+              style={{ height: `${20 + Math.abs(Math.sin(i + elapsedMs / 200)) * 80}%` }}
+            />
+          ))}
+        </div>
         <span className="text-sm font-medium text-red-700 tabular-nums shrink-0">
           {formatDurationMs(elapsedMs)}
         </span>
       </div>
-
-      {mode === "video" && (
-        <button
-          type="button"
-          disabled={flipping}
-          onClick={() => void handleFlip()}
-          className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 disabled:opacity-50 touch-manipulation"
-          aria-label="Перевернуть камеру"
-        >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M11 19H4a2 2 0 01-2-2V7a2 2 0 012-2h5" strokeLinecap="round" />
-            <path d="M13 5h7a2 2 0 012 2v10a2 2 0 01-2 2h-5" strokeLinecap="round" />
-            <path d="M8 12h8M16 9l3 3-3 3M8 15l-3-3 3-3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      )}
 
       <button
         type="button"

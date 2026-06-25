@@ -13,6 +13,7 @@ import {
 import type { DisplayMessage } from "./MessageBubble";
 import { stopActiveMessengerAudio } from "./AudioMessagePlayer";
 import { MediaRecordBar } from "./MediaRecordBar";
+import { VideoRecordOverlay } from "./VideoRecordOverlay";
 
 export interface MediaSendPayload {
   blob: Blob;
@@ -136,6 +137,17 @@ export function ChatComposer({
     }
   }, [onSendMedia, recordMode]);
 
+  if (recordMode === "video" && activeSession) {
+    return (
+      <VideoRecordOverlay
+        session={activeSession}
+        onDiscard={exitRecording}
+        onSend={() => void handleSendRecording()}
+        error={mediaError}
+      />
+    );
+  }
+
   return (
     <div
       className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur"
@@ -170,7 +182,6 @@ export function ChatComposer({
 
       {recordMode && activeSession ? (
         <MediaRecordBar
-          mode={recordMode}
           session={activeSession}
           onDiscard={exitRecording}
           onSend={() => void handleSendRecording()}
