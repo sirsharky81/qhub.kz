@@ -1,4 +1,8 @@
 import {
+  prepareAudioSessionForCapture,
+  restoreAudioSessionAfterCapture,
+} from "@/lib/audio-session";
+import {
   MAX_AUDIO_BLOB_BYTES,
   MAX_VIDEO_BLOB_BYTES,
   MAX_VIDEO_DURATION_MS,
@@ -75,6 +79,9 @@ export function mediaRecordingErrorMessage(err: unknown, mode: MediaRecordMode):
     }
     if (err.name === "NotReadableError") {
       return "Устройство занято другим приложением";
+    }
+    if (err.message.includes("AudioSession")) {
+      return "Не удалось включить микрофон — остановите воспроизведение и повторите";
     }
   }
   if (err instanceof Error && err.message) return err.message;
@@ -157,6 +164,7 @@ export async function createMediaRecorderSession(options: {
       mode === "audio"
         ? { audio: true }
         : { audio: true, video: { facingMode: nextFacing, width: { ideal: 640 }, height: { ideal: 480 } } };
+    prepareAudioSessionForCapture();
     stream = await navigator.mediaDevices.getUserMedia(constraints);
     facingMode = nextFacing;
   }
@@ -253,6 +261,7 @@ export async function createMediaRecorderSession(options: {
       stream?.getTracks().forEach((t) => t.stop());
       stream = null;
       recorder = null;
+      restoreAudioSessionAfterCapture();
     },
   };
 }

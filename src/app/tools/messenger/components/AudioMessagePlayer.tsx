@@ -13,6 +13,13 @@ interface Props {
 
 let activeAudio: HTMLAudioElement | null = null;
 
+export function stopActiveMessengerAudio(): void {
+  if (!activeAudio) return;
+  activeAudio.pause();
+  activeAudio.currentTime = 0;
+  activeAudio = null;
+}
+
 export function AudioMessagePlayer({ src, mime, durationMs, waveformPeaks, mine }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);

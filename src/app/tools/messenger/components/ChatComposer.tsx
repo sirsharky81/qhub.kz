@@ -11,6 +11,7 @@ import {
   type MediaRecorderSession,
 } from "@/lib/messenger/media-recorder";
 import type { DisplayMessage } from "./MessageBubble";
+import { stopActiveMessengerAudio } from "./AudioMessagePlayer";
 import { MediaRecordBar } from "./MediaRecordBar";
 
 export interface MediaSendPayload {
@@ -79,6 +80,7 @@ export function ChatComposer({
     }
     setStartingMode(mode);
     try {
+      stopActiveMessengerAudio();
       const session = await createMediaRecorderSession({ mode });
       await session.start();
       sessionRef.current = session;
