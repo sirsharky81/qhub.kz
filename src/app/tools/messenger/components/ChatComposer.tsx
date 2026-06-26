@@ -2,7 +2,6 @@
 
 import { useCallback, useRef, useState } from "react";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
-import { useChatViewportLayout } from "@/lib/messenger/use-visual-viewport";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import {
   canRecordMedia,
@@ -61,8 +60,8 @@ export function ChatComposer({
   const [activeSession, setActiveSession] = useState<MediaRecorderSession | null>(null);
   const [startingMode, setStartingMode] = useState<RecordMode>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [inputFocused, setInputFocused] = useState(false);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
-  const { keyboardOpen } = useChatViewportLayout(true);
   const trimmed = text.trim();
   const showMediaButtons = !trimmed && !recordMode && !startingMode;
 
@@ -154,8 +153,8 @@ export function ChatComposer({
     <div
       className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur"
       style={{
-        paddingTop: "0.5rem",
-        paddingBottom: keyboardOpen ? "0.5rem" : "env(safe-area-inset-bottom, 0.5rem)",
+        paddingTop: "0.375rem",
+        paddingBottom: inputFocused ? "0.25rem" : "env(safe-area-inset-bottom, 0px)",
         paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
         paddingRight: "max(0.75rem, env(safe-area-inset-right))",
       }}
@@ -195,9 +194,9 @@ export function ChatComposer({
           {startingMode === "audio" ? "Подключение микрофона…" : "Подключение камеры…"}
         </div>
       ) : (
-        <div className="flex items-end gap-2 min-w-0 max-w-full">
+        <div className="flex items-center gap-2 min-w-0 max-w-full">
           <label
-            className="mb-0.5 flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
             aria-label="Прикрепить файл"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
@@ -225,7 +224,7 @@ export function ChatComposer({
                 type="button"
                 disabled={!!startingMode}
                 onClick={() => void handleStartRecording("audio")}
-                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
                 aria-label="Голосовое сообщение"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
@@ -236,7 +235,7 @@ export function ChatComposer({
                 type="button"
                 disabled={!!startingMode}
                 onClick={() => void handleStartRecording("video")}
-                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
                 aria-label="Видеосообщение"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
@@ -254,7 +253,11 @@ export function ChatComposer({
             placeholder="Сообщение"
             className="min-w-0 flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-base leading-snug max-h-32 focus:outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
             style={{ fontSize: "16px" }}
-            onFocus={onFocus}
+            onFocus={() => {
+              setInputFocused(true);
+              onFocus?.();
+            }}
+            onBlur={() => setInputFocused(false)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -265,9 +268,10 @@ export function ChatComposer({
           <button
             type="button"
             disabled={!canSend}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onSend}
             aria-label="Отправить"
-            className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
               canSend ? "bg-sky-600 text-white hover:bg-sky-700" : "bg-gray-200 text-gray-400"
             }`}
           >

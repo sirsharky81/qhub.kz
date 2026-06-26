@@ -314,34 +314,8 @@ export function ChatView({
     scrollChatListToBottom(el);
   }, [messages]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.visualViewport) return;
-
-    const vv = window.visualViewport;
-    let raf = 0;
-    let lastHeight = vv.height;
-
-    function onViewportResize() {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const keyboardOpening = lastHeight - vv.height > 80;
-        if (keyboardOpening && isChatListNearBottom(listRef.current)) {
-          scrollChatListToBottom(listRef.current);
-        }
-        lastHeight = vv.height;
-      });
-    }
-
-    vv.addEventListener("resize", onViewportResize);
-    return () => {
-      cancelAnimationFrame(raf);
-      vv.removeEventListener("resize", onViewportResize);
-    };
-  }, []);
-
   const scrollMessagesToBottom = useCallback(() => {
     scrollChatListToBottom(listRef.current);
-    requestAnimationFrame(() => scrollChatListToBottom(listRef.current));
   }, []);
 
   useEffect(() => {
