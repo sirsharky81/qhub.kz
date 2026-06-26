@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
+import { useKeyboardInset } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -13,7 +14,7 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
-  /** Full-screen chat shell that resizes with the keyboard (interactive-widget). */
+  /** Lift content above the iOS virtual keyboard; header stays pinned at the top. */
   keyboardAware?: boolean;
 }
 
@@ -36,6 +37,7 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
+  const keyboardInset = useKeyboardInset(trackKeyboard);
 
   useEffect(() => {
     if (!trackKeyboard) return;
@@ -49,22 +51,6 @@ export function MessengerShell({
       html.style.overflow = prevHtml;
       body.style.overflow = prevBody;
     };
-  }, [trackKeyboard]);
-
-  // iOS shifts the layout viewport when the keyboard opens; keep the shell pinned.
-  useEffect(() => {
-    if (!trackKeyboard) return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const pin = () => {
-      if (vv.offsetTop !== 0) {
-        window.scrollTo(0, 0);
-      }
-    };
-
-    vv.addEventListener("scroll", pin);
-    return () => vv.removeEventListener("scroll", pin);
   }, [trackKeyboard]);
 
   const header = (
@@ -97,12 +83,12 @@ export function MessengerShell({
   if (trackKeyboard) {
     return (
       <div
-        className={`fixed inset-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
+        className={`fixed inset-x-0 top-0 z-40 flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden text-gray-900 ${
           framed ? "bg-slate-200/60" : "bg-slate-50"
         }`}
+        style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
       >
         <div
-          data-chat-shell
           className={`mx-auto flex h-full w-full min-w-0 flex-col overflow-hidden ${
             widthClass ?? ""
           } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
