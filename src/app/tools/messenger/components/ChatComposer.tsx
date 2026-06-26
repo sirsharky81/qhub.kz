@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useKeyboardVisible, useShellKeyboardGap } from "@/lib/messenger/use-visual-viewport";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import {
@@ -60,7 +61,9 @@ export function ChatComposer({
   const [activeSession, setActiveSession] = useState<MediaRecorderSession | null>(null);
   const [startingMode, setStartingMode] = useState<RecordMode>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const [inputFocused, setInputFocused] = useState(false);
+  const keyboardVisible = useKeyboardVisible();
+  const shellKeyboardGap = useShellKeyboardGap();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
   const trimmed = text.trim();
   const showMediaButtons = !trimmed && !recordMode && !startingMode;
@@ -154,7 +157,9 @@ export function ChatComposer({
       className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur"
       style={{
         paddingTop: "0.375rem",
-        paddingBottom: inputFocused ? "0.25rem" : "env(safe-area-inset-bottom, 0px)",
+        // With keyboard open iOS still reports safe-area-inset-bottom — ignore it.
+        paddingBottom: keyboardVisible ? "0.25rem" : "env(safe-area-inset-bottom, 0px)",
+        marginBottom: shellKeyboardGap > 0 ? shellKeyboardGap : undefined,
         paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
         paddingRight: "max(0.75rem, env(safe-area-inset-right))",
       }}
@@ -247,21 +252,21 @@ export function ChatComposer({
           )}
 
           <textarea
+            ref={textareaRef}
             value={text}
             onChange={(e) => onTextChange(e.target.value.slice(0, MAX_TEXT_LENGTH))}
             rows={1}
             placeholder="Сообщение"
-            className="min-w-0 flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-base leading-snug max-h-32 focus:outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
+            className="min-w-0 flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2 text-base leading-snug max-h-32 focus:outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
             style={{ fontSize: "16px" }}
-            onFocus={() => {
-              setInputFocused(true);
-              onFocus?.();
-            }}
-            onBlur={() => setInputFocused(false)}
+            onFocus={() => onFocus?.()}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (canSend) onSend();
+                if (canSend) {
+                  onSend();
+                  requestAnimationFrame(() => textareaRef.current?.focus());
+                }
               }
             }}
           />
@@ -269,7 +274,10 @@ export function ChatComposer({
             type="button"
             disabled={!canSend}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={onSend}
+            onClick={() => {
+              onSend();
+              requestAnimationFrame(() => textareaRef.current?.focus());
+            }}
             aria-label="Отправить"
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
               canSend ? "bg-sky-600 text-white hover:bg-sky-700" : "bg-gray-200 text-gray-400"

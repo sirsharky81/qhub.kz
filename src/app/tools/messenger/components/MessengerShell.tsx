@@ -51,6 +51,22 @@ export function MessengerShell({
     };
   }, [trackKeyboard]);
 
+  // iOS shifts the layout viewport when the keyboard opens; keep the shell pinned.
+  useEffect(() => {
+    if (!trackKeyboard) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const pin = () => {
+      if (vv.offsetTop !== 0) {
+        window.scrollTo(0, 0);
+      }
+    };
+
+    vv.addEventListener("scroll", pin);
+    return () => vv.removeEventListener("scroll", pin);
+  }, [trackKeyboard]);
+
   const header = (
     <header
       className="shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
@@ -70,7 +86,9 @@ export function MessengerShell({
       )}
       <div className="flex-1 min-w-0">
         <h1 className="text-base font-semibold truncate">{title}</h1>
-        {subtitle && <div className="text-xs text-gray-500 mt-0.5">{subtitle}</div>}
+        {subtitle && (
+          <div className="text-xs text-gray-500 mt-0.5 min-h-[1.125rem] leading-tight">{subtitle}</div>
+        )}
       </div>
       {trailing && <div className="shrink-0">{trailing}</div>}
     </header>
@@ -84,6 +102,7 @@ export function MessengerShell({
         }`}
       >
         <div
+          data-chat-shell
           className={`mx-auto flex h-full w-full min-w-0 flex-col overflow-hidden ${
             widthClass ?? ""
           } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
