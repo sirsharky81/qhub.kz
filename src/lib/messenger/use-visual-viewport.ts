@@ -34,18 +34,34 @@ export function useViewportState(enabled: boolean): { keyboardOpen: boolean } {
 
     baseRef.current = Math.round(vv.height);
 
+    // #region agent log
+    fetch('http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9851b9'},body:JSON.stringify({sessionId:'9851b9',location:'use-visual-viewport.ts:mount',message:'MOUNT values',data:{vvHeight:Math.round(vv.height),vvOffsetTop:Math.round(vv.offsetTop),windowInnerHeight:window.innerHeight,windowInnerWidth:window.innerWidth,baseRef:baseRef.current,screenHeight:window.screen?.height},timestamp:Date.now(),hypothesisId:'A-B-C-D-E'})}).catch(()=>{});
+    // #endregion
+
     let raf = 0;
+    let syncCount = 0;
     const sync = () => {
+      const h = Math.round(vv.height);
+      const off = Math.round(vv.offsetTop);
+      syncCount++;
+
       // ── Synchronous: update CSS var in the same microtask as the event ──
-      // The browser picks this up before deciding whether to pan the web view.
-      root.style.setProperty("--messenger-vvh", `${Math.round(vv.height)}px`);
+      root.style.setProperty("--messenger-vvh", `${h}px`);
+
+      // #region agent log
+      fetch('http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9851b9'},body:JSON.stringify({sessionId:'9851b9',location:'use-visual-viewport.ts:sync',message:'sync fired',data:{syncCount,vvHeight:h,vvOffsetTop:off,vvWidth:Math.round(vv.width),vvScale:vv.scale,windowInnerHeight:window.innerHeight,cssVarSet:`${h}px`,base:baseRef.current},timestamp:Date.now(),hypothesisId:'A-B-C-D'})}).catch(()=>{});
+      // #endregion
 
       // ── Async: keyboardOpen only drives the 34px safe-area toggle ──
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        const h = Math.round(vv.height);
         const base = baseRef.current || h;
-        setKeyboardOpen(base - h > KEYBOARD_THRESHOLD_PX);
+        const isOpen = base - h > KEYBOARD_THRESHOLD_PX;
+        setKeyboardOpen(isOpen);
+
+        // #region agent log
+        fetch('http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9851b9'},body:JSON.stringify({sessionId:'9851b9',location:'use-visual-viewport.ts:raf',message:'RAF keyboardOpen',data:{base,currentH:h,diff:base-h,keyboardOpen:isOpen,vvOffsetTop:Math.round(vv.offsetTop)},timestamp:Date.now(),hypothesisId:'D-E'})}).catch(()=>{});
+        // #endregion
       });
     };
 

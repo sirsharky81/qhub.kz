@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useViewportState } from "@/lib/messenger/use-visual-viewport";
 
@@ -89,23 +89,28 @@ export function MessengerShell({
     </header>
   );
 
-  if (trackKeyboard) {
-    // ─── Shell height strategy ────────────────────────────────────────────────
-    //
-    // We set --messenger-vvh = visualViewport.height synchronously inside the
-    // vv.resize event handler (see useViewportState).  Using that CSS variable
-    // as the shell height means the browser updates the layout in the SAME
-    // paint that responds to the keyboard animation — zero extra frame lag.
-    //
-    // `100dvh` is the fallback for SSR / before the first client event.
-    // On iOS PWA standalone mode `dvh` is unreliable (constant value), so
-    // the JS-driven CSS variable is the reliable path.
-    //
-    // No transform, no paddingBottom — just height.  The header is always the
-    // first flex child at y=0 and therefore always visible.
+  // #region agent log
+  const shellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!trackKeyboard) return;
+    const vv = window.visualViewport;
+    const logShell = () => {
+      const el = shellRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const cs = window.getComputedStyle(el);
+      fetch('http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9851b9'},body:JSON.stringify({sessionId:'9851b9',location:'MessengerShell.tsx:shellRect',message:'Shell bounding rect',data:{top:r.top,bottom:r.bottom,height:r.height,width:r.width,computedHeight:cs.height,computedTransform:cs.transform,vvOffsetTop:vv?Math.round(vv.offsetTop):null,vvHeight:vv?Math.round(vv.height):null},timestamp:Date.now(),hypothesisId:'A-B'})}).catch(()=>{});
+    };
+    const delay = setTimeout(logShell, 500);
+    vv?.addEventListener('resize', logShell);
+    return () => { clearTimeout(delay); vv?.removeEventListener('resize', logShell); };
+  }, [trackKeyboard]);
+  // #endregion
 
+  if (trackKeyboard) {
     return (
       <div
+        ref={shellRef}
         className={`fixed inset-x-0 top-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
           framed
             ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}`
