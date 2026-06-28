@@ -1,38 +1,55 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+export interface ViewportState {
+  /** Visual viewport height in CSS pixels. 0 before first client render. */
+  vvHeight: number;
+  /**
+   * True while the virtual keyboard is open.
+   * Detected by comparing current vv.height to the captured base height
+   * at component mount (before the keyboard ever appeared).
+   */
+  keyboardOpen: boolean;
+}
 
 const KEYBOARD_THRESHOLD_PX = 80;
 
-function readKeyboardHeight(): number {
-  if (typeof window === "undefined") return 0;
-  const vv = window.visualViewport;
-  if (!vv) return 0;
-  // window.innerHeight is CONSTANT on iOS (layout viewport never resizes).
-  // vv.height shrinks when the keyboard opens (default "resizes-visual" behaviour).
-  // vv.offsetTop is usually 0 when body overflow is hidden; we still subtract it
-  // so that any brief auto-scroll during animation doesn't corrupt the value.
-  const raw = window.innerHeight - vv.height - vv.offsetTop;
-  return raw > KEYBOARD_THRESHOLD_PX ? Math.round(raw) : 0;
-}
-
 /**
- * Height (px) that the virtual keyboard currently covers from the bottom of the
- * screen.  Returns 0 when no keyboard is visible.
- * Works on iOS PWA, Android Chrome, and desktop browsers.
+ * Tracks the visual viewport height and keyboard state.
+ *
+ * Key design decisions:
+ * - Uses vv.height at mount time as the "base" (no-keyboard reference)
+ *   instead of window.innerHeight, which can vary across iOS versions and
+ *   viewport configurations (viewport-fit=cover, PWA, etc.).
+ * - Does NOT expose vv.offsetTop or use it for positioning — even with
+ *   overflow:hidden on body, iOS can briefly make offsetTop non-zero during
+ *   the keyboard animation, which would cause header jumps if used for top:.
  */
-export function useKeyboardHeight(enabled: boolean): number {
-  const [height, setHeight] = useState(0);
+export function useViewportState(enabled: boolean): ViewportState {
+  const baseRef = useRef(0);
+  const [state, setState] = useState<ViewportState>({ vvHeight: 0, keyboardOpen: false });
 
   useEffect(() => {
     if (!enabled) return;
     const vv = window.visualViewport;
     if (!vv) return;
 
+    // Capture the "no keyboard" height once, synchronously at mount.
+    baseRef.current = Math.round(vv.height);
+
     let raf = 0;
     const sync = () => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => setHeight(readKeyboardHeight()));
+      raf = requestAnimationFrame(() => {
+        const h = Math.round(vv.height);
+        const base = baseRef.current || h;
+        const diff = base - h;
+        setState({
+          vvHeight: h,
+          keyboardOpen: diff > KEYBOARD_THRESHOLD_PX,
+        });
+      });
     };
 
     sync();
@@ -45,7 +62,7 @@ export function useKeyboardHeight(enabled: boolean): number {
     };
   }, [enabled]);
 
-  return height;
+  return state;
 }
 
 export function scrollChatListToBottom(listEl: HTMLElement | null): void {

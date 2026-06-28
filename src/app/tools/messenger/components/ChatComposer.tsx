@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useViewportState } from "@/lib/messenger/use-visual-viewport";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import {
@@ -62,6 +63,7 @@ export function ChatComposer({
   const [mediaError, setMediaError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
+  const { keyboardOpen } = useViewportState(true);
   const trimmed = text.trim();
   const showMediaButtons = !trimmed && !recordMode && !startingMode;
 
@@ -149,16 +151,21 @@ export function ChatComposer({
     );
   }
 
-  // Safe-area left/right are here for landscape orientation.
-  // Bottom safe-area (home indicator) is handled by the parent MessengerShell
-  // via paddingBottom so the white background fills the safe-area zone seamlessly.
   const sidePadding = {
     paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
     paddingRight: "max(0.75rem, env(safe-area-inset-right))",
   };
+  // When the keyboard is closed the home indicator sits at the screen bottom.
+  // We add env(safe-area-inset-bottom) so the input row stays above it.
+  // When the keyboard is open it physically covers that zone, so no extra padding
+  // is needed — the inner shell div is already sized to the visible area above the keyboard.
+  const bottomPadding = keyboardOpen ? "0px" : "env(safe-area-inset-bottom, 0px)";
 
   return (
-    <div className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur">
+    <div
+      className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur"
+      style={{ paddingBottom: bottomPadding }}
+    >
       {replyTo && !recordMode && (
         <div
           className="flex items-start gap-2 mx-3 mt-2 rounded-xl bg-gray-50 border border-gray-200 py-2 px-2"

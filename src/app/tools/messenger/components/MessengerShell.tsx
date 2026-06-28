@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { useKeyboardHeight } from "@/lib/messenger/use-visual-viewport";
+import { useViewportState } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -37,10 +37,9 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
-  const keyboardHeight = useKeyboardHeight(trackKeyboard);
+  const { vvHeight } = useViewportState(trackKeyboard);
 
-  // Lock scroll so iOS cannot auto-scroll the page when the keyboard opens,
-  // which would give vv.offsetTop a non-zero value and shift our shell.
+  // Lock scroll so iOS cannot auto-scroll the page when the keyboard opens.
   useEffect(() => {
     if (!trackKeyboard) return;
     const html = document.documentElement;
@@ -87,30 +86,34 @@ export function MessengerShell({
   );
 
   if (trackKeyboard) {
-    // The shell is pinned to the top-left-right edges of the screen (inset-0).
-    // The ONLY adaptation to the keyboard is paddingBottom:
-    //   - Keyboard open:  max(keyboardHeight px, safe-area-inset-bottom)
-    //   - Keyboard closed: env(safe-area-inset-bottom)  ← home indicator gap
+    // Strategy: outer shell covers the full screen (fixed inset-0).
+    // The INNER div is sized to vvHeight (the current visual viewport height).
+    // - When keyboard is closed: vvHeight ≈ full screen → inner fills screen.
+    // - When keyboard opens:    vvHeight shrinks to the area ABOVE the keyboard.
+    //   The inner div clips itself to that smaller height, so the composer sits
+    //   flush at the keyboard top. The outer div fills the rest (behind keyboard).
     //
-    // We intentionally do NOT use top: vv.offsetTop because iOS briefly makes
-    // offsetTop non-zero during the keyboard open/close animation, which would
-    // cause the header to visually jump.
-    const paddingBottomStyle =
-      keyboardHeight > 0
-        ? `max(${keyboardHeight}px, env(safe-area-inset-bottom, 0px))`
-        : "env(safe-area-inset-bottom, 0px)";
+    // Why not paddingBottom on the outer? Because if keyboardHeight is computed
+    // even slightly too large (iOS quirks), the flex content box collapses and
+    // the header gets clipped by overflow:hidden — the root cause of the jump.
+    //
+    // vvHeight=0 on SSR → fall back to "100%" (= full viewport via fixed inset-0).
+
+    const innerHeight = vvHeight > 0 ? `${vvHeight}px` : "100%";
 
     return (
       <div
-        className={`fixed inset-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
-          framed ? "bg-slate-200/60" : "bg-slate-50"
+        className={`fixed inset-0 z-40 flex flex-col items-center overflow-hidden text-gray-900 ${
+          framed ? "bg-white" : "bg-slate-50"
         }`}
-        style={{ paddingBottom: paddingBottomStyle }}
       >
         <div
-          className={`mx-auto flex h-full w-full min-w-0 flex-col overflow-hidden ${
-            widthClass ?? ""
-          } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
+          className={`flex w-full min-w-0 flex-col overflow-hidden ${widthClass ?? ""} ${
+            framed
+              ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}`
+              : ""
+          }`}
+          style={{ height: innerHeight }}
         >
           {header}
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
