@@ -1,0 +1,38 @@
+{
+  "id": "/tools/guitar-tuner",
+  "name": "QHub Guitar Tuner",
+  "short_name": "Tuner",
+  "description": "Тюнер для гитары, баса и укулеле — анализ в браузере",
+  "start_url": "/tools/guitar-tuner",
+  "scope": "/tools/guitar-tuner",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f9fafb",
+  "theme_color": "#059669",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/tools/guitar-tuner/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/guitar-tuner/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/guitar-tuner/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/tools/guitar-tuner/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

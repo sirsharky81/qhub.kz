@@ -81,12 +81,29 @@ export function clearAudioLog(): void {
   alertLog.length = 0;
 }
 
+const tunerEventLog: { time: string; event: string; detail?: string }[] = [];
+
+export function logTunerEvent(event: string, detail?: string): void {
+  if (typeof window === "undefined") return;
+  tunerEventLog.unshift({
+    time: new Date().toLocaleTimeString(),
+    event,
+    detail,
+  });
+  if (tunerEventLog.length > MAX_EVENTS) tunerEventLog.pop();
+}
+
+export function getTunerEventLog(): { time: string; event: string; detail?: string }[] {
+  return [...tunerEventLog];
+}
+
 export function exportAudioDebugBundle(): string {
   return JSON.stringify(
     {
       diagnostics: getAudioDiagnostics(),
       alerts: getAudioAlerts(),
       events: getAudioLog(),
+      tunerEvents: getTunerEventLog(),
     },
     null,
     2,

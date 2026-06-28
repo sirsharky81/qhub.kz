@@ -1,4 +1,7 @@
 import { logAudioEvent, setAudioDiagnostics } from "@/lib/audioDebug";
+import { isIOSDevice, isStandalonePWA } from "@/lib/platform/device";
+
+export { isIOSDevice, isStandalonePWA };
 import {
   buildCoverArtwork,
   buildPlaceholderArtwork,
@@ -54,24 +57,8 @@ type MediaSessionHandlers = {
   onResume?: () => void;
 };
 
-export function isIOSDevice(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-}
-
 function isPageHidden(): boolean {
   return typeof document !== "undefined" && document.hidden;
-}
-
-export function isStandalonePWA(): boolean {
-  if (typeof window === "undefined") return false;
-  const nav = window.navigator as Navigator & { standalone?: boolean };
-  return (
-    window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true
-  );
 }
 
 function ensureNavigatorAudioSession(): void {

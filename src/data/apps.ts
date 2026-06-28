@@ -152,6 +152,21 @@ export const apps: App[] = [
     sortOrder: 7,
   },
   {
+    id: "guitar-tuner",
+    title: "Guitar Tuner",
+    description: "Тюнер для гитары, баса и укулеле — точная настройка в браузере.",
+    longDescription:
+      "Профессиональный браузерный тюнер с AudioWorklet pitch detection (MPM/YIN). Гитара, бас, укулеле, хроматик. Аудио обрабатывается локально, без отправки на сервер.",
+    href: "/tools/guitar-tuner",
+    tags: ["tools", "music"],
+    icon: "🎸",
+    color: "from-emerald-500/10 to-emerald-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    beta: true,
+    sortOrder: 8,
+  },
+  {
     id: "file-converter",
     title: "QHub Smart File Converter",
     description:

@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/build-pitch-worklet.mjs && next build",
+    "build:worklet": "node scripts/build-pitch-worklet.mjs",
+    "dev": "node scripts/build-pitch-worklet.mjs && next dev",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -15,6 +16,7 @@
     "generate:qr-icons": "node scripts/generate-qr-generator-icons.mjs",
     "generate:code-scanner-icons": "node scripts/generate-code-scanner-icons.mjs",
     "generate:music-icons": "node scripts/generate-music-icons.mjs",
+    "generate:guitar-tuner-icons": "node scripts/generate-guitar-tuner-icons.mjs",
     "generate:family-icons": "node scripts/generate-family-icons.mjs"
   },
   "dependencies": {
@@ -67,6 +69,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
+    "esbuild": "^0.25.12",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
     "sharp": "^0.35.1",
