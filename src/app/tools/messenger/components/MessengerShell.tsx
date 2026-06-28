@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useViewportState } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
@@ -37,11 +37,13 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
-  const { vvHeight, vvOffsetTop } = useViewportState(trackKeyboard);
+  // keyboardOpen is used only by ChatComposer (via its own hook call).
+  // The shell itself uses CSS `height: 100dvh` which the browser updates
+  // synchronously — no JS frame lag, no translateY hacks needed.
+  useViewportState(trackKeyboard); // keep hook alive for ChatComposer's instance
 
-  // Lock scroll so iOS cannot auto-scroll the page when the keyboard opens.
-  // This works on most iOS versions; for those where it still scrolls,
-  // we compensate with translateY(vvOffsetTop) below.
+  // Prevent iOS from auto-scrolling the page when the keyboard opens,
+  // which would shift the layout viewport and misplace fixed elements.
   useEffect(() => {
     if (!trackKeyboard) return;
     const html = document.documentElement;
@@ -88,61 +90,42 @@ export function MessengerShell({
   );
 
   if (trackKeyboard) {
-    // ─── iOS PWA keyboard layout strategy ───────────────────────────────────
+    // ─── iOS / Android PWA keyboard layout ───────────────────────────────────
     //
-    // Two things happen on iOS when the virtual keyboard opens:
+    // Key insight: JS-based height adjustments have a ~1 rAF frame lag.
+    // In that 16 ms window, iOS may pan the web view to reveal a focused input,
+    // causing vv.offsetTop > 0 and making the header jump or disappear.
     //
-    // 1. vv.height shrinks  → the visible area above the keyboard is smaller.
-    //    We set `height: vvHeight` on the content div so it never extends
-    //    behind the keyboard.
+    // Solution: CSS `height: 100dvh`.
+    //   - `dvh` (dynamic viewport height) is 1% of the visible viewport height.
+    //   - On iOS 16.4+ / Android Chrome 108+, it updates SYNCHRONOUSLY with the
+    //     keyboard animation — no JS frame lag, no iOS pan, no header jump.
+    //   - The browser guarantees the shell always fills the space above the keyboard.
+    //   - No `transform`, no `vv.offsetTop` compensation needed.
     //
-    // 2. iOS auto-scrolls the page upward to keep the focused input visible
-    //    (vv.offsetTop > 0), even though we set overflow:hidden on <body>.
-    //    A `position:fixed` element stays at layout y=0, but the visual
-    //    viewport top is now at layout y=vv.offsetTop.  The result: the top
-    //    `vv.offsetTop` pixels of our shell are above the visible screen,
-    //    hiding the header.
+    // `interactiveWidget: resizes-visual` in layout.tsx makes vv.height (and
+    // therefore dvh) shrink when the keyboard opens, which is exactly what we need.
     //
-    // Fix: `transform: translateY(vv.offsetTop)` slides the content div down
-    // so its top edge aligns with the visual viewport top at all times.
-    // The GPU-composited transform has zero layout cost and tracks the scroll
-    // smoothly (within one rAF frame).
-    //
-    // When vvHeight is 0 (SSR / before mount) we fall back to `bottom:0` so
-    // the shell fills the full screen without a flash.
-
-    const innerStyle: CSSProperties =
-      vvHeight > 0
-        ? {
-            height: `${vvHeight}px`,
-            transform: vvOffsetTop > 0 ? `translateY(${vvOffsetTop}px)` : undefined,
-          }
-        : { bottom: 0 };
+    // Safe-area padding:
+    //   - Header handles its own top safe-area via paddingTop.
+    //   - ChatComposer toggles paddingBottom: env(safe-area-inset-bottom) on/off
+    //     using the `keyboardOpen` boolean from useViewportState so the home
+    //     indicator is covered when needed without adding a gap above the keyboard.
 
     return (
-      <>
-        {/* Background layer fills the full screen so the area behind the
-            keyboard (and below the shell on scroll) shows a consistent colour
-            instead of whatever is underneath the web view. */}
-        <div
-          className={`fixed inset-0 z-40 ${framed ? "bg-white" : "bg-slate-50"}`}
-        />
-
-        {/* Content layer: exactly tracks the visual viewport */}
-        <div
-          className={`fixed inset-x-0 top-0 z-50 flex flex-col overflow-hidden text-gray-900 ${
-            framed
-              ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}`
-              : "bg-slate-50"
-          } ${widthClass ? `mx-auto ${widthClass}` : "w-full"}`}
-          style={innerStyle}
-        >
-          {header}
-          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            {children}
-          </main>
-        </div>
-      </>
+      <div
+        className={`fixed inset-x-0 top-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
+          framed
+            ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}`
+            : "bg-slate-50"
+        } ${widthClass ? `mx-auto ${widthClass}` : "w-full"}`}
+        style={{ height: "100dvh" }}
+      >
+        {header}
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          {children}
+        </main>
+      </div>
     );
   }
 

@@ -4,45 +4,31 @@ import { useEffect, useRef, useState } from "react";
 
 export interface ViewportState {
   /**
-   * Visual viewport height in CSS pixels.
-   * Shrinks when the virtual keyboard is open.
-   * 0 before the first client-side render.
+   * True while the virtual keyboard is open.
+   * Computed by comparing current vv.height to the height captured at mount
+   * (before the keyboard appeared).
    */
-  vvHeight: number;
-  /**
-   * Distance between the top of the visual viewport and the top of the layout
-   * viewport, in CSS pixels.  Positive when iOS auto-scrolls the page up to
-   * keep the focused input visible after the keyboard opens.
-   * We compensate with translateY(vvOffsetTop) so that the shell always tracks
-   * the visual viewport exactly.
-   */
-  vvOffsetTop: number;
-  /** True while the virtual keyboard is significantly covering the screen. */
   keyboardOpen: boolean;
 }
 
 const KEYBOARD_THRESHOLD_PX = 80;
 
 /**
- * Tracks the visual viewport precisely, including the scroll offset that iOS
- * adds when the keyboard pushes content around.
+ * Detects whether the virtual keyboard is currently open.
  *
- * Design:
- * - Captures vv.height at mount (no keyboard) as the baseline.
- * - On every visualViewport resize/scroll event (batched via rAF) it reads
- *   vv.height and vv.offsetTop.
- * - keyboardOpen  = baseline - vv.height > threshold
- * - Callers should size their shell to `height: vvHeight` and offset it with
- *   `transform: translateY(vvOffsetTop)` so the shell always fills exactly
- *   the visible region above the keyboard.
+ * We deliberately do NOT expose vv.height or vv.offsetTop for shell sizing:
+ * those values have a ~1 rAF frame lag which causes visual jumps.  Instead,
+ * the shell uses CSS `height: 100dvh` (dynamic viewport height), which the
+ * browser updates synchronously as the keyboard animates.
+ *
+ * The only thing we need from JS is the boolean keyboardOpen so that
+ * ChatComposer can toggle its safe-area-inset-bottom padding:
+ *   - keyboard closed → add env(safe-area-inset-bottom) to lift above home bar
+ *   - keyboard open   → remove it (home bar is behind the keyboard, no gap needed)
  */
 export function useViewportState(enabled: boolean): ViewportState {
   const baseRef = useRef(0);
-  const [state, setState] = useState<ViewportState>({
-    vvHeight: 0,
-    vvOffsetTop: 0,
-    keyboardOpen: false,
-  });
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -57,13 +43,8 @@ export function useViewportState(enabled: boolean): ViewportState {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const h = Math.round(vv.height);
-        const ot = Math.round(vv.offsetTop);
         const base = baseRef.current || h;
-        setState({
-          vvHeight: h,
-          vvOffsetTop: ot,
-          keyboardOpen: base - h > KEYBOARD_THRESHOLD_PX,
-        });
+        setKeyboardOpen(base - h > KEYBOARD_THRESHOLD_PX);
       });
     };
 
@@ -77,7 +58,7 @@ export function useViewportState(enabled: boolean): ViewportState {
     };
   }, [enabled]);
 
-  return state;
+  return { keyboardOpen };
 }
 
 export function scrollChatListToBottom(listEl: HTMLElement | null): void {
