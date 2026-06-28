@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ConfirmDialog } from "@/components/music/ConfirmDialog";
 import { ChatComposer, type MediaSendPayload } from "./ChatComposer";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { MessageBubble, type DisplayMessage } from "./MessageBubble";
@@ -78,6 +80,7 @@ export function ChatView({
   const swipeToReply = useCoarsePointer();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; right: number } | null>(null);
   const [connection, setConnection] = useState<"online" | "reconnecting" | "offline">("reconnecting");
   const [peerOnline, setPeerOnline] = useState<boolean | null>(null);
   const [participantCount, setParticipantCount] = useState<number | null>(null);
@@ -149,21 +152,25 @@ export function ChatView({
     };
   }, [channel, persistHistory, storageKey]);
 
-  useEffect(() => {
-    if (!showMenu) return;
-    function handleOutside(event: MouseEvent | TouchEvent) {
-      const target = event.target as Node;
-      if (menuRef.current && !menuRef.current.contains(target)) {
-        setShowMenu(false);
-      }
+  const closeMenu = useCallback(() => {
+    setShowMenu(false);
+    setMenuAnchor(null);
+  }, []);
+
+  const toggleMenu = useCallback(() => {
+    if (showMenu) {
+      closeMenu();
+      return;
     }
-    document.addEventListener("mousedown", handleOutside);
-    document.addEventListener("touchstart", handleOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleOutside);
-      document.removeEventListener("touchstart", handleOutside);
-    };
-  }, [showMenu]);
+    const rect = menuRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuAnchor({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setShowMenu(true);
+  }, [closeMenu, showMenu]);
 
   useEffect(() => {
     setActiveChatChannel(channel);
@@ -479,7 +486,7 @@ export function ChatView({
     setMessages([]);
     seenIds.current.clear();
     setShowClearConfirm(false);
-    setShowMenu(false);
+    closeMenu();
     void refreshAppBadge();
   }
 
@@ -515,6 +522,10 @@ export function ChatView({
 
   const messageIds = new Set(messages.map((m) => m.id));
 
+  const clearChatConfirmTitle = isRoom
+    ? `Удалить историю комнаты ${title} на этом устройстве? Это нельзя отменить.`
+    : `Удалить всю историю переписки с ${title}? Это нельзя отменить. У собеседника история останется.`;
+
   const headerTrailing = (
     <div className="flex items-center gap-1">
       {isRoom && onLeaveRoom && (
@@ -530,27 +541,13 @@ export function ChatView({
         <div className="relative" ref={menuRef}>
           <button
             type="button"
-            onClick={() => setShowMenu((v) => !v)}
+            onClick={toggleMenu}
             className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
             aria-label="Меню чата"
             aria-expanded={showMenu}
           >
             ⋮
           </button>
-          {showMenu && (
-            <div className="absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border border-gray-200 bg-white shadow-lg py-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowMenu(false);
-                  setShowClearConfirm(true);
-                }}
-                className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-              >
-                Очистить чат
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -634,38 +631,44 @@ export function ChatView({
         />
       </MessengerShell>
 
-      {showClearConfirm && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-6"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="clear-chat-title"
-        >
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-4">
-            <p id="clear-chat-title" className="text-sm text-gray-800">
-              {isRoom
-                ? `Удалить историю комнаты ${title} на этом устройстве? Это нельзя отменить.`
-                : `Удалить всю историю переписки с ${title}? Это нельзя отменить. У собеседника история останется.`}
-            </p>
-            <div className="flex gap-2">
+      {showMenu &&
+        menuAnchor &&
+        createPortal(
+          <>
+            <button
+              type="button"
+              className="fixed inset-0 z-[200] cursor-default bg-transparent"
+              aria-label="Закрыть меню"
+              onClick={closeMenu}
+            />
+            <div
+              className="fixed z-[201] w-44 rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
+              style={{ top: menuAnchor.top, right: menuAnchor.right }}
+            >
               <button
                 type="button"
-                onClick={() => setShowClearConfirm(false)}
-                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm"
+                onClick={() => {
+                  closeMenu();
+                  setShowClearConfirm(true);
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
               >
-                Отмена
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleClearChat()}
-                className="flex-1 rounded-xl bg-red-600 text-white py-2.5 text-sm font-semibold"
-              >
-                Удалить
+                Очистить чат
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>,
+          document.body,
+        )}
+
+      <ConfirmDialog
+        open={showClearConfirm}
+        title={clearChatConfirmTitle}
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        destructive
+        onConfirm={() => void handleClearChat()}
+        onCancel={() => setShowClearConfirm(false)}
+      />
     </>
   );
 }

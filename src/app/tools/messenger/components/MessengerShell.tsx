@@ -54,18 +54,15 @@ export function MessengerShell({
   }, [trackKeyboard]);
 
   const header = (
-    <header
-      className="shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
-      style={{
-        paddingLeft: "max(1rem, env(safe-area-inset-left))",
-        paddingRight: "max(1rem, env(safe-area-inset-right))",
-      }}
-    >
+    <header className="relative z-20 shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
       {backHref && (
         <Link
           href={backHref}
           className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 shrink-0"
           aria-label="Назад"
+          style={{
+            marginLeft: "max(0rem, calc(env(safe-area-inset-left) - 1rem))",
+          }}
         >
           ←
         </Link>
@@ -83,16 +80,13 @@ export function MessengerShell({
   if (trackKeyboard) {
     return (
       <div
-        className={`fixed inset-x-0 top-0 z-40 flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden text-gray-900 ${
+        className={`fixed inset-0 z-40 flex flex-col text-gray-900 ${
           framed ? "bg-slate-200/60" : "bg-slate-50"
         }`}
-        style={{
-          paddingBottom:
-            keyboardInset > 0 ? keyboardInset : "env(safe-area-inset-bottom, 0px)",
-        }}
+        style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
       >
         <div
-          className={`mx-auto flex h-full w-full min-w-0 flex-col overflow-hidden ${
+          className={`mx-auto flex h-full w-full min-w-0 flex-col ${
             widthClass ?? ""
           } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
         >
