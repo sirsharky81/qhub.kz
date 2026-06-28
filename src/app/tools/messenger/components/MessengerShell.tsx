@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
+import { useKeyboardInset } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -13,7 +14,7 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
-  /** Full-screen chat shell; composer handles keyboard offset separately. */
+  /** Lift chat content above the iOS virtual keyboard. */
   keyboardAware?: boolean;
 }
 
@@ -36,6 +37,7 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
+  const keyboardInset = useKeyboardInset(trackKeyboard);
 
   useEffect(() => {
     if (!trackKeyboard) return;
@@ -81,9 +83,13 @@ export function MessengerShell({
   if (trackKeyboard) {
     return (
       <div
-        className={`fixed inset-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
+        className={`fixed inset-x-0 top-0 z-40 flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden text-gray-900 ${
           framed ? "bg-slate-200/60" : "bg-slate-50"
         }`}
+        style={{
+          paddingBottom:
+            keyboardInset > 0 ? keyboardInset : "env(safe-area-inset-bottom, 0px)",
+        }}
       >
         <div
           className={`mx-auto flex h-full w-full min-w-0 flex-col overflow-hidden ${

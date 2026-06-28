@@ -74,7 +74,6 @@ export function ChatView({
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [text, setText] = useState("");
-  const [composerHeight, setComposerHeight] = useState(72);
   const [replyTo, setReplyTo] = useState<DisplayMessage | null>(null);
   const swipeToReply = useCoarsePointer();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -568,53 +567,25 @@ export function ChatView({
   }
 
   return (
-    <MessengerShell
-      variant="chat"
-      title={title}
-      subtitle={headerSubtitle}
-      backHref={backHref}
-      trailing={headerTrailing}
-    >
-      {showClearConfirm && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 px-6">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-4">
-            <p className="text-sm text-gray-800">
-              {isRoom
-                ? `Удалить историю комнаты ${title} на этом устройстве? Это нельзя отменить.`
-                : `Удалить всю историю переписки с ${title}? Это нельзя отменить. У собеседника история останется.`}
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowClearConfirm(false)}
-                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleClearChat()}
-                className="flex-1 rounded-xl bg-red-600 text-white py-2.5 text-sm font-semibold"
-              >
-                Удалить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div
-        ref={listRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-y-contain touch-pan-y relative"
-        style={{
-          backgroundColor: "#eceff1",
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, rgb(15 23 42 / 0.035) 1px, transparent 0)",
-          backgroundSize: "18px 18px",
-          WebkitOverflowScrolling: "touch",
-          paddingBottom: composerHeight,
-        }}
+    <>
+      <MessengerShell
+        variant="chat"
+        title={title}
+        subtitle={headerSubtitle}
+        backHref={backHref}
+        trailing={headerTrailing}
       >
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-y-contain touch-pan-y relative"
+          style={{
+            backgroundColor: "#eceff1",
+            backgroundImage:
+              "radial-gradient(circle at 1px 1px, rgb(15 23 42 / 0.035) 1px, transparent 0)",
+            backgroundSize: "18px 18px",
+            WebkitOverflowScrolling: "touch",
+          }}
+        >
         {messages.length === 0 && persistHistory && (
           <div
             className="max-w-md"
@@ -650,18 +621,51 @@ export function ChatView({
         <div ref={bottomRef} className="h-1" />
       </div>
 
-      <ChatComposer
-        text={text}
-        onTextChange={setText}
-        onSend={() => void handleSend()}
-        onFile={(f) => void handleFile(f)}
-        onSendMedia={(p) => void handleSendMedia(p)}
-        canSend={text.trim().length > 0}
-        replyTo={replyTo}
-        onCancelReply={() => setReplyTo(null)}
-        onFocus={scrollMessagesToBottom}
-        onHeightChange={setComposerHeight}
-      />
-    </MessengerShell>
+        <ChatComposer
+          text={text}
+          onTextChange={setText}
+          onSend={() => void handleSend()}
+          onFile={(f) => void handleFile(f)}
+          onSendMedia={(p) => void handleSendMedia(p)}
+          canSend={text.trim().length > 0}
+          replyTo={replyTo}
+          onCancelReply={() => setReplyTo(null)}
+          onFocus={scrollMessagesToBottom}
+        />
+      </MessengerShell>
+
+      {showClearConfirm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="clear-chat-title"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-4">
+            <p id="clear-chat-title" className="text-sm text-gray-800">
+              {isRoom
+                ? `Удалить историю комнаты ${title} на этом устройстве? Это нельзя отменить.`
+                : `Удалить всю историю переписки с ${title}? Это нельзя отменить. У собеседника история останется.`}
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleClearChat()}
+                className="flex-1 rounded-xl bg-red-600 text-white py-2.5 text-sm font-semibold"
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

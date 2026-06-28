@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { useKeyboardInset } from "@/lib/messenger/use-visual-viewport";
+import { useCallback, useRef, useState } from "react";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import {
@@ -34,7 +33,6 @@ interface Props {
   replyTo: DisplayMessage | null;
   onCancelReply: () => void;
   onFocus?: () => void;
-  onHeightChange?: (height: number) => void;
 }
 
 type RecordMode = "audio" | "video" | null;
@@ -57,30 +55,15 @@ export function ChatComposer({
   replyTo,
   onCancelReply,
   onFocus,
-  onHeightChange,
 }: Props) {
   const [recordMode, setRecordMode] = useState<RecordMode>(null);
   const [activeSession, setActiveSession] = useState<MediaRecorderSession | null>(null);
   const [startingMode, setStartingMode] = useState<RecordMode>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const keyboardInset = useKeyboardInset(true);
-  const rootRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
   const trimmed = text.trim();
   const showMediaButtons = !trimmed && !recordMode && !startingMode;
-
-  useLayoutEffect(() => {
-    const el = rootRef.current;
-    if (!el || !onHeightChange) return;
-
-    const report = () => onHeightChange(Math.ceil(el.getBoundingClientRect().height));
-    report();
-
-    const ro = new ResizeObserver(report);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [onHeightChange, keyboardInset]);
 
   const exitRecording = useCallback(() => {
     sessionRef.current?.dispose();
@@ -167,18 +150,13 @@ export function ChatComposer({
   }
 
   return (
-    <div
-      ref={rootRef}
-      className="fixed inset-x-0 z-50 pointer-events-none"
-      style={{ bottom: keyboardInset }}
-    >
+    <div className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur">
       <div
-        className="pointer-events-auto mx-auto w-full max-w-2xl border-t border-gray-200 bg-white/95 backdrop-blur"
+        className="px-3 pt-1.5"
         style={{
-          paddingTop: "0.375rem",
-          paddingBottom: keyboardInset > 0 ? "0.375rem" : "env(safe-area-inset-bottom, 0px)",
           paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
           paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+          paddingBottom: "0.375rem",
         }}
       >
       {replyTo && !recordMode && (
