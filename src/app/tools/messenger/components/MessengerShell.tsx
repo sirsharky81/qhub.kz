@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { useKeyboardInset } from "@/lib/messenger/use-visual-viewport";
+import { useVisualViewportFrame } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -14,7 +14,7 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
-  /** Lift chat content above the iOS virtual keyboard. */
+  /** Resize with the visible viewport when the iOS keyboard opens. */
   keyboardAware?: boolean;
 }
 
@@ -37,7 +37,7 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
-  const keyboardInset = useKeyboardInset(trackKeyboard);
+  const viewportFrame = useVisualViewportFrame(trackKeyboard);
 
   useEffect(() => {
     if (!trackKeyboard) return;
@@ -54,15 +54,18 @@ export function MessengerShell({
   }, [trackKeyboard]);
 
   const header = (
-    <header className="relative z-20 shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+    <header
+      className="relative z-20 shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
+      style={{
+        paddingLeft: "max(1rem, env(safe-area-inset-left))",
+        paddingRight: "max(1rem, env(safe-area-inset-right))",
+      }}
+    >
       {backHref && (
         <Link
           href={backHref}
           className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 shrink-0"
           aria-label="Назад"
-          style={{
-            marginLeft: "max(0rem, calc(env(safe-area-inset-left) - 1rem))",
-          }}
         >
           ←
         </Link>
@@ -80,13 +83,16 @@ export function MessengerShell({
   if (trackKeyboard) {
     return (
       <div
-        className={`fixed inset-0 z-40 flex flex-col text-gray-900 ${
+        className={`fixed inset-x-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
           framed ? "bg-slate-200/60" : "bg-slate-50"
         }`}
-        style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
+        style={{
+          top: viewportFrame.top,
+          height: viewportFrame.height,
+        }}
       >
         <div
-          className={`mx-auto flex h-full w-full min-w-0 flex-col ${
+          className={`mx-auto flex h-full w-full min-w-0 flex-col overflow-hidden ${
             widthClass ?? ""
           } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
         >

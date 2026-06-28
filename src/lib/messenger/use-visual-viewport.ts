@@ -2,19 +2,31 @@
 
 import { useEffect, useState } from "react";
 
-const KEYBOARD_OPEN_THRESHOLD_PX = 8;
-
-function readKeyboardOverlap(): number {
-  if (typeof window === "undefined") return 0;
-  const vv = window.visualViewport;
-  if (!vv) return 0;
-  const overlap = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-  return overlap > KEYBOARD_OPEN_THRESHOLD_PX ? overlap : 0;
+export interface VisualViewportFrame {
+  top: number;
+  height: number;
+  keyboardOpen: boolean;
 }
 
-/** Space to lift fixed UI above the virtual keyboard (iOS PWA). */
-export function useKeyboardInset(enabled: boolean): number {
-  const [inset, setInset] = useState(0);
+const KEYBOARD_OPEN_DELTA_PX = 80;
+
+function readVisualViewportFrame(): VisualViewportFrame {
+  if (typeof window === "undefined") {
+    return { top: 0, height: 0, keyboardOpen: false };
+  }
+  const vv = window.visualViewport;
+  const height = Math.round(vv?.height ?? window.innerHeight);
+  const top = Math.max(0, Math.round(vv?.offsetTop ?? 0));
+  return {
+    top,
+    height,
+    keyboardOpen: height < window.innerHeight - KEYBOARD_OPEN_DELTA_PX,
+  };
+}
+
+/** Pin full-screen chat UI to the visible viewport (iOS keyboard / PWA). */
+export function useVisualViewportFrame(enabled: boolean): VisualViewportFrame {
+  const [frame, setFrame] = useState(readVisualViewportFrame);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
@@ -27,7 +39,7 @@ export function useKeyboardInset(enabled: boolean): number {
     const sync = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        setInset(readKeyboardOverlap());
+        setFrame(readVisualViewportFrame());
       });
     };
 
@@ -41,7 +53,7 @@ export function useKeyboardInset(enabled: boolean): number {
     };
   }, [enabled]);
 
-  return inset;
+  return frame;
 }
 
 export function scrollChatListToBottom(listEl: HTMLElement | null): void {

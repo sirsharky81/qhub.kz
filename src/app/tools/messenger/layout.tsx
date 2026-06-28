@@ -28,7 +28,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   // Keeps layout viewport above the virtual keyboard on supported mobile browsers.
-  interactiveWidget: "resizes-content",
+  interactiveWidget: "overlays-content",
 };
 
 export default function MessengerLayout({ children }: { children: ReactNode }) {
