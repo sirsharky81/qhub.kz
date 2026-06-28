@@ -52,13 +52,16 @@ export function usePitchDetection(options: UsePitchDetectionOptions): UsePitchDe
       clearInterval(fallbackTimerRef.current);
       fallbackTimerRef.current = null;
     }
-    graphRef.current?.dispose();
-    graphRef.current = null;
+    if (graphRef.current) {
+      graphRef.current.dispose();
+      graphRef.current = null;
+    }
     pipelineRef.current = null;
     setReading(null);
     setAudioContext(null);
     setStream(null);
     setUseFallback(false);
+    logTunerEvent("sessionStopped");
   }, []);
 
   const startFallbackLoop = useCallback((handle: AudioGraphHandle) => {
@@ -127,9 +130,10 @@ export function usePitchDetection(options: UsePitchDetectionOptions): UsePitchDe
   }, [stop, tuning, deviceId, analysisIntervalMs, a4CalibrationCents, startFallbackLoop]);
 
   const reacquire = useCallback(async () => {
+    if (!enabled) return;
     logTunerEvent("reacquirePitch");
     await start();
-  }, [start]);
+  }, [enabled, start]);
 
   useEffect(() => {
     if (!enabled || !graphRef.current?.workletNode) return;

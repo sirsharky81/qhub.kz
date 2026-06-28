@@ -98,8 +98,12 @@ export async function createAudioGraph(options: AudioGraphOptions): Promise<Audi
     analyserNode?.disconnect();
     lowPass.disconnect();
     source.disconnect();
-    stream.getTracks().forEach((t) => t.stop());
+    stream.getTracks().forEach((t) => {
+      t.stop();
+      t.enabled = false;
+    });
     void context.close();
+    logTunerEvent("micStopped");
   };
 
   return { context, stream, workletNode, analyserNode, useFallback, dispose };

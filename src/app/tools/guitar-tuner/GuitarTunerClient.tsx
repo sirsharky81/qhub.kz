@@ -8,6 +8,7 @@ import NoteDisplay from "./components/NoteDisplay";
 import PerformanceBanner from "./components/PerformanceBanner";
 import PermissionDialog from "./components/PermissionDialog";
 import StringSelector from "./components/StringSelector";
+import TunerControls, { type TunerSessionState } from "./components/TunerControls";
 import TunerDebugPanel from "./components/TunerDebugPanel";
 import TuningSelector from "./components/TuningSelector";
 import { useMicVisibilityResume } from "@/lib/guitar-tuner/hooks/useMicrophone";
@@ -31,12 +32,14 @@ async function loadMicList(): Promise<MediaDeviceInfo[]> {
 
 export default function GuitarTunerClient() {
   const [settings, setSettings] = useState<TunerSettings | null>(null);
-  const [started, setStarted] = useState(false);
-  const [showPermission, setShowPermission] = useState(true);
+  const [sessionState, setSessionState] = useState<TunerSessionState>("idle");
+  const [showPermission, setShowPermission] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [pwaHint, setPwaHint] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([]);
+
+  const isActive = sessionState === "active";
 
   useEffect(() => {
     void loadTunerSettings().then(setSettings);
@@ -56,37 +59,66 @@ export default function GuitarTunerClient() {
     tuning,
     deviceId: settings?.micDeviceId ?? null,
     a4CalibrationCents: settings?.a4CalibrationCents ?? 0,
-    enabled: started,
+    enabled: isActive,
   });
 
   const tuner = useTunerState(pitch.isReconfiguring);
 
-  useMicVisibilityResume(pitch.audioContext, pitch.stream, pitch.reacquire);
+  useMicVisibilityResume(
+    isActive ? pitch.audioContext : null,
+    isActive ? pitch.stream : null,
+    pitch.reacquire,
+  );
 
   useEffect(() => {
-    if (pitch.reading) tuner.pushReading(pitch.reading);
-  }, [pitch.reading, tuner]);
+    if (!isActive || !pitch.reading) return;
+    tuner.pushReading(pitch.reading);
+  }, [pitch.reading, isActive, tuner]);
 
   useEffect(() => {
-    if (!started) return;
-    void pitch.start();
-    return () => pitch.stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, settings?.micDeviceId, settings?.a4CalibrationCents]);
+    if (!isActive) return;
 
-  useEffect(() => {
-    if (!pitch.stream) return;
-    void loadMicList().then(setAvailableMics);
-  }, [pitch.stream]);
+    let cancelled = false;
 
-  const updateSettings = useCallback(async (patch: Partial<TunerSettings>) => {
-    setSettings((prev) => {
-      const next = { ...(prev ?? ({} as TunerSettings)), ...patch };
-      void saveTunerSettings(patch);
-      return next;
+    void pitch.start().catch((err) => {
+      if (cancelled) return;
+      pitch.stop();
+      setSessionState("idle");
+      const message = err instanceof Error ? err.message : "Microphone access failed";
+      setStartError(message);
+      setPermissionDenied(
+        err instanceof DOMException &&
+          (err.name === "NotAllowedError" || err.name === "PermissionDeniedError"),
+      );
+      if (isIOSDevice() && isStandalonePWA()) {
+        setPwaHint(true);
+      }
+      setShowPermission(true);
     });
-    tuner.reset();
-  }, [tuner]);
+
+    return () => {
+      cancelled = true;
+      pitch.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, settings?.micDeviceId, settings?.a4CalibrationCents]);
+
+  useEffect(() => {
+    if (!isActive || !pitch.stream) return;
+    void loadMicList().then(setAvailableMics);
+  }, [isActive, pitch.stream]);
+
+  const updateSettings = useCallback(
+    async (patch: Partial<TunerSettings>) => {
+      setSettings((prev) => {
+        const next = { ...(prev ?? ({} as TunerSettings)), ...patch };
+        void saveTunerSettings(patch);
+        return next;
+      });
+      tuner.reset();
+    },
+    [tuner],
+  );
 
   const handleInstrumentChange = (id: string) => {
     const inst = getInstrument(id);
@@ -98,27 +130,30 @@ export default function GuitarTunerClient() {
     });
   };
 
-  const handleStart = async () => {
-    try {
-      setStartError(null);
-      setStarted(true);
-      setShowPermission(false);
-      await pitch.start();
-      const mics = await loadMicList();
-      setAvailableMics(mics);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Microphone access failed";
-      setStartError(message);
-      setPermissionDenied(
-        err instanceof DOMException &&
-          (err.name === "NotAllowedError" || err.name === "PermissionDeniedError"),
-      );
-      if (isIOSDevice() && isStandalonePWA()) {
-        setPwaHint(true);
-      }
-      setShowPermission(true);
-      setStarted(false);
-    }
+  const handleStart = () => {
+    setStartError(null);
+    setPermissionDenied(false);
+    setShowPermission(false);
+    setSessionState("active");
+  };
+
+  const handlePause = () => {
+    pitch.stop();
+    tuner.reset();
+    setSessionState("paused");
+  };
+
+  const handleResume = () => {
+    setSessionState("active");
+  };
+
+  const handleStop = () => {
+    pitch.stop();
+    tuner.reset();
+    setSessionState("idle");
+    setAvailableMics([]);
+    setShowPermission(false);
+    setStartError(null);
   };
 
   const handleMicChange = async (deviceId: string) => {
@@ -135,18 +170,39 @@ export default function GuitarTunerClient() {
 
   const displayCents = tuner.display?.cents ?? 0;
   const displayConfidence = tuner.display?.confidence ?? tuner.rawReading?.confidence ?? 0;
+  const displayState = sessionState === "active" ? tuner.displayState : "listening";
 
   return (
-    <div className="flex flex-1 flex-col gap-6 px-4 py-6">
+    <div className="flex flex-1 flex-col gap-6 px-4 py-6 pb-8">
       <PermissionDialog
-        open={showPermission && !started}
+        open={showPermission}
         denied={permissionDenied}
         pwaHint={pwaHint}
         error={startError}
         onRequest={handleStart}
       />
 
-      {pitch.useFallback && <PerformanceBanner />}
+      <TunerControls
+        sessionState={sessionState}
+        onStart={handleStart}
+        onPause={handlePause}
+        onResume={handleResume}
+        onStop={handleStop}
+      />
+
+      {sessionState === "paused" && (
+        <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+          Микрофон отключён. Нажмите «Продолжить» или «Завершить».
+        </p>
+      )}
+
+      {sessionState === "idle" && (
+        <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+          Нажмите «Начать проверку», чтобы включить микрофон.
+        </p>
+      )}
+
+      {pitch.useFallback && isActive && <PerformanceBanner />}
 
       <InstrumentSelector
         instruments={INSTRUMENTS}
@@ -175,21 +231,23 @@ export default function GuitarTunerClient() {
           cents={displayCents}
           frequency={tuner.display?.frequency ?? 0}
           confidence={displayConfidence}
-          displayState={tuner.displayState}
+          displayState={displayState}
         />
         <Needle
           cents={displayCents}
           confidence={displayConfidence}
-          displayState={tuner.displayState}
+          displayState={displayState}
         />
       </div>
 
-      <MicSelector
-        mics={availableMics}
-        value={settings.micDeviceId}
-        onChange={handleMicChange}
-        level={tuner.rawReading?.rms ?? 0}
-      />
+      {isActive && availableMics.length > 0 && (
+        <MicSelector
+          mics={availableMics}
+          value={settings.micDeviceId}
+          onChange={handleMicChange}
+          level={tuner.rawReading?.rms ?? 0}
+        />
+      )}
 
       <div className="rounded-xl bg-gray-50 p-4 dark:bg-gray-900">
         <label className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
