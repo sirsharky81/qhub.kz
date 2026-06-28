@@ -74,6 +74,7 @@ export function ChatView({
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [text, setText] = useState("");
+  const [composerHeight, setComposerHeight] = useState(72);
   const [replyTo, setReplyTo] = useState<DisplayMessage | null>(null);
   const swipeToReply = useCoarsePointer();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -611,6 +612,7 @@ export function ChatView({
             "radial-gradient(circle at 1px 1px, rgb(15 23 42 / 0.035) 1px, transparent 0)",
           backgroundSize: "18px 18px",
           WebkitOverflowScrolling: "touch",
+          paddingBottom: composerHeight,
         }}
       >
         {messages.length === 0 && persistHistory && (
@@ -658,6 +660,7 @@ export function ChatView({
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
         onFocus={scrollMessagesToBottom}
+        onHeightChange={setComposerHeight}
       />
     </MessengerShell>
   );

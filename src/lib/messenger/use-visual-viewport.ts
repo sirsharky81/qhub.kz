@@ -2,20 +2,17 @@
 
 import { useEffect, useState } from "react";
 
-const KEYBOARD_OPEN_THRESHOLD_PX = 72;
+const KEYBOARD_OPEN_THRESHOLD_PX = 8;
 
 function readKeyboardOverlap(): number {
   if (typeof window === "undefined") return 0;
   const vv = window.visualViewport;
   if (!vv) return 0;
-  return Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+  const overlap = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+  return overlap > KEYBOARD_OPEN_THRESHOLD_PX ? overlap : 0;
 }
 
-function readKeyboardVisible(): boolean {
-  return readKeyboardOverlap() > KEYBOARD_OPEN_THRESHOLD_PX;
-}
-
-/** Space covered by the virtual keyboard from the bottom of the layout viewport. */
+/** Space to lift fixed UI above the virtual keyboard (iOS PWA). */
 export function useKeyboardInset(enabled: boolean): number {
   const [inset, setInset] = useState(0);
 
@@ -45,28 +42,6 @@ export function useKeyboardInset(enabled: boolean): number {
   }, [enabled]);
 
   return inset;
-}
-
-/** True while the on-screen keyboard overlaps the layout viewport (iOS/Android). */
-export function useKeyboardVisible(): boolean {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const sync = () => setVisible(readKeyboardVisible());
-
-    sync();
-    vv.addEventListener("resize", sync);
-    vv.addEventListener("scroll", sync);
-    return () => {
-      vv.removeEventListener("resize", sync);
-      vv.removeEventListener("scroll", sync);
-    };
-  }, []);
-
-  return visible;
 }
 
 export function scrollChatListToBottom(listEl: HTMLElement | null): void {
