@@ -14,7 +14,6 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
-  /** Lift content above the iOS/Android virtual keyboard. */
   keyboardAware?: boolean;
 }
 
@@ -37,13 +36,14 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
-  // keyboardOpen is used only by ChatComposer (via its own hook call).
-  // The shell itself uses CSS `height: 100dvh` which the browser updates
-  // synchronously — no JS frame lag, no translateY hacks needed.
-  useViewportState(trackKeyboard); // keep hook alive for ChatComposer's instance
 
-  // Prevent iOS from auto-scrolling the page when the keyboard opens,
-  // which would shift the layout viewport and misplace fixed elements.
+  // This hook's primary job here is to keep the --messenger-vvh CSS variable
+  // in sync with the visual viewport height (see use-visual-viewport.ts).
+  useViewportState(trackKeyboard);
+
+  // Keep <body> from scrolling so iOS cannot auto-pan the web view when the
+  // keyboard opens.  Belt-and-suspenders: the CSS-var approach already
+  // prevents the pan by updating the shell height before iOS can act.
   useEffect(() => {
     if (!trackKeyboard) return;
     const html = document.documentElement;
@@ -90,27 +90,19 @@ export function MessengerShell({
   );
 
   if (trackKeyboard) {
-    // ─── iOS / Android PWA keyboard layout ───────────────────────────────────
+    // ─── Shell height strategy ────────────────────────────────────────────────
     //
-    // Key insight: JS-based height adjustments have a ~1 rAF frame lag.
-    // In that 16 ms window, iOS may pan the web view to reveal a focused input,
-    // causing vv.offsetTop > 0 and making the header jump or disappear.
+    // We set --messenger-vvh = visualViewport.height synchronously inside the
+    // vv.resize event handler (see useViewportState).  Using that CSS variable
+    // as the shell height means the browser updates the layout in the SAME
+    // paint that responds to the keyboard animation — zero extra frame lag.
     //
-    // Solution: CSS `height: 100dvh`.
-    //   - `dvh` (dynamic viewport height) is 1% of the visible viewport height.
-    //   - On iOS 16.4+ / Android Chrome 108+, it updates SYNCHRONOUSLY with the
-    //     keyboard animation — no JS frame lag, no iOS pan, no header jump.
-    //   - The browser guarantees the shell always fills the space above the keyboard.
-    //   - No `transform`, no `vv.offsetTop` compensation needed.
+    // `100dvh` is the fallback for SSR / before the first client event.
+    // On iOS PWA standalone mode `dvh` is unreliable (constant value), so
+    // the JS-driven CSS variable is the reliable path.
     //
-    // `interactiveWidget: resizes-visual` in layout.tsx makes vv.height (and
-    // therefore dvh) shrink when the keyboard opens, which is exactly what we need.
-    //
-    // Safe-area padding:
-    //   - Header handles its own top safe-area via paddingTop.
-    //   - ChatComposer toggles paddingBottom: env(safe-area-inset-bottom) on/off
-    //     using the `keyboardOpen` boolean from useViewportState so the home
-    //     indicator is covered when needed without adding a gap above the keyboard.
+    // No transform, no paddingBottom — just height.  The header is always the
+    // first flex child at y=0 and therefore always visible.
 
     return (
       <div
@@ -119,7 +111,7 @@ export function MessengerShell({
             ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}`
             : "bg-slate-50"
         } ${widthClass ? `mx-auto ${widthClass}` : "w-full"}`}
-        style={{ height: "100dvh" }}
+        style={{ height: "var(--messenger-vvh, 100dvh)" }}
       >
         {header}
         <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
