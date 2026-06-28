@@ -3,39 +3,53 @@
 import { useEffect, useRef, useState } from "react";
 
 export interface ViewportState {
-  /** Visual viewport height in CSS pixels. 0 before first client render. */
+  /**
+   * Visual viewport height in CSS pixels.
+   * Shrinks when the virtual keyboard is open.
+   * 0 before the first client-side render.
+   */
   vvHeight: number;
   /**
-   * True while the virtual keyboard is open.
-   * Detected by comparing current vv.height to the captured base height
-   * at component mount (before the keyboard ever appeared).
+   * Distance between the top of the visual viewport and the top of the layout
+   * viewport, in CSS pixels.  Positive when iOS auto-scrolls the page up to
+   * keep the focused input visible after the keyboard opens.
+   * We compensate with translateY(vvOffsetTop) so that the shell always tracks
+   * the visual viewport exactly.
    */
+  vvOffsetTop: number;
+  /** True while the virtual keyboard is significantly covering the screen. */
   keyboardOpen: boolean;
 }
 
 const KEYBOARD_THRESHOLD_PX = 80;
 
 /**
- * Tracks the visual viewport height and keyboard state.
+ * Tracks the visual viewport precisely, including the scroll offset that iOS
+ * adds when the keyboard pushes content around.
  *
- * Key design decisions:
- * - Uses vv.height at mount time as the "base" (no-keyboard reference)
- *   instead of window.innerHeight, which can vary across iOS versions and
- *   viewport configurations (viewport-fit=cover, PWA, etc.).
- * - Does NOT expose vv.offsetTop or use it for positioning — even with
- *   overflow:hidden on body, iOS can briefly make offsetTop non-zero during
- *   the keyboard animation, which would cause header jumps if used for top:.
+ * Design:
+ * - Captures vv.height at mount (no keyboard) as the baseline.
+ * - On every visualViewport resize/scroll event (batched via rAF) it reads
+ *   vv.height and vv.offsetTop.
+ * - keyboardOpen  = baseline - vv.height > threshold
+ * - Callers should size their shell to `height: vvHeight` and offset it with
+ *   `transform: translateY(vvOffsetTop)` so the shell always fills exactly
+ *   the visible region above the keyboard.
  */
 export function useViewportState(enabled: boolean): ViewportState {
   const baseRef = useRef(0);
-  const [state, setState] = useState<ViewportState>({ vvHeight: 0, keyboardOpen: false });
+  const [state, setState] = useState<ViewportState>({
+    vvHeight: 0,
+    vvOffsetTop: 0,
+    keyboardOpen: false,
+  });
 
   useEffect(() => {
     if (!enabled) return;
     const vv = window.visualViewport;
     if (!vv) return;
 
-    // Capture the "no keyboard" height once, synchronously at mount.
+    // Capture the no-keyboard height once at mount.
     baseRef.current = Math.round(vv.height);
 
     let raf = 0;
@@ -43,11 +57,12 @@ export function useViewportState(enabled: boolean): ViewportState {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const h = Math.round(vv.height);
+        const ot = Math.round(vv.offsetTop);
         const base = baseRef.current || h;
-        const diff = base - h;
         setState({
           vvHeight: h,
-          keyboardOpen: diff > KEYBOARD_THRESHOLD_PX,
+          vvOffsetTop: ot,
+          keyboardOpen: base - h > KEYBOARD_THRESHOLD_PX,
         });
       });
     };

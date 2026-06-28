@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useViewportState } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
@@ -37,9 +37,11 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
-  const { vvHeight } = useViewportState(trackKeyboard);
+  const { vvHeight, vvOffsetTop } = useViewportState(trackKeyboard);
 
   // Lock scroll so iOS cannot auto-scroll the page when the keyboard opens.
+  // This works on most iOS versions; for those where it still scrolls,
+  // we compensate with translateY(vvOffsetTop) below.
   useEffect(() => {
     if (!trackKeyboard) return;
     const html = document.documentElement;
@@ -86,41 +88,61 @@ export function MessengerShell({
   );
 
   if (trackKeyboard) {
-    // Strategy: outer shell covers the full screen (fixed inset-0).
-    // The INNER div is sized to vvHeight (the current visual viewport height).
-    // - When keyboard is closed: vvHeight ≈ full screen → inner fills screen.
-    // - When keyboard opens:    vvHeight shrinks to the area ABOVE the keyboard.
-    //   The inner div clips itself to that smaller height, so the composer sits
-    //   flush at the keyboard top. The outer div fills the rest (behind keyboard).
+    // ─── iOS PWA keyboard layout strategy ───────────────────────────────────
     //
-    // Why not paddingBottom on the outer? Because if keyboardHeight is computed
-    // even slightly too large (iOS quirks), the flex content box collapses and
-    // the header gets clipped by overflow:hidden — the root cause of the jump.
+    // Two things happen on iOS when the virtual keyboard opens:
     //
-    // vvHeight=0 on SSR → fall back to "100%" (= full viewport via fixed inset-0).
+    // 1. vv.height shrinks  → the visible area above the keyboard is smaller.
+    //    We set `height: vvHeight` on the content div so it never extends
+    //    behind the keyboard.
+    //
+    // 2. iOS auto-scrolls the page upward to keep the focused input visible
+    //    (vv.offsetTop > 0), even though we set overflow:hidden on <body>.
+    //    A `position:fixed` element stays at layout y=0, but the visual
+    //    viewport top is now at layout y=vv.offsetTop.  The result: the top
+    //    `vv.offsetTop` pixels of our shell are above the visible screen,
+    //    hiding the header.
+    //
+    // Fix: `transform: translateY(vv.offsetTop)` slides the content div down
+    // so its top edge aligns with the visual viewport top at all times.
+    // The GPU-composited transform has zero layout cost and tracks the scroll
+    // smoothly (within one rAF frame).
+    //
+    // When vvHeight is 0 (SSR / before mount) we fall back to `bottom:0` so
+    // the shell fills the full screen without a flash.
 
-    const innerHeight = vvHeight > 0 ? `${vvHeight}px` : "100%";
+    const innerStyle: CSSProperties =
+      vvHeight > 0
+        ? {
+            height: `${vvHeight}px`,
+            transform: vvOffsetTop > 0 ? `translateY(${vvOffsetTop}px)` : undefined,
+          }
+        : { bottom: 0 };
 
     return (
-      <div
-        className={`fixed inset-0 z-40 flex flex-col items-center overflow-hidden text-gray-900 ${
-          framed ? "bg-white" : "bg-slate-50"
-        }`}
-      >
+      <>
+        {/* Background layer fills the full screen so the area behind the
+            keyboard (and below the shell on scroll) shows a consistent colour
+            instead of whatever is underneath the web view. */}
         <div
-          className={`flex w-full min-w-0 flex-col overflow-hidden ${widthClass ?? ""} ${
+          className={`fixed inset-0 z-40 ${framed ? "bg-white" : "bg-slate-50"}`}
+        />
+
+        {/* Content layer: exactly tracks the visual viewport */}
+        <div
+          className={`fixed inset-x-0 top-0 z-50 flex flex-col overflow-hidden text-gray-900 ${
             framed
               ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}`
-              : ""
-          }`}
-          style={{ height: innerHeight }}
+              : "bg-slate-50"
+          } ${widthClass ? `mx-auto ${widthClass}` : "w-full"}`}
+          style={innerStyle}
         >
           {header}
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {children}
           </main>
         </div>
-      </div>
+      </>
     );
   }
 
