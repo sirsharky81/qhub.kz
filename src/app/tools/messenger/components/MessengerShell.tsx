@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { useVisualViewportFrame } from "@/lib/messenger/use-visual-viewport";
+import { useKeyboardHeight } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -14,7 +14,7 @@ interface Props {
   trailing?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
-  /** Resize with the visible viewport when the iOS keyboard opens. */
+  /** Lift content above the iOS/Android virtual keyboard. */
   keyboardAware?: boolean;
 }
 
@@ -37,8 +37,10 @@ export function MessengerShell({
   const framed = variant !== "default";
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
-  const viewportFrame = useVisualViewportFrame(trackKeyboard);
+  const keyboardHeight = useKeyboardHeight(trackKeyboard);
 
+  // Lock scroll so iOS cannot auto-scroll the page when the keyboard opens,
+  // which would give vv.offsetTop a non-zero value and shift our shell.
   useEffect(() => {
     if (!trackKeyboard) return;
     const html = document.documentElement;
@@ -55,8 +57,10 @@ export function MessengerShell({
 
   const header = (
     <header
-      className="relative z-20 shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
+      className="relative z-10 shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur flex items-center gap-3"
       style={{
+        paddingTop: "max(0.75rem, env(safe-area-inset-top))",
+        paddingBottom: "0.75rem",
         paddingLeft: "max(1rem, env(safe-area-inset-left))",
         paddingRight: "max(1rem, env(safe-area-inset-right))",
       }}
@@ -73,7 +77,9 @@ export function MessengerShell({
       <div className="flex-1 min-w-0">
         <h1 className="text-base font-semibold truncate">{title}</h1>
         {subtitle && (
-          <div className="text-xs text-gray-500 mt-0.5 min-h-[1.125rem] leading-tight">{subtitle}</div>
+          <div className="text-xs text-gray-500 mt-0.5 min-h-[1.125rem] leading-tight">
+            {subtitle}
+          </div>
         )}
       </div>
       {trailing && <div className="shrink-0">{trailing}</div>}
@@ -81,15 +87,25 @@ export function MessengerShell({
   );
 
   if (trackKeyboard) {
+    // The shell is pinned to the top-left-right edges of the screen (inset-0).
+    // The ONLY adaptation to the keyboard is paddingBottom:
+    //   - Keyboard open:  max(keyboardHeight px, safe-area-inset-bottom)
+    //   - Keyboard closed: env(safe-area-inset-bottom)  ← home indicator gap
+    //
+    // We intentionally do NOT use top: vv.offsetTop because iOS briefly makes
+    // offsetTop non-zero during the keyboard open/close animation, which would
+    // cause the header to visually jump.
+    const paddingBottomStyle =
+      keyboardHeight > 0
+        ? `max(${keyboardHeight}px, env(safe-area-inset-bottom, 0px))`
+        : "env(safe-area-inset-bottom, 0px)";
+
     return (
       <div
-        className={`fixed inset-x-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
+        className={`fixed inset-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
           framed ? "bg-slate-200/60" : "bg-slate-50"
         }`}
-        style={{
-          top: viewportFrame.top,
-          height: viewportFrame.height,
-        }}
+        style={{ paddingBottom: paddingBottomStyle }}
       >
         <div
           className={`mx-auto flex h-full w-full min-w-0 flex-col overflow-hidden ${
@@ -97,7 +113,9 @@ export function MessengerShell({
           } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
         >
           {header}
-          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            {children}
+          </main>
         </div>
       </div>
     );
@@ -115,7 +133,9 @@ export function MessengerShell({
         } ${framed ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}` : ""}`}
       >
         {header}
-        <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          {children}
+        </main>
       </div>
     </div>
   );

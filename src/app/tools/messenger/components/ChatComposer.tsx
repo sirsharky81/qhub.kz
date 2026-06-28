@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useVisualViewportFrame } from "@/lib/messenger/use-visual-viewport";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import {
@@ -61,7 +60,6 @@ export function ChatComposer({
   const [activeSession, setActiveSession] = useState<MediaRecorderSession | null>(null);
   const [startingMode, setStartingMode] = useState<RecordMode>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const viewportFrame = useVisualViewportFrame(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
   const trimmed = text.trim();
@@ -151,20 +149,21 @@ export function ChatComposer({
     );
   }
 
+  // Safe-area left/right are here for landscape orientation.
+  // Bottom safe-area (home indicator) is handled by the parent MessengerShell
+  // via paddingBottom so the white background fills the safe-area zone seamlessly.
+  const sidePadding = {
+    paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+    paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+  };
+
   return (
     <div className="shrink-0 border-t border-gray-200 bg-white/95 backdrop-blur">
-      <div
-        className="px-3 pt-1.5"
-        style={{
-          paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
-          paddingRight: "max(0.75rem, env(safe-area-inset-right))",
-          paddingBottom: viewportFrame.keyboardOpen
-            ? "0.375rem"
-            : "env(safe-area-inset-bottom, 0px)",
-        }}
-      >
       {replyTo && !recordMode && (
-        <div className="flex items-start gap-2 mb-2 px-1 rounded-xl bg-gray-50 border border-gray-200 py-2">
+        <div
+          className="flex items-start gap-2 mx-3 mt-2 rounded-xl bg-gray-50 border border-gray-200 py-2 px-2"
+          style={sidePadding}
+        >
           <div className="flex-1 min-w-0 border-l-2 border-sky-500 pl-2">
             <p className="text-[11px] font-medium text-sky-700">Ответ</p>
             <p className="text-xs text-gray-600 truncate">{replyPreviewText(replyTo)}</p>
@@ -180,117 +179,115 @@ export function ChatComposer({
         </div>
       )}
       {text.length > 3500 && !recordMode && (
-        <p className="text-xs text-amber-600 px-1 mb-1.5">
+        <p className="text-xs text-amber-600 px-4 mt-1">
           {text.length}/{MAX_TEXT_LENGTH}
         </p>
       )}
 
-      {recordMode && activeSession ? (
-        <MediaRecordBar
-          session={activeSession}
-          onDiscard={exitRecording}
-          onSend={() => void handleSendRecording()}
-          error={mediaError}
-        />
-      ) : startingMode ? (
-        <div className="flex items-center justify-center gap-2 py-2 text-sm text-gray-500">
-          <span className="h-4 w-4 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
-          {startingMode === "audio" ? "Подключение микрофона…" : "Подключение камеры…"}
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 min-w-0 max-w-full">
-          <label
-            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-            aria-label="Прикрепить файл"
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
+      <div
+        className="py-1.5"
+        style={sidePadding}
+      >
+        {recordMode && activeSession ? (
+          <MediaRecordBar
+            session={activeSession}
+            onDiscard={exitRecording}
+            onSend={() => void handleSendRecording()}
+            error={mediaError}
+          />
+        ) : startingMode ? (
+          <div className="flex items-center justify-center gap-2 py-2 text-sm text-gray-500">
+            <span className="h-4 w-4 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+            {startingMode === "audio" ? "Подключение микрофона…" : "Подключение камеры…"}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 min-w-0">
+            <label
+              className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Прикрепить файл"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
+                />
+              </svg>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onFile(f);
+                  e.target.value = "";
+                }}
               />
-            </svg>
-            <input
-              type="file"
-              accept="image/*,.pdf"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onFile(f);
-                e.target.value = "";
+            </label>
+
+            {showMediaButtons && (
+              <>
+                <button
+                  type="button"
+                  disabled={!!startingMode}
+                  onClick={() => void handleStartRecording("audio")}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
+                  aria-label="Голосовое сообщение"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                    <path d="M12 14a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 0014 0h-2zm-5 9a7 7 0 007-7h-2a5 5 0 01-10 0H5a7 7 0 007 7z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  disabled={!!startingMode}
+                  onClick={() => void handleStartRecording("video")}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
+                  aria-label="Видеосообщение"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="6" width="13" height="12" rx="2" />
+                    <path d="M16 10l5-3v10l-5-3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </>
+            )}
+
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(e) => onTextChange(e.target.value.slice(0, MAX_TEXT_LENGTH))}
+              rows={1}
+              placeholder="Сообщение"
+              className="min-w-0 flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2 text-base leading-snug max-h-32 focus:outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
+              style={{ fontSize: "16px" }}
+              onFocus={() => onFocus?.()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (canSend) onSend();
+                }
               }}
             />
-          </label>
-
-          {showMediaButtons && (
-            <>
-              <button
-                type="button"
-                disabled={!!startingMode}
-                onClick={() => void handleStartRecording("audio")}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
-                aria-label="Голосовое сообщение"
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-                  <path d="M12 14a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 0014 0h-2zm-5 9a7 7 0 007-7h-2a5 5 0 01-10 0H5a7 7 0 007 7z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                disabled={!!startingMode}
-                onClick={() => void handleStartRecording("video")}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sky-600 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 touch-manipulation"
-                aria-label="Видеосообщение"
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="6" width="13" height="12" rx="2" />
-                  <path d="M16 10l5-3v10l-5-3" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </>
-          )}
-
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => onTextChange(e.target.value.slice(0, MAX_TEXT_LENGTH))}
-            rows={1}
-            placeholder="Сообщение"
-            className="min-w-0 flex-1 resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2 text-base leading-snug max-h-32 focus:outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
-            style={{ fontSize: "16px" }}
-            onFocus={() => onFocus?.()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (canSend) {
-                  onSend();
-                  requestAnimationFrame(() => textareaRef.current?.focus());
-                }
-              }
-            }}
-          />
-          <button
-            type="button"
-            disabled={!canSend}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              onSend();
-              requestAnimationFrame(() => textareaRef.current?.focus());
-            }}
-            aria-label="Отправить"
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
-              canSend ? "bg-sky-600 text-white hover:bg-sky-700" : "bg-gray-200 text-gray-400"
-            }`}
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
-              <path d="M3.4 20.4 21 12 3.4 3.6 3 11l8 1-8 1z" />
-            </svg>
-          </button>
-        </div>
-      )}
-      {mediaError && !recordMode && !startingMode && (
-        <p className="text-xs text-red-600 text-center mt-1.5 px-1">{mediaError}</p>
-      )}
+            <button
+              type="button"
+              disabled={!canSend}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onSend}
+              aria-label="Отправить"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
+                canSend ? "bg-sky-600 text-white hover:bg-sky-700" : "bg-gray-200 text-gray-400"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+                <path d="M3.4 20.4 21 12 3.4 3.6 3 11l8 1-8 1z" />
+              </svg>
+            </button>
+          </div>
+        )}
+        {mediaError && !recordMode && !startingMode && (
+          <p className="text-xs text-red-600 text-center mt-1.5">{mediaError}</p>
+        )}
       </div>
     </div>
   );

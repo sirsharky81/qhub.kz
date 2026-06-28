@@ -27,8 +27,12 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   width: "device-width",
   initialScale: 1,
-  // Keeps layout viewport above the virtual keyboard on supported mobile browsers.
-  interactiveWidget: "overlays-content",
+  // "resizes-visual" (the default) means only the visual viewport shrinks when
+  // the keyboard opens.  window.innerHeight stays constant, which lets us
+  // reliably compute keyboard height as (window.innerHeight - vv.height).
+  // Do NOT use "resizes-content" (breaks window.innerHeight on Android) or
+  // "overlays-content" (vv.height stays constant on iOS 17.4+, breaks detection).
+  interactiveWidget: "resizes-visual",
 };
 
 export default function MessengerLayout({ children }: { children: ReactNode }) {
