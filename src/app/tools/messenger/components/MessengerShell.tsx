@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { useViewportState } from "@/lib/messenger/use-visual-viewport";
+import { useViewportShellSync } from "@/lib/messenger/use-visual-viewport";
 
 type ShellVariant = "default" | "app" | "chat";
 
@@ -37,13 +37,8 @@ export function MessengerShell({
   const isChat = variant === "chat";
   const trackKeyboard = keyboardAware ?? isChat;
 
-  // This hook's primary job here is to keep the --messenger-vvh CSS variable
-  // in sync with the visual viewport height (see use-visual-viewport.ts).
-  useViewportState(trackKeyboard);
+  useViewportShellSync(trackKeyboard);
 
-  // Keep <body> from scrolling so iOS cannot auto-pan the web view when the
-  // keyboard opens.  Belt-and-suspenders: the CSS-var approach already
-  // prevents the pan by updating the shell height before iOS can act.
   useEffect(() => {
     if (!trackKeyboard) return;
     const html = document.documentElement;
@@ -89,34 +84,18 @@ export function MessengerShell({
     </header>
   );
 
-  // #region agent log
-  const shellRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!trackKeyboard) return;
-    const vv = window.visualViewport;
-    const logShell = () => {
-      const el = shellRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const cs = window.getComputedStyle(el);
-      fetch('http://127.0.0.1:7799/ingest/fe409093-9b20-464b-89a5-ab8bb99d144e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9851b9'},body:JSON.stringify({sessionId:'9851b9',location:'MessengerShell.tsx:shellRect',message:'Shell bounding rect',data:{top:r.top,bottom:r.bottom,height:r.height,width:r.width,computedHeight:cs.height,computedTransform:cs.transform,vvOffsetTop:vv?Math.round(vv.offsetTop):null,vvHeight:vv?Math.round(vv.height):null},timestamp:Date.now(),hypothesisId:'A-B'})}).catch(()=>{});
-    };
-    const delay = setTimeout(logShell, 500);
-    vv?.addEventListener('resize', logShell);
-    return () => { clearTimeout(delay); vv?.removeEventListener('resize', logShell); };
-  }, [trackKeyboard]);
-  // #endregion
-
   if (trackKeyboard) {
     return (
       <div
-        ref={shellRef}
-        className={`fixed inset-x-0 top-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
+        className={`fixed inset-x-0 z-40 flex flex-col overflow-hidden text-gray-900 ${
           framed
             ? `bg-white ${isChat ? "" : "shadow-sm md:border-x border-gray-200/70"}`
             : "bg-slate-50"
         } ${widthClass ? `mx-auto ${widthClass}` : "w-full"}`}
-        style={{ height: "var(--messenger-vvh, 100dvh)" }}
+        style={{
+          top: "var(--messenger-vv-top, 0px)",
+          height: "var(--messenger-vvh, 100dvh)",
+        }}
       >
         {header}
         <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">

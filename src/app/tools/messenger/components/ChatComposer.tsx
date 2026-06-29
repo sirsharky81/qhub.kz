@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useViewportState } from "@/lib/messenger/use-visual-viewport";
+import { useKeyboardOpen } from "@/lib/messenger/use-visual-viewport";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import {
@@ -63,7 +63,7 @@ export function ChatComposer({
   const [mediaError, setMediaError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<MediaRecorderSession | null>(null);
-  const { keyboardOpen } = useViewportState(true);
+  const keyboardOpen = useKeyboardOpen(true);
   const trimmed = text.trim();
   const showMediaButtons = !trimmed && !recordMode && !startingMode;
 
