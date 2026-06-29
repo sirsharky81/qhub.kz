@@ -197,6 +197,8 @@ export function MessageBubble({
               durationMs={message.plain.durationMs}
               waveformPeaks={message.plain.waveformPeaks}
               mine={message.mine}
+              downloadBase64={message.plain.data}
+              downloadFilename={message.plain.filename ?? "voice.webm"}
             />
           )}
           {message.type === "video" && message.plain?.data && (
@@ -204,6 +206,8 @@ export function MessageBubble({
               src={`data:${message.plain.mime ?? "video/webm"};base64,${message.plain.data}`}
               mime={message.plain.mime}
               mine={message.mine}
+              downloadBase64={message.plain.data}
+              downloadFilename={message.plain.filename ?? "video.webm"}
             />
           )}
           <div

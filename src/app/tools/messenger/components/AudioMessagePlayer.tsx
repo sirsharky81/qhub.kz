@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatDurationMs } from "@/lib/messenger/media-recorder";
+import { MediaDownloadButton } from "./MediaDownloadButton";
 
 interface Props {
   src: string;
@@ -9,6 +10,8 @@ interface Props {
   durationMs?: number;
   waveformPeaks?: number[];
   mine?: boolean;
+  downloadBase64?: string;
+  downloadFilename?: string;
 }
 
 let activeAudio: HTMLAudioElement | null = null;
@@ -20,7 +23,15 @@ export function stopActiveMessengerAudio(): void {
   activeAudio = null;
 }
 
-export function AudioMessagePlayer({ src, mime, durationMs, waveformPeaks, mine }: Props) {
+export function AudioMessagePlayer({
+  src,
+  mime,
+  durationMs,
+  waveformPeaks,
+  mine,
+  downloadBase64,
+  downloadFilename,
+}: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -114,6 +125,14 @@ export function AudioMessagePlayer({ src, mime, durationMs, waveformPeaks, mine 
           {totalMs > 0 ? ` / ${formatDurationMs(totalMs)}` : ""}
         </p>
       </div>
+      {downloadBase64 && downloadFilename && (
+        <MediaDownloadButton
+          base64={downloadBase64}
+          mime={mime ?? "audio/webm"}
+          filename={downloadFilename}
+          mine={mine}
+        />
+      )}
     </div>
   );
 }

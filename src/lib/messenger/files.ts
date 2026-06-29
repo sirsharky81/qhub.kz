@@ -53,3 +53,36 @@ export function base64ToBlob(base64: string, mime: string): Blob {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return new Blob([bytes], { type: mime });
 }
+
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Save base64 media to disk; on iOS uses the share sheet when direct download is unavailable. */
+export async function saveBase64Media(
+  base64: string,
+  mime: string,
+  filename: string,
+): Promise<void> {
+  const blob = base64ToBlob(base64, mime);
+  const file = new File([blob], filename, { type: mime });
+
+  if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+      return;
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+    }
+  }
+
+  downloadBlob(blob, filename);
+}
