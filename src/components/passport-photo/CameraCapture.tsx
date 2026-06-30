@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getDeviceKind, passportDebugLog } from "@/lib/passport-photo/faceProcessing";
+import { ensureMediaPermissions, mediaPermissionErrorMessage } from "@/lib/platform/media-access";
 
 interface Props {
   onCapture: (file: File) => void;
@@ -19,6 +20,7 @@ export default function CameraCapture({ onCapture, onClose }: Props) {
 
     (async () => {
       try {
+        await ensureMediaPermissions({ video: true });
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
           audio: false,
@@ -64,7 +66,7 @@ export default function CameraCapture({ onCapture, onClose }: Props) {
         }
       } catch {
         if (!cancelled) {
-          setError("Не удалось открыть камеру. Разрешите доступ или выберите фото из галереи.");
+          setError(mediaPermissionErrorMessage());
         }
       }
     })();

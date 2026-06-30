@@ -1,14 +1,28 @@
-import { redirect } from "next/navigation";
+"use client";
 
-interface Props {
-  searchParams: Promise<{ token?: string }>;
+import { Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
+function LegacyJoinRedirectInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token");
+
+  useEffect(() => {
+    if (token) {
+      router.replace(`/tools/family/parent/join?token=${encodeURIComponent(token)}`);
+    } else {
+      router.replace("/tools/family/child");
+    }
+  }, [router, token]);
+
+  return <div className="p-6 text-center text-gray-500 text-sm">Перенаправление…</div>;
 }
 
-export default async function LegacyJoinRedirect({ searchParams }: Props) {
-  const params = await searchParams;
-  const token = params.token;
-  if (token) {
-    redirect(`/tools/family/parent/join?token=${encodeURIComponent(token)}`);
-  }
-  redirect("/tools/family/child");
+export default function LegacyJoinRedirect() {
+  return (
+    <Suspense fallback={<div className="p-6 text-center text-gray-500 text-sm">Загрузка…</div>}>
+      <LegacyJoinRedirectInner />
+    </Suspense>
+  );
 }

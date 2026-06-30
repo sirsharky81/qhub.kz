@@ -1,14 +1,21 @@
-import type { Metadata } from "next";
-import { redirect } from "next/navigation";
-import { getMessengerSession } from "@/lib/messenger/session";
+"use client";
 
-export const metadata: Metadata = {
-  title: "Мессенджер",
-  description: "Закрытый зашифрованный мессенджер QHub",
-  robots: { index: false, follow: false },
-};
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { fetchAccessCheck } from "@/lib/messenger/client";
 
-export default async function MessengerPage() {
-  const session = await getMessengerSession();
-  redirect(session ? "/tools/messenger/home" : "/tools/messenger/login");
+export default function MessengerEntryPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    void fetchAccessCheck(true).then((data) => {
+      router.replace(data.messengerLoggedIn ? "/tools/messenger/home" : "/tools/messenger/login");
+    });
+  }, [router]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center text-gray-500 text-sm">
+      Загрузка…
+    </div>
+  );
 }

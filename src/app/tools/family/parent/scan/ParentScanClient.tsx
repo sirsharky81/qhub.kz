@@ -1,5 +1,6 @@
 "use client";
 
+import { parentRoomUrl } from "@/lib/app-routes";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -55,7 +56,7 @@ export function ParentScanClient() {
       const result = await adoptChildApi(session, trimmed, childName || undefined, memberType);
       setSuccess(`${result.childName} добавлен в семью`);
       setTimeout(() => {
-        router.replace(`/tools/family/parent/room/${session.roomId}`);
+        router.replace(parentRoomUrl(session.roomId));
       }, 1200);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
@@ -65,7 +66,7 @@ export function ParentScanClient() {
 
   const scanHref = `${CODE_SCANNER_SIMPLE_URL}?returnTo=${encodeURIComponent("/tools/family/parent/scan")}`;
   const session = loadParentSession();
-  const backHref = session ? `/tools/family/parent/room/${session.roomId}` : "/tools/family/parent";
+  const backHref = session ? parentRoomUrl(session.roomId) : "/tools/family/parent";
 
   return (
     <FamilyShell title="Добавить участника" subtitle="Сканируйте QR с устройства участника" backHref={backHref}>

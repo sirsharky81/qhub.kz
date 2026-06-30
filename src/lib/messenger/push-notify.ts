@@ -1,4 +1,5 @@
-import { sendWebPush } from "@/lib/family/push-server";
+import { dispatchPushNotifications } from "@/lib/push/dispatch";
+import { messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
 import { displayNameForPhone, getProfile, loadProfiles } from "./store";
 import type { MessageType } from "./types";
 import {
@@ -45,7 +46,7 @@ async function pushToPhone(
   const subs = await getMessengerPushSubscriptions(recipientPhone);
   if (subs.length === 0) return;
 
-  await sendWebPush(subs, {
+  await dispatchPushNotifications(subs, {
     ...payload,
     icon: MESSENGER_ICON,
     badge: MESSENGER_ICON,
@@ -63,7 +64,7 @@ export async function notifyDmMessage(params: {
 
   const label = await senderLabel(params.fromPhone);
   const preview = messagePreview(params.type);
-  const chatUrl = `/tools/messenger/chat/${encodeURIComponent(params.fromPhone)}`;
+  const chatUrl = messengerChatUrl(params.fromPhone);
 
   await pushToPhone(recipient, params.channel, {
     title: label,
@@ -81,7 +82,7 @@ export async function notifyRoomMessage(params: {
 }): Promise<void> {
   const label = await senderLabel(params.fromPhone);
   const preview = messagePreview(params.type);
-  const url = `/tools/messenger/room/${encodeURIComponent(params.roomId)}`;
+  const url = messengerRoomUrl(params.roomId);
 
   await Promise.allSettled(
     params.recipientPhones.map((phone) =>

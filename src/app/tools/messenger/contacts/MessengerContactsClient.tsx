@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { messengerChatUrl } from "@/lib/app-routes";
 import { useEffect, useState } from "react";
 import { MessengerShell } from "../components/MessengerShell";
 import { fetchAccessCheck, fetchContacts } from "@/lib/messenger/client";
@@ -36,7 +38,7 @@ export function MessengerContactsClient() {
   });
 
   function openChat(peerPhone: string) {
-    router.push(`/tools/messenger/chat/${encodeURIComponent(peerPhone)}`);
+    router.push(messengerChatUrl(peerPhone));
   }
 
   return (

@@ -10,6 +10,7 @@ import {
 import type { ScanPauseSeconds, ScanSessionSettings } from "@/lib/code-scanner/types";
 import { DuplicateScanGuard, scanFeedback } from "@/lib/code-scanner/scan-feedback";
 import { useCodeScannerT } from "@/lib/code-scanner/i18n";
+import { ensureMediaPermissions } from "@/lib/platform/media-access";
 
 interface CameraScannerProps {
   active: boolean;
@@ -117,6 +118,7 @@ export default function CameraScanner({
     readerRef.current = reader;
 
     try {
+      await ensureMediaPermissions({ video: true });
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: facingRef.current } },
         audio: false,

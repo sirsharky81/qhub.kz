@@ -6,6 +6,7 @@ import {
   openCameraStream,
   waitForVideoReady,
 } from "@/lib/document-scanner/camera-capture";
+import { mediaPermissionErrorMessage } from "@/lib/platform/media-access";
 
 interface Props {
   onCapture: (file: File) => void;
@@ -39,7 +40,7 @@ export default function ScannerCameraCapture({ onCapture, onClose }: Props) {
         }
       } catch {
         if (!cancelled) {
-          setError("Не удалось открыть камеру. Разрешите доступ или загрузите фото из галереи.");
+          setError(mediaPermissionErrorMessage());
         }
       }
     })();

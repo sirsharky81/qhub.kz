@@ -78,6 +78,8 @@ export interface FamilyBindToken {
 export interface FamilyPushSubscription {
   endpoint: string;
   keys: { p256dh: string; auth: string };
+  platform?: "web" | "ios" | "android";
+  nativeToken?: string;
 }
 
 export interface FamilyMemberPublic {

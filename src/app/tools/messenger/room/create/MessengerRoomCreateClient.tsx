@@ -1,5 +1,6 @@
 "use client";
 
+import { messengerRoomUrl } from "@/lib/app-routes";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { RoomInvite } from "../../components/RoomInvite";
@@ -69,7 +70,7 @@ export function MessengerRoomCreateClient() {
             setEntering(true);
             void joinRoomApi(roomId).then((r) => {
               if (r.ok) {
-                router.replace(`/tools/messenger/room/${roomId}`);
+                router.replace(messengerRoomUrl(roomId));
               } else {
                 setEntering(false);
               }

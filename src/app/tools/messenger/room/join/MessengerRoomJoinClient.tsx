@@ -1,5 +1,6 @@
 "use client";
 
+import { messengerRoomUrl } from "@/lib/app-routes";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
@@ -50,7 +51,7 @@ function JoinInner() {
     if (!rid || joining) return;
     const storedKey = getRoomKey(rid);
     if (storedKey && !keyInput.trim()) {
-      router.replace(`/tools/messenger/room/${rid}`);
+      router.replace(messengerRoomUrl(rid));
     }
   }, [myPhone, code, keyInput, joining, router]);
 
@@ -83,7 +84,7 @@ function JoinInner() {
         roomId: rid,
         createdAt: Date.now(),
       });
-      router.replace(`/tools/messenger/room/${rid}`);
+      router.replace(messengerRoomUrl(rid));
     } catch {
       setError("Неверный ключ комнаты");
       setJoining(false);

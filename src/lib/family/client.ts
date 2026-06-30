@@ -1,7 +1,10 @@
 import type { ChildPairingSession, FamilyPollSnapshot, FamilySession } from "./types";
 import type { FamilyMemberType } from "./member-types";
 
-function authHeaders(session: FamilySession): HeadersInit {
+import { platformFetch } from "@/lib/platform/api-client";
+import { PlatformOfflineQueue } from "@/lib/platform/offlineQueue";
+
+function authHeaders(session: FamilySession): Record<string, string> {
   return {
     "Content-Type": "application/json",
     "X-Family-Member-Id": session.memberId,
@@ -10,7 +13,7 @@ function authHeaders(session: FamilySession): HeadersInit {
 }
 
 export async function createFamilyRoomApi(name: string, parentName?: string): Promise<FamilySession> {
-  const res = await fetch("/api/family/rooms", {
+  const res = await platformFetch("/api/family/rooms", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, parentName }),
@@ -38,7 +41,7 @@ export async function createFamilyRoomApi(name: string, parentName?: string): Pr
 }
 
 export async function createChildPairingApi(name: string): Promise<ChildPairingSession & { qrUrl: string }> {
-  const res = await fetch("/api/family/child/pairing", {
+  const res = await platformFetch("/api/family/child/pairing", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
@@ -60,7 +63,7 @@ export async function pollChildPairingApi(pairing: ChildPairingSession): Promise
     token: pairing.pairToken,
     accessToken: pairing.accessToken,
   });
-  const res = await fetch(`/api/family/child/pairing?${params}`);
+  const res = await platformFetch(`/api/family/child/pairing?${params}`);
   if (res.status === 410) return { status: "expired" };
   if (!res.ok) return { status: "expired" };
   const data = (await res.json()) as
@@ -100,7 +103,7 @@ export async function adoptChildApi(
   childName?: string,
   memberType?: FamilyMemberType,
 ): Promise<{ childName: string; memberId: string }> {
-  const res = await fetch("/api/family/parent/adopt-child", {
+  const res = await platformFetch("/api/family/parent/adopt-child", {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify({ pairToken, childName, memberType }),
@@ -116,15 +119,12 @@ export async function postLocationApi(
   session: FamilySession,
   input: { lat: number; lng: number; accuracy: number; battery?: number | null },
 ): Promise<void> {
-  const res = await fetch("/api/family/location", {
-    method: "POST",
+  await PlatformOfflineQueue.enqueue({
+    type: "location",
+    endpoint: "/api/family/location",
+    payload: input,
     headers: authHeaders(session),
-    body: JSON.stringify(input),
   });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error ?? "Не удалось отправить координаты");
-  }
 }
 
 export async function setShareLocationApi(
@@ -132,7 +132,7 @@ export async function setShareLocationApi(
   enabled: boolean,
   target: "children" | "parents" = "children",
 ): Promise<void> {
-  const res = await fetch("/api/family/member/share-location", {
+  const res = await platformFetch("/api/family/member/share-location", {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify({ enabled, target }),
@@ -147,7 +147,7 @@ export async function joinFamilyBindApi(
   token: string,
   name?: string,
 ): Promise<FamilySession> {
-  const res = await fetch("/api/family/bind", {
+  const res = await platformFetch("/api/family/bind", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, name }),
@@ -175,7 +175,7 @@ export async function joinFamilyBindApi(
 }
 
 export async function createParentInviteApi(session: FamilySession): Promise<{ bindUrl: string }> {
-  const res = await fetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}/parent-invite`, {
+  const res = await platformFetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}/parent-invite`, {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify({}),
@@ -188,7 +188,7 @@ export async function createParentInviteApi(session: FamilySession): Promise<{ b
 }
 
 export async function leaveFamilyApi(session: FamilySession): Promise<void> {
-  const res = await fetch("/api/family/member/leave", {
+  const res = await platformFetch("/api/family/member/leave", {
     method: "POST",
     headers: authHeaders(session),
   });
@@ -202,7 +202,7 @@ export async function postSosApi(
   session: FamilySession,
   input: { lat: number; lng: number },
 ): Promise<void> {
-  const res = await fetch("/api/family/sos", {
+  const res = await platformFetch("/api/family/sos", {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify(input),
@@ -214,7 +214,7 @@ export async function postSosApi(
 }
 
 export async function clearSosApi(session: FamilySession, memberId: string): Promise<void> {
-  const res = await fetch(`/api/family/sos/${encodeURIComponent(memberId)}`, {
+  const res = await platformFetch(`/api/family/sos/${encodeURIComponent(memberId)}`, {
     method: "DELETE",
     headers: authHeaders(session),
   });
@@ -225,7 +225,7 @@ export async function clearSosApi(session: FamilySession, memberId: string): Pro
 }
 
 export async function removeMemberApi(session: FamilySession, memberId: string): Promise<void> {
-  const res = await fetch(`/api/family/members/${encodeURIComponent(memberId)}`, {
+  const res = await platformFetch(`/api/family/members/${encodeURIComponent(memberId)}`, {
     method: "DELETE",
     headers: authHeaders(session),
   });
@@ -236,7 +236,7 @@ export async function removeMemberApi(session: FamilySession, memberId: string):
 }
 
 export async function deleteFamilyRoomApi(session: FamilySession): Promise<void> {
-  const res = await fetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}`, {
+  const res = await platformFetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}`, {
     method: "DELETE",
     headers: authHeaders(session),
   });
@@ -247,7 +247,7 @@ export async function deleteFamilyRoomApi(session: FamilySession): Promise<void>
 }
 
 export async function updateSosPhoneApi(session: FamilySession, sosPhone: string | null): Promise<void> {
-  const res = await fetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}`, {
+  const res = await platformFetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}`, {
     method: "PATCH",
     headers: authHeaders(session),
     body: JSON.stringify({ sosPhone }),
@@ -262,7 +262,7 @@ export async function linkMessengerRoomApi(
   session: FamilySession,
   messengerRoomId: string | null,
 ): Promise<void> {
-  const res = await fetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}`, {
+  const res = await platformFetch(`/api/family/rooms/${encodeURIComponent(session.roomId)}`, {
     method: "PATCH",
     headers: authHeaders(session),
     body: JSON.stringify({ messengerRoomId }),
@@ -288,7 +288,7 @@ export async function pollFamilyRoomApi(
   });
   if (heartbeat) params.set("heartbeat", "1");
 
-  const res = await fetch(`/api/family/poll?${params}`, {
+  const res = await platformFetch(`/api/family/poll?${params}`, {
     headers: {
       "X-Family-Member-Id": session.memberId,
       "X-Family-Access-Token": session.accessToken,

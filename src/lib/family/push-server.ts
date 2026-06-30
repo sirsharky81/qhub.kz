@@ -37,7 +37,9 @@ export async function sendWebPush(
 
   const data = JSON.stringify(payload);
   await Promise.allSettled(
-    subscriptions.map((sub) =>
+    subscriptions
+      .filter((sub) => sub.keys.p256dh !== "native")
+      .map((sub) =>
       webpush.sendNotification(
         {
           endpoint: sub.endpoint,
@@ -53,7 +55,8 @@ export async function sendFamilyPush(
   subscriptions: FamilyPushSubscription[],
   payload: { title: string; body: string; url: string },
 ): Promise<void> {
-  await sendWebPush(subscriptions, {
+  const { dispatchPushNotifications } = await import("@/lib/push/dispatch");
+  await dispatchPushNotifications(subscriptions, {
     ...payload,
     icon: "/tools/family/icon-192.png",
     badge: "/icon-192.png",

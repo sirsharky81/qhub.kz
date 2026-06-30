@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { PdfToolLayout } from "../_pdf-shared/PdfToolLayout";
 import PdfPagesClient from "./PdfPagesClient";
 
@@ -117,13 +118,7 @@ const webAppJsonLd = {
   },
 };
 
-export default async function PdfPagesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ action?: "merge" | "split" | "extract" }>;
-}) {
-  const params = await searchParams;
-
+export default function PdfPagesPage() {
   return (
     <PdfToolLayout title="PDF Pages" icon="📄">
       <script
@@ -134,7 +129,9 @@ export default async function PdfPagesPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(webAppJsonLd) }}
       />
-      <PdfPagesClient initialAction={params.action} />
+      <Suspense fallback={<div className="p-8 text-center text-gray-500">Загрузка…</div>}>
+        <PdfPagesClient />
+      </Suspense>
     </PdfToolLayout>
   );
 }

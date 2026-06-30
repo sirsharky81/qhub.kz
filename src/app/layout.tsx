@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { headers } from "next/headers";
 import InstallBanner from "@/components/InstallBanner";
+import { PlatformInit } from "@/components/PlatformInit";
+import { VersionGate } from "@/components/VersionGate";
 import PWAProvider from "@/components/PWAProvider";
 import { AppProviders } from "@/components/providers/AppProviders";
-import { getCatalogForViewer } from "@/lib/admin/catalog";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -57,14 +57,11 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const host = (await headers()).get("host");
-  const catalog = await getCatalogForViewer(host);
-
   return (
     <html
       lang="ru"
@@ -72,14 +69,10 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-white text-gray-900">
         <PWAProvider />
-        <AppProviders
-          visibleApps={catalog.apps}
-          isAdmin={catalog.isAdmin}
-          hiddenIds={catalog.hiddenIds}
-          host={host}
-        >
-          {children}
-        </AppProviders>
+        <PlatformInit />
+        <VersionGate>
+          <AppProviders>{children}</AppProviders>
+        </VersionGate>
         <InstallBanner />
       </body>
     </html>

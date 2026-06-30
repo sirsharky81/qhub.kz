@@ -1,5 +1,6 @@
 "use client";
 
+import { parentRoomUrl } from "@/lib/app-routes";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -21,7 +22,7 @@ export function ParentInviteClient() {
       return;
     }
     if (session.role !== "owner") {
-      router.replace(`/tools/family/parent/room/${session.roomId}`);
+      router.replace(parentRoomUrl(session.roomId));
       return;
     }
     void (async () => {
@@ -37,7 +38,7 @@ export function ParentInviteClient() {
   }, [router]);
 
   const session = loadParentSession();
-  const backHref = session ? `/tools/family/parent/room/${session.roomId}` : "/tools/family/parent";
+  const backHref = session ? parentRoomUrl(session.roomId) : "/tools/family/parent";
 
   return (
     <FamilyShell title="Пригласить родителя" subtitle="Второй родитель в семье" backHref={backHref}>

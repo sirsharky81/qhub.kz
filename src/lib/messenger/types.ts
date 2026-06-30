@@ -83,6 +83,8 @@ export type DialogKind = "dm" | "room";
 export interface MessengerPushSubscription {
   endpoint: string;
   keys: { p256dh: string; auth: string };
+  platform?: "web" | "ios" | "android";
+  nativeToken?: string;
 }
 
 export interface MessengerPresence {

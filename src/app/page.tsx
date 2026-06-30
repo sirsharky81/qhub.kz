@@ -1,16 +1,11 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import Navbar from "@/components/Navbar";
 import { HomePageExtras } from "@/components/home/HomePageExtras";
 import { DevelopersSubmitSection } from "@/components/home/DevelopersSubmitSection";
 import { AppsGrid } from "@/components/home/AppsGrid";
-import { getCatalogForViewer } from "@/lib/admin/catalog";
+import { HomeStats } from "@/components/home/HomeStats";
 
-export default async function Home() {
-  const host = (await headers()).get("host");
-  const { apps: visibleApps } = await getCatalogForViewer(host);
-  const liveCount = visibleApps.filter((a) => !a.comingSoon).length;
-  const comingSoonCount = visibleApps.filter((a) => a.comingSoon).length;
+export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-900 pb-16">
@@ -69,18 +64,7 @@ export default async function Home() {
         </div>
 
         {/* Stats row */}
-        <div className="relative mt-16 flex flex-wrap justify-center gap-8 sm:gap-16">
-          {[
-            { value: String(liveCount), label: liveCount === 1 ? "Запущенное приложение" : "Запущенных приложения" },
-            { value: `${comingSoonCount}+`, label: "Скоро на платформе" },
-            { value: "100%", label: "Бесплатно" },
-          ].map((s) => (
-            <div key={s.label} className="flex flex-col items-center gap-1">
-              <span className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900">{s.value}</span>
-              <span className="text-xs text-gray-400 text-center max-w-[120px]">{s.label}</span>
-            </div>
-          ))}
-        </div>
+        <HomeStats />
       </section>
 
       <HomePageExtras />

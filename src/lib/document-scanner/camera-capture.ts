@@ -1,7 +1,10 @@
+import { ensureMediaPermissions } from "@/lib/platform/media-access";
+
 /** Max dimension for perspective-corrected crop output (preserve text detail). */
 export { CROP_OUTPUT_MAX_PX } from "./constants";
 
 export async function openCameraStream(): Promise<MediaStream> {
+  await ensureMediaPermissions({ video: true });
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: { ideal: "environment" },

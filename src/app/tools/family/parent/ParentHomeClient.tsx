@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { parentRoomUrl } from "@/lib/app-routes";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FamilyShell } from "../components/FamilyShell";
@@ -22,7 +23,7 @@ export function ParentHomeClient() {
   useEffect(() => {
     const session = loadParentSession();
     if (session?.roomId) {
-      router.replace(`/tools/family/parent/room/${session.roomId}`);
+      router.replace(parentRoomUrl(session.roomId));
     }
   }, [router]);
 
@@ -32,7 +33,7 @@ export function ParentHomeClient() {
     try {
       const session = await createFamilyRoomApi(name, parentName.trim() || "Родитель");
       saveParentSession(session);
-      router.replace(`/tools/family/parent/room/${session.roomId}`);
+      router.replace(parentRoomUrl(session.roomId));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
       setLoading(false);

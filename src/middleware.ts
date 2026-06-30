@@ -3,9 +3,16 @@ import type { NextRequest } from "next/server";
 import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
 import { verifySessionToken } from "@/lib/admin/session-crypto";
 import { shouldHideDevOnlyApps } from "@/lib/admin/runtime";
+import { apiMiddlewareCors, applyCorsToNextResponse } from "@/lib/api/cors";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith("/api/")) {
+    const corsResponse = apiMiddlewareCors(request);
+    if (corsResponse) return corsResponse;
+  }
+
   const panelBase = `/${ADMIN_PANEL_PATH}`;
   const host = request.headers.get("host");
 
@@ -35,11 +42,12 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  return applyCorsToNextResponse(NextResponse.next(), request);
 }
 
 export const config = {
   matcher: [
+    "/api/:path*",
     // Must stay in sync with ADMIN_PANEL_PATH in constants.ts (static string required by Next.js)
     "/qhub-ctrl-7k2m/:path*",
     "/tools/audio-extractor/:path*",

@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       ok: true,
       mustChangePin: result.mustChangePin,
       phone: normalizeKzPhone(phone),
+      token,
     });
   } catch (err) {
     return jsonAuthError(err);

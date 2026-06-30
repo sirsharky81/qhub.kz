@@ -4,6 +4,13 @@ import type {
   MessageType,
   ReceiptPayload,
 } from "./types";
+import { platformFetch } from "@/lib/platform/api-client";
+import { PlatformOfflineQueue } from "@/lib/platform/offlineQueue";
+import {
+  clearMessengerSessionToken,
+  primeMessengerSessionTokenCache,
+  saveMessengerSessionToken,
+} from "./session-token";
 
 export interface AccessCheckResult {
   allowed: boolean;
@@ -31,7 +38,7 @@ export async function fetchAccessCheck(force = false): Promise<AccessCheckResult
   if (!force && accessCache && Date.now() - accessCache.at < ACCESS_STALE_MS) {
     return accessCache.data;
   }
-  const res = await fetch("/api/messenger/access-check");
+  const res = await platformFetch("/api/messenger/access-check");
   const data = (await res.json()) as AccessCheckResult;
   accessCache = { at: Date.now(), data };
   return data;
@@ -42,7 +49,7 @@ export function invalidateAccessCache(): void {
 }
 
 export async function identifyMessenger(phone: string): Promise<IdentifyResult> {
-  const res = await fetch("/api/messenger/auth/identify", {
+  const res = await platformFetch("/api/messenger/auth/identify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone }),
@@ -51,7 +58,7 @@ export async function identifyMessenger(phone: string): Promise<IdentifyResult> 
 }
 
 export async function loginMessenger(phone: string, pin: string) {
-  const res = await fetch("/api/messenger/auth/login", {
+  const res = await platformFetch("/api/messenger/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone, pin }),
@@ -61,13 +68,18 @@ export async function loginMessenger(phone: string, pin: string) {
     error?: string;
     mustChangePin?: boolean;
     lockedUntil?: number;
+    token?: string;
   };
-  if (data.ok) invalidateAccessCache();
+  if (data.ok && data.token) {
+    await saveMessengerSessionToken(data.token);
+    primeMessengerSessionTokenCache(data.token);
+    invalidateAccessCache();
+  }
   return data;
 }
 
 export async function setMessengerPin(phone: string, pin: string, confirmPin: string) {
-  const res = await fetch("/api/messenger/auth/set-pin", {
+  const res = await platformFetch("/api/messenger/auth/set-pin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone, pin, confirmPin }),
@@ -78,12 +90,14 @@ export async function setMessengerPin(phone: string, pin: string, confirmPin: st
 }
 
 export async function logoutMessenger() {
-  await fetch("/api/messenger/auth/logout", { method: "DELETE" });
+  await platformFetch("/api/messenger/auth/logout", { method: "DELETE" });
+  await clearMessengerSessionToken();
+  primeMessengerSessionTokenCache(null);
   invalidateAccessCache();
 }
 
 export async function publishPublicKey(publicKey: string) {
-  await fetch("/api/messenger/pubkey", {
+  await platformFetch("/api/messenger/pubkey", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ publicKey }),
@@ -91,7 +105,7 @@ export async function publishPublicKey(publicKey: string) {
 }
 
 export async function fetchPeerPublicKey(phone: string): Promise<string | null> {
-  const res = await fetch(`/api/messenger/pubkey?phone=${encodeURIComponent(phone)}`);
+  const res = await platformFetch(`/api/messenger/pubkey?phone=${encodeURIComponent(phone)}`);
   if (!res.ok) return null;
   const data = (await res.json()) as { publicKey: string };
   return data.publicKey;
@@ -100,7 +114,7 @@ export async function fetchPeerPublicKey(phone: string): Promise<string | null> 
 export async function fetchContacts(): Promise<
   { phone: string; displayName: string | null; label: string }[]
 > {
-  const res = await fetch("/api/messenger/contacts");
+  const res = await platformFetch("/api/messenger/contacts");
   if (!res.ok) return [];
   const data = (await res.json()) as {
     contacts: { phone: string; displayName: string | null; label: string }[];
@@ -112,13 +126,13 @@ export async function fetchProfile(): Promise<{
   phone: string;
   displayName: string | null;
 } | null> {
-  const res = await fetch("/api/messenger/profile");
+  const res = await platformFetch("/api/messenger/profile");
   if (!res.ok) return null;
   return res.json() as Promise<{ phone: string; displayName: string | null }>;
 }
 
 export async function updateProfile(displayName: string): Promise<boolean> {
-  const res = await fetch("/api/messenger/profile", {
+  const res = await platformFetch("/api/messenger/profile", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ displayName }),
@@ -136,7 +150,7 @@ export async function fetchProfilesMap(): Promise<Record<string, string>> {
 }
 
 export async function createRoom(): Promise<{ roomId: string; channel: string } | null> {
-  const res = await fetch("/api/messenger/room", { method: "POST" });
+  const res = await platformFetch("/api/messenger/room", { method: "POST" });
   if (!res.ok) return null;
   return res.json() as Promise<{ roomId: string; channel: string }>;
 }
@@ -144,7 +158,7 @@ export async function createRoom(): Promise<{ roomId: string; channel: string } 
 export async function joinRoomApi(
   roomId: string,
 ): Promise<{ ok: boolean; error?: string; channel?: string }> {
-  const res = await fetch("/api/messenger/room/members", {
+  const res = await platformFetch("/api/messenger/room/members", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roomId, action: "join" }),
@@ -155,7 +169,7 @@ export async function joinRoomApi(
 }
 
 export async function leaveRoomApi(roomId: string) {
-  const res = await fetch("/api/messenger/room/members", {
+  const res = await platformFetch("/api/messenger/room/members", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roomId, action: "leave" }),
@@ -172,7 +186,7 @@ export interface RoomStatusResult {
 }
 
 export async function fetchRoomStatus(roomId: string): Promise<RoomStatusResult | null> {
-  const res = await fetch(`/api/messenger/room?roomId=${encodeURIComponent(roomId.toUpperCase())}`);
+  const res = await platformFetch(`/api/messenger/room?roomId=${encodeURIComponent(roomId.toUpperCase())}`);
   if (res.status === 404) return null;
   if (!res.ok) return null;
   return res.json() as Promise<RoomStatusResult>;
@@ -202,7 +216,7 @@ export async function pollChannel(
     since: String(since),
   });
   if (heartbeat) params.set("heartbeat", "1");
-  const res = await fetch(`/api/messenger/poll?${params}`);
+  const res = await platformFetch(`/api/messenger/poll?${params}`);
   if (res.status === 410) {
     return { error: "room_gone" };
   }
@@ -229,12 +243,36 @@ export async function pollChannel(
   };
 }
 
+export async function sendEncryptedMessage(input: {
+  channel: string;
+  type: MessageType;
+  ciphertext: string;
+  iv: string;
+  mime?: string;
+  filename?: string;
+}): Promise<{ messageId: string; version: number } | null> {
+  const res = await platformFetch("/api/messenger/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.ok) {
+    return res.json() as Promise<{ messageId: string; version: number }>;
+  }
+  await PlatformOfflineQueue.enqueue({
+    type: "message",
+    endpoint: "/api/messenger/send",
+    payload: input,
+  });
+  return { messageId: `pending-${Date.now()}`, version: 0 };
+}
+
 export async function sendReceipt(input: {
   channel: string;
   refMessageId: string;
   receipt: "delivered" | "read";
 }): Promise<{ messageId: string; version: number } | null> {
-  const res = await fetch("/api/messenger/send", {
+  const res = await platformFetch("/api/messenger/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -244,33 +282,28 @@ export async function sendReceipt(input: {
       receipt: input.receipt,
     }),
   });
-  if (!res.ok) return null;
-  return res.json() as Promise<{ messageId: string; version: number }>;
+  if (res.ok) {
+    return res.json() as Promise<{ messageId: string; version: number }>;
+  }
+  await PlatformOfflineQueue.enqueue({
+    type: "readReceipt",
+    endpoint: "/api/messenger/send",
+    payload: {
+      channel: input.channel,
+      kind: "receipt",
+      refMessageId: input.refMessageId,
+      receipt: input.receipt,
+    },
+  });
+  return { messageId: input.refMessageId, version: 0 };
 }
 
 export { isReceiptEnvelope };
 
-export async function sendEncryptedMessage(input: {
-  channel: string;
-  type: MessageType;
-  ciphertext: string;
-  iv: string;
-  mime?: string;
-  filename?: string;
-}): Promise<{ messageId: string; version: number } | null> {
-  const res = await fetch("/api/messenger/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) return null;
-  return res.json() as Promise<{ messageId: string; version: number }>;
-}
-
 export async function ackMessage(channel: string, messageId: string) {
-  await fetch("/api/messenger/ack", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ channel, messageId }),
+  await PlatformOfflineQueue.enqueue({
+    type: "messageAck",
+    endpoint: "/api/messenger/ack",
+    payload: { channel, messageId },
   });
 }

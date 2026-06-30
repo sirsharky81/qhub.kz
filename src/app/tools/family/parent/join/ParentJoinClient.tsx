@@ -1,5 +1,6 @@
 "use client";
 
+import { parentRoomUrl } from "@/lib/app-routes";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
@@ -20,7 +21,7 @@ function JoinInner() {
   useEffect(() => {
     const session = loadParentSession();
     if (session?.roomId) {
-      router.replace(`/tools/family/parent/room/${session.roomId}`);
+      router.replace(parentRoomUrl(session.roomId));
     }
   }, [router]);
 
@@ -65,7 +66,7 @@ function JoinInner() {
         return;
       }
       saveParentSession(session);
-      router.replace(`/tools/family/parent/room/${session.roomId}`);
+      router.replace(parentRoomUrl(session.roomId));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
       setLoading(false);

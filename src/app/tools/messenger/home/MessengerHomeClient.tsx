@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SettingsHeaderLink } from "@/components/SettingsHeaderButton";
@@ -77,10 +78,10 @@ export function MessengerHomeClient() {
 
   function dialogHref(d: LocalDialog): string {
     if (d.kind === "dm" && d.peerPhone) {
-      return `/tools/messenger/chat/${encodeURIComponent(d.peerPhone)}`;
+      return messengerChatUrl(d.peerPhone);
     }
     if (d.kind === "room" && d.roomId) {
-      return `/tools/messenger/room/${d.roomId}`;
+      return messengerRoomUrl(d.roomId);
     }
     return "/tools/messenger/home";
   }

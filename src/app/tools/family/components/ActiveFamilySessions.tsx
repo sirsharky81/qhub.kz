@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { parentRoomUrl } from "@/lib/app-routes";
 import { useEffect, useState } from "react";
 import {
   loadChildPairingSession,
@@ -31,7 +32,7 @@ function buildEntries(): SavedEntry[] {
   if (parent?.roomId) {
     entries.push({
       key: `parent-${parent.roomId}`,
-      href: `/tools/family/parent/room/${parent.roomId}`,
+      href: parentRoomUrl(parent.roomId),
       roomName: parent.roomName || "Семья",
       memberName: parent.name,
       roleLabel: roleLabel(parent.role),
