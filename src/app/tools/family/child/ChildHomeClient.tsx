@@ -266,14 +266,9 @@ export function ChildHomeClient() {
   }
 
   if (view === "waiting" && pairing) {
-    const qrUrl =
-      pairing.qrUrl ||
-      (typeof window !== "undefined"
-        ? `${window.location.origin}/tools/family/parent/scan?token=${encodeURIComponent(pairing.pairToken)}`
-        : "");
     return (
       <FamilyShell title="Ожидание" subtitle="Покажите QR родителю" backHref="/tools/family">
-        <ChildPairQr qrUrl={qrUrl} childName={pairing.name} />
+        <ChildPairQr pairToken={pairing.pairToken} childName={pairing.name} />
         <p className="text-center text-[11px] text-gray-500 pb-6 animate-pulse">Ожидание привязки…</p>
         {geoError && <p className="text-xs text-red-600 text-center px-3">{geoError}</p>}
       </FamilyShell>

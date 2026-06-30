@@ -3,6 +3,7 @@ import type { FamilyMemberType } from "./member-types";
 
 import { platformFetch } from "@/lib/platform/api-client";
 import { PlatformOfflineQueue } from "@/lib/platform/offlineQueue";
+import { buildChildPairShareUrl, parseParentScanPayload } from "./qr-pair";
 
 function authHeaders(session: FamilySession): Record<string, string> {
   return {
@@ -110,6 +111,9 @@ export async function adoptChildApi(
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (data.error === "Неверный токен" || data.error === "Требуется авторизация") {
+      throw new Error("Сессия родителя истекла. Откройте комнату семьи или создайте семью заново.");
+    }
     throw new Error(data.error ?? "Не удалось добавить ребёнка");
   }
   return res.json() as Promise<{ childName: string; memberId: string }>;
@@ -303,16 +307,10 @@ export async function pollFamilyRoomApi(
   return data;
 }
 
-export function buildChildPairQrUrl(pairToken: string, origin?: string): string {
-  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "https://qhub.kz");
-  return `${base}/tools/family/parent/scan?token=${encodeURIComponent(pairToken)}`;
+export function buildChildPairQrUrl(pairToken: string): string {
+  return buildChildPairShareUrl(pairToken);
 }
 
-export function parseParentScanUrl(url: string): { token: string | null } {
-  try {
-    const u = new URL(url, typeof window !== "undefined" ? window.location.origin : "https://qhub.kz");
-    return { token: u.searchParams.get("token") };
-  } catch {
-    return { token: null };
-  }
+export function parseParentScanUrl(url: string): { token: string | null; truncated: boolean } {
+  return parseParentScanPayload(url);
 }

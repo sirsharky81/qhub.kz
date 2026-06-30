@@ -2,34 +2,37 @@
 
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
+import { buildChildPairQrPayload, buildChildPairShareUrl } from "@/lib/family/qr-pair";
 
 interface Props {
-  qrUrl: string;
+  pairToken: string;
   childName: string;
 }
 
-export function ChildPairQr({ qrUrl, childName }: Props) {
+export function ChildPairQr({ pairToken, childName }: Props) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const shareUrl = buildChildPairShareUrl(pairToken);
+  const qrPayload = buildChildPairQrPayload(pairToken);
 
   useEffect(() => {
-    void QRCode.toDataURL(qrUrl, { margin: 2, width: 220 }).then(setQrDataUrl);
-  }, [qrUrl]);
+    void QRCode.toDataURL(qrPayload, { margin: 2, width: 220 }).then(setQrDataUrl);
+  }, [qrPayload]);
 
   async function handleShare() {
-    const text = `${childName} приглашает в семью. Откройте ссылку в приложении «Семья → Родитель» и подтвердите привязку.`;
+    const text = `${childName} приглашает в семью. Откройте «Семья → Родитель → Добавить участника» и отсканируйте QR или вставьте ссылку.`;
     if (navigator.share) {
       try {
         await navigator.share({
           title: `Привязка: ${childName}`,
           text,
-          url: qrUrl,
+          url: shareUrl,
         });
         return;
       } catch {
         /* cancelled or unsupported fields */
       }
     }
-    await navigator.clipboard.writeText(`${text}\n\n${qrUrl}`);
+    await navigator.clipboard.writeText(`${text}\n\n${shareUrl}`);
     alert("Ссылка скопирована");
   }
 
@@ -42,7 +45,7 @@ export function ChildPairQr({ qrUrl, childName }: Props) {
         <img src={qrDataUrl} alt="QR для родителя" className="rounded-xl border border-gray-200" />
       )}
       <p className="text-xs text-gray-500 text-center max-w-xs">
-        QR действует 15 минут. Родитель сканирует его или открывает ссылку в «Семья → Родитель».
+        QR действует 15 минут. Родитель сканирует его в «Семья → Родитель → Добавить участника».
       </p>
       <button
         type="button"

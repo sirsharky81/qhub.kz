@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FamilyShell } from "../../components/FamilyShell";
 import { MemberTypeSelect } from "../../components/MemberTypeSelect";
-import { adoptChildApi, parseParentScanUrl } from "@/lib/family/client";
+import { adoptChildApi, parseParentScanUrl, pollFamilyRoomApi } from "@/lib/family/client";
 import type { FamilyMemberType } from "@/lib/family/member-types";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
 import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
@@ -29,6 +29,9 @@ export function ParentScanClient() {
       if (raw) {
         const parsed = parseParentScanUrl(raw);
         if (parsed.token) setToken(parsed.token);
+        else if (parsed.truncated) {
+          setError("QR обрезан при сканировании. Попросите ребёнка показать QR ещё раз.");
+        }
       }
     }
   }, [searchParams]);
@@ -49,11 +52,21 @@ export function ParentScanClient() {
       setError("Введите или отсканируйте QR ребёнка");
       return;
     }
+    const parsed = parseParentScanUrl(trimmed);
+    const pairToken = parsed.token ?? trimmed;
+    if (parsed.truncated || pairToken.length < 48) {
+      setError("Токен обрезан. Отсканируйте QR заново — не вводите вручную.");
+      return;
+    }
     setLoading(true);
     setError(null);
     setSuccess(null);
     try {
-      const result = await adoptChildApi(session, trimmed, childName || undefined, memberType);
+      const poll = await pollFamilyRoomApi(session, 0, true);
+      if (!poll) {
+        throw new Error("Сессия родителя истекла. Создайте семью заново.");
+      }
+      const result = await adoptChildApi(session, pairToken, childName || undefined, memberType);
       setSuccess(`${result.childName} добавлен в семью`);
       setTimeout(() => {
         router.replace(parentRoomUrl(session.roomId));

@@ -1,15 +1,20 @@
 import { checkFamilyRateLimit, getClientIp } from "@/lib/rate-limit";
 import { jsonFamilyAuthError } from "@/lib/family/guard";
 import { createChildPairing, getPairingStatus } from "@/lib/family/store";
+import { buildChildPairShareUrl } from "@/lib/family/qr-pair";
+import { withCors } from "@/lib/api/cors";
 
 export async function POST(request: Request) {
   try {
     const ip = getClientIp(request);
     const { allowed, retryAfterSec } = await checkFamilyRateLimit(`child-pair:${ip}`);
     if (!allowed) {
-      return Response.json(
-        { error: "Слишком много запросов" },
-        { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
+      return withCors(
+        Response.json(
+          { error: "Слишком много запросов" },
+          { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
+        ),
+        request,
       );
     }
 
@@ -21,13 +26,12 @@ export async function POST(request: Request) {
     }
 
     const result = await createChildPairing(body.name ?? "Участник");
-    const origin = new URL(request.url).origin;
-    const qrUrl = `${origin}/tools/family/parent/scan?token=${encodeURIComponent(result.pairToken)}`;
+    const qrUrl = buildChildPairShareUrl(result.pairToken);
 
-    return Response.json({ ...result, qrUrl });
+    return withCors(Response.json({ ...result, qrUrl }), request);
   } catch (err) {
     console.error("[family/child/pairing] POST failed:", err);
-    return Response.json({ error: "Не удалось создать QR" }, { status: 500 });
+    return withCors(Response.json({ error: "Не удалось создать QR" }, { status: 500 }), request);
   }
 }
 
