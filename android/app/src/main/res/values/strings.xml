@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">QHub</string>
+    <string name="title_activity_main">QHub</string>
+    <string name="package_name">kz.qhub.app</string>
+    <string name="custom_url_scheme">kz.qhub.app</string>
+</resources>
