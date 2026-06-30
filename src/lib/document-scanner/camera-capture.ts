@@ -1,15 +1,10 @@
 /** Max dimension for perspective-corrected crop output (preserve text detail). */
 export { CROP_OUTPUT_MAX_PX } from "./constants";
 
+import { getCameraStream } from "@/lib/platform/camera-access";
+
 export async function openCameraStream(): Promise<MediaStream> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: { ideal: "environment" },
-      width: { ideal: 4096 },
-      height: { ideal: 3072 },
-    },
-    audio: false,
-  });
+  const stream = await getCameraStream();
 
   const track = stream.getVideoTracks()[0];
   if (track) {

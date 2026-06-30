@@ -10,6 +10,7 @@ import {
 import type { ScanPauseSeconds, ScanSessionSettings } from "@/lib/code-scanner/types";
 import { DuplicateScanGuard, scanFeedback } from "@/lib/code-scanner/scan-feedback";
 import { useCodeScannerT } from "@/lib/code-scanner/i18n";
+import { getCameraStream } from "@/lib/platform/camera-access";
 
 interface CameraScannerProps {
   active: boolean;
@@ -117,10 +118,7 @@ export default function CameraScanner({
     readerRef.current = reader;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: facingRef.current } },
-        audio: false,
-      });
+      const stream = await getCameraStream(facingRef.current);
       if (generationRef.current !== generation) {
         stream.getTracks().forEach((tr) => tr.stop());
         return;
