@@ -1,4 +1,5 @@
 import { PhotoSize, PaperSize, PhotoCount, MARGIN_PX, cmToPx, MARGIN_CM } from "./dimensions";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 
 /**
  * Crops the source image to the given pixel rectangle and returns a Blob
@@ -118,12 +119,7 @@ function blobToImage(blob: Blob): Promise<HTMLImageElement> {
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveBlobToDevice(blob, filename);
 }
 
 /**

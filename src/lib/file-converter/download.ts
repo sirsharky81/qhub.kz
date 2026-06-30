@@ -1,22 +1,15 @@
-import JSZip from "jszip";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 
 export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveBlobToDevice(blob, filename);
 }
 
-export async function downloadZip(
-  files: { name: string; blob: Blob }[],
-  zipName: string,
-): Promise<void> {
+export async function downloadZip(files: { name: string; blob: Blob }[], zipName: string): Promise<void> {
+  const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
   for (const file of files) {
     zip.file(file.name, file.blob);
   }
   const blob = await zip.generateAsync({ type: "blob" });
-  downloadBlob(blob, zipName);
+  await saveBlobToDevice(blob, zipName);
 }

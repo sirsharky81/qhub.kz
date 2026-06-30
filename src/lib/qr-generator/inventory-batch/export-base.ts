@@ -1,5 +1,6 @@
 import type { InventoryLabelBatch } from "./types";
 import { GENERATED_AT_COLUMN_NAME, GENERATED_COLUMN_NAME } from "./types";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 
 export function batchToMatrix(batch: InventoryLabelBatch): string[][] {
   const headers = [
@@ -28,8 +29,7 @@ export function matrixToCsv(matrix: string[][]): string {
 export async function downloadBatchCsv(batch: InventoryLabelBatch, filename: string): Promise<void> {
   const matrix = batchToMatrix(batch);
   const blob = new Blob([matrixToCsv(matrix)], { type: "text/csv;charset=utf-8" });
-  const { saveAs } = await import("file-saver");
-  saveAs(blob, filename.endsWith(".csv") ? filename : `${filename}.csv`);
+  await saveBlobToDevice(blob, filename.endsWith(".csv") ? filename : `${filename}.csv`);
 }
 
 export async function downloadBatchXlsx(batch: InventoryLabelBatch, filename: string): Promise<void> {
@@ -39,8 +39,7 @@ export async function downloadBatchXlsx(batch: InventoryLabelBatch, filename: st
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "База ОС");
   const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-  const { saveAs } = await import("file-saver");
-  saveAs(
+  await saveBlobToDevice(
     new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
     filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`,
   );

@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 
 function escapeCsvCell(value: string, delimiter: string): string {
   if (value.includes(delimiter) || value.includes('"') || value.includes("\n") || value.includes("\r")) {
@@ -11,33 +12,37 @@ export function matrixToCsv(rows: string[][], delimiter = ";"): string {
   return rows.map((row) => row.map((cell) => escapeCsvCell(cell, delimiter)).join(delimiter)).join("\r\n");
 }
 
-export function downloadText(content: string, filename: string, mime = "text/plain;charset=utf-8"): void {
+export async function downloadText(content: string, filename: string, mime = "text/plain;charset=utf-8"): Promise<void> {
   const blob = new Blob([content], { type: mime });
-  triggerDownload(blob, filename);
+  await saveBlobToDevice(blob, filename);
 }
 
-export function downloadCsv(rows: string[][], filename: string): void {
+export async function downloadCsv(rows: string[][], filename: string): Promise<void> {
   const csv = `\uFEFF${matrixToCsv(rows)}`;
-  downloadText(csv, filename, "text/csv;charset=utf-8");
+  await downloadText(csv, filename, "text/csv;charset=utf-8");
 }
 
-export function downloadXlsx(rows: string[][], filename: string, sheetName = "Данные"): void {
+export async function downloadXlsx(rows: string[][], filename: string, sheetName = "Данные"): Promise<void> {
   if (rows.length > 20_001) {
     throw new Error("XLSX_LIMIT");
   }
   const ws = XLSX.utils.aoa_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
-  XLSX.writeFile(wb, filename);
+  const buffer = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  await saveBlobToDevice(blob, filename);
 }
 
-export function downloadXlsxIfAllowed(
+export async function downloadXlsxIfAllowed(
   rows: string[][],
   filename: string,
   sheetName = "Данные",
-): { ok: true } | { ok: false; reason: "limit" } {
+): Promise<{ ok: true } | { ok: false; reason: "limit" }> {
   if (rows.length > 20_001) return { ok: false, reason: "limit" };
-  downloadXlsx(rows, filename, sheetName);
+  await downloadXlsx(rows, filename, sheetName);
   return { ok: true };
 }
 
@@ -58,15 +63,6 @@ export async function shareText(title: string, text: string): Promise<"shared" |
   return "copied";
 }
 
-function triggerDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 export function slugFilename(prefix: string, ext: string): string {
   const date = new Date().toISOString().slice(0, 10);
   return `${prefix}-${date}.${ext}`;
@@ -79,5 +75,5 @@ export async function downloadZip(files: { name: string; content: string | Blob 
     zip.file(file.name, file.content);
   }
   const blob = await zip.generateAsync({ type: "blob" });
-  triggerDownload(blob, zipName);
+  await saveBlobToDevice(blob, zipName);
 }

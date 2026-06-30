@@ -694,12 +694,13 @@ export default function InventoryView({ onBack }: Props) {
                   <button
                     type="button"
                     onClick={() => {
-                      const res = downloadXlsxIfAllowed(
+                      void downloadXlsxIfAllowed(
                         featured.rows,
                         `${project.displayNumber}-baza-os-dlya-1c.xlsx`,
                         "База ОС",
-                      );
-                      if (!res.ok) alert(t("xlsxLimit"));
+                      ).then((res) => {
+                        if (!res.ok) alert(t("xlsxLimit"));
+                      });
                     }}
                     className="px-4 py-2 text-sm rounded-lg border border-gray-300 bg-white"
                   >
@@ -747,8 +748,11 @@ export default function InventoryView({ onBack }: Props) {
                   <button
                     type="button"
                     onClick={() => {
-                      const res = downloadXlsxIfAllowed(r.rows, `${project.displayNumber}-${r.id}.xlsx`, r.title);
-                      if (!res.ok) alert(t("xlsxLimit"));
+                      void downloadXlsxIfAllowed(r.rows, `${project.displayNumber}-${r.id}.xlsx`, r.title).then(
+                        (res) => {
+                          if (!res.ok) alert(t("xlsxLimit"));
+                        },
+                      );
                     }}
                     className="text-xs px-2 py-1 border rounded"
                   >

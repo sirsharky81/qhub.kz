@@ -1,4 +1,5 @@
 import { PDFDocument, degrees, type PDFPage } from "pdf-lib";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import type { PageRotation, PdfPage } from "../types";
 import { DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH } from "./pageLayout";
 import { parsePageRanges } from "./rangeParser";
@@ -254,12 +255,7 @@ export async function renderThumbnail(
  */
 export function downloadPdf(bytes: Uint8Array, fileName: string): void {
   const blob = new Blob([bytes.slice()], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  void saveBlobToDevice(blob, fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`);
 }
 
 /**

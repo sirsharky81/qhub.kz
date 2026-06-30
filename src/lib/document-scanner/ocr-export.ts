@@ -1,10 +1,10 @@
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import {
   Document,
   PageBreak,
   Packer,
   Paragraph,
 } from "docx";
-import { saveAs } from "file-saver";
 import type { FilterMode, PageAdjustments, ScanItem, ScanPage } from "./types";
 import { blobToCanvas, detectContentRect, downscaleCanvas } from "./canvas-utils";
 import { applyFilters } from "./filters";
@@ -135,7 +135,7 @@ export async function exportRecognizedTextToWord(texts: string[], filename: stri
 
   const blob = await Packer.toBlob(doc);
   const safeName = filename.replace(/[<>:"/\\|?*]/g, "_").trim() || "Scan";
-  saveAs(blob, `${safeName}.docx`);
+  await saveBlobToDevice(blob, `${safeName}.docx`);
 }
 
 export function hasRecognizedText(texts: string[]): boolean {

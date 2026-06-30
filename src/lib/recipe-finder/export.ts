@@ -1,3 +1,4 @@
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import {
   Document,
   Paragraph,
@@ -11,7 +12,6 @@ import {
   Table,
   WidthType,
 } from "docx";
-import { saveAs } from "file-saver";
 import { Recipe, DIFFICULTY_LABELS } from "./types";
 
 function buildRecipeDoc(recipe: Recipe): Document {
@@ -171,7 +171,7 @@ export async function exportRecipeToWord(recipe: Recipe): Promise<void> {
   const doc = buildRecipeDoc(recipe);
   const blob = await Packer.toBlob(doc);
   const filename = `${recipe.title.replace(/[^а-яёА-ЯЁa-zA-Z0-9\s]/g, "").trim()}.docx`;
-  saveAs(blob, filename);
+  await saveBlobToDevice(blob, filename);
 }
 
 export function printRecipe(recipe: Recipe): void {

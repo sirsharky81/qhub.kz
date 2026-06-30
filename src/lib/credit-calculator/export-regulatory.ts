@@ -1,3 +1,4 @@
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import type { CalculationResult, Lang, RegulatoryMeta, RepaymentMethod } from "./types";
 import { dayBasisLabel, withDisbursementRow } from "./calculations";
 import {
@@ -240,10 +241,5 @@ export function exportRegulatorySchedule(
   lang: Lang
 ): void {
   const { blob, filename } = buildRegulatoryWordBlob(result, meta, lang);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveBlobToDevice(blob, filename);
 }

@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFImage, type PDFFont, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import { saveAs } from "file-saver";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { renderCode128DataUrl } from "./barcode";
 
 const FONT_REGULAR = "/fonts/Roboto-Regular.woff2";
@@ -301,7 +301,7 @@ export async function generateInventoryBatchPdf(
   }
 
   const bytes = await pdf.save();
-  saveAs(new Blob([bytes as BlobPart], { type: "application/pdf" }), filename);
+  await saveBlobToDevice(new Blob([bytes as BlobPart], { type: "application/pdf" }), filename);
 }
 
 /** Одна метка на листе A4 в реальном размере (мм), в левом верхнем углу. */
@@ -333,7 +333,7 @@ export async function generateSingleInventoryLabelPdf(
   );
 
   const bytes = await pdf.save();
-  saveAs(new Blob([bytes as BlobPart], { type: "application/pdf" }), filename);
+  await saveBlobToDevice(new Blob([bytes as BlobPart], { type: "application/pdf" }), filename);
 }
 
 export async function generateBulkLabelsPdf(

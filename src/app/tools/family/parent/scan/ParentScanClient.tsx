@@ -10,6 +10,7 @@ import { adoptChildApi, parseParentScanUrl, pollFamilyRoomApi } from "@/lib/fami
 import type { FamilyMemberType } from "@/lib/family/member-types";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
 import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
+import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import { loadParentSession } from "@/lib/family/session";
 
 export function ParentScanClient() {
@@ -94,13 +95,13 @@ export function ParentScanClient() {
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Токен из QR"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-mono"
+          className={`w-full rounded-lg border border-gray-200 px-3 py-2 font-mono ${MOBILE_SAFE_INPUT_CLASS}`}
         />
         <input
           value={childName}
           onChange={(e) => setChildName(e.target.value)}
           placeholder="Имя участника (необязательно)"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          className={`w-full rounded-lg border border-gray-200 px-3 py-2 ${MOBILE_SAFE_INPUT_CLASS}`}
         />
         <MemberTypeSelect value={memberType} onChange={setMemberType} />
         {error && <p className="text-xs text-red-600">{error}</p>}

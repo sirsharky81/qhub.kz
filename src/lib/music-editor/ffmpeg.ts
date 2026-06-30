@@ -1,5 +1,6 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
+import { downloadBlob as platformDownloadBlob } from "@/lib/platform/save-file";
 import { audioBufferToWav } from "./waveform";
 import type { ExportFormat } from "./types";
 
@@ -225,10 +226,5 @@ export async function encodeBufferToFile(
 
 export function downloadBlob(blob: Blob, filename: string) {
   logExport("download", `Скачивание ${filename} (${(blob.size / 1024).toFixed(0)} KB)`);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  platformDownloadBlob(blob, filename);
 }

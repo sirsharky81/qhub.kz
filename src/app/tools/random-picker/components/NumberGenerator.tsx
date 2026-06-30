@@ -218,10 +218,13 @@ export function useVideoRecorder(containerRef: React.RefObject<HTMLElement | nul
 
   const downloadVideo = useCallback(() => {
     if (!videoUrl) return;
-    const a = document.createElement("a");
-    a.href = videoUrl;
-    a.download = `qhub-random-picker-${Date.now()}.webm`;
-    a.click();
+    void fetch(videoUrl)
+      .then((r) => r.blob())
+      .then((blob) =>
+        import("@/lib/platform/save-file").then(({ saveBlobToDevice }) =>
+          saveBlobToDevice(blob, `qhub-random-picker-${Date.now()}.webm`),
+        ),
+      );
   }, [videoUrl]);
 
   return { recording, videoUrl, startRecording, stopRecording, downloadVideo };

@@ -1,6 +1,7 @@
 import { PDFDocument, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import QRCode from "qrcode";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import type { ProtocolTitle, VerificationRecord } from "./types";
 import { LEGAL_DISCLAIMER, SERVICE_URL } from "./types";
 
@@ -298,10 +299,5 @@ export async function generateProtocolPdf(record: VerificationRecord): Promise<U
 
 export function downloadPdf(bytes: Uint8Array, filename: string): void {
   const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveBlobToDevice(blob, filename);
 }

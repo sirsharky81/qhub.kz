@@ -1,3 +1,4 @@
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import type { ExportFormat, ExportQuality, ScanPage } from "./types";
 import { QUALITY_PRESETS } from "./constants";
 import { renderPageToCanvas } from "./a4-layout";
@@ -31,12 +32,7 @@ export async function exportPagesAsImages(
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveBlobToDevice(blob, filename);
 }
 
 export async function downloadZip(files: { blob: Blob; filename: string }[], zipName: string): Promise<void> {

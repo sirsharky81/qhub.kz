@@ -1,8 +1,8 @@
-import { saveAs } from "file-saver";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 
 export async function downloadPng(dataUrl: string, filename = "qrcode.png"): Promise<void> {
   const blob = await dataUrlToBlob(dataUrl);
-  saveAs(blob, filename);
+  await saveBlobToDevice(blob, filename);
 }
 
 export async function downloadPngTransparent(
@@ -12,17 +12,17 @@ export async function downloadPngTransparent(
 ): Promise<void> {
   const transparent = await makeTransparentBackground(dataUrl, backgroundColor);
   const blob = await dataUrlToBlob(transparent);
-  saveAs(blob, filename);
+  await saveBlobToDevice(blob, filename);
 }
 
 export function downloadSvg(svg: string, filename = "qrcode.svg"): void {
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-  saveAs(blob, filename);
+  void saveBlobToDevice(blob, filename);
 }
 
 export async function downloadJpg(dataUrl: string, filename = "qrcode.jpg"): Promise<void> {
   const blob = await dataUrlToJpgBlob(dataUrl);
-  saveAs(blob, filename);
+  await saveBlobToDevice(blob, filename);
 }
 
 export async function copyQrToClipboard(dataUrl: string): Promise<void> {

@@ -8,6 +8,7 @@ import { FamilyShell } from "../../components/FamilyShell";
 import { joinFamilyBindApi } from "@/lib/family/client";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
 import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
+import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import { loadParentSession, saveParentSession } from "@/lib/family/session";
 
 function JoinInner() {
@@ -87,7 +88,7 @@ function JoinInner() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Как вас называть в семье"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          className={`w-full rounded-lg border border-gray-200 px-3 py-2 ${MOBILE_SAFE_INPUT_CLASS}`}
         />
         <Link href={scanHref} className="block text-center text-[11px] text-sky-600 underline">
           Открыть сканер QR
@@ -96,7 +97,7 @@ function JoinInner() {
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Код из приглашения"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-mono"
+          className={`w-full rounded-lg border border-gray-200 px-3 py-2 font-mono ${MOBILE_SAFE_INPUT_CLASS}`}
         />
         {error && <p className="text-xs text-red-600">{error}</p>}
         <button

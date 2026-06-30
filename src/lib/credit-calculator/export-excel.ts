@@ -1,3 +1,4 @@
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import type { AnnuityResult, CalculationResult, DiffResult, LoanInput, RegulatoryMeta, ScheduleRow } from "./types";
 import { dayBasisLabel, paymentDate, withDisbursementRow } from "./calculations";
 
@@ -287,10 +288,5 @@ export async function buildLoanExcelBlob(
 
 export async function exportLoanToExcel(data: LoanExportData): Promise<void> {
   const { blob, filename } = await buildLoanExcelBlob(data);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  await saveBlobToDevice(blob, filename);
 }

@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import type { ParticipantTable } from "./types";
 
 function escapeCsvCell(value: string, delimiter: string): string {
@@ -31,24 +32,19 @@ function defaultFilename(ext: "csv" | "xlsx", eventName?: string): string {
   return slug ? `${slug}-${date}.${ext}` : `participants-${date}.${ext}`;
 }
 
-function triggerDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-export function downloadParticipantCsv(table: ParticipantTable, eventName?: string): void {
+export async function downloadParticipantCsv(table: ParticipantTable, eventName?: string): Promise<void> {
   const csv = `\uFEFF${tableToCsv(table)}`;
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  triggerDownload(blob, defaultFilename("csv", eventName));
+  await saveBlobToDevice(blob, defaultFilename("csv", eventName));
 }
 
-export function downloadParticipantXlsx(table: ParticipantTable, eventName?: string): void {
+export async function downloadParticipantXlsx(table: ParticipantTable, eventName?: string): Promise<void> {
   const ws = XLSX.utils.aoa_to_sheet(tableToRows(table));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Участники");
-  XLSX.writeFile(wb, defaultFilename("xlsx", eventName));
+  const buffer = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  await saveBlobToDevice(blob, defaultFilename("xlsx", eventName));
 }

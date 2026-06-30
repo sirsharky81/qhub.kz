@@ -35,6 +35,20 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow-x: hidden;
+}
+
+/* iOS Safari / PWA: inputs <16px trigger page zoom — keep layout within viewport */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
+html {
+  overflow-x: hidden;
 }
 
 /* Dot grid — светлый вариант */

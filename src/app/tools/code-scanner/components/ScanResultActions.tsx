@@ -71,8 +71,9 @@ export default function ScanResultActions({ raw, table, onSave }: Props) {
           <button
             type="button"
             onClick={() => {
-              const res = downloadXlsxIfAllowed(matrix, slugFilename("scan", "xlsx"));
-              if (!res.ok) showToast(t("xlsxLimit"));
+              void downloadXlsxIfAllowed(matrix, slugFilename("scan", "xlsx")).then((res) => {
+                if (!res.ok) showToast(t("xlsxLimit"));
+              });
             }}
             className="px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white"
           >

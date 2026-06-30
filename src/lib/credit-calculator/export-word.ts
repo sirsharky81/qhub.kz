@@ -1,3 +1,4 @@
+import { saveBlobToDevice } from "@/lib/platform/save-file";
 import type { CalculationResult } from "./types";
 import { dayBasisLabel, interestSharePercent, paymentDate, round2 } from "./calculations";
 import { formatDate, formatMoney, formatNum } from "./format";
@@ -42,12 +43,7 @@ export function buildLoanWordBlob(
 
 export function exportLoanToWord(result: CalculationResult, lang: Lang): void {
   const { blob, filename } = buildLoanWordBlob(result, lang);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveBlobToDevice(blob, filename);
 }
 
 function buildLoanWordHtml(result: CalculationResult, lang: Lang): string {
