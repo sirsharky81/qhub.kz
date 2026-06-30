@@ -39,7 +39,7 @@ export async function platformFetch(
     });
   } catch (err) {
     const hint = isNativePlatform()
-      ? " Проверьте интернет и что qhub.kz доступен."
+      ? " Проверьте интернет и что www.qhub.kz доступен."
       : "";
     throw new Error(
       err instanceof Error && err.message === "Failed to fetch"

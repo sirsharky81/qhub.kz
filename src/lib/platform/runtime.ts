@@ -38,4 +38,4 @@ export function getNativePlatform(): "ios" | "android" | "web" {
 }
 
 export const NATIVE_API_BASE =
-  process.env.NEXT_PUBLIC_NATIVE_API_BASE?.replace(/\/$/, "") || "https://qhub.kz";
+  process.env.NEXT_PUBLIC_NATIVE_API_BASE?.replace(/\/$/, "") || "https://www.qhub.kz";

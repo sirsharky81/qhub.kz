@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import "@/lib/platform/native-fetch-patch";
 import { Geist, Geist_Mono } from "next/font/google";
 import InstallBanner from "@/components/InstallBanner";
 import { PlatformInit } from "@/components/PlatformInit";
