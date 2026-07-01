@@ -24,13 +24,21 @@ export function setMessengerPushEnabledLocally(enabled: boolean): void {
   localStorage.setItem(MESSENGER_PUSH_PREFS_KEY, enabled ? "1" : "0");
 }
 
+/** Web Push API (service worker) — not Capacitor FCM. */
+export function isWebPushSupported(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window
+  );
+}
+
 /** Sync hint — on native, use resolveMessengerPushSupportStatus for accurate permission. */
 export function getPushSupportStatus(): PushSupportStatus {
   if (typeof window === "undefined") return "unsupported";
   if (isNativePlatform()) return "default";
-  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-    return "unsupported";
-  }
+  if (!isWebPushSupported()) return "unsupported";
   return Notification.permission as PushSupportStatus;
 }
 
@@ -48,6 +56,19 @@ export async function resolveMessengerPushSupportStatus(): Promise<PushSupportSt
     }
   }
   return getPushSupportStatus();
+}
+
+async function ensureServiceWorkerReady(): Promise<ServiceWorkerRegistration | null> {
+  if (!isWebPushSupported()) return null;
+  try {
+    let registration = await navigator.serviceWorker.getRegistration("/sw.js");
+    if (!registration) {
+      registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    }
+    return registration;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchMessengerVapidPublicKey(): Promise<string | null> {
@@ -81,7 +102,9 @@ export async function subscribeMessengerPush(): Promise<boolean> {
     return false;
   }
 
-  const registration = await navigator.serviceWorker.ready;
+  const registration = await ensureServiceWorkerReady();
+  if (!registration) return false;
+
   const existing = await registration.pushManager.getSubscription();
   const subscription =
     existing ??
@@ -111,18 +134,27 @@ export async function subscribeMessengerPush(): Promise<boolean> {
 
 export async function unsubscribeMessengerPush(): Promise<boolean> {
   if (isNativePlatform()) {
-    const { unregisterNativePush } = await import("@/lib/platform/native/push");
-    await unregisterNativePush("messenger");
+    try {
+      const { unregisterNativePush } = await import("@/lib/platform/native/push");
+      await unregisterNativePush("messenger");
+    } catch {
+      /* keep going — clear local pref even if native layer fails */
+    }
     setMessengerPushEnabledLocally(false);
     return true;
   }
 
-  if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
+  if (typeof window === "undefined" || !isWebPushSupported()) {
     setMessengerPushEnabledLocally(false);
     return true;
   }
 
-  const registration = await navigator.serviceWorker.ready;
+  const registration = await ensureServiceWorkerReady();
+  if (!registration) {
+    setMessengerPushEnabledLocally(false);
+    return true;
+  }
+
   const subscription = await registration.pushManager.getSubscription();
   if (subscription) {
     const json = subscription.toJSON();
@@ -157,7 +189,9 @@ export async function ensureMessengerPushSubscription(): Promise<boolean> {
 
   if (getPushSupportStatus() !== "granted") return false;
 
-  const registration = await navigator.serviceWorker.ready;
+  const registration = await ensureServiceWorkerReady();
+  if (!registration) return false;
+
   const existing = await registration.pushManager.getSubscription();
   if (existing) {
     const json = existing.toJSON();

@@ -81,10 +81,11 @@ export async function registerNativePush(
 export async function unregisterNativePush(context: NotificationContext): Promise<void> {
   if (!isNativePlatform()) return;
 
-  const token =
+  const tokenKey =
     context === "messenger"
-      ? localStorage.getItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY)
-      : localStorage.getItem("qhub_family_native_push_token");
+      ? MESSENGER_NATIVE_PUSH_TOKEN_KEY
+      : "qhub_family_native_push_token";
+  const token = localStorage.getItem(tokenKey);
 
   const apiEndpoint =
     context === "family" ? "/api/family/push/subscribe" : "/api/messenger/push/subscribe";
@@ -104,15 +105,18 @@ export async function unregisterNativePush(context: NotificationContext): Promis
         },
       }),
     }).catch(() => {});
-    if (context === "messenger") {
-      localStorage.removeItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY);
-    } else {
-      localStorage.removeItem("qhub_family_native_push_token");
+    localStorage.removeItem(tokenKey);
+
+    try {
+      const { PushNotifications } = await import("@capacitor/push-notifications");
+      await PushNotifications.unregister();
+    } catch (err) {
+      PlatformLogger.error(
+        "Push unregister failed",
+        err instanceof Error ? err : new Error(String(err)),
+      );
     }
   }
-
-  const { PushNotifications } = await import("@capacitor/push-notifications");
-  await PushNotifications.unregister().catch(() => {});
 }
 
 export async function initNativePushListeners(): Promise<void> {

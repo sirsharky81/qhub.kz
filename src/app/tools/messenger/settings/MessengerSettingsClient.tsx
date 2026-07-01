@@ -20,6 +20,7 @@ import {
   type PushSupportStatus,
 } from "@/lib/messenger/push";
 import { isNativePlatform } from "@/lib/platform/runtime";
+import { isIOS, isStandalone } from "@/lib/pwa-utils";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
@@ -69,6 +70,8 @@ export function MessengerSettingsClient() {
       } else {
         await subscribeMessengerPush();
       }
+      refreshPushState();
+    } catch {
       refreshPushState();
     } finally {
       setPushBusy(false);
@@ -259,7 +262,9 @@ export function MessengerSettingsClient() {
             <p className="text-xs text-amber-700">
               {isNativePlatform()
                 ? "Разрешите уведомления в настройках телефона."
-                : "Уведомления заблокированы в настройках браузера или iOS."}
+                : isIOS() && isStandalone()
+                  ? "Уведомления отключены. Настройки iOS → Уведомления → QHub → Разрешить."
+                  : "Уведомления заблокированы в настройках браузера или iOS."}
             </p>
           )}
           {pushStatus === "default" && !pushEnabled && (
