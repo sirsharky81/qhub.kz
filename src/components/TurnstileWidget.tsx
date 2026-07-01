@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TURNSTILE_SITE_KEY, isTurnstileRequired } from "@/lib/captcha/turnstile-client";
 
 declare global {
@@ -15,6 +15,7 @@ declare global {
           "error-callback"?: () => void;
           appearance?: "always" | "execute" | "interaction-only";
           theme?: "light" | "dark" | "auto";
+          size?: "normal" | "compact" | "flexible";
         },
       ) => string;
       reset: (widgetId: string) => void;
@@ -33,6 +34,10 @@ function loadTurnstileScript(): Promise<void> {
   const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
   if (existing) {
     return new Promise((resolve, reject) => {
+      if (window.turnstile) {
+        resolve();
+        return;
+      }
       existing.addEventListener("load", () => resolve(), { once: true });
       existing.addEventListener("error", () => reject(new Error("turnstile load failed")), {
         once: true,
@@ -62,6 +67,20 @@ interface Props {
 export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
+  const onTokenRef = useRef(onToken);
+  const onExpireRef = useRef(onExpire);
+  const onErrorRef = useRef(onError);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    onTokenRef.current = onToken;
+  }, [onToken]);
+  useEffect(() => {
+    onExpireRef.current = onExpire;
+  }, [onExpire]);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const siteKey = TURNSTILE_SITE_KEY;
   const required = isTurnstileRequired();
@@ -72,6 +91,7 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
     if (!container) return;
 
     let cancelled = false;
+    setLoadFailed(false);
 
     void loadTurnstileScript()
       .then(() => {
@@ -86,14 +106,21 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
         }
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
-          appearance: "interaction-only",
+          appearance: "always",
           theme: "auto",
-          callback: (token) => onToken(token),
-          "expired-callback": () => onExpire?.(),
-          "error-callback": () => onError?.(),
+          size: "flexible",
+          callback: (token) => onTokenRef.current(token),
+          "expired-callback": () => onExpireRef.current?.(),
+          "error-callback": () => {
+            setLoadFailed(true);
+            onErrorRef.current?.();
+          },
         });
       })
-      .catch(() => onError?.());
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+        onErrorRef.current?.();
+      });
 
     return () => {
       cancelled = true;
@@ -106,11 +133,24 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey, required, resetKey, onToken, onExpire, onError]);
+  }, [siteKey, required, resetKey]);
 
   if (!siteKey || !required) return null;
 
-  return <div ref={containerRef} className="flex justify-center min-h-[65px]" />;
+  return (
+    <div className="w-full space-y-2">
+      <div
+        ref={containerRef}
+        className="flex justify-center w-full min-h-[65px] overflow-visible"
+        aria-live="polite"
+      />
+      {loadFailed && (
+        <p className="text-xs text-amber-700 text-center">
+          Не удалось загрузить проверку. Обновите страницу или откройте в Safari/Chrome.
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function turnstileRequiredOnClient(): boolean {

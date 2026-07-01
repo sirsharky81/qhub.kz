@@ -19,6 +19,8 @@ import {
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { isStandalone } from "@/lib/pwa-utils";
 import { TurnstileWidget, turnstileRequiredOnClient } from "@/components/TurnstileWidget";
+import { CAPTCHA_REQUIRED_MSG } from "@/lib/captcha/turnstile-client";
+import { useKeyboardOpen } from "@/lib/messenger/use-visual-viewport";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
 type Step = "phone" | "login" | "setPin";
@@ -53,6 +55,7 @@ export function MessengerLoginClient() {
   const [phoneCaptchaReset, setPhoneCaptchaReset] = useState(0);
   const [loginCaptchaReset, setLoginCaptchaReset] = useState(0);
   const captchaRequired = turnstileRequiredOnClient();
+  const keyboardOpen = useKeyboardOpen(true);
 
   useEffect(() => {
     setPhoneInput(loadLastPhone());
@@ -68,6 +71,10 @@ export function MessengerLoginClient() {
   async function handleIdentify(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (captchaRequired && !phoneCaptchaToken) {
+      setError(CAPTCHA_REQUIRED_MSG);
+      return;
+    }
     setLoading(true);
     try {
       const res = await identifyMessenger(phoneInput, phoneCaptchaToken ?? undefined);
@@ -109,6 +116,10 @@ export function MessengerLoginClient() {
 
   async function handleLogin() {
     setError(null);
+    if (captchaRequired && !loginCaptchaToken) {
+      setError(CAPTCHA_REQUIRED_MSG);
+      return;
+    }
     setLoading(true);
     try {
       const res = await loginMessenger(phone, pin, loginCaptchaToken ?? undefined);
@@ -174,8 +185,12 @@ export function MessengerLoginClient() {
   return (
     <>
       <MessengerInstallModal open={showInstallModal} onContinue={handleInstallContinue} />
-      <MessengerShell variant="app" title="Мессенджер" backHref="/">
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 max-w-md mx-auto w-full">
+      <MessengerShell variant="app" title="Мессенджер" backHref="/" keyboardAware>
+      <div
+        className={`flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 max-w-md mx-auto w-full ${
+          keyboardOpen ? "justify-start pt-4 pb-6" : "justify-center py-8"
+        }`}
+      >
         <div className="w-full rounded-3xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
           {step === "phone" && (
             <>
@@ -192,9 +207,11 @@ export function MessengerLoginClient() {
                   value={phoneInput}
                   onChange={(e) => setPhoneInput(e.target.value)}
                   placeholder="+7XXXXXXXXXX"
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm"
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-base"
+                  style={{ fontSize: "16px" }}
                   required
-                  autoFocus
+                  autoComplete="tel"
+                  enterKeyHint="done"
                 />
                 <TurnstileWidget
                   resetKey={phoneCaptchaReset}

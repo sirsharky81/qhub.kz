@@ -10,3 +10,5 @@ export function isTurnstileRequired(): boolean {
   if (isTurnstileConfiguredOnClient()) return true;
   return process.env.NODE_ENV === "production";
 }
+
+export const CAPTCHA_REQUIRED_MSG = "Подтвердите, что вы не робот";
