@@ -1,11 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { checkMessengerRateLimit, getClientIp } from "@/lib/rate-limit";
-import { setPin } from "@/lib/messenger/auth-service";
-import { assertWhitelistedPhone, jsonAuthError } from "@/lib/messenger/guard";
+import { getPinStatus, setPin } from "@/lib/messenger/auth-service";
+import { assertWhitelistedPhone, jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
 import { isValidKzPhone, normalizeKzPhone } from "@/lib/messenger/phone";
 import {
   createMessengerSessionToken,
+  getMessengerSession,
   messengerSessionCookieOptions,
 } from "@/lib/messenger/session";
 
@@ -33,6 +34,15 @@ export async function POST(request: Request) {
     }
 
     const { phone } = await assertWhitelistedPhone(rawPhone);
+    const pinStatus = await getPinStatus(phone);
+
+    if (pinStatus.passwordSet && !pinStatus.mustChangePin) {
+      const session = await getMessengerSession();
+      if (!session || normalizeKzPhone(session.phone) !== normalizeKzPhone(phone)) {
+        throw new MessengerAuthError("Требуется вход в мессенджер", 403);
+      }
+    }
+
     const pin = typeof body.pin === "string" ? body.pin : "";
     const confirmPin = typeof body.confirmPin === "string" ? body.confirmPin : undefined;
     const result = await setPin(phone, pin, confirmPin);

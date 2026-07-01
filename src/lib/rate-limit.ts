@@ -14,6 +14,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:audio-extractor": { requests: 10, window: "1 h" },
   "qhub:lotto": { requests: 120, window: "1 m" },
   "qhub:messenger": { requests: 60, window: "1 m" },
+  "qhub:messenger-identify-phone": { requests: 10, window: "15 m" },
   "qhub:family": { requests: 120, window: "1 m" },
 };
 
@@ -113,6 +114,12 @@ export async function checkMessengerRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:messenger", identifier);
+}
+
+export async function checkMessengerIdentifyPhoneRateLimit(
+  phone: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:messenger-identify-phone", phone);
 }
 
 export async function checkFamilyRateLimit(

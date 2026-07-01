@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { assertTurnstile } from "@/lib/captcha/turnstile";
 import { checkMessengerRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getPinStatus, loginWithPin } from "@/lib/messenger/auth-service";
 import { assertWhitelistedPhone, jsonAuthError } from "@/lib/messenger/guard";
@@ -21,11 +22,19 @@ export async function POST(request: Request) {
   }
 
   try {
-    let body: { phone?: string; pin?: string };
+    let body: { phone?: string; pin?: string; captchaToken?: string };
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ error: "Неверный формат" }, { status: 400 });
+    }
+
+    const captcha = await assertTurnstile(
+      typeof body.captchaToken === "string" ? body.captchaToken : undefined,
+      ip,
+    );
+    if (!captcha.ok) {
+      return NextResponse.json({ error: captcha.error }, { status: captcha.status });
     }
 
     const rawPhone = typeof body.phone === "string" ? body.phone.trim() : "";

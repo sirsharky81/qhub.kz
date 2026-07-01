@@ -85,6 +85,58 @@ export async function setPin(
   return { ok: true };
 }
 
+export async function changePin(
+  phone: string,
+  currentPin: string,
+  newPin: string,
+  confirmPin: string,
+): Promise<{ ok: true } | { ok: false; error: string; lockedUntil?: number }> {
+  if (!isValidPin(currentPin) || !isValidPin(newPin)) {
+    return { ok: false, error: "PIN должен состоять из 4 цифр" };
+  }
+  if (newPin !== confirmPin) {
+    return { ok: false, error: "PIN не совпадает" };
+  }
+  if (currentPin === newPin) {
+    return { ok: false, error: "Новый PIN должен отличаться от текущего" };
+  }
+
+  const record = await getAuthRecord(phone);
+  if (!record?.pinHash) {
+    return { ok: false, error: "PIN не установлен" };
+  }
+
+  if (record.lockedUntil && record.lockedUntil > Date.now()) {
+    return {
+      ok: false,
+      error: "Слишком много попыток. Попробуйте позже.",
+      lockedUntil: record.lockedUntil,
+    };
+  }
+
+  const valid = await verifyPassword(currentPin, record.pinHash);
+  if (!valid) {
+    record.failedAttempts += 1;
+    if (record.failedAttempts >= MAX_PIN_ATTEMPTS) {
+      record.lockedUntil = Date.now() + PIN_LOCKOUT_MS;
+      record.failedAttempts = 0;
+    }
+    await saveAuthRecord(record);
+    return { ok: false, error: "Неверный текущий PIN" };
+  }
+
+  const pinHash = await hashPassword(newPin);
+  await saveAuthRecord({
+    phone,
+    pinHash,
+    pinSetAt: Date.now(),
+    mustChangePin: false,
+    failedAttempts: 0,
+    lockedUntil: null,
+  });
+  return { ok: true };
+}
+
 export async function getPinStatus(phone: string): Promise<{
   passwordSet: boolean;
   mustChangePin: boolean;

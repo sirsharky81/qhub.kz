@@ -464,12 +464,13 @@ export function ChatView({
 
   async function handleSendMedia(payload: MediaSendPayload) {
     const data = await blobToBase64(payload.blob);
+    const ext = payload.mime.includes("mp4") ? "mp4" : "webm";
     await sendPlain(payload.type, {
       data,
       mime: payload.mime,
       durationMs: payload.durationMs,
       waveformPeaks: payload.waveformPeaks,
-      filename: payload.type === "audio" ? "voice.webm" : "video.webm",
+      filename: payload.type === "audio" ? `voice.${ext}` : `video.${ext}`,
     });
   }
 

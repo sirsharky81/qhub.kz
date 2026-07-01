@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { checkMessengerRateLimit, getClientIp } from "@/lib/rate-limit";
+import { assertTurnstile } from "@/lib/captcha/turnstile";
+import {
+  checkMessengerIdentifyPhoneRateLimit,
+  checkMessengerRateLimit,
+  getClientIp,
+} from "@/lib/rate-limit";
 import { getPinStatus } from "@/lib/messenger/auth-service";
 import { ACCESS_DENIED_MSG, assertWhitelistedPhone, jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
 import { maskPhone } from "@/lib/messenger/phone-format";
@@ -15,16 +20,36 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { phone?: string };
+  let body: { phone?: string; captchaToken?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
   }
 
+  const captcha = await assertTurnstile(
+    typeof body.captchaToken === "string" ? body.captchaToken : undefined,
+    ip,
+  );
+  if (!captcha.ok) {
+    return NextResponse.json({ ok: false, error: captcha.error }, { status: captcha.status });
+  }
+
   const raw = typeof body.phone === "string" ? body.phone.trim() : "";
   if (!raw || !isValidKzPhone(normalizeKzPhone(raw))) {
     return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
+  }
+
+  const normalized = normalizeKzPhone(raw);
+  const phoneLimit = await checkMessengerIdentifyPhoneRateLimit(normalized);
+  if (!phoneLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, error: "Слишком много запросов" },
+      {
+        status: 429,
+        headers: phoneLimit.retryAfterSec ? { "Retry-After": String(phoneLimit.retryAfterSec) } : undefined,
+      },
+    );
   }
 
   try {

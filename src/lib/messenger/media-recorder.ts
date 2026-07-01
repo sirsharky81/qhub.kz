@@ -2,6 +2,7 @@ import {
   prepareAudioSessionForCapture,
   restoreAudioSessionAfterCapture,
 } from "@/lib/audio-session";
+import { getNativePlatform, isNativePlatform } from "@/lib/platform/runtime";
 import {
   MAX_AUDIO_BLOB_BYTES,
   MAX_VIDEO_BLOB_BYTES,
@@ -30,6 +31,15 @@ const VIDEO_MIME_CANDIDATES = [
 
 const VIDEO_MIME_IOS = ["video/mp4", "video/webm;codecs=vp8,opus", "video/webm", "video/webm;codecs=vp9,opus"];
 
+/** Chrome on Android defaults to H.264 in WebM; forcing vp8 often yields audio-only blobs. */
+const VIDEO_MIME_ANDROID = [
+  "video/webm",
+  "video/mp4",
+  "video/webm;codecs=vp8,opus",
+  "video/webm;codecs=vp8",
+  "video/webm;codecs=vp9,opus",
+];
+
 function isAppleMobile(): boolean {
   if (typeof navigator === "undefined") return false;
   return (
@@ -38,11 +48,58 @@ function isAppleMobile(): boolean {
   );
 }
 
+function isAndroidRecorder(): boolean {
+  if (isNativePlatform() && getNativePlatform() === "android") return true;
+  return typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+}
+
 function mimeCandidates(mode: MediaRecordMode): string[] {
   if (isAppleMobile()) {
     return mode === "audio" ? AUDIO_MIME_IOS : VIDEO_MIME_IOS;
   }
+  if (mode === "video" && isAndroidRecorder()) return VIDEO_MIME_ANDROID;
   return mode === "audio" ? AUDIO_MIME_CANDIDATES : VIDEO_MIME_CANDIDATES;
+}
+
+function videoConstraints(facing: FacingMode): MediaTrackConstraints {
+  if (isAndroidRecorder()) {
+    return {
+      facingMode: facing,
+      width: { ideal: 640, max: 640 },
+      height: { ideal: 480, max: 480 },
+      frameRate: { ideal: 24, max: 24 },
+    };
+  }
+  return {
+    facingMode: facing,
+    width: { ideal: 640 },
+    height: { ideal: 480 },
+    frameRate: { ideal: 24, max: 30 },
+  };
+}
+
+function createRecorderForStream(
+  mediaStream: MediaStream,
+  mode: MediaRecordMode,
+): { recorder: MediaRecorder; mime: string } {
+  for (const candidate of mimeCandidates(mode)) {
+    if (!MediaRecorder.isTypeSupported(candidate)) continue;
+    try {
+      const options: MediaRecorderOptions = { mimeType: candidate };
+      if (mode === "video") {
+        options.videoBitsPerSecond = 1_000_000;
+        options.audioBitsPerSecond = 96_000;
+      }
+      const recorder = new MediaRecorder(mediaStream, options);
+      return { recorder, mime: recorder.mimeType || candidate };
+    } catch {
+      /* try next mime */
+    }
+  }
+  const recorder = new MediaRecorder(mediaStream);
+  const fallbackMime =
+    recorder.mimeType || (mode === "audio" ? "audio/webm" : "video/webm");
+  return { recorder, mime: fallbackMime };
 }
 
 export function pickAudioMime(): string | null {
@@ -93,6 +150,36 @@ export function formatDurationMs(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/** True when the blob contains decodable video frames (not audio-only). */
+export async function videoBlobHasFrames(blob: Blob): Promise<boolean> {
+  if (typeof document === "undefined") return true;
+  if (!blob.type.startsWith("video/")) return false;
+  const url = URL.createObjectURL(blob);
+  try {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.src = url;
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => resolve(), 4000);
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timer);
+        resolve();
+      };
+      video.onerror = () => {
+        window.clearTimeout(timer);
+        reject(new Error("metadata load failed"));
+      };
+    });
+    return video.videoWidth > 0 && video.videoHeight > 0;
+  } catch {
+    return false;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export async function extractWaveformPeaks(blob: Blob, points = 32): Promise<number[]> {
@@ -163,25 +250,29 @@ export async function createMediaRecorderSession(options: {
     const constraints: MediaStreamConstraints =
       mode === "audio"
         ? { audio: true }
-        : { audio: true, video: { facingMode: nextFacing, width: { ideal: 640 }, height: { ideal: 480 } } };
+        : { audio: true, video: videoConstraints(nextFacing) };
     prepareAudioSessionForCapture();
     stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = true;
+    });
     facingMode = nextFacing;
   }
 
   async function startRecorder(clearChunks = true) {
     if (!stream) await attachStream(facingMode);
     if (clearChunks) chunks = [];
-    try {
-      recorder = new MediaRecorder(stream!, { mimeType: mime! });
-    } catch {
-      recorder = new MediaRecorder(stream!);
-      if (recorder.mimeType) mime = recorder.mimeType;
-    }
+    const created = createRecorderForStream(stream!, mode);
+    recorder = created.recorder;
+    mime = created.mime;
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
     };
-    recorder.start(250);
+    if (isAndroidRecorder()) {
+      recorder.start();
+    } else {
+      recorder.start(250);
+    }
     startedAt = Date.now();
     if (autoStopTimer) clearTimeout(autoStopTimer);
     autoStopTimer = setTimeout(() => {

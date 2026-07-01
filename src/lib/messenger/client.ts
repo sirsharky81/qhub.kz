@@ -48,20 +48,20 @@ export function invalidateAccessCache(): void {
   accessCache = null;
 }
 
-export async function identifyMessenger(phone: string): Promise<IdentifyResult> {
+export async function identifyMessenger(phone: string, captchaToken?: string): Promise<IdentifyResult> {
   const res = await platformFetch("/api/messenger/auth/identify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, captchaToken }),
   });
   return res.json() as Promise<IdentifyResult>;
 }
 
-export async function loginMessenger(phone: string, pin: string) {
+export async function loginMessenger(phone: string, pin: string, captchaToken?: string) {
   const res = await platformFetch("/api/messenger/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, pin }),
+    body: JSON.stringify({ phone, pin, captchaToken }),
   });
   const data = (await res.json()) as {
     ok?: boolean;
@@ -85,6 +85,21 @@ export async function setMessengerPin(phone: string, pin: string, confirmPin: st
     body: JSON.stringify({ phone, pin, confirmPin }),
   });
   const data = (await res.json()) as { ok?: boolean; error?: string };
+  if (data.ok) invalidateAccessCache();
+  return data;
+}
+
+export async function changeMessengerPin(
+  currentPin: string,
+  newPin: string,
+  confirmPin: string,
+): Promise<{ ok?: boolean; error?: string; lockedUntil?: number }> {
+  const res = await platformFetch("/api/messenger/auth/change-pin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPin, newPin, confirmPin }),
+  });
+  const data = (await res.json()) as { ok?: boolean; error?: string; lockedUntil?: number };
   if (data.ok) invalidateAccessCache();
   return data;
 }

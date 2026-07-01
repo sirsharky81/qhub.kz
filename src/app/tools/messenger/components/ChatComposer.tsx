@@ -4,11 +4,13 @@ import { useCallback, useRef, useState } from "react";
 import { useKeyboardOpen } from "@/lib/messenger/use-visual-viewport";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
+import { ensureMediaPermissions, mediaPermissionErrorMessage } from "@/lib/platform/media-access";
 import {
   canRecordMedia,
   createMediaRecorderSession,
   extractWaveformPeaks,
   mediaRecordingErrorMessage,
+  videoBlobHasFrames,
   type MediaRecorderSession,
 } from "@/lib/messenger/media-recorder";
 import type { DisplayMessage } from "./MessageBubble";
@@ -85,13 +87,18 @@ export function ChatComposer({
     setStartingMode(mode);
     try {
       stopActiveMessengerAudio();
+      await ensureMediaPermissions({ audio: true, video: mode === "video" });
       const session = await createMediaRecorderSession({ mode });
       await session.start();
       sessionRef.current = session;
       setActiveSession(session);
       setRecordMode(mode);
     } catch (err) {
-      setMediaError(mediaRecordingErrorMessage(err, mode));
+      if (err instanceof Error && err.message === "permission_denied") {
+        setMediaError(mediaPermissionErrorMessage());
+      } else {
+        setMediaError(mediaRecordingErrorMessage(err, mode));
+      }
     } finally {
       setStartingMode(null);
     }
@@ -109,8 +116,15 @@ export function ChatComposer({
         return;
       }
       let finalBlob = blob;
+      let finalMime = mime;
       if (recordMode === "video") {
+        if (!(await videoBlobHasFrames(blob))) {
+          setMediaError("Видео не записалось — повторите запись");
+          await session.start();
+          return;
+        }
         finalBlob = await compressVideoIfNeeded(blob);
+        finalMime = finalBlob.type || mime;
       }
       const maxBytes = recordMode === "audio" ? MAX_AUDIO_BLOB_BYTES : MAX_VIDEO_BLOB_BYTES;
       if (finalBlob.size > maxBytes) {
@@ -132,7 +146,7 @@ export function ChatComposer({
         blob: finalBlob,
         type: recordMode,
         durationMs,
-        mime: finalBlob.type || mime,
+        mime: finalMime,
         waveformPeaks,
       });
     } catch (err) {

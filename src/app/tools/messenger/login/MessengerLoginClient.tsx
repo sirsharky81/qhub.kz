@@ -18,6 +18,7 @@ import {
 } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { isStandalone } from "@/lib/pwa-utils";
+import { TurnstileWidget, turnstileRequiredOnClient } from "@/components/TurnstileWidget";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
 type Step = "phone" | "login" | "setPin";
@@ -47,6 +48,11 @@ export function MessengerLoginClient() {
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [showInstallModal, setShowInstallModal] = useState(false);
+  const [phoneCaptchaToken, setPhoneCaptchaToken] = useState<string | null>(null);
+  const [loginCaptchaToken, setLoginCaptchaToken] = useState<string | null>(null);
+  const [phoneCaptchaReset, setPhoneCaptchaReset] = useState(0);
+  const [loginCaptchaReset, setLoginCaptchaReset] = useState(0);
+  const captchaRequired = turnstileRequiredOnClient();
 
   useEffect(() => {
     setPhoneInput(loadLastPhone());
@@ -64,9 +70,11 @@ export function MessengerLoginClient() {
     setError(null);
     setLoading(true);
     try {
-      const res = await identifyMessenger(phoneInput);
+      const res = await identifyMessenger(phoneInput, phoneCaptchaToken ?? undefined);
       if (!res.ok) {
         setError(res.error ?? "Доступ недоступен");
+        setPhoneCaptchaToken(null);
+        setPhoneCaptchaReset((k) => k + 1);
         return;
       }
       setPhone(res.phone ?? phoneInput);
@@ -103,9 +111,11 @@ export function MessengerLoginClient() {
     setError(null);
     setLoading(true);
     try {
-      const res = await loginMessenger(phone, pin);
+      const res = await loginMessenger(phone, pin, loginCaptchaToken ?? undefined);
       if (!res.ok) {
         setError(res.error ?? "Ошибка входа");
+        setLoginCaptchaToken(null);
+        setLoginCaptchaReset((k) => k + 1);
         return;
       }
       if (res.mustChangePin) {
@@ -148,6 +158,9 @@ export function MessengerLoginClient() {
     setPin("");
     setConfirmPin("");
     setError(null);
+    setPhoneCaptchaToken(null);
+    setLoginCaptchaToken(null);
+    setPhoneCaptchaReset((k) => k + 1);
   }
 
   if (checkingSession) {
@@ -183,9 +196,17 @@ export function MessengerLoginClient() {
                   required
                   autoFocus
                 />
+                <TurnstileWidget
+                  resetKey={phoneCaptchaReset}
+                  onToken={setPhoneCaptchaToken}
+                  onExpire={() => setPhoneCaptchaToken(null)}
+                  onError={() => setPhoneCaptchaToken(null)}
+                />
                 <button
                   type="submit"
-                  disabled={loading || !phoneInput.trim()}
+                  disabled={
+                    loading || !phoneInput.trim() || (captchaRequired && !phoneCaptchaToken)
+                  }
                   className="w-full rounded-2xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
                 >
                   {loading ? "Проверка…" : "Продолжить"}
@@ -240,9 +261,17 @@ export function MessengerLoginClient() {
             <>
               <h2 className="text-center text-sm font-semibold">Введите PIN</h2>
               <PinInput value={pin} onChange={setPin} autoFocus />
+              <TurnstileWidget
+                resetKey={loginCaptchaReset}
+                onToken={setLoginCaptchaToken}
+                onExpire={() => setLoginCaptchaToken(null)}
+                onError={() => setLoginCaptchaToken(null)}
+              />
               <button
                 type="button"
-                disabled={loading || pin.length < PIN_LENGTH}
+                disabled={
+                  loading || pin.length < PIN_LENGTH || (captchaRequired && !loginCaptchaToken)
+                }
                 onClick={() => void handleLogin()}
                 className="w-full rounded-2xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
               >
