@@ -26,7 +26,17 @@ export async function POST(request: Request) {
     }
 
     const sub = body.subscription;
-    if (!sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
+    if (!sub?.endpoint) {
+      return Response.json({ error: "Неполная подписка" }, { status: 400 });
+    }
+
+    const isNative =
+      Boolean(sub.nativeToken) ||
+      sub.platform === "ios" ||
+      sub.platform === "android" ||
+      sub.keys?.p256dh === "native";
+
+    if (!isNative && (!sub.keys?.p256dh || !sub.keys?.auth)) {
       return Response.json({ error: "Неполная подписка" }, { status: 400 });
     }
 

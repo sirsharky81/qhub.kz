@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PinInput } from "../components/PinInput";
 import { MessengerInstallModal } from "../components/MessengerInstallModal";
 import { MessengerShell } from "../components/MessengerShell";
@@ -54,6 +54,13 @@ export function MessengerLoginClient() {
   const [phoneCaptchaReset, setPhoneCaptchaReset] = useState(0);
   const [loginCaptchaReset, setLoginCaptchaReset] = useState(0);
   const captchaRequired = turnstileRequiredOnClient();
+  const phoneInputRef = useRef<HTMLInputElement>(null);
+
+  function scrollPhoneInputIntoView() {
+    requestAnimationFrame(() => {
+      phoneInputRef.current?.scrollIntoView({ block: "center", inline: "nearest" });
+    });
+  }
 
   useEffect(() => {
     setPhoneInput(loadLastPhone());
@@ -183,9 +190,11 @@ export function MessengerLoginClient() {
   return (
     <>
       <MessengerInstallModal open={showInstallModal} onContinue={handleInstallContinue} />
-      <MessengerShell variant="app" title="Мессенджер" backHref="/">
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
-        <div className="mx-auto w-full max-w-md px-4 py-8 md:min-h-full md:flex md:flex-col md:justify-center">
+      <MessengerShell variant="app" title="Мессенджер" backHref="/" keyboardAware>
+      <div
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain px-4 max-w-md mx-auto w-full pt-4 pb-6 [-webkit-overflow-scrolling:touch]"
+      >
+        <div className="w-full md:min-h-full md:flex md:flex-col md:justify-center md:py-4">
         <div className="w-full rounded-3xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
           {step === "phone" && (
             <>
@@ -198,11 +207,13 @@ export function MessengerLoginClient() {
               </div>
               <form onSubmit={(e) => void handleIdentify(e)} className="space-y-4">
                 <input
+                  ref={phoneInputRef}
                   type="tel"
                   value={phoneInput}
                   onChange={(e) => setPhoneInput(e.target.value)}
+                  onFocus={scrollPhoneInputIntoView}
                   placeholder="+7XXXXXXXXXX"
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-base scroll-mt-6"
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-base scroll-mt-4"
                   style={{ fontSize: "16px" }}
                   required
                   autoComplete="tel"

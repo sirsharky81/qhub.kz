@@ -1,6 +1,11 @@
+function isMessengerKeyboardShellActive(): boolean {
+  return document.documentElement.style.getPropertyValue("--messenger-vvh").length > 0;
+}
+
 /** Reset layout drift after iOS keyboard / input zoom (Safari PWA, Capacitor WebView). */
 export function resetMobileViewport(): void {
   if (typeof window === "undefined") return;
+  if (isMessengerKeyboardShellActive()) return;
 
   const apply = () => {
     document.documentElement.scrollLeft = 0;

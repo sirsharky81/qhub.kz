@@ -1,6 +1,7 @@
 "use client";
 
-import { MESSENGER_PUSH_PREFS_KEY } from "./constants";
+import { MESSENGER_NATIVE_PUSH_TOKEN_KEY, MESSENGER_PUSH_PREFS_KEY } from "./constants";
+import { isNativePlatform } from "@/lib/platform/runtime";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -13,14 +14,6 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 
 export type PushSupportStatus = "unsupported" | "denied" | "default" | "granted";
 
-export function getPushSupportStatus(): PushSupportStatus {
-  if (typeof window === "undefined") return "unsupported";
-  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-    return "unsupported";
-  }
-  return Notification.permission as PushSupportStatus;
-}
-
 export function isMessengerPushEnabledLocally(): boolean {
   if (typeof window === "undefined") return false;
   return localStorage.getItem(MESSENGER_PUSH_PREFS_KEY) === "1";
@@ -31,6 +24,32 @@ export function setMessengerPushEnabledLocally(enabled: boolean): void {
   localStorage.setItem(MESSENGER_PUSH_PREFS_KEY, enabled ? "1" : "0");
 }
 
+/** Sync hint — on native, use resolveMessengerPushSupportStatus for accurate permission. */
+export function getPushSupportStatus(): PushSupportStatus {
+  if (typeof window === "undefined") return "unsupported";
+  if (isNativePlatform()) return "default";
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    return "unsupported";
+  }
+  return Notification.permission as PushSupportStatus;
+}
+
+export async function resolveMessengerPushSupportStatus(): Promise<PushSupportStatus> {
+  if (typeof window === "undefined") return "unsupported";
+  if (isNativePlatform()) {
+    try {
+      const { PushNotifications } = await import("@capacitor/push-notifications");
+      const { receive } = await PushNotifications.checkPermissions();
+      if (receive === "granted") return "granted";
+      if (receive === "denied") return "denied";
+      return "default";
+    } catch {
+      return "unsupported";
+    }
+  }
+  return getPushSupportStatus();
+}
+
 export async function fetchMessengerVapidPublicKey(): Promise<string | null> {
   const res = await fetch("/api/messenger/push/vapid");
   if (!res.ok) return null;
@@ -39,6 +58,18 @@ export async function fetchMessengerVapidPublicKey(): Promise<string | null> {
 }
 
 export async function subscribeMessengerPush(): Promise<boolean> {
+  if (isNativePlatform()) {
+    const { PlatformNotifications } = await import("@/lib/platform/notifications");
+    const perm = await PlatformNotifications.requestPermission();
+    if (perm !== "granted") {
+      setMessengerPushEnabledLocally(false);
+      return false;
+    }
+    const ok = await PlatformNotifications.subscribe("messenger");
+    if (ok) setMessengerPushEnabledLocally(true);
+    return ok;
+  }
+
   if (getPushSupportStatus() === "unsupported") return false;
 
   const publicKey = await fetchMessengerVapidPublicKey();
@@ -79,6 +110,13 @@ export async function subscribeMessengerPush(): Promise<boolean> {
 }
 
 export async function unsubscribeMessengerPush(): Promise<boolean> {
+  if (isNativePlatform()) {
+    const { unregisterNativePush } = await import("@/lib/platform/native/push");
+    await unregisterNativePush("messenger");
+    setMessengerPushEnabledLocally(false);
+    return true;
+  }
+
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
     setMessengerPushEnabledLocally(false);
     return true;
@@ -110,6 +148,13 @@ export async function unsubscribeMessengerPush(): Promise<boolean> {
 
 export async function ensureMessengerPushSubscription(): Promise<boolean> {
   if (!isMessengerPushEnabledLocally()) return false;
+
+  if (isNativePlatform()) {
+    const status = await resolveMessengerPushSupportStatus();
+    if (status !== "granted") return false;
+    return subscribeMessengerPush();
+  }
+
   if (getPushSupportStatus() !== "granted") return false;
 
   const registration = await navigator.serviceWorker.ready;

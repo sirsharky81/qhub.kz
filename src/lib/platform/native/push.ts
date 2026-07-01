@@ -1,5 +1,6 @@
 import type { FamilySession } from "@/lib/family/types";
 import type { NotificationContext } from "../notifications";
+import { MESSENGER_NATIVE_PUSH_TOKEN_KEY } from "@/lib/messenger/constants";
 import { isNativePlatform, getNativePlatform } from "../runtime";
 import { platformFetch } from "../api-client";
 import { PlatformOfflineQueue } from "../offlineQueue";
@@ -24,6 +25,10 @@ export async function registerNativePush(
     };
 
     void PushNotifications.addListener("registration", (token) => {
+      if (typeof window !== "undefined" && context === "messenger") {
+        localStorage.setItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY, token.value);
+      }
+
       const endpoint =
         context === "family" ? "/api/family/push/subscribe" : "/api/messenger/push/subscribe";
 
@@ -32,7 +37,7 @@ export async function registerNativePush(
           ? {
               subscription: {
                 endpoint: token.value,
-                keys: { p256dh: "", auth: "" },
+                keys: { p256dh: "native", auth: "native" },
                 platform,
                 nativeToken: token.value,
               },
@@ -40,7 +45,7 @@ export async function registerNativePush(
           : {
               subscription: {
                 endpoint: token.value,
-                keys: { p256dh: "", auth: "" },
+                keys: { p256dh: "native", auth: "native" },
                 platform,
                 nativeToken: token.value,
               },
@@ -71,6 +76,43 @@ export async function registerNativePush(
 
     setTimeout(() => finish(false), 15000);
   });
+}
+
+export async function unregisterNativePush(context: NotificationContext): Promise<void> {
+  if (!isNativePlatform()) return;
+
+  const token =
+    context === "messenger"
+      ? localStorage.getItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY)
+      : localStorage.getItem("qhub_family_native_push_token");
+
+  const apiEndpoint =
+    context === "family" ? "/api/family/push/subscribe" : "/api/messenger/push/subscribe";
+  const platform = getNativePlatform() === "ios" ? "ios" : "android";
+
+  if (token) {
+    await platformFetch(apiEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        remove: true,
+        subscription: {
+          endpoint: token,
+          keys: { p256dh: "native", auth: "native" },
+          platform,
+          nativeToken: token,
+        },
+      }),
+    }).catch(() => {});
+    if (context === "messenger") {
+      localStorage.removeItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY);
+    } else {
+      localStorage.removeItem("qhub_family_native_push_token");
+    }
+  }
+
+  const { PushNotifications } = await import("@capacitor/push-notifications");
+  await PushNotifications.unregister().catch(() => {});
 }
 
 export async function initNativePushListeners(): Promise<void> {

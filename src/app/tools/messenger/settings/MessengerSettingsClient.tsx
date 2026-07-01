@@ -13,12 +13,13 @@ import {
 } from "@/lib/messenger/client";
 import { MAX_DISPLAY_NAME_LENGTH, PIN_LENGTH } from "@/lib/messenger/constants";
 import {
-  getPushSupportStatus,
   isMessengerPushEnabledLocally,
+  resolveMessengerPushSupportStatus,
   subscribeMessengerPush,
   unsubscribeMessengerPush,
   type PushSupportStatus,
 } from "@/lib/messenger/push";
+import { isNativePlatform } from "@/lib/platform/runtime";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
@@ -41,8 +42,10 @@ export function MessengerSettingsClient() {
   const [pinSaved, setPinSaved] = useState(false);
 
   const refreshPushState = useCallback(() => {
-    setPushStatus(getPushSupportStatus());
-    setPushEnabled(isMessengerPushEnabledLocally() && getPushSupportStatus() === "granted");
+    void resolveMessengerPushSupportStatus().then((status) => {
+      setPushStatus(status);
+      setPushEnabled(isMessengerPushEnabledLocally() && status === "granted");
+    });
   }, []);
 
   useEffect(() => {
@@ -246,12 +249,17 @@ export function MessengerSettingsClient() {
               />
             </button>
           </div>
-          {pushStatus === "unsupported" && (
+          {pushStatus === "unsupported" && !isNativePlatform() && (
             <p className="text-xs text-amber-700">Браузер не поддерживает push-уведомления.</p>
+          )}
+          {pushStatus === "unsupported" && isNativePlatform() && (
+            <p className="text-xs text-amber-700">Push недоступен на этом устройстве.</p>
           )}
           {pushStatus === "denied" && (
             <p className="text-xs text-amber-700">
-              Уведомления заблокированы в настройках браузера или iOS.
+              {isNativePlatform()
+                ? "Разрешите уведомления в настройках телефона."
+                : "Уведомления заблокированы в настройках браузера или iOS."}
             </p>
           )}
           {pushStatus === "default" && !pushEnabled && (

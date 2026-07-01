@@ -41,6 +41,7 @@ export const REDIS_MESSENGER_PRESENCE_PREFIX = "qhub:messenger:presence:";
 export const MESSENGER_PUSH_TTL_SEC = 60 * 60 * 24 * 30;
 export const MESSENGER_PRESENCE_TTL_SEC = 45;
 export const MESSENGER_PUSH_PREFS_KEY = "qhub_messenger_push_enabled";
+export const MESSENGER_NATIVE_PUSH_TOKEN_KEY = "qhub_messenger_native_push_token";
 
 export const MAX_DISPLAY_NAME_LENGTH = 30;
 export const QUOTE_PREVIEW_LENGTH = 80;
