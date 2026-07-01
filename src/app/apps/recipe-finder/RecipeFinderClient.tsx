@@ -6,6 +6,7 @@ import FiltersBar from "@/components/recipe-finder/FiltersBar";
 import RecipeCard from "@/components/recipe-finder/RecipeCard";
 import RecipeModal from "@/components/recipe-finder/RecipeModal";
 import { Recipe, CuisineType, MealCategory } from "@/lib/recipe-finder/types";
+import { generateRecipes } from "@/lib/recipe-finder/api";
 
 const QUICK_INGREDIENTS = [
   "Яйца", "Молоко", "Масло сливочное", "Мука", "Картофель", "Лук",
@@ -55,16 +56,7 @@ export default function RecipeFinderClient() {
     setIntentLabel(null);
 
     try {
-      const res = await fetch("/api/recipes/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query.trim(), cuisine, category, strictIngredients }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Не удалось подобрать рецепты");
-        return;
-      }
+      const data = await generateRecipes(query, cuisine, category, strictIngredients);
       setRecipes(data.recipes || []);
       if (data.intent) {
         const labels: Record<string, string> = {
@@ -75,12 +67,12 @@ export default function RecipeFinderClient() {
         };
         setIntentLabel(labels[data.intent] ?? null);
       }
-    } catch {
-      setError("Ошибка соединения. Проверьте интернет и попробуйте снова.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка соединения. Проверьте интернет и попробуйте снова.");
     } finally {
       setIsGenerating(false);
     }
-  }, [query, cuisine, category]);
+  }, [query, cuisine, category, strictIngredients]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {

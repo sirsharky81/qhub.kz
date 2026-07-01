@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback } from "react";
+import { analyzeRecipePhoto } from "@/lib/recipe-finder/api";
 
 interface Props {
   onIngredientsFound: (ingredients: string[]) => void;
@@ -20,24 +21,15 @@ export default function PhotoCapture({ onIngredientsFound, onLoading, isLoading 
     setAnalyzed(false);
     onLoading(true);
     try {
-      const res = await fetch("/api/recipes/analyze-photo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: dataUrl }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Ошибка анализа фото");
-        return;
-      }
-      if (!data.ingredients || data.ingredients.length === 0) {
+      const ingredients = await analyzeRecipePhoto(dataUrl);
+      if (ingredients.length === 0) {
         setError("Продукты на фото не обнаружены. Попробуйте другое фото.");
         return;
       }
       setAnalyzed(true);
-      onIngredientsFound(data.ingredients);
-    } catch {
-      setError("Не удалось проанализировать фото. Проверьте соединение.");
+      onIngredientsFound(ingredients);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось проанализировать фото. Проверьте соединение.");
     } finally {
       onLoading(false);
     }
