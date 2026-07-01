@@ -20,7 +20,6 @@ import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { isStandalone } from "@/lib/pwa-utils";
 import { TurnstileWidget, turnstileRequiredOnClient } from "@/components/TurnstileWidget";
 import { CAPTCHA_REQUIRED_MSG } from "@/lib/captcha/turnstile-client";
-import { useKeyboardOpen } from "@/lib/messenger/use-visual-viewport";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
 type Step = "phone" | "login" | "setPin";
@@ -55,7 +54,6 @@ export function MessengerLoginClient() {
   const [phoneCaptchaReset, setPhoneCaptchaReset] = useState(0);
   const [loginCaptchaReset, setLoginCaptchaReset] = useState(0);
   const captchaRequired = turnstileRequiredOnClient();
-  const keyboardOpen = useKeyboardOpen(true);
 
   useEffect(() => {
     setPhoneInput(loadLastPhone());
@@ -185,12 +183,9 @@ export function MessengerLoginClient() {
   return (
     <>
       <MessengerInstallModal open={showInstallModal} onContinue={handleInstallContinue} />
-      <MessengerShell variant="app" title="Мессенджер" backHref="/" keyboardAware>
-      <div
-        className={`flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 max-w-md mx-auto w-full ${
-          keyboardOpen ? "justify-start pt-4 pb-6" : "justify-center py-8"
-        }`}
-      >
+      <MessengerShell variant="app" title="Мессенджер" backHref="/">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
+        <div className="mx-auto w-full max-w-md px-4 py-8 md:min-h-full md:flex md:flex-col md:justify-center">
         <div className="w-full rounded-3xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
           {step === "phone" && (
             <>
@@ -207,7 +202,7 @@ export function MessengerLoginClient() {
                   value={phoneInput}
                   onChange={(e) => setPhoneInput(e.target.value)}
                   placeholder="+7XXXXXXXXXX"
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-base"
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-base scroll-mt-6"
                   style={{ fontSize: "16px" }}
                   required
                   autoComplete="tel"
@@ -300,6 +295,7 @@ export function MessengerLoginClient() {
           {error && (
             <p className="text-sm text-red-600 text-center bg-red-50 rounded-xl px-3 py-2">{error}</p>
           )}
+        </div>
         </div>
       </div>
     </MessengerShell>

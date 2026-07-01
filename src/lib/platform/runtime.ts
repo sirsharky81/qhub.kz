@@ -39,3 +39,24 @@ export function getNativePlatform(): "ios" | "android" | "web" {
 
 export const NATIVE_API_BASE =
   process.env.NEXT_PUBLIC_NATIVE_API_BASE?.replace(/\/$/, "") || "https://www.qhub.kz";
+
+const NATIVE_REMOTE_HOSTS = new Set(["qhub.kz", "www.qhub.kz"]);
+
+/** Capacitor shell loading UI from production (server.url), not bundled localhost. */
+export function isNativeRemoteShell(): boolean {
+  if (!isNativePlatform()) return false;
+  if (typeof window === "undefined") return true;
+  return NATIVE_REMOTE_HOSTS.has(window.location.hostname);
+}
+
+/** Legacy bundled static export served from https://localhost. */
+export function isNativeBundledShell(): boolean {
+  return isNativePlatform() && !isNativeRemoteShell();
+}
+
+/** API prefix for native fetch — empty when UI and API share the same origin. */
+export function getNativeApiBaseUrl(): string {
+  if (!isNativePlatform()) return "";
+  if (isNativeRemoteShell()) return "";
+  return NATIVE_API_BASE;
+}

@@ -24,7 +24,7 @@ export function corsHeaders(request: Request): HeadersInit {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Authorization, Content-Type, X-Family-Member-Id, X-Family-Access-Token",
+      "Authorization, Content-Type, X-Family-Member-Id, X-Family-Access-Token, X-QHub-Client",
     "Access-Control-Allow-Credentials": "true",
     "Vary": "Origin",
   };

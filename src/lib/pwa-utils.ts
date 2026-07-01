@@ -1,3 +1,5 @@
+import { isNativePlatform } from "@/lib/platform/runtime";
+
 export interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -5,6 +7,7 @@ export interface BeforeInstallPromptEvent extends Event {
 
 export function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
+  if (isNativePlatform()) return true;
   return (
     window.matchMedia("(display-mode: standalone)").matches ||
     (window.navigator as Navigator & { standalone?: boolean }).standalone === true

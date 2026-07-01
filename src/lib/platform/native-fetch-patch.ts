@@ -1,9 +1,15 @@
-import { getApiBaseUrl } from "./api-client";
+import { applyNativeClientHeaders, getApiBaseUrl } from "./api-client";
 import { isNativePlatform } from "./runtime";
+
+function withNativeClientHeaders(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  applyNativeClientHeaders(headers);
+  return { ...init, headers };
+}
 
 let installed = false;
 
-/** Route all relative /api/* fetch calls to the remote Vercel backend in Capacitor. */
+/** Route relative /api/* to remote backend only in bundled Capacitor shell (https://localhost). */
 export function installNativeFetchPatch(): void {
   if (installed || typeof window === "undefined") return;
 
@@ -33,24 +39,27 @@ export function installNativeFetchPatch(): void {
 
     const absolute = `${base}${url}`;
     const credentials = init?.credentials ?? "omit";
+    const patchedInit = withNativeClientHeaders(init);
     if (typeof input === "string") {
-      return originalFetch(absolute, { ...init, credentials });
+      return originalFetch(absolute, { ...patchedInit, credentials });
     }
     if (input instanceof Request) {
+      const headers = new Headers(input.headers);
+      applyNativeClientHeaders(headers);
       return originalFetch(
         new Request(absolute, {
           method: input.method,
-          headers: input.headers,
+          headers,
           body: input.body,
           mode: "cors",
           credentials,
           signal: input.signal,
           redirect: input.redirect,
         }),
-        init,
+        patchedInit,
       );
     }
-    return originalFetch(absolute, { ...init, credentials });
+    return originalFetch(absolute, { ...patchedInit, credentials });
   };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { isNativePlatform } from "@/lib/platform/runtime";
 
 function isLocalhost(): boolean {
   return (
@@ -17,6 +18,12 @@ async function unregisterServiceWorkers(): Promise<void> {
 export function usePWA() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
+      return;
+    }
+
+    // Capacitor WebView loads remote UI — service worker cache causes stale bundles.
+    if (isNativePlatform()) {
+      void unregisterServiceWorkers();
       return;
     }
 

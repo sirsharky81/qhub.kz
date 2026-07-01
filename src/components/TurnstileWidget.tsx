@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TURNSTILE_SITE_KEY, isTurnstileRequired } from "@/lib/captcha/turnstile-client";
+import {
+  TURNSTILE_SITE_KEY,
+  isTurnstileRequiredForUi,
+} from "@/lib/captcha/turnstile-client";
 
 declare global {
   interface Window {
@@ -83,7 +86,7 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
   }, [onError]);
 
   const siteKey = TURNSTILE_SITE_KEY;
-  const required = isTurnstileRequired();
+  const required = isTurnstileRequiredForUi();
 
   useEffect(() => {
     if (!siteKey || !required) return;
@@ -154,5 +157,5 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
 }
 
 export function turnstileRequiredOnClient(): boolean {
-  return isTurnstileRequired();
+  return isTurnstileRequiredForUi();
 }

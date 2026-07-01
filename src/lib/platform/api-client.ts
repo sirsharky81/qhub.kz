@@ -1,7 +1,15 @@
-import { isNativePlatform, NATIVE_API_BASE } from "./runtime";
+import { NATIVE_CLIENT_HEADER, NATIVE_CLIENT_VALUE } from "@/lib/captcha/turnstile-client";
+import { getNativeApiBaseUrl, isNativePlatform } from "./runtime";
+
+export function applyNativeClientHeaders(headers: Headers): void {
+  if (!isNativePlatform()) return;
+  if (!headers.has(NATIVE_CLIENT_HEADER)) {
+    headers.set(NATIVE_CLIENT_HEADER, NATIVE_CLIENT_VALUE);
+  }
+}
 
 export function getApiBaseUrl(): string {
-  return isNativePlatform() ? NATIVE_API_BASE : "";
+  return getNativeApiBaseUrl();
 }
 
 export function resolveApiUrl(path: string): string {
@@ -25,17 +33,20 @@ export async function platformFetch(
     headers.set("Content-Type", "application/json");
   }
 
+  applyNativeClientHeaders(headers);
+
   const auth = await getMessengerBearerToken();
   if (auth && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${auth}`);
   }
 
   const url = resolveApiUrl(path);
+  const remoteApi = Boolean(getApiBaseUrl());
   try {
     return await fetch(url, {
       ...rest,
       headers,
-      credentials: isNativePlatform() ? "omit" : "same-origin",
+      credentials: remoteApi ? "omit" : (rest.credentials ?? "same-origin"),
     });
   } catch (err) {
     const hint = isNativePlatform()
