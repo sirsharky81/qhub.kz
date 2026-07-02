@@ -39,6 +39,8 @@ import {
   incrementRoomUnread,
   setActiveChatChannel,
 } from "@/lib/messenger/unread";
+import { useCallOptional } from "./call/CallProvider";
+import { DmCallHeaderButton } from "./call/DmCallHeaderButton";
 
 interface Props {
   channel: string;
@@ -72,6 +74,8 @@ export function ChatView({
   profileLabels = {},
 }: Props) {
   const { storageKey, isUnlocked } = useMessengerUnlock();
+  const callCtx = useCallOptional();
+  const inCall = callCtx?.isInCall ?? false;
   const persistHistory = isUnlocked && storageKey !== null;
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -274,7 +278,10 @@ export function ChatView({
 
   useEffect(() => {
     let cancelled = false;
-    const intervalMs = () => (document.hidden ? 12000 : 2000);
+    const intervalMs = () => {
+      if (inCall) return 12000;
+      return document.hidden ? 12000 : 2000;
+    };
 
     async function tick() {
       try {
@@ -313,7 +320,7 @@ export function ChatView({
       cancelled = true;
       clearInterval(id);
     };
-  }, [channel, ingestEnvelopes, isRoom, onRoomEnded]);
+  }, [channel, ingestEnvelopes, isRoom, onRoomEnded, inCall]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -529,6 +536,7 @@ export function ChatView({
 
   const headerTrailing = (
     <div className="flex items-center gap-1">
+      {!isRoom && callCtx && <DmCallHeaderButton peerOnline={peerOnline} />}
       {isRoom && onLeaveRoom && (
         <button
           type="button"

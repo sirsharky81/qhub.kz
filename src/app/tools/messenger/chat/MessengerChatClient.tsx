@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { ChatView } from "../components/ChatView";
+import { CallProvider } from "../components/call/CallProvider";
 import { DmWaitingView } from "../components/DmWaitingView";
 import { MessengerShell } from "../components/MessengerShell";
 import { PinUnlockGate } from "../components/PinUnlockGate";
@@ -130,6 +131,7 @@ function MessengerChatInner() {
   }, [myPhone, checking, tryConnectPeer]);
 
   const peerTitle = profileLabels[peerPhone] ?? maskPhone(peerPhone);
+  const deepLinkCallId = searchParams.get("call");
 
   if (phase === "auth_error") {
     return (
@@ -167,14 +169,22 @@ function MessengerChatInner() {
 
   return (
     <PinUnlockGate phone={myPhone} maskedPhone={maskedPhone} title={peerTitle} backHref="/tools/messenger/home">
-      <ChatView
-        channel={channel}
-        title={peerTitle}
-        backHref="/tools/messenger/home"
+      <CallProvider
         myPhone={myPhone}
-        aesKey={aesKey}
-        profileLabels={profileLabels}
-      />
+        peerPhone={peerPhone}
+        channel={channel}
+        peerTitle={peerTitle}
+        deepLinkCallId={deepLinkCallId}
+      >
+        <ChatView
+          channel={channel}
+          title={peerTitle}
+          backHref="/tools/messenger/home"
+          myPhone={myPhone}
+          aesKey={aesKey}
+          profileLabels={profileLabels}
+        />
+      </CallProvider>
     </PinUnlockGate>
   );
 }

@@ -1,5 +1,5 @@
 import { dispatchPushNotifications } from "@/lib/push/dispatch";
-import { messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
+import { messengerChatCallUrl, messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
 import { displayNameForPhone, getProfile, loadProfiles } from "./store";
 import type { MessageType } from "./types";
 import {
@@ -93,4 +93,28 @@ export async function notifyRoomMessage(params: {
       }),
     ),
   );
+}
+
+export async function notifyIncomingCall(params: {
+  channel: string;
+  callId: string;
+  callerPhone: string;
+  calleePhone: string;
+}): Promise<void> {
+  const label = await senderLabel(params.callerPhone);
+  const chatUrl = messengerChatCallUrl(params.callerPhone, params.callId);
+
+  const presence = await getMessengerPresence(params.calleePhone);
+  if (isViewingChannel(presence, params.channel)) return;
+
+  const subs = await getMessengerPushSubscriptions(params.calleePhone);
+  if (subs.length === 0) return;
+
+  await dispatchPushNotifications(subs, {
+    title: label,
+    body: "Входящий звонок",
+    url: chatUrl,
+    icon: MESSENGER_ICON,
+    badge: MESSENGER_ICON,
+  });
 }

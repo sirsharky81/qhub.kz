@@ -101,3 +101,28 @@ export interface LocalDialog {
   createdAt: number;
   displayName?: string;
 }
+
+export type CallSignalType = "offer" | "answer" | "ice" | "reject" | "end" | "busy";
+export type CallStatus = "ringing" | "connecting" | "active" | "ended";
+
+export interface CallSession {
+  callId: string;
+  channel: string;
+  caller: string;
+  callee: string;
+  status: CallStatus;
+  version: number;
+  signalSeq: number;
+  createdAt: number;
+  endedAt?: number;
+  endReason?: string;
+}
+
+export interface CallSignal {
+  id: string;
+  type: CallSignalType;
+  from: string;
+  ts: number;
+  seq: number;
+  payload?: string;
+}

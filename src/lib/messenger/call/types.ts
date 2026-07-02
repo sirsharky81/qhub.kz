@@ -1,0 +1,61 @@
+export interface RTCIceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export type CallPhase =
+  | "idle"
+  | "outgoing"
+  | "incoming"
+  | "connecting"
+  | "active"
+  | "ended";
+
+export type CallEndReason =
+  | "hangup"
+  | "reject"
+  | "busy"
+  | "timeout"
+  | "error"
+  | "remote_end"
+  | null;
+
+export interface CallState {
+  phase: CallPhase;
+  callId: string | null;
+  channel: string | null;
+  peerPhone: string | null;
+  muted: boolean;
+  durationSec: number;
+  errorMessage: string | null;
+  endReason: CallEndReason;
+}
+
+export interface CallPollResponse {
+  session: {
+    callId: string;
+    channel: string;
+    caller: string;
+    callee: string;
+    status: string;
+    version: number;
+    createdAt: number;
+    endedAt?: number;
+    endReason?: string;
+  };
+  signals: Array<{
+    id: string;
+    type: string;
+    from: string;
+    ts: number;
+    seq: number;
+    payload?: string;
+  }>;
+}
+
+export interface InitiateCallResponse {
+  ok: boolean;
+  callId?: string;
+  error?: string;
+}

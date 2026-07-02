@@ -43,6 +43,15 @@ export const MESSENGER_PRESENCE_TTL_SEC = 45;
 export const MESSENGER_PUSH_PREFS_KEY = "qhub_messenger_push_enabled";
 export const MESSENGER_NATIVE_PUSH_TOKEN_KEY = "qhub_messenger_native_push_token";
 
+export const REDIS_CALL_PREFIX = "qhub:messenger:call:";
+export const REDIS_CALL_DM_ACTIVE_PREFIX = "qhub:messenger:call:dm:";
+export const DEFAULT_CALL_TTL_SEC = 120;
+export const DEFAULT_CALL_RING_TIMEOUT_SEC = 45;
+export const DEFAULT_CALL_ICE_TIMEOUT_SEC = 30;
+export const MAX_CALL_SIGNALS = 200;
+export const CALL_POLL_INTERVAL_MS = 500;
+export const CALL_HEARTBEAT_INTERVAL_MS = 30_000;
+
 export const MAX_DISPLAY_NAME_LENGTH = 30;
 export const QUOTE_PREVIEW_LENGTH = 80;
 export const SENDER_GROUP_MS = 5 * 60 * 1000;
