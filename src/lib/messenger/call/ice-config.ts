@@ -54,8 +54,18 @@ function staticTurnServers(): RTCIceServer[] {
   return [];
 }
 
+function meteredAppDomain(): string {
+  const raw = process.env.MESSENGER_METERED_DOMAIN?.trim() || "qhubkz";
+  return (
+    raw
+      .replace(/^https?:\/\//i, "")
+      .replace(/\.metered\.live\/?.*$/i, "")
+      .split("/")[0] || "qhubkz"
+  );
+}
+
 async function fetchMeteredIceServers(): Promise<RTCIceServer[] | null> {
-  const domain = process.env.MESSENGER_METERED_DOMAIN?.trim();
+  const domain = meteredAppDomain();
   const apiKey = process.env.MESSENGER_METERED_TURN_API_KEY?.trim();
   if (!domain || !apiKey) return null;
 
