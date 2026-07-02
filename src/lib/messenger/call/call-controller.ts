@@ -58,6 +58,7 @@ export class CallController {
   private sinceSeq = 0;
   private localStream: MediaStream | null = null;
   private lastSession: CallPollResponse["session"] | null = null;
+  private sdpSyncInFlight = false;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
@@ -395,13 +396,36 @@ export class CallController {
    * signal was individually observed in this poll. This makes the handshake
    * self-healing against dropped signals (rate limits, backgrounded tabs, etc.):
    * every poll tick converges toward the correct state.
+   *
+   * Guarded against: (a) overlapping invocations racing on the same tick cycle
+   * (sdpSyncInFlight), and (b) a thrown error leaving the call silently stuck
+   * forever — any failure here ends the call with a visible message instead of
+   * retrying the same broken SDP on every subsequent tick.
    */
   private async syncSdpFromSession(session: CallPollResponse["session"]): Promise<void> {
-    if (!this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.offerSdp) {
-      await this.applyRemoteOffer(session.offerSdp);
-    }
-    if (this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.answerSdp) {
-      await this.applyRemoteAnswer(session.answerSdp);
+    if (this.sdpSyncInFlight) return;
+    const shouldApplyOffer =
+      !this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.offerSdp;
+    const shouldApplyAnswer =
+      this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.answerSdp;
+    if (!shouldApplyOffer && !shouldApplyAnswer) return;
+
+    this.sdpSyncInFlight = true;
+    try {
+      if (shouldApplyOffer) {
+        await this.applyRemoteOffer(session.offerSdp!);
+      }
+      if (shouldApplyAnswer) {
+        await this.applyRemoteAnswer(session.answerSdp!);
+      }
+    } catch (err) {
+      console.error("[call] Failed to apply remote SDP:", err);
+      void this.cleanup(
+        "error",
+        "Не удалось установить соединение. Попробуйте Wi‑Fi или перезвоните.",
+      );
+    } finally {
+      this.sdpSyncInFlight = false;
     }
   }
 
@@ -448,23 +472,27 @@ export class CallController {
   }
 
   private async pollOnce(callId: string): Promise<void> {
-    const data = await pollCallSignals(callId, this.sinceSeq);
-    if (!data) return;
+    try {
+      const data = await pollCallSignals(callId, this.sinceSeq);
+      if (!data) return;
 
-    for (const signal of data.signals) {
-      this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
-      await this.handleSignal(signal.type, signal.from, signal.payload);
+      for (const signal of data.signals) {
+        this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
+        await this.handleSignal(signal.type, signal.from, signal.payload);
+      }
+
+      await this.pc?.flushPendingRemoteCandidates();
+      this.lastSession = data.session;
+
+      if (data.session.status === "ended" && this.state.phase !== "ended") {
+        this.syncFromSession(data.session);
+        return;
+      }
+
+      await this.syncSdpFromSession(data.session);
+    } catch (err) {
+      console.error("[call] poll tick failed:", err);
     }
-
-    await this.pc?.flushPendingRemoteCandidates();
-    this.lastSession = data.session;
-
-    if (data.session.status === "ended" && this.state.phase !== "ended") {
-      this.syncFromSession(data.session);
-      return;
-    }
-
-    await this.syncSdpFromSession(data.session);
   }
 
   private startPolling(callId: string): void {

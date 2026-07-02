@@ -2,7 +2,14 @@
 
 import type { ReactNode } from "react";
 import { CallStatusText } from "./CallStatusText";
-import { MicIcon, MicOffIcon, PhoneDownIcon, SpeakerIcon, SpeakerOffIcon } from "./CallControlIcons";
+import {
+  MicIcon,
+  MicOffIcon,
+  PhoneDownIcon,
+  PhoneIcon,
+  SpeakerIcon,
+  SpeakerOffIcon,
+} from "./CallControlIcons";
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -10,10 +17,9 @@ function formatDuration(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function peerInitial(title: string): string {
-  const trimmed = title.trim();
-  if (!trimmed) return "?";
-  return trimmed.charAt(0).toUpperCase();
+function peerInitial(title: string): string | null {
+  const letter = title.trim().match(/[\p{L}]/u)?.[0];
+  return letter ? letter.toUpperCase() : null;
 }
 
 interface Props {
@@ -98,7 +104,11 @@ export function ActiveCallScreen({
 
         <div className="flex flex-1 items-center justify-center px-6">
           <div className="flex h-40 w-40 items-center justify-center rounded-full bg-[#1f2c34] ring-1 ring-white/10 shadow-2xl">
-            <span className="text-6xl font-light text-[#00a884]">{peerInitial(peerTitle)}</span>
+            {peerInitial(peerTitle) ? (
+              <span className="text-6xl font-light text-[#00a884]">{peerInitial(peerTitle)}</span>
+            ) : (
+              <PhoneIcon className="h-16 w-16 text-[#00a884]" />
+            )}
           </div>
         </div>
       </div>
