@@ -14,13 +14,24 @@ async function fetchWithRetry(url: string, init?: RequestInit): Promise<Response
   return platformFetch(url, init);
 }
 
-export async function fetchIceServers(): Promise<RTCIceServer[]> {
+export async function fetchIceServers(): Promise<{
+  iceServers: RTCIceServer[];
+  turnSource: "metered" | "static" | "fallback" | null;
+}> {
   const res = await platformFetch("/api/messenger/call/ice-config");
   if (!res.ok) {
-    return [{ urls: "stun:stun.l.google.com:19302" }];
+    return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }], turnSource: null };
   }
-  const data = (await res.json()) as { iceServers: RTCIceServer[] };
-  return data.iceServers?.length ? data.iceServers : [{ urls: "stun:stun.l.google.com:19302" }];
+  const data = (await res.json()) as {
+    iceServers: RTCIceServer[];
+    turnSource?: "metered" | "static" | "fallback";
+  };
+  return {
+    iceServers: data.iceServers?.length
+      ? data.iceServers
+      : [{ urls: "stun:stun.l.google.com:19302" }],
+    turnSource: data.turnSource ?? null,
+  };
 }
 
 export async function initiateCall(params: {

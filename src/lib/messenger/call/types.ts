@@ -21,6 +21,20 @@ export type CallEndReason =
   | "remote_end"
   | null;
 
+export interface CallDebugInfo {
+  isCaller: boolean;
+  turnSource: "metered" | "static" | "fallback" | null;
+  iceConnectionState: string | null;
+  connectionState: string | null;
+  hasRemoteDescription: boolean;
+  hasLocalOffer: boolean;
+  hasLocalAnswer: boolean;
+  hasSessionOffer: boolean;
+  hasSessionAnswer: boolean;
+  lastError: string | null;
+  pollCount: number;
+}
+
 export interface CallState {
   phase: CallPhase;
   callId: string | null;
@@ -31,6 +45,7 @@ export interface CallState {
   durationSec: number;
   errorMessage: string | null;
   endReason: CallEndReason;
+  debug: CallDebugInfo;
 }
 
 export interface CallPollResponse {

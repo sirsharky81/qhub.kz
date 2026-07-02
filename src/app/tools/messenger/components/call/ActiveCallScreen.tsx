@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { CallDebugInfo } from "@/lib/messenger/call/types";
 import { CallStatusText } from "./CallStatusText";
 import {
   MicIcon,
@@ -29,9 +30,39 @@ interface Props {
   muted: boolean;
   speakerOn: boolean;
   errorMessage?: string | null;
+  debug?: CallDebugInfo;
   onToggleMute: () => void;
   onToggleSpeaker: () => void;
   onHangup: () => void;
+}
+
+function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
+  if (phase !== "outgoing" && phase !== "connecting") return null;
+  const row = (label: string, value: string | boolean) => (
+    <div className="flex justify-between gap-3">
+      <span className="text-white/50">{label}</span>
+      <span className={value === false ? "text-red-400" : "text-emerald-400"}>
+        {typeof value === "boolean" ? (value ? "да" : "нет") : value}
+      </span>
+    </div>
+  );
+  return (
+    <div className="mx-4 mt-3 rounded-lg bg-black/60 p-3 font-mono text-[11px] leading-tight text-white/80 backdrop-blur">
+      {row("роль", debug.isCaller ? "звонящий" : "принимающий")}
+      {row("turn", debug.turnSource ?? "—")}
+      {row("ICE", debug.iceConnectionState ?? "—")}
+      {row("conn", debug.connectionState ?? "—")}
+      {row("remoteDesc", debug.hasRemoteDescription)}
+      {row("localOffer", debug.hasLocalOffer)}
+      {row("localAnswer", debug.hasLocalAnswer)}
+      {row("session.offer", debug.hasSessionOffer)}
+      {row("session.answer", debug.hasSessionAnswer)}
+      {row("опросов", String(debug.pollCount))}
+      {debug.lastError && (
+        <div className="mt-1 break-words text-red-400">err: {debug.lastError}</div>
+      )}
+    </div>
+  );
 }
 
 function ControlButton({
@@ -72,6 +103,7 @@ export function ActiveCallScreen({
   muted,
   speakerOn,
   errorMessage,
+  debug,
   onToggleMute,
   onToggleSpeaker,
   onHangup,
@@ -111,6 +143,8 @@ export function ActiveCallScreen({
             )}
           </div>
         </div>
+
+        {debug && <DebugPanel phase={phase} debug={debug} />}
       </div>
 
       <div

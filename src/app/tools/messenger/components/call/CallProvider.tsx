@@ -154,6 +154,7 @@ export function CallProvider({
           muted={state.muted}
           speakerOn={state.speakerOn}
           errorMessage={state.errorMessage}
+          debug={state.debug}
           onToggleMute={toggleMute}
           onToggleSpeaker={toggleSpeaker}
           onHangup={hangup}

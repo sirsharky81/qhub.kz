@@ -24,10 +24,29 @@ import {
   pollCallSignals,
   sendCallSignal,
 } from "./signaling-client";
-import type { CallEndReason, CallPhase, CallState } from "./types";
+import type { CallDebugInfo, CallEndReason, CallPhase, CallState } from "./types";
 import type { CallPollResponse } from "./types";
 
 type Listener = (state: CallState) => void;
+
+function describeError(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  return String(err);
+}
+
+const INITIAL_DEBUG: CallDebugInfo = {
+  isCaller: false,
+  turnSource: null,
+  iceConnectionState: null,
+  connectionState: null,
+  hasRemoteDescription: false,
+  hasLocalOffer: false,
+  hasLocalAnswer: false,
+  hasSessionOffer: false,
+  hasSessionAnswer: false,
+  lastError: null,
+  pollCount: 0,
+};
 
 const INITIAL_STATE: CallState = {
   phase: "idle",
@@ -39,6 +58,7 @@ const INITIAL_STATE: CallState = {
   durationSec: 0,
   errorMessage: null,
   endReason: null,
+  debug: { ...INITIAL_DEBUG },
 };
 
 export class CallController {
@@ -102,6 +122,7 @@ export class CallController {
       this.sinceSeq = 0;
       this.lastSession = data.session;
       this.patch({
+        debug: { ...INITIAL_DEBUG },
         phase: "incoming",
         callId: data.session.callId,
         channel: this.channel,
@@ -150,6 +171,7 @@ export class CallController {
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
     this.patch({
+      debug: { ...INITIAL_DEBUG, isCaller: true },
       phase: "outgoing",
       callId: result.callId,
       channel: this.channel,
@@ -163,6 +185,7 @@ export class CallController {
       await this.setupPeerConnection();
       const offerSdp = await this.pc!.createOffer();
       this.localOfferSdp = offerSdp;
+      this.patchDebug({ hasLocalOffer: true });
       await this.sendSignalReliable({
         callId: result.callId,
         type: "offer",
@@ -173,7 +196,8 @@ export class CallController {
       this.startRingTimeout();
       this.startSetupWatchdog();
       void this.pollNow();
-    } catch {
+    } catch (err) {
+      this.patchDebug({ lastError: describeError(err) });
       await this.cleanup("error", "Не удалось получить доступ к микрофону");
     }
   }
@@ -197,7 +221,8 @@ export class CallController {
         // via syncSdpFromSession as soon as it's visible on the session.
         void this.pollNow();
       }
-    } catch {
+    } catch (err) {
+      this.patchDebug({ lastError: describeError(err) });
       if (this.state.callId) {
         await sendCallSignal({ callId: this.state.callId, type: "reject" });
       }
@@ -220,7 +245,11 @@ export class CallController {
     }
     const callId = this.state.callId;
     await this.flushLocalIce();
-    await this.sendSignalReliable({ callId, type: "end" });
+    // endCallReliable (POST /call/end) already appends the "end" signal AND
+    // sets endReason to the specific reason ("hangup"). Sending a separate
+    // "end" signal first used to hardcode endReason to the generic "end",
+    // so the remote peer lost the friendly "Собеседник завершил звонок"
+    // message — endCallReliable alone covers both.
     await this.endCallReliable(callId, "hangup");
     await this.cleanup("hangup");
   }
@@ -247,6 +276,7 @@ export class CallController {
     this.sinceSeq = 0;
     this.lastSession = null;
     this.patch({
+      debug: { ...INITIAL_DEBUG },
       phase: "incoming",
       callId,
       channel: this.channel,
@@ -264,6 +294,10 @@ export class CallController {
     this.destroyed = true;
     void this.cleanup(null);
     this.stopIncomingWatch();
+  }
+
+  private patchDebug(partial: Partial<CallDebugInfo>): void {
+    this.patch({ debug: { ...this.state.debug, ...partial } });
   }
 
   private patch(partial: Partial<CallState>): void {
@@ -312,7 +346,8 @@ export class CallController {
   }
 
   private async setupPeerConnection(): Promise<void> {
-    const iceServers = await fetchIceServers();
+    const { iceServers, turnSource } = await fetchIceServers();
+    this.patchDebug({ turnSource, isCaller: this.isCaller });
     this.pc = new CallPeerConnection();
     await this.pc.init(iceServers);
     if (this.localStream) {
@@ -329,6 +364,7 @@ export class CallController {
         this.queueLocalIce(candidate);
       },
       onConnectionState: (connState) => {
+        this.patchDebug({ connectionState: connState });
         this.handlePeerConnected(connState === "connected");
         if (connState === "failed") {
           void this.cleanup(
@@ -338,6 +374,7 @@ export class CallController {
         }
       },
       onIceConnectionState: (iceState) => {
+        this.patchDebug({ iceConnectionState: iceState });
         if (iceState === "failed") {
           void this.cleanup(
             "error",
@@ -371,6 +408,7 @@ export class CallController {
     this.clearRingTimeout();
     getCallSounds().stop();
     await this.pc.applyAnswer(payload);
+    this.patchDebug({ hasRemoteDescription: true });
     await this.flushPendingRemoteIce();
     this.patch({ phase: "connecting" });
     this.startIceTimeout();
@@ -384,6 +422,7 @@ export class CallController {
     }
     const answerSdp = await this.pc!.createAnswer(offerPayload);
     this.localAnswerSdp = answerSdp;
+    this.patchDebug({ hasRemoteDescription: true, hasLocalAnswer: true });
     if (this.state.callId) {
       await this.sendSignalReliable({
         callId: this.state.callId,
@@ -461,6 +500,7 @@ export class CallController {
       }
     } catch (err) {
       console.error("[call] Failed to apply remote SDP:", err);
+      this.patchDebug({ lastError: describeError(err) });
       void this.cleanup(
         "error",
         "Не удалось установить соединение. Попробуйте Wi‑Fi или перезвоните.",
@@ -524,6 +564,11 @@ export class CallController {
 
       await this.pc?.flushPendingRemoteCandidates();
       this.lastSession = data.session;
+      this.patchDebug({
+        pollCount: this.state.debug.pollCount + 1,
+        hasSessionOffer: Boolean(data.session.offerSdp),
+        hasSessionAnswer: Boolean(data.session.answerSdp),
+      });
 
       if (data.session.status === "ended" && this.state.phase !== "ended") {
         this.syncFromSession(data.session);
@@ -533,6 +578,7 @@ export class CallController {
       await this.syncSdpFromSession(data.session);
     } catch (err) {
       console.error("[call] poll tick failed:", err);
+      this.patchDebug({ lastError: describeError(err) });
     }
   }
 
