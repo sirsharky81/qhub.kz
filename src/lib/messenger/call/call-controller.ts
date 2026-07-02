@@ -13,6 +13,7 @@ import {
   DEFAULT_CALL_RING_TIMEOUT_SEC,
 } from "../constants";
 import { normalizeKzPhone } from "../phone";
+import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
 import { CallPeerConnection, type IceCandidatePayload } from "./peer-connection";
 import {
@@ -302,6 +303,7 @@ export class CallController {
   }
 
   setSpeaker(speakerOn: boolean): void {
+    prepareAudioSessionForCall();
     this.pc?.setSpeakerphone(speakerOn);
     this.patch({ speakerOn });
     void this.pc?.playRemoteAudio();
@@ -679,7 +681,16 @@ export class CallController {
     this.patch({ phase: "active" });
     this.startDurationTimer();
     getCallSounds().stop();
+    prepareAudioSessionForCall();
     void this.pc?.playRemoteAudio();
+    if (isIOSDevice()) {
+      for (const delay of [300, 800, 1500]) {
+        setTimeout(() => {
+          prepareAudioSessionForCall();
+          void this.pc?.playRemoteAudio();
+        }, delay);
+      }
+    }
   }
 
   private async bufferRemoteIce(payload: string): Promise<void> {
