@@ -3,11 +3,16 @@
 interface Props {
   phase: string;
   errorMessage?: string | null;
+  variant?: "light" | "dark";
 }
 
-export function CallStatusText({ phase, errorMessage }: Props) {
+export function CallStatusText({ phase, errorMessage, variant = "light" }: Props) {
   if (errorMessage) {
-    return <span className="text-sm text-red-600">{errorMessage}</span>;
+    return (
+      <span className={`text-sm ${variant === "dark" ? "text-red-300" : "text-red-600"}`}>
+        {errorMessage}
+      </span>
+    );
   }
 
   const labels: Record<string, string> = {
@@ -19,7 +24,7 @@ export function CallStatusText({ phase, errorMessage }: Props) {
   };
 
   return (
-    <span className="text-sm text-gray-600">
+    <span className={`text-sm ${variant === "dark" ? "text-gray-300" : "text-gray-600"}`}>
       {labels[phase] ?? ""}
     </span>
   );

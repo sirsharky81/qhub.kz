@@ -27,13 +27,18 @@ export class CallPeerConnection {
   private onIceCandidate: ((candidate: IceCandidatePayload) => void) | null = null;
   private onConnectionState: ((state: RTCPeerConnectionState) => void) | null = null;
   private onIceConnectionState: ((state: RTCIceConnectionState) => void) | null = null;
+  private onRemoteTrack: (() => void) | null = null;
   private iceBatch: IceCandidatePayload[] = [];
   private iceBatchTimer: ReturnType<typeof setTimeout> | null = null;
   private remoteDescriptionSet = false;
   private pendingRemoteCandidates: RTCIceCandidateInit[] = [];
 
   async init(iceServers: RTCIceServer[]): Promise<void> {
-    this.pc = new RTCPeerConnection({ iceServers });
+    this.pc = new RTCPeerConnection({
+      iceServers,
+      iceCandidatePoolSize: 10,
+      bundlePolicy: "max-bundle",
+    });
     this.pc.onicecandidate = (ev) => {
       if (!ev.candidate || !this.onIceCandidate) return;
       const payload: IceCandidatePayload = {
@@ -60,6 +65,15 @@ export class CallPeerConnection {
         this.onIceConnectionState(this.pc.iceConnectionState);
       }
     };
+    this.pc.onicegatheringstatechange = () => {
+      if (this.pc?.iceGatheringState === "complete") {
+        this.flushIceBatch();
+      }
+    };
+  }
+
+  hasRemoteDescription(): boolean {
+    return this.remoteDescriptionSet;
   }
 
   private attachRemoteStream(stream: MediaStream): void {
@@ -74,6 +88,7 @@ export class CallPeerConnection {
     }
     this.remoteAudio.srcObject = stream;
     void this.playRemoteAudio();
+    this.onRemoteTrack?.();
   }
 
   async playRemoteAudio(): Promise<void> {
@@ -100,10 +115,12 @@ export class CallPeerConnection {
     onIceCandidate?: (candidate: IceCandidatePayload) => void;
     onConnectionState?: (state: RTCPeerConnectionState) => void;
     onIceConnectionState?: (state: RTCIceConnectionState) => void;
+    onRemoteTrack?: () => void;
   }): void {
     this.onIceCandidate = handlers.onIceCandidate ?? null;
     this.onConnectionState = handlers.onConnectionState ?? null;
     this.onIceConnectionState = handlers.onIceConnectionState ?? null;
+    this.onRemoteTrack = handlers.onRemoteTrack ?? null;
   }
 
   async attachLocalAudio(stream: MediaStream): Promise<void> {

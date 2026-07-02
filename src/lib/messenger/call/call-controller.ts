@@ -53,6 +53,7 @@ export class CallController {
   private pendingOffer: string | null = null;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
+  private pollCallId: string | null = null;
 
   configure(params: { myPhone: string; peerPhone: string; channel: string }): void {
     this.myPhone = params.myPhone;
@@ -150,6 +151,7 @@ export class CallController {
       this.startPolling(result.callId);
       this.startHeartbeat(result.callId);
       this.startRingTimeout();
+      void this.pollNow();
     } catch {
       await this.cleanup("error", "Не удалось получить доступ к микрофону");
     }
@@ -167,16 +169,11 @@ export class CallController {
       if (this.pendingOffer) {
         const offer = this.pendingOffer;
         this.pendingOffer = null;
-        const answerSdp = await this.pc!.createAnswer(offer);
-        await sendCallSignal({
-          callId: this.state.callId,
-          type: "answer",
-          payload: answerSdp,
-        });
-        await this.flushPendingRemoteIce();
+        await this.applyRemoteOffer(offer);
+      } else {
+        this.startIceTimeout();
+        void this.pollNow();
       }
-      this.startIceTimeout();
-      void this.pc?.playRemoteAudio();
     } catch {
       if (this.state.callId) {
         await sendCallSignal({ callId: this.state.callId, type: "reject" });
@@ -274,7 +271,31 @@ export class CallController {
       onIceConnectionState: (iceState) => {
         this.handlePeerConnected(iceState === "connected" || iceState === "completed");
       },
+      onRemoteTrack: () => {
+        void this.pc?.playRemoteAudio();
+        this.handlePeerConnected(true);
+      },
     });
+  }
+
+  private async applyRemoteOffer(offerPayload: string): Promise<void> {
+    if (!this.pc) {
+      await this.ensureLocalAudio();
+      await this.setupPeerConnection();
+    }
+    const answerSdp = await this.pc!.createAnswer(offerPayload);
+    if (this.state.callId) {
+      await sendCallSignal({
+        callId: this.state.callId,
+        type: "answer",
+        payload: answerSdp,
+      });
+    }
+    await this.flushPendingRemoteIce();
+    this.patch({ phase: "connecting" });
+    this.startIceTimeout();
+    void this.pc?.playRemoteAudio();
+    void this.pollNow();
   }
 
   private handlePeerConnected(connected: boolean): void {
@@ -306,6 +327,7 @@ export class CallController {
 
   private startPolling(callId: string): void {
     this.stopPolling();
+    this.pollCallId = callId;
     const tick = async () => {
       const data = await pollCallSignals(callId, this.sinceSeq);
       if (!data) return;
@@ -330,6 +352,29 @@ export class CallController {
     this.pollTimer = setInterval(() => void tick(), CALL_POLL_INTERVAL_MS);
   }
 
+  private async pollNow(): Promise<void> {
+    const callId = this.pollCallId ?? this.state.callId;
+    if (!callId) return;
+
+    const data = await pollCallSignals(callId, this.sinceSeq);
+    if (!data) return;
+
+    for (const signal of data.signals) {
+      this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
+      await this.handleSignal(signal.type, signal.from, signal.payload);
+    }
+
+    if (data.session.status === "ended" && this.state.phase !== "ended") {
+      const reason: CallEndReason =
+        data.session.endReason === "reject"
+          ? "reject"
+          : data.session.endReason === "busy"
+            ? "busy"
+            : "remote_end";
+      void this.cleanup(reason);
+    }
+  }
+
   private async handleSignal(
     type: string,
     from: string,
@@ -342,29 +387,19 @@ export class CallController {
         this.pendingOffer = payload;
         return;
       }
+      if (
+        this.state.phase === "connecting" &&
+        this.pc &&
+        !this.pc.hasRemoteDescription()
+      ) {
+        await this.applyRemoteOffer(payload);
+        return;
+      }
       if (this.state.phase === "connecting" || this.state.phase === "active") {
         return;
       }
-      if (!this.pc) {
-        try {
-          await this.ensureLocalAudio();
-          await this.setupPeerConnection();
-        } catch {
-          await this.rejectIncoming();
-          return;
-        }
-      }
-      const answerSdp = await this.pc!.createAnswer(payload);
-      if (this.state.callId) {
-        await sendCallSignal({
-          callId: this.state.callId,
-          type: "answer",
-          payload: answerSdp,
-        });
-      }
-      await this.flushPendingRemoteIce();
-      this.patch({ phase: "connecting" });
-      this.startIceTimeout();
+      await this.applyRemoteOffer(payload);
+      return;
     }
 
     if (type === "answer" && payload && this.isCaller) {
@@ -372,6 +407,7 @@ export class CallController {
       await this.flushPendingRemoteIce();
       this.patch({ phase: "connecting" });
       this.startIceTimeout();
+      void this.pc?.playRemoteAudio();
     }
 
     if (type === "ice" && payload) {
@@ -437,6 +473,7 @@ export class CallController {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    this.pollCallId = null;
   }
 
   private stopHeartbeat(): void {

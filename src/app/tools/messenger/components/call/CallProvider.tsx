@@ -12,7 +12,7 @@ import {
 } from "react";
 import { getCallController } from "@/lib/messenger/call/call-controller";
 import type { CallState } from "@/lib/messenger/call/types";
-import { ActiveCallBar } from "./ActiveCallBar";
+import { ActiveCallScreen } from "./ActiveCallScreen";
 import { IncomingCallOverlay } from "./IncomingCallOverlay";
 
 interface CallContextValue {
@@ -124,7 +124,7 @@ export function CallProvider({
   );
 
   const showIncoming = state.phase === "incoming";
-  const showBar =
+  const showCallScreen =
     state.phase === "outgoing" ||
     state.phase === "connecting" ||
     state.phase === "active" ||
@@ -140,8 +140,8 @@ export function CallProvider({
           onDecline={rejectCall}
         />
       )}
-      {showBar && (
-        <ActiveCallBar
+      {showCallScreen && (
+        <ActiveCallScreen
           peerTitle={peerTitle}
           phase={state.phase}
           durationSec={state.durationSec}

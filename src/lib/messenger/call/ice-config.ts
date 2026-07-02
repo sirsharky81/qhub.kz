@@ -1,6 +1,10 @@
 import type { RTCIceServer } from "./types";
 
-const DEFAULT_STUN: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const DEFAULT_STUN: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun2.l.google.com:19302" },
+];
 
 function parseTurnUrlsEnv(): RTCIceServer[] {
   const raw = process.env.MESSENGER_TURN_URLS?.trim();
