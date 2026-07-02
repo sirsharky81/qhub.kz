@@ -1,10 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  TURNSTILE_SITE_KEY,
-  isTurnstileRequiredForUi,
-} from "@/lib/captcha/turnstile-client";
 
 declare global {
   interface Window {
@@ -61,13 +57,24 @@ function loadTurnstileScript(): Promise<void> {
 }
 
 interface Props {
+  siteKey: string;
+  enabled: boolean;
+  loading?: boolean;
   onToken: (token: string) => void;
   onExpire?: () => void;
   onError?: () => void;
   resetKey?: number;
 }
 
-export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Props) {
+export function TurnstileWidget({
+  siteKey,
+  enabled,
+  loading = false,
+  onToken,
+  onExpire,
+  onError,
+  resetKey = 0,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const onTokenRef = useRef(onToken);
@@ -85,11 +92,8 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
     onErrorRef.current = onError;
   }, [onError]);
 
-  const siteKey = TURNSTILE_SITE_KEY;
-  const required = isTurnstileRequiredForUi();
-
   useEffect(() => {
-    if (!siteKey || !required) return;
+    if (!siteKey || !enabled || loading) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -136,9 +140,25 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey, required, resetKey]);
+  }, [siteKey, enabled, loading, resetKey]);
 
-  if (!siteKey || !required) return null;
+  if (loading) {
+    return (
+      <div className="w-full min-h-[65px] flex items-center justify-center text-xs text-gray-400">
+        Загрузка проверки…
+      </div>
+    );
+  }
+
+  if (!enabled) return null;
+
+  if (!siteKey) {
+    return (
+      <p className="text-xs text-amber-700 text-center bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+        Проверка CAPTCHA временно недоступна. Попробуйте позже или откройте сайт в браузере.
+      </p>
+    );
+  }
 
   return (
     <div className="w-full space-y-2">
@@ -154,8 +174,4 @@ export function TurnstileWidget({ onToken, onExpire, onError, resetKey = 0 }: Pr
       )}
     </div>
   );
-}
-
-export function turnstileRequiredOnClient(): boolean {
-  return isTurnstileRequiredForUi();
 }

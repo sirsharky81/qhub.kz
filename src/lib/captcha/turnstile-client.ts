@@ -10,13 +10,12 @@ export function isTurnstileConfiguredOnClient(): boolean {
 
 /** True when Turnstile is enabled for this deployment (web + native remote shell). */
 export function isTurnstileRequired(): boolean {
-  if (isTurnstileConfiguredOnClient()) return true;
-  return process.env.NODE_ENV === "production";
+  return isTurnstileConfiguredOnClient();
 }
 
 /** True when the login UI should show Turnstile and require a token before submit. */
 export function isTurnstileRequiredForUi(): boolean {
-  return isTurnstileRequired();
+  return isTurnstileConfiguredOnClient();
 }
 
 export const CAPTCHA_REQUIRED_MSG = "Подтвердите, что вы не робот";

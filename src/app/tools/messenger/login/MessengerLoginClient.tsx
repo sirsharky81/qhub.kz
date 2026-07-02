@@ -18,8 +18,9 @@ import {
 } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { isStandalone } from "@/lib/pwa-utils";
-import { TurnstileWidget, turnstileRequiredOnClient } from "@/components/TurnstileWidget";
+import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { CAPTCHA_REQUIRED_MSG } from "@/lib/captcha/turnstile-client";
+import { useTurnstileConfig } from "@/lib/captcha/useTurnstileConfig";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
 type Step = "phone" | "login" | "setPin";
@@ -53,7 +54,8 @@ export function MessengerLoginClient() {
   const [loginCaptchaToken, setLoginCaptchaToken] = useState<string | null>(null);
   const [phoneCaptchaReset, setPhoneCaptchaReset] = useState(0);
   const [loginCaptchaReset, setLoginCaptchaReset] = useState(0);
-  const captchaRequired = turnstileRequiredOnClient();
+  const turnstile = useTurnstileConfig();
+  const captchaRequired = turnstile.enabled;
   const phoneInputRef = useRef<HTMLInputElement>(null);
 
   function scrollPhoneInputIntoView() {
@@ -220,6 +222,9 @@ export function MessengerLoginClient() {
                   enterKeyHint="done"
                 />
                 <TurnstileWidget
+                  siteKey={turnstile.siteKey}
+                  enabled={captchaRequired}
+                  loading={turnstile.loading}
                   resetKey={phoneCaptchaReset}
                   onToken={setPhoneCaptchaToken}
                   onExpire={() => setPhoneCaptchaToken(null)}
@@ -228,7 +233,10 @@ export function MessengerLoginClient() {
                 <button
                   type="submit"
                   disabled={
-                    loading || !phoneInput.trim() || (captchaRequired && !phoneCaptchaToken)
+                    loading ||
+                    turnstile.loading ||
+                    !phoneInput.trim() ||
+                    (captchaRequired && !phoneCaptchaToken)
                   }
                   className="w-full rounded-2xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
                 >
@@ -285,6 +293,9 @@ export function MessengerLoginClient() {
               <h2 className="text-center text-sm font-semibold">Введите PIN</h2>
               <PinInput value={pin} onChange={setPin} autoFocus />
               <TurnstileWidget
+                siteKey={turnstile.siteKey}
+                enabled={captchaRequired}
+                loading={turnstile.loading}
                 resetKey={loginCaptchaReset}
                 onToken={setLoginCaptchaToken}
                 onExpire={() => setLoginCaptchaToken(null)}
@@ -293,7 +304,10 @@ export function MessengerLoginClient() {
               <button
                 type="button"
                 disabled={
-                  loading || pin.length < PIN_LENGTH || (captchaRequired && !loginCaptchaToken)
+                  loading ||
+                  turnstile.loading ||
+                  pin.length < PIN_LENGTH ||
+                  (captchaRequired && !loginCaptchaToken)
                 }
                 onClick={() => void handleLogin()}
                 className="w-full rounded-2xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"

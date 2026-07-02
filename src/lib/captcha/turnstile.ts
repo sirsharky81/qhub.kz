@@ -1,3 +1,5 @@
+import { getTurnstilePublicConfig } from "./turnstile-config";
+
 const VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 export const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() ?? "";
@@ -6,12 +8,11 @@ const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY?.trim() ?? "";
 export const CAPTCHA_REQUIRED_MSG = "Подтвердите, что вы не робот";
 
 export function isTurnstileConfigured(): boolean {
-  return Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+  return getTurnstilePublicConfig().enabled;
 }
 
 export function isTurnstileRequired(): boolean {
-  if (isTurnstileConfigured()) return true;
-  return process.env.NODE_ENV === "production";
+  return isTurnstileConfigured();
 }
 
 export async function verifyTurnstileToken(
