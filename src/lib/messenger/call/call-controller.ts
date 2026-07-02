@@ -4,6 +4,7 @@ import {
 } from "@/lib/audio-session";
 import { ensureMediaPermissions } from "@/lib/platform/media-access";
 import {
+  CALL_CONNECT_POLL_INTERVAL_MS,
   CALL_HEARTBEAT_INTERVAL_MS,
   CALL_POLL_INTERVAL_MS,
   DEFAULT_CALL_ICE_TIMEOUT_SEC,
@@ -29,6 +30,7 @@ const INITIAL_STATE: CallState = {
   channel: null,
   peerPhone: null,
   muted: false,
+  speakerOn: true,
   durationSec: 0,
   errorMessage: null,
   endReason: null,
@@ -143,7 +145,7 @@ export class CallController {
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
       const offerSdp = await this.pc!.createOffer();
-      await sendCallSignal({
+      await this.sendSignalReliable({
         callId: result.callId,
         type: "offer",
         payload: offerSdp,
@@ -202,6 +204,12 @@ export class CallController {
     this.patch({ muted });
   }
 
+  setSpeaker(speakerOn: boolean): void {
+    this.pc?.setSpeakerphone(speakerOn);
+    this.patch({ speakerOn });
+    void this.pc?.playRemoteAudio();
+  }
+
   async handleDeepLink(callId: string): Promise<void> {
     if (this.isInCall()) return;
     this.isCaller = false;
@@ -226,8 +234,43 @@ export class CallController {
   }
 
   private patch(partial: Partial<CallState>): void {
+    const prevPhase = this.state.phase;
     this.state = { ...this.state, ...partial };
     for (const l of this.listeners) l(this.state);
+
+    const phase = this.state.phase;
+    if (
+      prevPhase !== phase &&
+      this.pollCallId &&
+      (phase === "connecting" || phase === "outgoing" || phase === "incoming")
+    ) {
+      this.restartPollingInterval();
+    }
+  }
+
+  private restartPollingInterval(): void {
+    if (!this.pollTimer || !this.pollCallId) return;
+    clearInterval(this.pollTimer);
+    const callId = this.pollCallId;
+    const tick = async () => {
+      const data = await pollCallSignals(callId, this.sinceSeq);
+      if (!data) return;
+      for (const signal of data.signals) {
+        this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
+        await this.handleSignal(signal.type, signal.from, signal.payload);
+      }
+      await this.pc?.flushPendingRemoteCandidates();
+      if (data.session.status === "ended" && this.state.phase !== "ended") {
+        const reason: CallEndReason =
+          data.session.endReason === "reject"
+            ? "reject"
+            : data.session.endReason === "busy"
+              ? "busy"
+              : "remote_end";
+        void this.cleanup(reason);
+      }
+    };
+    this.pollTimer = setInterval(() => void tick(), this.pollIntervalMs());
   }
 
   private async ensureLocalAudio(): Promise<void> {
@@ -250,6 +293,7 @@ export class CallController {
     if (this.localStream) {
       await this.pc.attachLocalAudio(this.localStream);
     }
+    this.pc.setSpeakerphone(this.state.speakerOn);
     this.pc.setHandlers({
       onIceCandidate: (candidate) => {
         if (!this.state.callId) return;
@@ -269,6 +313,13 @@ export class CallController {
         }
       },
       onIceConnectionState: (iceState) => {
+        if (iceState === "failed") {
+          void this.cleanup(
+            "error",
+            "Не удалось установить соединение. Попробуйте Wi‑Fi или перезвоните.",
+          );
+          return;
+        }
         this.handlePeerConnected(iceState === "connected" || iceState === "completed");
       },
       onRemoteTrack: () => {
@@ -278,6 +329,17 @@ export class CallController {
     });
   }
 
+  private async sendSignalReliable(params: {
+    callId: string;
+    type: "offer" | "answer" | "ice" | "reject" | "end" | "busy";
+    payload?: string;
+  }): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (await sendCallSignal(params)) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+
   private async applyRemoteOffer(offerPayload: string): Promise<void> {
     if (!this.pc) {
       await this.ensureLocalAudio();
@@ -285,13 +347,14 @@ export class CallController {
     }
     const answerSdp = await this.pc!.createAnswer(offerPayload);
     if (this.state.callId) {
-      await sendCallSignal({
+      await this.sendSignalReliable({
         callId: this.state.callId,
         type: "answer",
         payload: answerSdp,
       });
     }
     await this.flushPendingRemoteIce();
+    await this.pc?.flushPendingRemoteCandidates();
     this.patch({ phase: "connecting" });
     this.startIceTimeout();
     void this.pc?.playRemoteAudio();
@@ -315,14 +378,27 @@ export class CallController {
   }
 
   private async flushPendingRemoteIce(): Promise<void> {
-    if (!this.pc || this.pendingRemoteIce.length === 0) return;
+    if (!this.pc || this.pendingRemoteIce.length === 0) {
+      await this.pc?.flushPendingRemoteCandidates();
+      return;
+    }
     const pending = [...this.pendingRemoteIce];
     this.pendingRemoteIce = [];
     for (const payload of pending) {
       await this.pc.addIceCandidate(payload);
     }
-    // Re-queue any that peer-connection could not apply yet.
-    // addIceCandidate queues internally when remote description is missing.
+    await this.pc.flushPendingRemoteCandidates();
+  }
+
+  private pollIntervalMs(): number {
+    if (
+      this.state.phase === "outgoing" ||
+      this.state.phase === "connecting" ||
+      this.state.phase === "incoming"
+    ) {
+      return CALL_CONNECT_POLL_INTERVAL_MS;
+    }
+    return CALL_POLL_INTERVAL_MS;
   }
 
   private startPolling(callId: string): void {
@@ -337,6 +413,8 @@ export class CallController {
         await this.handleSignal(signal.type, signal.from, signal.payload);
       }
 
+      await this.pc?.flushPendingRemoteCandidates();
+
       if (data.session.status === "ended" && this.state.phase !== "ended") {
         const reason: CallEndReason =
           data.session.endReason === "reject"
@@ -349,7 +427,7 @@ export class CallController {
     };
 
     void tick();
-    this.pollTimer = setInterval(() => void tick(), CALL_POLL_INTERVAL_MS);
+    this.pollTimer = setInterval(() => void tick(), this.pollIntervalMs());
   }
 
   private async pollNow(): Promise<void> {
@@ -363,6 +441,8 @@ export class CallController {
       this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
       await this.handleSignal(signal.type, signal.from, signal.payload);
     }
+
+    await this.pc?.flushPendingRemoteCandidates();
 
     if (data.session.status === "ended" && this.state.phase !== "ended") {
       const reason: CallEndReason =
@@ -408,6 +488,7 @@ export class CallController {
       this.patch({ phase: "connecting" });
       this.startIceTimeout();
       void this.pc?.playRemoteAudio();
+      void this.pollNow();
     }
 
     if (type === "ice" && payload) {

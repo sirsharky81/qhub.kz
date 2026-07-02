@@ -20,16 +20,22 @@ function parseIcePayload(payload: string): RTCIceCandidateInit | null {
   }
 }
 
+function isIosWebKit(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
 export class CallPeerConnection {
   private pc: RTCPeerConnection | null = null;
+  private audioTransceiver: RTCRtpTransceiver | null = null;
   private localStream: MediaStream | null = null;
-  private remoteAudio: HTMLAudioElement | null = null;
+  private remoteStream: MediaStream | null = null;
+  private remoteMedia: HTMLMediaElement | null = null;
+  private speakerOn = true;
   private onIceCandidate: ((candidate: IceCandidatePayload) => void) | null = null;
   private onConnectionState: ((state: RTCPeerConnectionState) => void) | null = null;
   private onIceConnectionState: ((state: RTCIceConnectionState) => void) | null = null;
   private onRemoteTrack: (() => void) | null = null;
-  private iceBatch: IceCandidatePayload[] = [];
-  private iceBatchTimer: ReturnType<typeof setTimeout> | null = null;
   private remoteDescriptionSet = false;
   private pendingRemoteCandidates: RTCIceCandidateInit[] = [];
 
@@ -38,18 +44,18 @@ export class CallPeerConnection {
       iceServers,
       iceCandidatePoolSize: 10,
       bundlePolicy: "max-bundle",
+      rtcpMuxPolicy: "require",
     });
+    this.audioTransceiver = this.pc.addTransceiver("audio", { direction: "sendrecv" });
+
     this.pc.onicecandidate = (ev) => {
-      if (!ev.candidate || !this.onIceCandidate) return;
-      const payload: IceCandidatePayload = {
+      if (!this.onIceCandidate) return;
+      if (!ev.candidate) return;
+      this.onIceCandidate({
         candidate: ev.candidate.candidate,
         sdpMid: ev.candidate.sdpMid,
         sdpMLineIndex: ev.candidate.sdpMLineIndex,
-      };
-      this.iceBatch.push(payload);
-      if (!this.iceBatchTimer) {
-        this.iceBatchTimer = setTimeout(() => this.flushIceBatch(), 50);
-      }
+      });
     };
     this.pc.ontrack = (ev) => {
       const stream = ev.streams[0] ?? new MediaStream([ev.track]);
@@ -65,11 +71,6 @@ export class CallPeerConnection {
         this.onIceConnectionState(this.pc.iceConnectionState);
       }
     };
-    this.pc.onicegatheringstatechange = () => {
-      if (this.pc?.iceGatheringState === "complete") {
-        this.flushIceBatch();
-      }
-    };
   }
 
   hasRemoteDescription(): boolean {
@@ -77,37 +78,52 @@ export class CallPeerConnection {
   }
 
   private attachRemoteStream(stream: MediaStream): void {
-    if (!this.remoteAudio) {
-      const audio = document.createElement("audio");
-      audio.autoplay = true;
-      audio.setAttribute("playsinline", "true");
-      audio.setAttribute("webkit-playsinline", "true");
-      audio.style.display = "none";
-      document.body.appendChild(audio);
-      this.remoteAudio = audio;
-    }
-    this.remoteAudio.srcObject = stream;
-    void this.playRemoteAudio();
+    this.remoteStream = stream;
+    this.mountRemoteMedia();
     this.onRemoteTrack?.();
   }
 
+  private destroyRemoteMedia(): void {
+    if (!this.remoteMedia) return;
+    this.remoteMedia.pause();
+    this.remoteMedia.srcObject = null;
+    this.remoteMedia.remove();
+    this.remoteMedia = null;
+  }
+
+  private mountRemoteMedia(): void {
+    if (!this.remoteStream) return;
+    this.destroyRemoteMedia();
+
+    const useVideo = isIosWebKit() ? this.speakerOn : false;
+    const el = document.createElement(useVideo ? "video" : "audio");
+    el.autoplay = true;
+    el.setAttribute("playsinline", "true");
+    el.setAttribute("webkit-playsinline", "true");
+    el.muted = false;
+    el.volume = 1;
+    el.style.display = "none";
+    document.body.appendChild(el);
+    el.srcObject = this.remoteStream;
+    this.remoteMedia = el;
+    void this.playRemoteAudio();
+  }
+
   async playRemoteAudio(): Promise<void> {
-    if (!this.remoteAudio?.srcObject) return;
+    if (!this.remoteMedia?.srcObject) return;
     try {
-      this.remoteAudio.muted = false;
-      this.remoteAudio.volume = 1;
-      await this.remoteAudio.play();
+      this.remoteMedia.muted = false;
+      this.remoteMedia.volume = 1;
+      await this.remoteMedia.play();
     } catch {
-      // Autoplay policy — caller may need a tap; retried when call becomes active.
+      // Retried when call becomes active or user toggles speaker.
     }
   }
 
-  private flushIceBatch(): void {
-    this.iceBatchTimer = null;
-    if (!this.onIceCandidate || this.iceBatch.length === 0) return;
-    const batch = this.iceBatch.splice(0);
-    for (const c of batch) {
-      this.onIceCandidate(c);
+  setSpeakerphone(enabled: boolean): void {
+    this.speakerOn = enabled;
+    if (this.remoteStream) {
+      this.mountRemoteMedia();
     }
   }
 
@@ -125,15 +141,20 @@ export class CallPeerConnection {
 
   async attachLocalAudio(stream: MediaStream): Promise<void> {
     this.localStream = stream;
-    if (!this.pc) return;
-    for (const track of stream.getAudioTracks()) {
-      this.pc.addTrack(track, stream);
+    const track = stream.getAudioTracks()[0];
+    if (!this.pc || !track) return;
+
+    if (this.audioTransceiver?.sender) {
+      await this.audioTransceiver.sender.replaceTrack(track);
+      return;
     }
+
+    this.pc.addTrack(track, stream);
   }
 
   async createOffer(): Promise<string> {
     if (!this.pc) throw new Error("no_pc");
-    const offer = await this.pc.createOffer({ offerToReceiveAudio: true });
+    const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     return JSON.stringify(this.pc.localDescription);
   }
@@ -173,7 +194,7 @@ export class CallPeerConnection {
     }
   }
 
-  private async flushPendingRemoteCandidates(): Promise<void> {
+  async flushPendingRemoteCandidates(): Promise<void> {
     if (!this.pc || !this.remoteDescriptionSet) return;
 
     const remaining: RTCIceCandidateInit[] = [];
@@ -194,23 +215,15 @@ export class CallPeerConnection {
   }
 
   close(): void {
-    if (this.iceBatchTimer) {
-      clearTimeout(this.iceBatchTimer);
-      this.iceBatchTimer = null;
-    }
-    this.iceBatch = [];
     this.pendingRemoteCandidates = [];
     this.remoteDescriptionSet = false;
-    if (this.remoteAudio) {
-      this.remoteAudio.pause();
-      this.remoteAudio.srcObject = null;
-      this.remoteAudio.remove();
-      this.remoteAudio = null;
-    }
+    this.destroyRemoteMedia();
+    this.remoteStream = null;
     for (const track of this.localStream?.getTracks() ?? []) {
       track.stop();
     }
     this.localStream = null;
+    this.audioTransceiver = null;
     if (this.pc) {
       this.pc.close();
       this.pc = null;

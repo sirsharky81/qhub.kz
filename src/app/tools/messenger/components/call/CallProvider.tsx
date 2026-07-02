@@ -22,6 +22,7 @@ interface CallContextValue {
   rejectCall: () => void;
   hangup: () => void;
   toggleMute: () => void;
+  toggleSpeaker: () => void;
   isInCall: boolean;
 }
 
@@ -110,6 +111,10 @@ export function CallProvider({
     controllerRef.current.setMuted(!state.muted);
   }, [state.muted]);
 
+  const toggleSpeaker = useCallback(() => {
+    controllerRef.current.setSpeaker(!state.speakerOn);
+  }, [state.speakerOn]);
+
   const value = useMemo<CallContextValue>(
     () => ({
       state,
@@ -118,9 +123,10 @@ export function CallProvider({
       rejectCall,
       hangup,
       toggleMute,
+      toggleSpeaker,
       isInCall: state.phase !== "idle" && state.phase !== "ended",
     }),
-    [state, startCall, acceptCall, rejectCall, hangup, toggleMute],
+    [state, startCall, acceptCall, rejectCall, hangup, toggleMute, toggleSpeaker],
   );
 
   const showIncoming = state.phase === "incoming";
@@ -146,8 +152,10 @@ export function CallProvider({
           phase={state.phase}
           durationSec={state.durationSec}
           muted={state.muted}
+          speakerOn={state.speakerOn}
           errorMessage={state.errorMessage}
           onToggleMute={toggleMute}
+          onToggleSpeaker={toggleSpeaker}
           onHangup={hangup}
         />
       )}

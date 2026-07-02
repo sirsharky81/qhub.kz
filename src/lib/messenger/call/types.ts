@@ -27,6 +27,7 @@ export interface CallState {
   channel: string | null;
   peerPhone: string | null;
   muted: boolean;
+  speakerOn: boolean;
   durationSec: number;
   errorMessage: string | null;
   endReason: CallEndReason;
