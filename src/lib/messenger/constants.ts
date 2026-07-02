@@ -45,6 +45,7 @@ export const MESSENGER_NATIVE_PUSH_TOKEN_KEY = "qhub_messenger_native_push_token
 
 export const REDIS_CALL_PREFIX = "qhub:messenger:call:";
 export const REDIS_CALL_DM_ACTIVE_PREFIX = "qhub:messenger:call:dm:";
+export const REDIS_CALL_INCOMING_PREFIX = "qhub:messenger:call:incoming:";
 export const DEFAULT_CALL_TTL_SEC = 120;
 export const DEFAULT_CALL_RING_TIMEOUT_SEC = 45;
 export const DEFAULT_CALL_ICE_TIMEOUT_SEC = 45;

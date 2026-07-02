@@ -195,7 +195,9 @@ export class CallController {
 
   async rejectIncoming(): Promise<void> {
     if (!this.state.callId) return;
-    await sendCallSignal({ callId: this.state.callId, type: "reject" });
+    const callId = this.state.callId;
+    await this.sendSignalReliable({ callId, type: "reject" });
+    await this.endCallReliable(callId, "reject");
     await this.cleanup("reject");
   }
 
@@ -204,7 +206,10 @@ export class CallController {
       this.reset();
       return;
     }
-    await this.endCallReliable(this.state.callId, "hangup");
+    const callId = this.state.callId;
+    await this.flushLocalIce();
+    await this.sendSignalReliable({ callId, type: "end" });
+    await this.endCallReliable(callId, "hangup");
     await this.cleanup("hangup");
   }
 
@@ -529,6 +534,7 @@ export class CallController {
     if (raw === "timeout" || raw === "ice_failed") return "Нет ответа";
     if (raw === "reject") return "Звонок отклонён";
     if (raw === "busy") return "Собеседник занят";
+    if (raw === "hangup") return "Собеседник завершил звонок";
     return null;
   }
 
@@ -586,7 +592,8 @@ export class CallController {
       return;
     }
 
-    if (type === "answer" && payload && this.isCaller) {
+    if (type === "answer" && payload && (this.isCaller || this.state.phase === "outgoing")) {
+      this.isCaller = true;
       this.clearRingTimeout();
       getCallSounds().stop();
       await this.pc?.applyAnswer(payload);
@@ -608,7 +615,7 @@ export class CallController {
     }
 
     if (type === "end") {
-      void this.cleanup("remote_end");
+      void this.cleanup("remote_end", "Собеседник завершил звонок");
     }
   }
 

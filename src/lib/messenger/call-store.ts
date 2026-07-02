@@ -3,6 +3,7 @@ import {
   DEFAULT_CALL_TTL_SEC,
   MAX_CALL_SIGNALS,
   REDIS_CALL_DM_ACTIVE_PREFIX,
+  REDIS_CALL_INCOMING_PREFIX,
   REDIS_CALL_PREFIX,
 } from "./constants";
 import {
@@ -27,6 +28,14 @@ function callKey(callId: string): string {
 
 function signalsKey(callId: string): string {
   return `${REDIS_CALL_PREFIX}${callId}:signals`;
+}
+
+function incomingKey(calleePhone: string): string {
+  return `${REDIS_CALL_INCOMING_PREFIX}${calleePhone}`;
+}
+
+async function clearIncomingForCallee(calleePhone: string): Promise<void> {
+  await redisDel(incomingKey(calleePhone));
 }
 
 function dmActiveKey(channel: string): string {
@@ -84,7 +93,31 @@ export async function createCallSession(params: {
   const ttl = callTtlSec();
   await redisSet(callKey(callId), JSON.stringify(session), ttl);
   await redisSet(dmActiveKey(params.channel), callId, ttl);
+  await redisSet(
+    incomingKey(params.callee),
+    JSON.stringify({ callId, channel: params.channel, caller: params.caller }),
+    ttl,
+  );
   return session;
+}
+
+export async function getIncomingCallForUser(
+  phone: string,
+): Promise<{ callId: string; channel: string; caller: string } | null> {
+  const raw = await redisGet(incomingKey(phone));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { callId: string; channel: string; caller: string };
+    const session = await getCallSession(parsed.callId);
+    if (!session || session.status === "ended" || session.status !== "ringing") {
+      await clearIncomingForCallee(phone);
+      return null;
+    }
+    return parsed;
+  } catch {
+    await clearIncomingForCallee(phone);
+    return null;
+  }
 }
 
 export class CallStoreError extends Error {
@@ -110,6 +143,7 @@ export async function updateCallStatus(
     session.endedAt = Date.now();
     session.endReason = endReason;
     await redisDel(dmActiveKey(session.channel));
+    await clearIncomingForCallee(session.callee);
   }
 
   const ttl = callTtlSec();
@@ -152,13 +186,16 @@ export async function appendCallSignal(params: {
     session.endedAt = Date.now();
     session.endReason = params.type;
     await redisDel(dmActiveKey(session.channel));
+    await clearIncomingForCallee(session.callee);
   } else if (params.type === "end") {
     session.status = "ended";
     session.endedAt = Date.now();
     session.endReason = "end";
     await redisDel(dmActiveKey(session.channel));
+    await clearIncomingForCallee(session.callee);
   } else if (params.type === "answer") {
     session.status = "connecting";
+    await clearIncomingForCallee(session.callee);
   } else if (params.type === "offer" && session.status === "ringing") {
     // offer stays ringing until answer
   }
@@ -215,5 +252,6 @@ export async function endCallSession(
   const ttl = callTtlSec();
   result.session.endReason = reason;
   await redisSet(callKey(callId), JSON.stringify(result.session), ttl);
+  await clearIncomingForCallee(result.session.callee);
   return result.session;
 }

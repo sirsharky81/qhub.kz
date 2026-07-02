@@ -19,6 +19,18 @@ function parseTurnUrlsEnv(): RTCIceServer[] {
   }
 }
 
+const FALLBACK_TURN: RTCIceServer[] = [
+  {
+    urls: [
+      "turn:openrelay.metered.ca:80",
+      "turn:openrelay.metered.ca:443",
+      "turn:openrelay.metered.ca:443?transport=tcp",
+    ],
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  },
+];
+
 /** Server-side ICE config for authenticated clients (keeps TURN creds off the bundle). */
 export function getServerIceServers(): RTCIceServer[] {
   const turn = parseTurnUrlsEnv();
@@ -32,5 +44,5 @@ export function getServerIceServers(): RTCIceServer[] {
     ];
   }
 
-  return [...DEFAULT_STUN];
+  return [...DEFAULT_STUN, ...FALLBACK_TURN];
 }

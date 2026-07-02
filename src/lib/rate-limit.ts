@@ -15,7 +15,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:lotto": { requests: 120, window: "1 m" },
   "qhub:messenger": { requests: 60, window: "1 m" },
   "qhub:messenger-call-signal": { requests: 400, window: "1 m" },
-  "qhub:messenger-call-poll": { requests: 180, window: "1 m" },
+  "qhub:messenger-call-poll": { requests: 900, window: "1 m" },
   "qhub:messenger-identify-phone": { requests: 10, window: "15 m" },
   "qhub:family": { requests: 120, window: "1 m" },
 };

@@ -73,6 +73,22 @@ export async function heartbeatCall(callId: string): Promise<void> {
   });
 }
 
+export async function pollIncomingCall(): Promise<{
+  incoming: boolean;
+  callId?: string;
+  channel?: string;
+  callerPhone?: string;
+} | null> {
+  const res = await platformFetch("/api/messenger/call/incoming");
+  if (!res.ok) return null;
+  return res.json() as Promise<{
+    incoming: boolean;
+    callId?: string;
+    channel?: string;
+    callerPhone?: string;
+  }>;
+}
+
 export async function endCallApi(callId: string, reason?: string): Promise<boolean> {
   const res = await platformFetch("/api/messenger/call/end", {
     method: "POST",
