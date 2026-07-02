@@ -51,6 +51,7 @@ export class CallController {
   private sinceSeq = 0;
   private localStream: MediaStream | null = null;
   private pendingOffer: string | null = null;
+  private pendingRemoteIce: string[] = [];
   private destroyed = false;
 
   configure(params: { myPhone: string; peerPhone: string; channel: string }): void {
@@ -172,8 +173,10 @@ export class CallController {
           type: "answer",
           payload: answerSdp,
         });
+        await this.flushPendingRemoteIce();
       }
       this.startIceTimeout();
+      void this.pc?.playRemoteAudio();
     } catch {
       if (this.state.callId) {
         await sendCallSignal({ callId: this.state.callId, type: "reject" });
@@ -260,19 +263,45 @@ export class CallController {
         });
       },
       onConnectionState: (connState) => {
-        if (connState === "connected") {
-          this.clearIceTimeout();
-          this.clearRingTimeout();
-          this.patch({ phase: "active" });
-          this.startDurationTimer();
-        } else if (connState === "failed" || connState === "disconnected") {
+        this.handlePeerConnected(connState === "connected");
+        if (connState === "failed") {
           void this.cleanup(
             "error",
             "Не удалось установить соединение. Попробуйте Wi‑Fi или перезвоните.",
           );
         }
       },
+      onIceConnectionState: (iceState) => {
+        this.handlePeerConnected(iceState === "connected" || iceState === "completed");
+      },
     });
+  }
+
+  private handlePeerConnected(connected: boolean): void {
+    if (!connected || this.state.phase === "active") return;
+    this.clearIceTimeout();
+    this.clearRingTimeout();
+    this.patch({ phase: "active" });
+    this.startDurationTimer();
+    void this.pc?.playRemoteAudio();
+  }
+
+  private async bufferRemoteIce(payload: string): Promise<void> {
+    if (!this.pendingRemoteIce.includes(payload)) {
+      this.pendingRemoteIce.push(payload);
+    }
+    await this.flushPendingRemoteIce();
+  }
+
+  private async flushPendingRemoteIce(): Promise<void> {
+    if (!this.pc || this.pendingRemoteIce.length === 0) return;
+    const pending = [...this.pendingRemoteIce];
+    this.pendingRemoteIce = [];
+    for (const payload of pending) {
+      await this.pc.addIceCandidate(payload);
+    }
+    // Re-queue any that peer-connection could not apply yet.
+    // addIceCandidate queues internally when remote description is missing.
   }
 
   private startPolling(callId: string): void {
@@ -313,6 +342,9 @@ export class CallController {
         this.pendingOffer = payload;
         return;
       }
+      if (this.state.phase === "connecting" || this.state.phase === "active") {
+        return;
+      }
       if (!this.pc) {
         try {
           await this.ensureLocalAudio();
@@ -330,18 +362,20 @@ export class CallController {
           payload: answerSdp,
         });
       }
+      await this.flushPendingRemoteIce();
       this.patch({ phase: "connecting" });
       this.startIceTimeout();
     }
 
     if (type === "answer" && payload && this.isCaller) {
       await this.pc?.applyAnswer(payload);
+      await this.flushPendingRemoteIce();
       this.patch({ phase: "connecting" });
       this.startIceTimeout();
     }
 
     if (type === "ice" && payload) {
-      await this.pc?.addIceCandidate(payload);
+      await this.bufferRemoteIce(payload);
     }
 
     if (type === "reject" || type === "busy") {
@@ -443,6 +477,9 @@ export class CallController {
     this.clearIceTimeout();
     this.stopDurationTimer();
 
+    this.pendingOffer = null;
+    this.pendingRemoteIce = [];
+
     this.pc?.close();
     this.pc = null;
 
@@ -472,6 +509,7 @@ export class CallController {
     this.sinceSeq = 0;
     this.isCaller = false;
     this.pendingOffer = null;
+    this.pendingRemoteIce = [];
     this.state = { ...INITIAL_STATE };
     for (const l of this.listeners) l(this.state);
     if (!this.destroyed) {
