@@ -80,15 +80,30 @@ export async function sendCallSignal(params: {
   type: CallSignalType;
   payload?: string;
 }): Promise<boolean> {
+  const result = await sendCallSignalDetailed(params);
+  return result.ok;
+}
+
+/** Same as sendCallSignal but surfaces the real HTTP status (or a sentinel
+ * for network/timeout failures) so the call debug overlay can show exactly
+ * what's happening to offer/answer delivery instead of just "не доходит". */
+export async function sendCallSignalDetailed(params: {
+  callId: string;
+  type: CallSignalType;
+  payload?: string;
+}): Promise<{ ok: boolean; status: number; session?: CallPollResponse["session"] }> {
   try {
     const res = await fetchWithTimeout("/api/messenger/call/signal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
     });
-    return res.ok;
-  } catch {
-    return false;
+    if (!res.ok) return { ok: false, status: res.status };
+    const data = (await res.json()) as { session?: CallPollResponse["session"] };
+    return { ok: true, status: res.status, session: data.session };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "AbortError";
+    return { ok: false, status: timedOut ? -2 : -1 };
   }
 }
 

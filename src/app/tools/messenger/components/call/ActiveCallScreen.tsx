@@ -59,6 +59,17 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
       {row("session.offer", debug.hasSessionOffer)}
       {row("session.answer", debug.hasSessionAnswer)}
       {row("опросов", String(debug.pollCount))}
+      {row("попыток отправки SDP", String(debug.sdpSendAttempts))}
+      {row(
+        "статус отправки",
+        debug.lastSdpSendStatus === null
+          ? "—"
+          : debug.lastSdpSendStatus === -1
+            ? "сеть недоступна"
+            : debug.lastSdpSendStatus === -2
+              ? "таймаут (8с)"
+              : String(debug.lastSdpSendStatus),
+      )}
       {debug.lastError && (
         <div className="mt-1 break-words text-red-400">err: {debug.lastError}</div>
       )}

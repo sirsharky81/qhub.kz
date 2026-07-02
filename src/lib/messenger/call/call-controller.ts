@@ -23,6 +23,7 @@ import {
   pollActiveCall,
   pollCallSignals,
   sendCallSignal,
+  sendCallSignalDetailed,
 } from "./signaling-client";
 import type { CallDebugInfo, CallEndReason, CallPhase, CallState } from "./types";
 import type { CallPollResponse } from "./types";
@@ -66,6 +67,8 @@ const INITIAL_DEBUG: CallDebugInfo = {
   lastError: null,
   pollCount: 0,
   elapsedSec: 0,
+  sdpSendAttempts: 0,
+  lastSdpSendStatus: null,
 };
 
 const INITIAL_STATE: CallState = {
@@ -102,6 +105,9 @@ export class CallController {
   private localOfferSdp: string | null = null;
   private localAnswerSdp: string | null = null;
   private lastSdpResendAt = 0;
+  private resendInFlight = false;
+  private sdpKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private elapsedTimer: ReturnType<typeof setInterval> | null = null;
   private callStartedAt = 0;
   private pollInFlight = false;
   private pollStartedAt = 0;
@@ -158,6 +164,8 @@ export class CallController {
       this.startHeartbeat(data.session.callId);
       this.startRingTimeout();
       this.startSetupWatchdog();
+      this.startElapsedTimer();
+      this.startSdpKeepalive();
     };
 
     void tick();
@@ -205,24 +213,24 @@ export class CallController {
       errorMessage: null,
     });
 
+    // Start signaling immediately — don't wait for getUserMedia / ICE config.
+    // On mobile, mic permission + TURN fetch can take many seconds; the callee
+    // must be able to poll the session and receive the offer as soon as it's
+    // ready. Previously polling started only after WebRTC setup, so the whole
+    // handshake was frozen until metered.ca + getUserMedia finished.
+    this.startPolling(result.callId);
+    this.startHeartbeat(result.callId);
+    this.startRingTimeout();
+    this.startSetupWatchdog();
+    this.startElapsedTimer();
+    this.startSdpKeepalive();
+
     try {
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
       const offerSdp = await this.pc!.createOffer();
       this.localOfferSdp = offerSdp;
       this.patchDebug({ hasLocalOffer: true });
-
-      // Start polling BEFORE sending the offer, not after. A stalled/hung
-      // fetch (common on iOS when the network briefly suspends in the
-      // background) would otherwise permanently block this whole function
-      // at the `await`, meaning startPolling() below would never even run —
-      // the call would silently freeze on "Звоним..." forever with no error.
-      // Polling running independently also means resendLocalSdpIfNeeded can
-      // recover the offer send even if this first attempt never completes.
-      this.startPolling(result.callId);
-      this.startHeartbeat(result.callId);
-      this.startRingTimeout();
-      this.startSetupWatchdog();
 
       void this.sendSignalReliable({
         callId: result.callId,
@@ -322,6 +330,8 @@ export class CallController {
     this.startHeartbeat(callId);
     this.startRingTimeout();
     this.startSetupWatchdog();
+    this.startElapsedTimer();
+    this.startSdpKeepalive();
   }
 
   destroy(): void {
@@ -434,14 +444,33 @@ export class CallController {
     type: "offer" | "answer" | "ice" | "reject" | "end" | "busy";
     payload?: string;
   }): Promise<void> {
+    const trackSdp = params.type === "offer" || params.type === "answer";
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (await sendCallSignal(params)) return;
+      if (trackSdp) {
+        const result = await sendCallSignalDetailed(params);
+        this.patchDebug({
+          sdpSendAttempts: this.state.debug.sdpSendAttempts + 1,
+          lastSdpSendStatus: result.status,
+        });
+        if (result.ok) {
+          if (result.session) {
+            this.lastSession = result.session;
+            this.patchDebug({
+              hasSessionOffer: Boolean(result.session.offerSdp),
+              hasSessionAnswer: Boolean(result.session.answerSdp),
+            });
+          }
+          return;
+        }
+      } else if (await sendCallSignal(params)) {
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
   }
 
   private async applyRemoteAnswer(payload: string): Promise<void> {
-    if (!this.pc) return;
+    if (!this.pc || this.pc.hasRemoteDescription()) return;
     this.isCaller = true;
     this.clearRingTimeout();
     getCallSounds().stop();
@@ -454,6 +483,7 @@ export class CallController {
   }
 
   private async applyRemoteOffer(offerPayload: string): Promise<void> {
+    if (this.pc?.hasRemoteDescription()) return;
     if (!this.pc) {
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
@@ -500,32 +530,48 @@ export class CallController {
    * on every poll tick, if the session still doesn't reflect our local
    * offer/answer, resend it (throttled to avoid hammering the endpoint).
    */
-  private async resendLocalSdpIfNeeded(session: CallPollResponse["session"]): Promise<void> {
+  private resendLocalSdpIfNeeded(session?: CallPollResponse["session"] | null): void {
+    const snapshot = session ?? this.lastSession;
+    // IMPORTANT: this must never be awaited by the poll loop. sendSignalReliable
+    // retries up to 3x with an 8s timeout each (~24s worst case) — if that were
+    // awaited inside pollOnce, a single failing send would hold pollInFlight
+    // true for up to 24s, freezing the entire poll cycle (session refresh,
+    // remote SDP/ICE pickup, everything) even though only the *resend* was
+    // stuck. That was the actual cause of "опросов" staying frozen at 1 while
+    // the call sat on Звоним/Соединение. Fire-and-forget here, with its own
+    // re-entrancy guard so slow attempts don't pile up.
+    if (this.resendInFlight) return;
     const now = Date.now();
     if (now - this.lastSdpResendAt < 1500) return;
 
-    if (this.isCaller && this.localOfferSdp && !session.offerSdp && this.state.callId) {
+    if (this.isCaller && this.localOfferSdp && !snapshot?.offerSdp && this.state.callId) {
       this.lastSdpResendAt = now;
-      await this.sendSignalReliable({
+      this.resendInFlight = true;
+      void this.sendSignalReliable({
         callId: this.state.callId,
         type: "offer",
         payload: this.localOfferSdp,
+      }).finally(() => {
+        this.resendInFlight = false;
       });
       return;
     }
 
-    if (!this.isCaller && this.localAnswerSdp && !session.answerSdp && this.state.callId) {
+    if (!this.isCaller && this.localAnswerSdp && !snapshot?.answerSdp && this.state.callId) {
       this.lastSdpResendAt = now;
-      await this.sendSignalReliable({
+      this.resendInFlight = true;
+      void this.sendSignalReliable({
         callId: this.state.callId,
         type: "answer",
         payload: this.localAnswerSdp,
+      }).finally(() => {
+        this.resendInFlight = false;
       });
     }
   }
 
-  private async syncSdpFromSession(session: CallPollResponse["session"]): Promise<void> {
-    await this.resendLocalSdpIfNeeded(session);
+  private syncSdpFromSession(session: CallPollResponse["session"]): void {
+    this.resendLocalSdpIfNeeded(session);
     if (this.sdpSyncInFlight) return;
     const shouldApplyOffer =
       !this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.offerSdp;
@@ -534,23 +580,25 @@ export class CallController {
     if (!shouldApplyOffer && !shouldApplyAnswer) return;
 
     this.sdpSyncInFlight = true;
-    try {
-      if (shouldApplyOffer) {
-        await this.applyRemoteOffer(session.offerSdp!);
+    void (async () => {
+      try {
+        if (shouldApplyOffer) {
+          await this.applyRemoteOffer(session.offerSdp!);
+        }
+        if (shouldApplyAnswer) {
+          await this.applyRemoteAnswer(session.answerSdp!);
+        }
+      } catch (err) {
+        console.error("[call] Failed to apply remote SDP:", err);
+        this.patchDebug({ lastError: describeError(err) });
+        void this.cleanup(
+          "error",
+          "Не удалось установить соединение. Попробуйте Wi‑Fi или перезвоните.",
+        );
+      } finally {
+        this.sdpSyncInFlight = false;
       }
-      if (shouldApplyAnswer) {
-        await this.applyRemoteAnswer(session.answerSdp!);
-      }
-    } catch (err) {
-      console.error("[call] Failed to apply remote SDP:", err);
-      this.patchDebug({ lastError: describeError(err) });
-      void this.cleanup(
-        "error",
-        "Не удалось установить соединение. Попробуйте Wi‑Fi или перезвоните.",
-      );
-    } finally {
-      this.sdpSyncInFlight = false;
-    }
+    })();
   }
 
   private handlePeerConnected(connected: boolean): void {
@@ -622,10 +670,10 @@ export class CallController {
 
       for (const signal of data.signals) {
         this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
-        await this.handleSignal(signal.type, signal.from, signal.payload);
+        void this.handleSignal(signal.type, signal.from, signal.payload);
       }
 
-      await this.pc?.flushPendingRemoteCandidates();
+      void this.pc?.flushPendingRemoteCandidates();
       this.lastSession = data.session;
       this.patchDebug({
         pollCount: this.state.debug.pollCount + 1,
@@ -639,12 +687,46 @@ export class CallController {
         return;
       }
 
-      await this.syncSdpFromSession(data.session);
+      this.syncSdpFromSession(data.session);
     } catch (err) {
       console.error("[call] poll tick failed:", err);
       this.patchDebug({ lastError: describeError(err) });
     } finally {
       this.pollInFlight = false;
+    }
+  }
+
+  private startElapsedTimer(): void {
+    this.stopElapsedTimer();
+    this.elapsedTimer = setInterval(() => {
+      if (this.callStartedAt <= 0) return;
+      this.patchDebug({
+        elapsedSec: Math.floor((Date.now() - this.callStartedAt) / 1000),
+      });
+    }, 1000);
+  }
+
+  private stopElapsedTimer(): void {
+    if (this.elapsedTimer) {
+      clearInterval(this.elapsedTimer);
+      this.elapsedTimer = null;
+    }
+  }
+
+  /** Retries offer/answer delivery on its own schedule, independent of the
+   * poll loop, so a slow/stuck poll tick can never block SDP from reaching
+   * the server. */
+  private startSdpKeepalive(): void {
+    this.stopSdpKeepalive();
+    this.sdpKeepaliveTimer = setInterval(() => {
+      this.resendLocalSdpIfNeeded(this.lastSession);
+    }, 1500);
+  }
+
+  private stopSdpKeepalive(): void {
+    if (this.sdpKeepaliveTimer) {
+      clearInterval(this.sdpKeepaliveTimer);
+      this.sdpKeepaliveTimer = null;
     }
   }
 
@@ -880,6 +962,8 @@ export class CallController {
   ): Promise<void> {
     this.stopPolling();
     this.stopHeartbeat();
+    this.stopElapsedTimer();
+    this.stopSdpKeepalive();
     this.clearRingTimeout();
     this.clearIceTimeout();
     this.clearSetupWatchdog();
@@ -895,6 +979,7 @@ export class CallController {
     this.lastSession = null;
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
+    this.resendInFlight = false;
     this.pendingRemoteIce = [];
 
     this.pc?.close();
