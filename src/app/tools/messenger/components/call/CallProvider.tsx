@@ -71,7 +71,7 @@ export function CallProvider({
   useEffect(() => {
     if (!deepLinkCallId || deepLinkHandled.current) return;
     deepLinkHandled.current = true;
-    void controllerRef.current.handleDeepLink(deepLinkCallId);
+    void controllerRef.current.handleDeepLink(deepLinkCallId, { channel, peerPhone });
   }, [deepLinkCallId]);
 
   useEffect(() => {

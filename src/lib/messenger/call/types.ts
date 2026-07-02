@@ -36,6 +36,8 @@ export interface CallDebugInfo {
   elapsedSec: number;
   sdpSendAttempts: number;
   lastSdpSendStatus: number | null;
+  lastPollStatus: number | null;
+  activeCallId: string | null;
 }
 
 export interface CallState {

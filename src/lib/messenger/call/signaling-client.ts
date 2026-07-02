@@ -110,15 +110,20 @@ export async function sendCallSignalDetailed(params: {
 export async function pollCallSignals(
   callId: string,
   sinceSeq: number,
-): Promise<CallPollResponse | null> {
+): Promise<{ data: CallPollResponse | null; status: number }> {
   try {
-    const res = await fetchWithRetry(
+    // Single attempt with a hard timeout — the poll loop retries every 150ms
+    // anyway. fetchWithRetry here could block pollInFlight for 20+ seconds on
+    // 429/timeouts, which is why callers saw "опросов: 2" over 45 seconds.
+    const res = await fetchWithTimeout(
       `/api/messenger/call/poll?callId=${encodeURIComponent(callId)}&since=${sinceSeq}`,
     );
-    if (!res.ok) return null;
-    return (await res.json()) as CallPollResponse;
-  } catch {
-    return null;
+    if (!res.ok) return { data: null, status: res.status };
+    const data = (await res.json()) as CallPollResponse;
+    return { data, status: res.status };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "AbortError";
+    return { data: null, status: timedOut ? -2 : -1 };
   }
 }
 

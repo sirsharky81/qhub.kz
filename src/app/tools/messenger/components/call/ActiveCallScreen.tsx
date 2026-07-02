@@ -59,6 +59,8 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
       {row("session.offer", debug.hasSessionOffer)}
       {row("session.answer", debug.hasSessionAnswer)}
       {row("опросов", String(debug.pollCount))}
+      {row("poll HTTP", debug.lastPollStatus === null ? "—" : String(debug.lastPollStatus))}
+      {row("callId", debug.activeCallId ? debug.activeCallId.slice(-8) : "—")}
       {row("попыток отправки SDP", String(debug.sdpSendAttempts))}
       {row(
         "статус отправки",

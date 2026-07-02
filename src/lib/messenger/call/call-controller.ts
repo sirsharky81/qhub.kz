@@ -69,6 +69,8 @@ const INITIAL_DEBUG: CallDebugInfo = {
   elapsedSec: 0,
   sdpSendAttempts: 0,
   lastSdpSendStatus: null,
+  lastPollStatus: null,
+  activeCallId: null,
 };
 
 const INITIAL_STATE: CallState = {
@@ -102,6 +104,7 @@ export class CallController {
   private localStream: MediaStream | null = null;
   private lastSession: CallPollResponse["session"] | null = null;
   private sdpSyncInFlight = false;
+  private sdpSyncStartedAt = 0;
   private localOfferSdp: string | null = null;
   private localAnswerSdp: string | null = null;
   private lastSdpResendAt = 0;
@@ -160,8 +163,8 @@ export class CallController {
         endReason: null,
         errorMessage: null,
       });
-      this.startPolling(data.session.callId);
-      this.startHeartbeat(data.session.callId);
+      this.applySessionSnapshot(data.session);
+      this.adoptCallId(data.session.callId);
       this.startRingTimeout();
       this.startSetupWatchdog();
       this.startElapsedTimer();
@@ -204,7 +207,7 @@ export class CallController {
     this.localAnswerSdp = null;
     this.callStartedAt = Date.now();
     this.patch({
-      debug: { ...INITIAL_DEBUG, isCaller: true },
+      debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: result.callId },
       phase: "outgoing",
       callId: result.callId,
       channel: this.channel,
@@ -214,12 +217,7 @@ export class CallController {
     });
 
     // Start signaling immediately — don't wait for getUserMedia / ICE config.
-    // On mobile, mic permission + TURN fetch can take many seconds; the callee
-    // must be able to poll the session and receive the offer as soon as it's
-    // ready. Previously polling started only after WebRTC setup, so the whole
-    // handshake was frozen until metered.ca + getUserMedia finished.
-    this.startPolling(result.callId);
-    this.startHeartbeat(result.callId);
+    this.adoptCallId(result.callId);
     this.startRingTimeout();
     this.startSetupWatchdog();
     this.startElapsedTimer();
@@ -251,6 +249,12 @@ export class CallController {
     this.patch({ phase: "connecting" });
 
     try {
+      // Always reconcile with the server's active call for this DM channel.
+      // Deep links and push notifications often carry a stale callId while a
+      // newer call (with the offer) is already active — callee would poll the
+      // wrong session forever and never see session.offer.
+      await this.refreshCallFromServer();
+
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
 
@@ -258,8 +262,6 @@ export class CallController {
       if (offerSdp) {
         await this.applyRemoteOffer(offerSdp);
       } else {
-        // Offer not observed locally yet — the next poll tick will pick it up
-        // via syncSdpFromSession as soon as it's visible on the session.
         void this.pollNow();
       }
     } catch (err) {
@@ -318,7 +320,7 @@ export class CallController {
     this.lastSession = null;
     this.callStartedAt = Date.now();
     this.patch({
-      debug: { ...INITIAL_DEBUG },
+      debug: { ...INITIAL_DEBUG, activeCallId: callId },
       phase: "incoming",
       callId,
       channel: this.channel,
@@ -326,12 +328,13 @@ export class CallController {
       endReason: null,
       errorMessage: null,
     });
-    this.startPolling(callId);
-    this.startHeartbeat(callId);
+    this.adoptCallId(callId);
     this.startRingTimeout();
     this.startSetupWatchdog();
     this.startElapsedTimer();
     this.startSdpKeepalive();
+
+    await this.refreshCallFromServer();
   }
 
   destroy(): void {
@@ -369,11 +372,55 @@ export class CallController {
   private restartPollingInterval(): void {
     if (!this.pollTimer || !this.pollCallId) return;
     clearInterval(this.pollTimer);
-    const callId = this.pollCallId;
-    this.pollTimer = setInterval(
-      () => void this.pollOnce(callId),
-      this.pollIntervalMs(),
-    );
+    this.pollTimer = setInterval(() => void this.pollOnce(), this.pollIntervalMs());
+  }
+
+  private applySessionSnapshot(session: CallPollResponse["session"]): void {
+    this.lastSession = session;
+    this.patchDebug({
+      activeCallId: session.callId,
+      hasSessionOffer: Boolean(session.offerSdp),
+      hasSessionAnswer: Boolean(session.answerSdp),
+    });
+  }
+
+  /** Switch poll/heartbeat to a different callId (resets signal cursor). */
+  private adoptCallId(callId: string): void {
+    if (this.pollCallId === callId && this.state.callId === callId) return;
+    this.sinceSeq = 0;
+    this.patch({ callId });
+    this.patchDebug({ activeCallId: callId });
+    this.startPolling(callId);
+    this.startHeartbeat(callId);
+  }
+
+  /**
+   * Reconcile local callId with the server's active call on this DM channel.
+   * Fixes callee polling a stale deep-link callId while the real offer lives
+   * on a newer session.
+   */
+  private async refreshCallFromServer(): Promise<CallPollResponse["session"] | null> {
+    if (this.channel) {
+      const active = await pollActiveCall(this.channel);
+      if (active.active && active.session) {
+        this.applySessionSnapshot(active.session);
+        if (active.session.callId !== this.state.callId) {
+          this.adoptCallId(active.session.callId);
+        }
+        return active.session;
+      }
+    }
+
+    const callId = this.state.callId ?? this.pollCallId;
+    if (!callId) return null;
+
+    const result = await pollCallSignals(callId, 0);
+    this.patchDebug({ lastPollStatus: result.status });
+    if (result.data?.session) {
+      this.applySessionSnapshot(result.data.session);
+      return result.data.session;
+    }
+    return null;
   }
 
   private async ensureLocalAudio(): Promise<void> {
@@ -572,7 +619,12 @@ export class CallController {
 
   private syncSdpFromSession(session: CallPollResponse["session"]): void {
     this.resendLocalSdpIfNeeded(session);
-    if (this.sdpSyncInFlight) return;
+    if (this.sdpSyncInFlight) {
+      const stuckMs = Date.now() - this.sdpSyncStartedAt;
+      if (stuckMs < 15000) return;
+      console.error(`[call] sdp sync stuck for ${stuckMs}ms — forcing reset`);
+      this.sdpSyncInFlight = false;
+    }
     const shouldApplyOffer =
       !this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.offerSdp;
     const shouldApplyAnswer =
@@ -580,6 +632,7 @@ export class CallController {
     if (!shouldApplyOffer && !shouldApplyAnswer) return;
 
     this.sdpSyncInFlight = true;
+    this.sdpSyncStartedAt = Date.now();
     void (async () => {
       try {
         if (shouldApplyOffer) {
@@ -643,7 +696,10 @@ export class CallController {
     return CALL_POLL_INTERVAL_MS;
   }
 
-  private async pollOnce(callId: string): Promise<void> {
+  private async pollOnce(): Promise<void> {
+    const callId = this.pollCallId ?? this.state.callId;
+    if (!callId) return;
+
     // Re-entrancy guard: on a slow mobile connection a single poll round-trip
     // can easily exceed the 150ms tick interval. Without this guard, the
     // setInterval keeps firing regardless and piles up more and more
@@ -665,8 +721,18 @@ export class CallController {
     this.pollInFlight = true;
     this.pollStartedAt = Date.now();
     try {
-      const data = await pollCallSignals(callId, this.sinceSeq);
-      if (!data) return;
+      const result = await pollCallSignals(callId, this.sinceSeq);
+      this.patchDebug({
+        lastPollStatus: result.status,
+        activeCallId: callId,
+      });
+      if (!result.data) {
+        if (result.status === 404 && this.channel) {
+          void this.refreshCallFromServer();
+        }
+        return;
+      }
+      const data = result.data;
 
       for (const signal of data.signals) {
         this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
@@ -733,14 +799,13 @@ export class CallController {
   private startPolling(callId: string): void {
     this.stopPolling();
     this.pollCallId = callId;
-    void this.pollOnce(callId);
-    this.pollTimer = setInterval(() => void this.pollOnce(callId), this.pollIntervalMs());
+    this.patchDebug({ activeCallId: callId });
+    void this.pollOnce();
+    this.pollTimer = setInterval(() => void this.pollOnce(), this.pollIntervalMs());
   }
 
   private async pollNow(): Promise<void> {
-    const callId = this.pollCallId ?? this.state.callId;
-    if (!callId) return;
-    await this.pollOnce(callId);
+    await this.pollOnce();
   }
 
   private isSelfSignal(from: string): boolean {
