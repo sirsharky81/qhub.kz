@@ -6,6 +6,7 @@ import {
   REDIS_CALL_INCOMING_PREFIX,
   REDIS_CALL_PREFIX,
 } from "./constants";
+import { normalizeKzPhone } from "./phone";
 import {
   redisDel,
   redisExpire,
@@ -79,11 +80,13 @@ export async function createCallSession(params: {
   }
 
   const callId = generateMessageId();
+  const caller = normalizeKzPhone(params.caller);
+  const callee = normalizeKzPhone(params.callee);
   const session: CallSession = {
     callId,
     channel: params.channel,
-    caller: params.caller,
-    callee: params.callee,
+    caller,
+    callee,
     status: "ringing",
     version: 1,
     signalSeq: 0,
@@ -94,8 +97,8 @@ export async function createCallSession(params: {
   await redisSet(callKey(callId), JSON.stringify(session), ttl);
   await redisSet(dmActiveKey(params.channel), callId, ttl);
   await redisSet(
-    incomingKey(params.callee),
-    JSON.stringify({ callId, channel: params.channel, caller: params.caller }),
+    incomingKey(callee),
+    JSON.stringify({ callId, channel: params.channel, caller }),
     ttl,
   );
   return session;

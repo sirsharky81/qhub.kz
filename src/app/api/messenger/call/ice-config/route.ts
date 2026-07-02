@@ -5,7 +5,8 @@ import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 export async function GET() {
   try {
     await assertMessengerSession();
-    return NextResponse.json({ iceServers: getServerIceServers() });
+    const iceServers = await getServerIceServers();
+    return NextResponse.json({ iceServers });
   } catch (err) {
     return jsonAuthError(err);
   }

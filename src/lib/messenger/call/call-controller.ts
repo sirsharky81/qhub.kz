@@ -5,6 +5,7 @@ import {
 import { ensureMediaPermissions } from "@/lib/platform/media-access";
 import {
   CALL_CONNECT_POLL_INTERVAL_MS,
+  CALL_DISCOVERY_POLL_INTERVAL_MS,
   CALL_HEARTBEAT_INTERVAL_MS,
   CALL_POLL_INTERVAL_MS,
   DEFAULT_CALL_ICE_TIMEOUT_SEC,
@@ -110,7 +111,7 @@ export class CallController {
     };
 
     void tick();
-    this.activePollTimer = setInterval(() => void tick(), CALL_CONNECT_POLL_INTERVAL_MS);
+    this.activePollTimer = setInterval(() => void tick(), CALL_DISCOVERY_POLL_INTERVAL_MS);
   }
 
   stopIncomingWatch(): void {
@@ -224,8 +225,13 @@ export class CallController {
     void this.pc?.playRemoteAudio();
   }
 
-  async handleDeepLink(callId: string): Promise<void> {
+  async handleDeepLink(
+    callId: string,
+    opts?: { channel?: string; peerPhone?: string },
+  ): Promise<void> {
     if (this.isInCall()) return;
+    if (opts?.channel) this.channel = opts.channel;
+    if (opts?.peerPhone) this.peerPhone = opts.peerPhone;
     this.isCaller = false;
     this.sinceSeq = 0;
     this.patch({

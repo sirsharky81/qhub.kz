@@ -2,6 +2,18 @@ import { platformFetch } from "@/lib/platform/api-client";
 import type { CallPollResponse, InitiateCallResponse } from "./types";
 import type { CallSignalType } from "../types";
 
+async function fetchWithRetry(url: string, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const res = await platformFetch(url, init);
+    if (res.status !== 429) return res;
+    const retryAfterSec = Number(res.headers.get("Retry-After") ?? "1");
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(Math.max(retryAfterSec, 1), 3) * 1000),
+    );
+  }
+  return platformFetch(url, init);
+}
+
 export async function fetchIceServers(): Promise<RTCIceServer[]> {
   const res = await platformFetch("/api/messenger/call/ice-config");
   if (!res.ok) {
@@ -40,7 +52,7 @@ export async function pollCallSignals(
   callId: string,
   sinceSeq: number,
 ): Promise<CallPollResponse | null> {
-  const res = await platformFetch(
+  const res = await fetchWithRetry(
     `/api/messenger/call/poll?callId=${encodeURIComponent(callId)}&since=${sinceSeq}`,
   );
   if (!res.ok) return null;
@@ -52,7 +64,7 @@ export async function pollActiveCall(channel: string): Promise<{
   incoming?: boolean;
   session?: CallPollResponse["session"];
 }> {
-  const res = await platformFetch("/api/messenger/call/poll", {
+  const res = await fetchWithRetry("/api/messenger/call/poll", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ channel }),
@@ -79,7 +91,7 @@ export async function pollIncomingCall(): Promise<{
   channel?: string;
   callerPhone?: string;
 } | null> {
-  const res = await platformFetch("/api/messenger/call/incoming");
+  const res = await fetchWithRetry("/api/messenger/call/incoming");
   if (!res.ok) return null;
   return res.json() as Promise<{
     incoming: boolean;
