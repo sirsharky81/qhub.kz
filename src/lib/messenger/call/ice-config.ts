@@ -64,9 +64,18 @@ function meteredAppDomain(): string {
   );
 }
 
+function meteredApiKey(): string | undefined {
+  return (
+    process.env.MESSENGER_METERED_TURN_API_KEY?.trim() ||
+    process.env.MESSENGER_METERED_API_KEY?.trim() ||
+    process.env.MESSENGER_TURN_API_KEY?.trim() ||
+    undefined
+  );
+}
+
 async function fetchMeteredIceServers(): Promise<RTCIceServer[] | null> {
   const domain = meteredAppDomain();
-  const apiKey = process.env.MESSENGER_METERED_TURN_API_KEY?.trim();
+  const apiKey = meteredApiKey();
   if (!domain || !apiKey) return null;
 
   const now = Date.now();
@@ -101,16 +110,19 @@ async function fetchMeteredIceServers(): Promise<RTCIceServer[] | null> {
 }
 
 /** Server-side ICE config (TURN creds stay off the client bundle). */
-export async function getServerIceServers(): Promise<RTCIceServer[]> {
+export async function getServerIceServers(): Promise<{
+  iceServers: RTCIceServer[];
+  turnSource: "metered" | "static" | "fallback";
+}> {
   const metered = await fetchMeteredIceServers();
   if (metered?.length) {
-    return metered;
+    return { iceServers: metered, turnSource: "metered" };
   }
 
   const staticTurn = staticTurnServers();
   if (staticTurn.length > 0) {
-    return [...DEFAULT_STUN, ...staticTurn];
+    return { iceServers: [...DEFAULT_STUN, ...staticTurn], turnSource: "static" };
   }
 
-  return [...DEFAULT_STUN, ...FALLBACK_TURN];
+  return { iceServers: [...DEFAULT_STUN, ...FALLBACK_TURN], turnSource: "fallback" };
 }

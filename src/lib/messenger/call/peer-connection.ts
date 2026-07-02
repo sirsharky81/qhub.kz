@@ -50,7 +50,10 @@ export class CallPeerConnection {
 
     this.pc.onicecandidate = (ev) => {
       if (!this.onIceCandidate) return;
-      if (!ev.candidate) return;
+      if (!ev.candidate) {
+        this.onIceCandidate({});
+        return;
+      }
       this.onIceCandidate({
         candidate: ev.candidate.candidate,
         sdpMid: ev.candidate.sdpMid,

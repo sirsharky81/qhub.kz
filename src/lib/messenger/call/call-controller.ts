@@ -58,6 +58,7 @@ export class CallController {
   private sinceSeq = 0;
   private localStream: MediaStream | null = null;
   private pendingOffer: string | null = null;
+  private pendingAnswer: string | null = null;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
@@ -174,10 +175,17 @@ export class CallController {
 
     this.clearRingTimeout();
     this.patch({ phase: "connecting" });
+    const callId = this.state.callId;
 
     try {
+      if (!this.pendingOffer) {
+        await this.recoverMissedOffer(callId);
+      }
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
+      if (!this.pendingOffer) {
+        await this.recoverMissedOffer(callId);
+      }
       if (this.pendingOffer) {
         const offer = this.pendingOffer;
         this.pendingOffer = null;
@@ -290,6 +298,8 @@ export class CallController {
       await this.pc?.flushPendingRemoteCandidates();
       if (data.session.status === "ended" && this.state.phase !== "ended") {
         this.syncFromSession(data.session);
+      } else {
+        await this.reconcileSessionFromPoll(data.session, callId);
       }
     };
     this.pollTimer = setInterval(() => void tick(), this.pollIntervalMs());
@@ -319,6 +329,10 @@ export class CallController {
     this.pc.setHandlers({
       onIceCandidate: (candidate) => {
         if (!this.state.callId) return;
+        if (!candidate.candidate) {
+          void this.flushLocalIce();
+          return;
+        }
         this.queueLocalIce(candidate);
       },
       onConnectionState: (connState) => {
@@ -355,6 +369,72 @@ export class CallController {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (await sendCallSignal(params)) return;
       await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+
+  private async applyRemoteAnswer(payload: string): Promise<void> {
+    if (!this.pc) {
+      this.pendingAnswer = payload;
+      return;
+    }
+    this.isCaller = true;
+    this.clearRingTimeout();
+    getCallSounds().stop();
+    await this.pc.applyAnswer(payload);
+    await this.flushPendingRemoteIce();
+    this.patch({ phase: "connecting" });
+    this.startIceTimeout();
+    void this.pc.playRemoteAudio();
+  }
+
+  private async tryApplyPendingAnswer(): Promise<void> {
+    if (!this.pendingAnswer || !this.pc) return;
+    if (this.state.phase !== "outgoing" && this.state.phase !== "connecting") return;
+    const answer = this.pendingAnswer;
+    this.pendingAnswer = null;
+    await this.applyRemoteAnswer(answer);
+  }
+
+  private async recoverMissedOffer(callId: string): Promise<void> {
+    if (this.pendingOffer) return;
+    const data = await pollCallSignals(callId, 0);
+    if (!data) return;
+    const offer = [...data.signals]
+      .sort((a, b) => a.seq - b.seq)
+      .find((s) => s.type === "offer" && s.payload && !this.isSelfSignal(s.from));
+    if (offer?.payload) {
+      this.pendingOffer = offer.payload;
+    }
+  }
+
+  private async recoverMissedAnswer(callId: string): Promise<void> {
+    if (this.pendingAnswer || !this.pc) return;
+    const data = await pollCallSignals(callId, 0);
+    if (!data) return;
+    const answer = [...data.signals]
+      .sort((a, b) => a.seq - b.seq)
+      .find((s) => s.type === "answer" && s.payload && !this.isSelfSignal(s.from));
+    if (answer?.payload) {
+      this.pendingAnswer = answer.payload;
+      await this.tryApplyPendingAnswer();
+    }
+  }
+
+  private async reconcileSessionFromPoll(
+    session: CallPollResponse["session"],
+    callId: string,
+  ): Promise<void> {
+    if (session.status !== "connecting") return;
+    if (this.isCaller && this.state.phase === "outgoing") {
+      await this.recoverMissedAnswer(callId);
+    }
+    if (!this.isCaller && this.state.phase === "connecting" && this.pc && !this.pc.hasRemoteDescription()) {
+      await this.recoverMissedOffer(callId);
+      if (this.pendingOffer) {
+        const offer = this.pendingOffer;
+        this.pendingOffer = null;
+        await this.applyRemoteOffer(offer);
+      }
     }
   }
 
@@ -437,6 +517,8 @@ export class CallController {
 
       if (data.session.status === "ended" && this.state.phase !== "ended") {
         this.syncFromSession(data.session);
+      } else {
+        await this.reconcileSessionFromPoll(data.session, callId);
       }
     };
 
@@ -460,6 +542,8 @@ export class CallController {
 
     if (data.session.status === "ended" && this.state.phase !== "ended") {
       this.syncFromSession(data.session);
+    } else {
+      await this.reconcileSessionFromPoll(data.session, callId);
     }
   }
 
@@ -579,18 +663,19 @@ export class CallController {
     if (this.isSelfSignal(from)) return;
 
     if (type === "offer" && payload && !this.isCaller) {
-      if (this.state.phase === "incoming") {
+      const waitingForOffer =
+        this.state.phase === "incoming" ||
+        (this.state.phase === "connecting" && (!this.pc || !this.pc.hasRemoteDescription()));
+
+      if (waitingForOffer) {
+        if (this.pc && !this.pc.hasRemoteDescription()) {
+          await this.applyRemoteOffer(payload);
+          return;
+        }
         this.pendingOffer = payload;
         return;
       }
-      if (
-        this.state.phase === "connecting" &&
-        this.pc &&
-        !this.pc.hasRemoteDescription()
-      ) {
-        await this.applyRemoteOffer(payload);
-        return;
-      }
+
       if (this.state.phase === "connecting" || this.state.phase === "active") {
         return;
       }
@@ -599,14 +684,7 @@ export class CallController {
     }
 
     if (type === "answer" && payload && (this.isCaller || this.state.phase === "outgoing")) {
-      this.isCaller = true;
-      this.clearRingTimeout();
-      getCallSounds().stop();
-      await this.pc?.applyAnswer(payload);
-      await this.flushPendingRemoteIce();
-      this.patch({ phase: "connecting" });
-      this.startIceTimeout();
-      void this.pc?.playRemoteAudio();
+      await this.applyRemoteAnswer(payload);
       void this.pollNow();
     }
 
@@ -723,6 +801,7 @@ export class CallController {
     this.iceOutBatch = [];
 
     this.pendingOffer = null;
+    this.pendingAnswer = null;
     this.pendingRemoteIce = [];
 
     this.pc?.close();
@@ -754,6 +833,7 @@ export class CallController {
     this.sinceSeq = 0;
     this.isCaller = false;
     this.pendingOffer = null;
+    this.pendingAnswer = null;
     this.pendingRemoteIce = [];
     this.state = { ...INITIAL_STATE };
     for (const l of this.listeners) l(this.state);
