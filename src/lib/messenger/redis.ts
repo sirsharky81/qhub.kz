@@ -97,8 +97,10 @@ export async function redisLpush(key: string, ...values: string[]): Promise<void
 export async function redisLrange(key: string, start: number, stop: number): Promise<string[]> {
   const redis = getMessengerRedis();
   if (redis) {
-    const raw = await redis.lrange<string>(key, start, stop);
-    return raw ?? [];
+    const raw = await redis.lrange(key, start, stop);
+    return (raw ?? []).map((item) =>
+      typeof item === "string" ? item : JSON.stringify(item),
+    );
   }
   const existing = memoryStore().get(key);
   if (!existing) return [];

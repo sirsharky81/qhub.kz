@@ -105,6 +105,7 @@ export class CallController {
   private lastSession: CallPollResponse["session"] | null = null;
   private sdpSyncInFlight = false;
   private sdpSyncStartedAt = 0;
+  private sdpApplyInFlight = false;
   private localOfferSdp: string | null = null;
   private localAnswerSdp: string | null = null;
   private lastSdpResendAt = 0;
@@ -257,11 +258,9 @@ export class CallController {
 
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
+      await this.ensureSdpApplied();
 
-      const offerSdp = this.lastSession?.offerSdp;
-      if (offerSdp) {
-        await this.applyRemoteOffer(offerSdp);
-      } else {
+      if (!this.pc?.hasRemoteDescription()) {
         void this.pollNow();
       }
     } catch (err) {
@@ -516,44 +515,67 @@ export class CallController {
     }
   }
 
+  private async ensureSdpApplied(session?: CallPollResponse["session"] | null): Promise<void> {
+    const snap = session ?? this.lastSession;
+    if (!snap || !this.pc) return;
+
+    if (!this.isCaller && snap.offerSdp && !this.pc.hasRemoteDescription()) {
+      await this.applyRemoteOffer(snap.offerSdp);
+      return;
+    }
+    if (this.isCaller && snap.answerSdp && !this.pc.hasRemoteDescription()) {
+      await this.applyRemoteAnswer(snap.answerSdp);
+    }
+  }
+
   private async applyRemoteAnswer(payload: string): Promise<void> {
-    if (!this.pc || this.pc.hasRemoteDescription()) return;
-    this.isCaller = true;
-    this.clearRingTimeout();
-    getCallSounds().stop();
-    await this.pc.applyAnswer(payload);
-    this.patchDebug({ hasRemoteDescription: true });
-    await this.flushPendingRemoteIce();
-    this.patch({ phase: "connecting" });
-    this.startIceTimeout();
-    void this.pc.playRemoteAudio();
+    if (!this.pc || this.pc.hasRemoteDescription() || this.sdpApplyInFlight) return;
+    this.sdpApplyInFlight = true;
+    try {
+      this.isCaller = true;
+      this.clearRingTimeout();
+      getCallSounds().stop();
+      await this.pc.applyAnswer(payload);
+      this.patchDebug({ hasRemoteDescription: true });
+      await this.flushPendingRemoteIce();
+      if (this.state.phase !== "active") {
+        this.patch({ phase: "connecting" });
+      }
+      this.startIceTimeout();
+      void this.pc.playRemoteAudio();
+    } finally {
+      this.sdpApplyInFlight = false;
+    }
   }
 
   private async applyRemoteOffer(offerPayload: string): Promise<void> {
-    if (this.pc?.hasRemoteDescription()) return;
-    if (!this.pc) {
-      await this.ensureLocalAudio();
-      await this.setupPeerConnection();
-    }
-    const answerSdp = await this.pc!.createAnswer(offerPayload);
-    this.localAnswerSdp = answerSdp;
-    this.patchDebug({ hasRemoteDescription: true, hasLocalAnswer: true });
-    await this.flushPendingRemoteIce();
-    await this.pc?.flushPendingRemoteCandidates();
-    this.patch({ phase: "connecting" });
-    this.startIceTimeout();
-    void this.pc?.playRemoteAudio();
+    if (this.pc?.hasRemoteDescription() || this.sdpApplyInFlight) return;
+    this.sdpApplyInFlight = true;
+    try {
+      if (!this.pc) {
+        await this.ensureLocalAudio();
+        await this.setupPeerConnection();
+      }
+      const answerSdp = await this.pc!.createAnswer(offerPayload);
+      this.localAnswerSdp = answerSdp;
+      this.patchDebug({ hasRemoteDescription: true, hasLocalAnswer: true });
+      await this.flushPendingRemoteIce();
+      await this.pc?.flushPendingRemoteCandidates();
+      if (this.state.phase !== "active") {
+        this.patch({ phase: "connecting" });
+      }
+      this.startIceTimeout();
+      void this.pc?.playRemoteAudio();
 
-    // Fire-and-forget, same reasoning as the offer send in startOutgoing:
-    // don't let a stalled send delay arming the ICE timeout above. The poll
-    // loop's resendLocalSdpIfNeeded resends this if the session doesn't
-    // reflect it yet, and sendCallSignal itself is now time-bounded either way.
-    if (this.state.callId) {
-      void this.sendSignalReliable({
-        callId: this.state.callId,
-        type: "answer",
-        payload: answerSdp,
-      });
+      if (this.state.callId) {
+        void this.sendSignalReliable({
+          callId: this.state.callId,
+          type: "answer",
+          payload: answerSdp,
+        });
+      }
+    } finally {
+      this.sdpApplyInFlight = false;
     }
   }
 
@@ -635,12 +657,7 @@ export class CallController {
     this.sdpSyncStartedAt = Date.now();
     void (async () => {
       try {
-        if (shouldApplyOffer) {
-          await this.applyRemoteOffer(session.offerSdp!);
-        }
-        if (shouldApplyAnswer) {
-          await this.applyRemoteAnswer(session.answerSdp!);
-        }
+        await this.ensureSdpApplied(session);
       } catch (err) {
         console.error("[call] Failed to apply remote SDP:", err);
         this.patchDebug({ lastError: describeError(err) });
@@ -1045,6 +1062,7 @@ export class CallController {
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
     this.resendInFlight = false;
+    this.sdpApplyInFlight = false;
     this.pendingRemoteIce = [];
 
     this.pc?.close();

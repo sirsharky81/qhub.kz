@@ -15,6 +15,7 @@ import {
   redisLpush,
   redisLrange,
   redisSet,
+  parseRedisJsonValue,
 } from "./redis";
 import type { CallSession, CallSignal, CallSignalType, CallStatus } from "./types";
 
@@ -224,7 +225,8 @@ export async function getCallSignalsSince(
   const raw = await redisLrange(signalsKey(callId), 0, MAX_CALL_SIGNALS - 1);
   const signals: CallSignal[] = [];
   for (const item of raw) {
-    const parsed = JSON.parse(item) as CallSignal;
+    const parsed = parseRedisJsonValue<CallSignal>(item);
+    if (!parsed || typeof parsed.seq !== "number") continue;
     if (parsed.seq > sinceSeq) signals.push(parsed);
   }
   signals.sort((a, b) => a.seq - b.seq);

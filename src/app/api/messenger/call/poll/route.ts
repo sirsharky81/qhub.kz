@@ -45,6 +45,7 @@ export async function GET(request: Request) {
     const signals = await getCallSignalsSince(callId, sinceSeq);
     return NextResponse.json({ session, signals });
   } catch (err) {
+    console.error("[call/poll] GET failed:", err);
     return jsonAuthError(err);
   }
 }
