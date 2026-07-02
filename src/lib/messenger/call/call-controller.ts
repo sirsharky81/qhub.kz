@@ -57,8 +57,7 @@ export class CallController {
   private durationTimer: ReturnType<typeof setInterval> | null = null;
   private sinceSeq = 0;
   private localStream: MediaStream | null = null;
-  private pendingOffer: string | null = null;
-  private pendingAnswer: string | null = null;
+  private lastSession: CallPollResponse["session"] | null = null;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
@@ -97,6 +96,7 @@ export class CallController {
       if (this.state.phase !== "idle") return;
       this.isCaller = false;
       this.sinceSeq = 0;
+      this.lastSession = data.session;
       this.patch({
         phase: "incoming",
         callId: data.session.callId,
@@ -142,6 +142,7 @@ export class CallController {
 
     this.isCaller = true;
     this.sinceSeq = 0;
+    this.lastSession = null;
     this.patch({
       phase: "outgoing",
       callId: result.callId,
@@ -175,23 +176,17 @@ export class CallController {
 
     this.clearRingTimeout();
     this.patch({ phase: "connecting" });
-    const callId = this.state.callId;
 
     try {
-      if (!this.pendingOffer) {
-        await this.recoverMissedOffer(callId);
-      }
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
-      if (!this.pendingOffer) {
-        await this.recoverMissedOffer(callId);
-      }
-      if (this.pendingOffer) {
-        const offer = this.pendingOffer;
-        this.pendingOffer = null;
-        await this.applyRemoteOffer(offer);
+
+      const offerSdp = this.lastSession?.offerSdp;
+      if (offerSdp) {
+        await this.applyRemoteOffer(offerSdp);
       } else {
-        this.startIceTimeout();
+        // Offer not observed locally yet — the next poll tick will pick it up
+        // via syncSdpFromSession as soon as it's visible on the session.
         void this.pollNow();
       }
     } catch {
@@ -242,6 +237,7 @@ export class CallController {
     if (opts?.peerPhone) this.peerPhone = opts.peerPhone;
     this.isCaller = false;
     this.sinceSeq = 0;
+    this.lastSession = null;
     this.patch({
       phase: "incoming",
       callId,
@@ -288,21 +284,10 @@ export class CallController {
     if (!this.pollTimer || !this.pollCallId) return;
     clearInterval(this.pollTimer);
     const callId = this.pollCallId;
-    const tick = async () => {
-      const data = await pollCallSignals(callId, this.sinceSeq);
-      if (!data) return;
-      for (const signal of data.signals) {
-        this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
-        await this.handleSignal(signal.type, signal.from, signal.payload);
-      }
-      await this.pc?.flushPendingRemoteCandidates();
-      if (data.session.status === "ended" && this.state.phase !== "ended") {
-        this.syncFromSession(data.session);
-      } else {
-        await this.reconcileSessionFromPoll(data.session, callId);
-      }
-    };
-    this.pollTimer = setInterval(() => void tick(), this.pollIntervalMs());
+    this.pollTimer = setInterval(
+      () => void this.pollOnce(callId),
+      this.pollIntervalMs(),
+    );
   }
 
   private async ensureLocalAudio(): Promise<void> {
@@ -373,10 +358,7 @@ export class CallController {
   }
 
   private async applyRemoteAnswer(payload: string): Promise<void> {
-    if (!this.pc) {
-      this.pendingAnswer = payload;
-      return;
-    }
+    if (!this.pc) return;
     this.isCaller = true;
     this.clearRingTimeout();
     getCallSounds().stop();
@@ -385,57 +367,6 @@ export class CallController {
     this.patch({ phase: "connecting" });
     this.startIceTimeout();
     void this.pc.playRemoteAudio();
-  }
-
-  private async tryApplyPendingAnswer(): Promise<void> {
-    if (!this.pendingAnswer || !this.pc) return;
-    if (this.state.phase !== "outgoing" && this.state.phase !== "connecting") return;
-    const answer = this.pendingAnswer;
-    this.pendingAnswer = null;
-    await this.applyRemoteAnswer(answer);
-  }
-
-  private async recoverMissedOffer(callId: string): Promise<void> {
-    if (this.pendingOffer) return;
-    const data = await pollCallSignals(callId, 0);
-    if (!data) return;
-    const offer = [...data.signals]
-      .sort((a, b) => a.seq - b.seq)
-      .find((s) => s.type === "offer" && s.payload && !this.isSelfSignal(s.from));
-    if (offer?.payload) {
-      this.pendingOffer = offer.payload;
-    }
-  }
-
-  private async recoverMissedAnswer(callId: string): Promise<void> {
-    if (this.pendingAnswer || !this.pc) return;
-    const data = await pollCallSignals(callId, 0);
-    if (!data) return;
-    const answer = [...data.signals]
-      .sort((a, b) => a.seq - b.seq)
-      .find((s) => s.type === "answer" && s.payload && !this.isSelfSignal(s.from));
-    if (answer?.payload) {
-      this.pendingAnswer = answer.payload;
-      await this.tryApplyPendingAnswer();
-    }
-  }
-
-  private async reconcileSessionFromPoll(
-    session: CallPollResponse["session"],
-    callId: string,
-  ): Promise<void> {
-    if (session.status !== "connecting") return;
-    if (this.isCaller && this.state.phase === "outgoing") {
-      await this.recoverMissedAnswer(callId);
-    }
-    if (!this.isCaller && this.state.phase === "connecting" && this.pc && !this.pc.hasRemoteDescription()) {
-      await this.recoverMissedOffer(callId);
-      if (this.pendingOffer) {
-        const offer = this.pendingOffer;
-        this.pendingOffer = null;
-        await this.applyRemoteOffer(offer);
-      }
-    }
   }
 
   private async applyRemoteOffer(offerPayload: string): Promise<void> {
@@ -456,7 +387,22 @@ export class CallController {
     this.patch({ phase: "connecting" });
     this.startIceTimeout();
     void this.pc?.playRemoteAudio();
-    void this.pollNow();
+  }
+
+  /**
+   * Level-triggered SDP sync: applies the latest known offer/answer straight
+   * from the call session, independent of whether the discrete "offer"/"answer"
+   * signal was individually observed in this poll. This makes the handshake
+   * self-healing against dropped signals (rate limits, backgrounded tabs, etc.):
+   * every poll tick converges toward the correct state.
+   */
+  private async syncSdpFromSession(session: CallPollResponse["session"]): Promise<void> {
+    if (!this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.offerSdp) {
+      await this.applyRemoteOffer(session.offerSdp);
+    }
+    if (this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.answerSdp) {
+      await this.applyRemoteAnswer(session.answerSdp);
+    }
   }
 
   private handlePeerConnected(connected: boolean): void {
@@ -501,35 +447,7 @@ export class CallController {
     return CALL_POLL_INTERVAL_MS;
   }
 
-  private startPolling(callId: string): void {
-    this.stopPolling();
-    this.pollCallId = callId;
-    const tick = async () => {
-      const data = await pollCallSignals(callId, this.sinceSeq);
-      if (!data) return;
-
-      for (const signal of data.signals) {
-        this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
-        await this.handleSignal(signal.type, signal.from, signal.payload);
-      }
-
-      await this.pc?.flushPendingRemoteCandidates();
-
-      if (data.session.status === "ended" && this.state.phase !== "ended") {
-        this.syncFromSession(data.session);
-      } else {
-        await this.reconcileSessionFromPoll(data.session, callId);
-      }
-    };
-
-    void tick();
-    this.pollTimer = setInterval(() => void tick(), this.pollIntervalMs());
-  }
-
-  private async pollNow(): Promise<void> {
-    const callId = this.pollCallId ?? this.state.callId;
-    if (!callId) return;
-
+  private async pollOnce(callId: string): Promise<void> {
     const data = await pollCallSignals(callId, this.sinceSeq);
     if (!data) return;
 
@@ -539,12 +457,27 @@ export class CallController {
     }
 
     await this.pc?.flushPendingRemoteCandidates();
+    this.lastSession = data.session;
 
     if (data.session.status === "ended" && this.state.phase !== "ended") {
       this.syncFromSession(data.session);
-    } else {
-      await this.reconcileSessionFromPoll(data.session, callId);
+      return;
     }
+
+    await this.syncSdpFromSession(data.session);
+  }
+
+  private startPolling(callId: string): void {
+    this.stopPolling();
+    this.pollCallId = callId;
+    void this.pollOnce(callId);
+    this.pollTimer = setInterval(() => void this.pollOnce(callId), this.pollIntervalMs());
+  }
+
+  private async pollNow(): Promise<void> {
+    const callId = this.pollCallId ?? this.state.callId;
+    if (!callId) return;
+    await this.pollOnce(callId);
   }
 
   private isSelfSignal(from: string): boolean {
@@ -662,31 +595,8 @@ export class CallController {
   ): Promise<void> {
     if (this.isSelfSignal(from)) return;
 
-    if (type === "offer" && payload && !this.isCaller) {
-      const waitingForOffer =
-        this.state.phase === "incoming" ||
-        (this.state.phase === "connecting" && (!this.pc || !this.pc.hasRemoteDescription()));
-
-      if (waitingForOffer) {
-        if (this.pc && !this.pc.hasRemoteDescription()) {
-          await this.applyRemoteOffer(payload);
-          return;
-        }
-        this.pendingOffer = payload;
-        return;
-      }
-
-      if (this.state.phase === "connecting" || this.state.phase === "active") {
-        return;
-      }
-      await this.applyRemoteOffer(payload);
-      return;
-    }
-
-    if (type === "answer" && payload && (this.isCaller || this.state.phase === "outgoing")) {
-      await this.applyRemoteAnswer(payload);
-      void this.pollNow();
-    }
+    // "offer"/"answer" are applied via syncSdpFromSession (level-triggered from
+    // the session's offerSdp/answerSdp), which is robust against a dropped signal.
 
     if (type === "ice" && payload) {
       await this.applyRemoteIcePayloads(payload);
@@ -800,8 +710,7 @@ export class CallController {
     }
     this.iceOutBatch = [];
 
-    this.pendingOffer = null;
-    this.pendingAnswer = null;
+    this.lastSession = null;
     this.pendingRemoteIce = [];
 
     this.pc?.close();
@@ -832,8 +741,7 @@ export class CallController {
   private reset(): void {
     this.sinceSeq = 0;
     this.isCaller = false;
-    this.pendingOffer = null;
-    this.pendingAnswer = null;
+    this.lastSession = null;
     this.pendingRemoteIce = [];
     this.state = { ...INITIAL_STATE };
     for (const l of this.listeners) l(this.state);

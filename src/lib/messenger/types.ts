@@ -116,6 +116,10 @@ export interface CallSession {
   createdAt: number;
   endedAt?: number;
   endReason?: string;
+  /** Latest offer/answer SDP, kept on the session so clients can converge even if
+   *  the discrete "offer"/"answer" signal was missed (rate limit, backgrounding, etc). */
+  offerSdp?: string;
+  answerSdp?: string;
 }
 
 export interface CallSignal {

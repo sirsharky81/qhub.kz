@@ -197,9 +197,11 @@ export async function appendCallSignal(params: {
     await redisDel(dmActiveKey(session.channel));
     await clearIncomingForCallee(session.callee);
   } else if (params.type === "answer") {
+    session.answerSdp = params.payload;
     session.status = "connecting";
     await clearIncomingForCallee(session.callee);
-  } else if (params.type === "offer" && session.status === "ringing") {
+  } else if (params.type === "offer") {
+    session.offerSdp = params.payload;
     // offer stays ringing until answer
   }
 

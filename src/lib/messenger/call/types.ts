@@ -44,6 +44,8 @@ export interface CallPollResponse {
     createdAt: number;
     endedAt?: number;
     endReason?: string;
+    offerSdp?: string;
+    answerSdp?: string;
   };
   signals: Array<{
     id: string;
