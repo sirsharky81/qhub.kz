@@ -59,6 +59,9 @@ export class CallController {
   private localStream: MediaStream | null = null;
   private lastSession: CallPollResponse["session"] | null = null;
   private sdpSyncInFlight = false;
+  private localOfferSdp: string | null = null;
+  private localAnswerSdp: string | null = null;
+  private lastSdpResendAt = 0;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
@@ -144,6 +147,8 @@ export class CallController {
     this.isCaller = true;
     this.sinceSeq = 0;
     this.lastSession = null;
+    this.localOfferSdp = null;
+    this.localAnswerSdp = null;
     this.patch({
       phase: "outgoing",
       callId: result.callId,
@@ -157,6 +162,7 @@ export class CallController {
       await this.ensureLocalAudio();
       await this.setupPeerConnection();
       const offerSdp = await this.pc!.createOffer();
+      this.localOfferSdp = offerSdp;
       await this.sendSignalReliable({
         callId: result.callId,
         type: "offer",
@@ -176,6 +182,7 @@ export class CallController {
     if (this.state.phase !== "incoming" || !this.state.callId) return;
 
     this.clearRingTimeout();
+    this.localAnswerSdp = null;
     this.patch({ phase: "connecting" });
 
     try {
@@ -376,6 +383,7 @@ export class CallController {
       await this.setupPeerConnection();
     }
     const answerSdp = await this.pc!.createAnswer(offerPayload);
+    this.localAnswerSdp = answerSdp;
     if (this.state.callId) {
       await this.sendSignalReliable({
         callId: this.state.callId,
@@ -402,7 +410,40 @@ export class CallController {
    * forever — any failure here ends the call with a visible message instead of
    * retrying the same broken SDP on every subsequent tick.
    */
+  /**
+   * The initial offer/answer POST only retries a few times over ~450ms before
+   * giving up silently. If it never lands (transient mobile network blip),
+   * nothing would ever resend it, and the peer stays stuck forever waiting for
+   * an SDP that's never coming. This makes the *send* side self-healing too:
+   * on every poll tick, if the session still doesn't reflect our local
+   * offer/answer, resend it (throttled to avoid hammering the endpoint).
+   */
+  private async resendLocalSdpIfNeeded(session: CallPollResponse["session"]): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastSdpResendAt < 1500) return;
+
+    if (this.isCaller && this.localOfferSdp && !session.offerSdp && this.state.callId) {
+      this.lastSdpResendAt = now;
+      await this.sendSignalReliable({
+        callId: this.state.callId,
+        type: "offer",
+        payload: this.localOfferSdp,
+      });
+      return;
+    }
+
+    if (!this.isCaller && this.localAnswerSdp && !session.answerSdp && this.state.callId) {
+      this.lastSdpResendAt = now;
+      await this.sendSignalReliable({
+        callId: this.state.callId,
+        type: "answer",
+        payload: this.localAnswerSdp,
+      });
+    }
+  }
+
   private async syncSdpFromSession(session: CallPollResponse["session"]): Promise<void> {
+    await this.resendLocalSdpIfNeeded(session);
     if (this.sdpSyncInFlight) return;
     const shouldApplyOffer =
       !this.isCaller && this.pc && !this.pc.hasRemoteDescription() && session.offerSdp;
@@ -739,6 +780,8 @@ export class CallController {
     this.iceOutBatch = [];
 
     this.lastSession = null;
+    this.localOfferSdp = null;
+    this.localAnswerSdp = null;
     this.pendingRemoteIce = [];
 
     this.pc?.close();
