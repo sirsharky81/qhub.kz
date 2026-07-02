@@ -73,10 +73,11 @@ export async function heartbeatCall(callId: string): Promise<void> {
   });
 }
 
-export async function endCallApi(callId: string, reason?: string): Promise<void> {
-  await platformFetch("/api/messenger/call/end", {
+export async function endCallApi(callId: string, reason?: string): Promise<boolean> {
+  const res = await platformFetch("/api/messenger/call/end", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ callId, reason }),
   });
+  return res.ok;
 }

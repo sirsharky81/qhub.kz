@@ -211,8 +211,9 @@ export async function endCallSession(
 
   const result = await appendCallSignal({ callId, from: phone, type: "end" });
   if (!result) return null;
-  if (result.session.endReason === undefined) {
-    result.session.endReason = reason;
-  }
+
+  const ttl = callTtlSec();
+  result.session.endReason = reason;
+  await redisSet(callKey(callId), JSON.stringify(result.session), ttl);
   return result.session;
 }

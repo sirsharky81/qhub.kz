@@ -8,9 +8,12 @@ import {
   CALL_HEARTBEAT_INTERVAL_MS,
   CALL_POLL_INTERVAL_MS,
   DEFAULT_CALL_ICE_TIMEOUT_SEC,
+  DEFAULT_CALL_MAX_SETUP_SEC,
   DEFAULT_CALL_RING_TIMEOUT_SEC,
 } from "../constants";
-import { CallPeerConnection } from "./peer-connection";
+import { normalizeKzPhone } from "../phone";
+import { getCallSounds } from "./call-sounds";
+import { CallPeerConnection, type IceCandidatePayload } from "./peer-connection";
 import {
   endCallApi,
   fetchIceServers,
@@ -21,6 +24,7 @@ import {
   sendCallSignal,
 } from "./signaling-client";
 import type { CallEndReason, CallPhase, CallState } from "./types";
+import type { CallPollResponse } from "./types";
 
 type Listener = (state: CallState) => void;
 
@@ -56,6 +60,9 @@ export class CallController {
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
+  private iceOutBatch: IceCandidatePayload[] = [];
+  private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
+  private setupWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
   configure(params: { myPhone: string; peerPhone: string; channel: string }): void {
     this.myPhone = params.myPhone;
@@ -99,10 +106,11 @@ export class CallController {
       this.startPolling(data.session.callId);
       this.startHeartbeat(data.session.callId);
       this.startRingTimeout();
+      this.startSetupWatchdog();
     };
 
     void tick();
-    this.activePollTimer = setInterval(() => void tick(), CALL_POLL_INTERVAL_MS * 2);
+    this.activePollTimer = setInterval(() => void tick(), CALL_CONNECT_POLL_INTERVAL_MS);
   }
 
   stopIncomingWatch(): void {
@@ -153,6 +161,7 @@ export class CallController {
       this.startPolling(result.callId);
       this.startHeartbeat(result.callId);
       this.startRingTimeout();
+      this.startSetupWatchdog();
       void this.pollNow();
     } catch {
       await this.cleanup("error", "Не удалось получить доступ к микрофону");
@@ -195,7 +204,7 @@ export class CallController {
       this.reset();
       return;
     }
-    await endCallApi(this.state.callId, "hangup");
+    await this.endCallReliable(this.state.callId, "hangup");
     await this.cleanup("hangup");
   }
 
@@ -225,6 +234,7 @@ export class CallController {
     this.startPolling(callId);
     this.startHeartbeat(callId);
     this.startRingTimeout();
+    this.startSetupWatchdog();
   }
 
   destroy(): void {
@@ -237,6 +247,13 @@ export class CallController {
     const prevPhase = this.state.phase;
     this.state = { ...this.state, ...partial };
     for (const l of this.listeners) l(this.state);
+
+    if (prevPhase !== this.state.phase) {
+      this.updateSoundsForPhase(this.state.phase);
+      if (this.state.phase === "connecting" || this.state.phase === "active") {
+        this.clearRingTimeout();
+      }
+    }
 
     const phase = this.state.phase;
     if (
@@ -261,13 +278,7 @@ export class CallController {
       }
       await this.pc?.flushPendingRemoteCandidates();
       if (data.session.status === "ended" && this.state.phase !== "ended") {
-        const reason: CallEndReason =
-          data.session.endReason === "reject"
-            ? "reject"
-            : data.session.endReason === "busy"
-              ? "busy"
-              : "remote_end";
-        void this.cleanup(reason);
+        this.syncFromSession(data.session);
       }
     };
     this.pollTimer = setInterval(() => void tick(), this.pollIntervalMs());
@@ -297,11 +308,7 @@ export class CallController {
     this.pc.setHandlers({
       onIceCandidate: (candidate) => {
         if (!this.state.callId) return;
-        void sendCallSignal({
-          callId: this.state.callId,
-          type: "ice",
-          payload: JSON.stringify(candidate),
-        });
+        this.queueLocalIce(candidate);
       },
       onConnectionState: (connState) => {
         this.handlePeerConnected(connState === "connected");
@@ -365,8 +372,10 @@ export class CallController {
     if (!connected || this.state.phase === "active") return;
     this.clearIceTimeout();
     this.clearRingTimeout();
+    this.clearSetupWatchdog();
     this.patch({ phase: "active" });
     this.startDurationTimer();
+    getCallSounds().stop();
     void this.pc?.playRemoteAudio();
   }
 
@@ -416,13 +425,7 @@ export class CallController {
       await this.pc?.flushPendingRemoteCandidates();
 
       if (data.session.status === "ended" && this.state.phase !== "ended") {
-        const reason: CallEndReason =
-          data.session.endReason === "reject"
-            ? "reject"
-            : data.session.endReason === "busy"
-              ? "busy"
-              : "remote_end";
-        void this.cleanup(reason);
+        this.syncFromSession(data.session);
       }
     };
 
@@ -445,13 +448,114 @@ export class CallController {
     await this.pc?.flushPendingRemoteCandidates();
 
     if (data.session.status === "ended" && this.state.phase !== "ended") {
-      const reason: CallEndReason =
-        data.session.endReason === "reject"
-          ? "reject"
-          : data.session.endReason === "busy"
-            ? "busy"
-            : "remote_end";
-      void this.cleanup(reason);
+      this.syncFromSession(data.session);
+    }
+  }
+
+  private isSelfSignal(from: string): boolean {
+    if (!this.myPhone) return false;
+    return normalizeKzPhone(from) === normalizeKzPhone(this.myPhone);
+  }
+
+  private updateSoundsForPhase(phase: CallPhase): void {
+    const sounds = getCallSounds();
+    if (phase === "incoming") {
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate([400, 200, 400, 200, 400]);
+      }
+      void sounds.startIncoming();
+      return;
+    }
+    if (phase === "outgoing") {
+      void sounds.startOutgoing();
+      return;
+    }
+    sounds.stop();
+  }
+
+  private queueLocalIce(candidate: IceCandidatePayload): void {
+    this.iceOutBatch.push(candidate);
+    if (!this.iceOutTimer) {
+      this.iceOutTimer = setTimeout(() => void this.flushLocalIce(), 120);
+    }
+  }
+
+  private async flushLocalIce(): Promise<void> {
+    this.iceOutTimer = null;
+    const batch = this.iceOutBatch.splice(0);
+    if (!batch.length || !this.state.callId) return;
+    const payload = batch.length === 1 ? JSON.stringify(batch[0]) : JSON.stringify(batch);
+    await this.sendSignalReliable({
+      callId: this.state.callId,
+      type: "ice",
+      payload,
+    });
+  }
+
+  private expandIcePayloads(payload: string): string[] {
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => (typeof item === "string" ? item : JSON.stringify(item)));
+      }
+    } catch {
+      // single candidate payload
+    }
+    return [payload];
+  }
+
+  private async applyRemoteIcePayloads(payload: string): Promise<void> {
+    for (const item of this.expandIcePayloads(payload)) {
+      await this.bufferRemoteIce(item);
+    }
+  }
+
+  private async endCallReliable(callId: string, reason: string): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (await endCallApi(callId, reason)) return;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }
+
+  private mapRemoteEndReason(raw?: string): CallEndReason {
+    if (raw === "reject") return "reject";
+    if (raw === "busy") return "busy";
+    if (raw === "timeout" || raw === "ice_failed") return "timeout";
+    if (raw === "error") return "error";
+    return "remote_end";
+  }
+
+  private messageForRemoteEnd(raw?: string): string | null {
+    if (raw === "timeout" || raw === "ice_failed") return "Нет ответа";
+    if (raw === "reject") return "Звонок отклонён";
+    if (raw === "busy") return "Собеседник занят";
+    return null;
+  }
+
+  private syncFromSession(session: CallPollResponse["session"]): void {
+    if (session.status !== "ended" || this.state.phase === "ended") return;
+    const reason = this.mapRemoteEndReason(session.endReason);
+    void this.cleanup(reason, this.messageForRemoteEnd(session.endReason) ?? undefined);
+  }
+
+  private startSetupWatchdog(): void {
+    this.clearSetupWatchdog();
+    this.setupWatchdogTimer = setTimeout(() => {
+      if (this.state.phase === "idle" || this.state.phase === "ended" || this.state.phase === "active") {
+        return;
+      }
+      const callId = this.state.callId;
+      void (async () => {
+        if (callId) await this.endCallReliable(callId, "timeout");
+        await this.cleanup("timeout", "Звонок завершён");
+      })();
+    }, DEFAULT_CALL_MAX_SETUP_SEC * 1000);
+  }
+
+  private clearSetupWatchdog(): void {
+    if (this.setupWatchdogTimer) {
+      clearTimeout(this.setupWatchdogTimer);
+      this.setupWatchdogTimer = null;
     }
   }
 
@@ -460,7 +564,7 @@ export class CallController {
     from: string,
     payload?: string,
   ): Promise<void> {
-    if (from === this.myPhone) return;
+    if (this.isSelfSignal(from)) return;
 
     if (type === "offer" && payload && !this.isCaller) {
       if (this.state.phase === "incoming") {
@@ -483,6 +587,8 @@ export class CallController {
     }
 
     if (type === "answer" && payload && this.isCaller) {
+      this.clearRingTimeout();
+      getCallSounds().stop();
       await this.pc?.applyAnswer(payload);
       await this.flushPendingRemoteIce();
       this.patch({ phase: "connecting" });
@@ -492,7 +598,7 @@ export class CallController {
     }
 
     if (type === "ice" && payload) {
-      await this.bufferRemoteIce(payload);
+      await this.applyRemoteIcePayloads(payload);
     }
 
     if (type === "reject" || type === "busy") {
@@ -518,7 +624,7 @@ export class CallController {
       if (this.state.phase === "outgoing" || this.state.phase === "incoming") {
         const callId = this.state.callId;
         void (async () => {
-          if (callId) await endCallApi(callId, "timeout");
+          if (callId) await this.endCallReliable(callId, "timeout");
           await this.cleanup("timeout", "Нет ответа");
         })();
       }
@@ -531,9 +637,9 @@ export class CallController {
       if (this.state.phase === "connecting") {
         const callId = this.state.callId;
         void (async () => {
-          if (callId) await endCallApi(callId, "ice_failed");
+          if (callId) await this.endCallReliable(callId, "ice_failed");
           await this.cleanup(
-            "error",
+            "timeout",
             "Не удалось установить соединение. Попробуйте Wi‑Fi или перезвоните.",
           );
         })();
@@ -593,7 +699,15 @@ export class CallController {
     this.stopHeartbeat();
     this.clearRingTimeout();
     this.clearIceTimeout();
+    this.clearSetupWatchdog();
     this.stopDurationTimer();
+    getCallSounds().stop();
+
+    if (this.iceOutTimer) {
+      clearTimeout(this.iceOutTimer);
+      this.iceOutTimer = null;
+    }
+    this.iceOutBatch = [];
 
     this.pendingOffer = null;
     this.pendingRemoteIce = [];
