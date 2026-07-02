@@ -48,6 +48,7 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
   );
   return (
     <div className="mx-4 mt-3 rounded-lg bg-black/60 p-3 font-mono text-[11px] leading-tight text-white/80 backdrop-blur">
+      {row("время звонка", `${debug.elapsedSec}с`)}
       {row("роль", debug.isCaller ? "звонящий" : "принимающий")}
       {row("turn", debug.turnSource ?? "—")}
       {row("ICE", debug.iceConnectionState ?? "—")}

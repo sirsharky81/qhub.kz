@@ -46,6 +46,7 @@ const INITIAL_DEBUG: CallDebugInfo = {
   hasSessionAnswer: false,
   lastError: null,
   pollCount: 0,
+  elapsedSec: 0,
 };
 
 const INITIAL_STATE: CallState = {
@@ -82,6 +83,7 @@ export class CallController {
   private localOfferSdp: string | null = null;
   private localAnswerSdp: string | null = null;
   private lastSdpResendAt = 0;
+  private callStartedAt = 0;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
@@ -121,6 +123,7 @@ export class CallController {
       this.isCaller = false;
       this.sinceSeq = 0;
       this.lastSession = data.session;
+      this.callStartedAt = Date.now();
       this.patch({
         debug: { ...INITIAL_DEBUG },
         phase: "incoming",
@@ -170,6 +173,7 @@ export class CallController {
     this.lastSession = null;
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
+    this.callStartedAt = Date.now();
     this.patch({
       debug: { ...INITIAL_DEBUG, isCaller: true },
       phase: "outgoing",
@@ -275,6 +279,7 @@ export class CallController {
     this.isCaller = false;
     this.sinceSeq = 0;
     this.lastSession = null;
+    this.callStartedAt = Date.now();
     this.patch({
       debug: { ...INITIAL_DEBUG },
       phase: "incoming",
@@ -568,6 +573,7 @@ export class CallController {
         pollCount: this.state.debug.pollCount + 1,
         hasSessionOffer: Boolean(data.session.offerSdp),
         hasSessionAnswer: Boolean(data.session.answerSdp),
+        elapsedSec: Math.floor((Date.now() - this.callStartedAt) / 1000),
       });
 
       if (data.session.status === "ended" && this.state.phase !== "ended") {

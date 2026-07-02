@@ -33,6 +33,7 @@ export interface CallDebugInfo {
   hasSessionAnswer: boolean;
   lastError: string | null;
   pollCount: number;
+  elapsedSec: number;
 }
 
 export interface CallState {
