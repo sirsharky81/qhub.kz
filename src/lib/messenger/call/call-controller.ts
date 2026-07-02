@@ -190,16 +190,24 @@ export class CallController {
       const offerSdp = await this.pc!.createOffer();
       this.localOfferSdp = offerSdp;
       this.patchDebug({ hasLocalOffer: true });
-      await this.sendSignalReliable({
-        callId: result.callId,
-        type: "offer",
-        payload: offerSdp,
-      });
+
+      // Start polling BEFORE sending the offer, not after. A stalled/hung
+      // fetch (common on iOS when the network briefly suspends in the
+      // background) would otherwise permanently block this whole function
+      // at the `await`, meaning startPolling() below would never even run —
+      // the call would silently freeze on "Звоним..." forever with no error.
+      // Polling running independently also means resendLocalSdpIfNeeded can
+      // recover the offer send even if this first attempt never completes.
       this.startPolling(result.callId);
       this.startHeartbeat(result.callId);
       this.startRingTimeout();
       this.startSetupWatchdog();
-      void this.pollNow();
+
+      void this.sendSignalReliable({
+        callId: result.callId,
+        type: "offer",
+        payload: offerSdp,
+      });
     } catch (err) {
       this.patchDebug({ lastError: describeError(err) });
       await this.cleanup("error", "Не удалось получить доступ к микрофону");
@@ -428,18 +436,23 @@ export class CallController {
     const answerSdp = await this.pc!.createAnswer(offerPayload);
     this.localAnswerSdp = answerSdp;
     this.patchDebug({ hasRemoteDescription: true, hasLocalAnswer: true });
-    if (this.state.callId) {
-      await this.sendSignalReliable({
-        callId: this.state.callId,
-        type: "answer",
-        payload: answerSdp,
-      });
-    }
     await this.flushPendingRemoteIce();
     await this.pc?.flushPendingRemoteCandidates();
     this.patch({ phase: "connecting" });
     this.startIceTimeout();
     void this.pc?.playRemoteAudio();
+
+    // Fire-and-forget, same reasoning as the offer send in startOutgoing:
+    // don't let a stalled send delay arming the ICE timeout above. The poll
+    // loop's resendLocalSdpIfNeeded resends this if the session doesn't
+    // reflect it yet, and sendCallSignal itself is now time-bounded either way.
+    if (this.state.callId) {
+      void this.sendSignalReliable({
+        callId: this.state.callId,
+        type: "answer",
+        payload: answerSdp,
+      });
+    }
   }
 
   /**
