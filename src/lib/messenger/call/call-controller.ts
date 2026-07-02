@@ -34,6 +34,25 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
+/** Race a promise against a hard deadline so a stuck browser API (e.g. a
+ * getUserMedia permission prompt that never gets answered) can't freeze the
+ * whole call setup chain forever. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout: ${label}`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 const INITIAL_DEBUG: CallDebugInfo = {
   isCaller: false,
   turnSource: null,
@@ -85,6 +104,7 @@ export class CallController {
   private lastSdpResendAt = 0;
   private callStartedAt = 0;
   private pollInFlight = false;
+  private pollStartedAt = 0;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
@@ -348,15 +368,19 @@ export class CallController {
 
   private async ensureLocalAudio(): Promise<void> {
     prepareAudioSessionForCall();
-    await ensureMediaPermissions({ audio: true });
-    this.localStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-      video: false,
-    });
+    await withTimeout(ensureMediaPermissions({ audio: true }), 15000, "media_permissions");
+    this.localStream = await withTimeout(
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      }),
+      15000,
+      "get_user_media",
+    );
   }
 
   private async setupPeerConnection(): Promise<void> {
@@ -579,8 +603,19 @@ export class CallController {
     // in flight — which can stall the connection (mobile browsers cap
     // concurrent connections per host) so hard that everything after the
     // first successful poll silently stops responding.
-    if (this.pollInFlight) return;
+    //
+    // Self-heal: if something inside a tick (e.g. a browser WebRTC/media API
+    // that never resolves or rejects) manages to hang anyway, don't let the
+    // guard itself become a permanent deadlock — force it open again after
+    // a generous grace period so the call can still recover.
+    if (this.pollInFlight) {
+      const stuckMs = Date.now() - this.pollStartedAt;
+      if (stuckMs < 10000) return;
+      console.error(`[call] poll tick stuck for ${stuckMs}ms — forcing reset`);
+      this.patchDebug({ lastError: `poll завис на ${Math.round(stuckMs / 1000)}с, перезапуск` });
+    }
     this.pollInFlight = true;
+    this.pollStartedAt = Date.now();
     try {
       const data = await pollCallSignals(callId, this.sinceSeq);
       if (!data) return;
