@@ -8,7 +8,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { loginMessenger } from "@/lib/messenger/client";
+import { fetchAccessCheck, verifyMessengerPin } from "@/lib/messenger/client";
+import { verifyStorageKeyAgainstHistory } from "@/lib/messenger/history-db";
+import { normalizeKzPhone } from "@/lib/messenger/phone";
 import { deriveStorageKey } from "@/lib/messenger/storage-key";
 
 interface UnlockContextValue {
@@ -25,12 +27,29 @@ export function MessengerUnlockProvider({ children }: { children: ReactNode }) {
   const [storageKey, setStorageKey] = useState<CryptoKey | null>(null);
 
   const unlockWithPin = useCallback(async (phone: string, pin: string) => {
-    const res = await loginMessenger(phone, pin);
-    if (!res.ok) {
-      return { ok: false, error: res.error ?? "Неверный PIN" };
+    const access = await fetchAccessCheck(true);
+    if (!access.messengerLoggedIn || !access.phone) {
+      return { ok: false, error: "Сессия истекла. Войдите снова." };
     }
+    if (normalizeKzPhone(phone) !== normalizeKzPhone(access.phone)) {
+      return { ok: false, error: "Неверный номер" };
+    }
+
     try {
       const key = await deriveStorageKey(pin);
+      const localCheck = await verifyStorageKeyAgainstHistory(key);
+
+      if (localCheck === "invalid") {
+        return { ok: false, error: "Неверный PIN" };
+      }
+
+      if (localCheck === "no_history") {
+        const res = await verifyMessengerPin(pin);
+        if (!res.ok) {
+          return { ok: false, error: res.error ?? "Неверный PIN" };
+        }
+      }
+
       setStorageKey(key);
       return { ok: true };
     } catch {

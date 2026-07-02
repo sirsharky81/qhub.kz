@@ -201,6 +201,30 @@ export async function countAllUnreadDm(): Promise<number> {
   return records.filter((r) => !r.mine && r.deliveryStatus !== "read").length;
 }
 
+/** Check PIN by decrypting one stored message; no_history if IndexedDB is empty. */
+export async function verifyStorageKeyAgainstHistory(
+  storageKey: CryptoKey,
+): Promise<"valid" | "invalid" | "no_history"> {
+  const db = await openDb();
+  const record = await new Promise<HistoryMessageRecord | null>((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, "readonly");
+    const store = transaction.objectStore(STORE_MESSAGES);
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      resolve(cursor ? (cursor.value as HistoryMessageRecord) : null);
+    };
+    request.onerror = () => reject(request.error);
+  });
+  if (!record) return "no_history";
+  try {
+    await decryptFromStorage(storageKey, record.storageCiphertext, record.storageIv);
+    return "valid";
+  } catch {
+    return "invalid";
+  }
+}
+
 export async function markIncomingAsRead(chatId: string): Promise<void> {
   const db = await openDb();
   const records = await new Promise<HistoryMessageRecord[]>((resolve, reject) => {

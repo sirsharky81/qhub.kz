@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PinInput } from "./PinInput";
 import { MessengerShell } from "./MessengerShell";
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function PinUnlockGate({ phone, maskedPhone, title, backHref, children }: Props) {
+  const router = useRouter();
   const { isUnlocked, unlockWithPin } = useMessengerUnlock();
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +32,10 @@ export function PinUnlockGate({ phone, maskedPhone, title, backHref, children }:
     try {
       const res = await unlockWithPin(phone, pin);
       if (!res.ok) {
+        if (res.error?.includes("Сессия истекла")) {
+          router.replace("/tools/messenger/login");
+          return;
+        }
         setError(res.error ?? "Неверный PIN");
         setPin("");
       }

@@ -78,6 +78,20 @@ export async function loginMessenger(phone: string, pin: string, captchaToken?: 
   return data;
 }
 
+/** Verify PIN when session already exists (PIN unlock — no CAPTCHA). */
+export async function verifyMessengerPin(pin: string): Promise<{
+  ok: boolean;
+  error?: string;
+  lockedUntil?: number;
+}> {
+  const res = await platformFetch("/api/messenger/auth/verify-pin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
+  });
+  return res.json() as Promise<{ ok: boolean; error?: string; lockedUntil?: number }>;
+}
+
 export async function setMessengerPin(phone: string, pin: string, confirmPin: string) {
   const res = await platformFetch("/api/messenger/auth/set-pin", {
     method: "POST",
