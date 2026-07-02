@@ -89,7 +89,16 @@ async function fetchMeteredIceServers(): Promise<RTCIceServer[] | null> {
   if (region) url.searchParams.set("region", region);
 
   try {
-    const res = await fetch(url.toString(), { cache: "no-store" });
+    // Metered.ca is a third-party dependency with no SLA here. Without a
+    // timeout, a slow/hanging response stalls this whole route, which in
+    // turn stalls the client's setupPeerConnection() before it can even
+    // create the offer — the call would silently sit there before the user
+    // ever sees "Звоним...", or push createOffer() several seconds later
+    // than expected. Bound it so we fall back to STUN-only quickly instead.
+    const res = await fetch(url.toString(), {
+      cache: "no-store",
+      signal: AbortSignal.timeout(4000),
+    });
     if (!res.ok) {
       console.error("[ice-config] Metered API failed:", res.status);
       return null;

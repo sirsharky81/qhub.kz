@@ -84,6 +84,7 @@ export class CallController {
   private localAnswerSdp: string | null = null;
   private lastSdpResendAt = 0;
   private callStartedAt = 0;
+  private pollInFlight = false;
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
@@ -571,6 +572,15 @@ export class CallController {
   }
 
   private async pollOnce(callId: string): Promise<void> {
+    // Re-entrancy guard: on a slow mobile connection a single poll round-trip
+    // can easily exceed the 150ms tick interval. Without this guard, the
+    // setInterval keeps firing regardless and piles up more and more
+    // concurrent requests to the same endpoint on top of the one still
+    // in flight — which can stall the connection (mobile browsers cap
+    // concurrent connections per host) so hard that everything after the
+    // first successful poll silently stops responding.
+    if (this.pollInFlight) return;
+    this.pollInFlight = true;
     try {
       const data = await pollCallSignals(callId, this.sinceSeq);
       if (!data) return;
@@ -598,6 +608,8 @@ export class CallController {
     } catch (err) {
       console.error("[call] poll tick failed:", err);
       this.patchDebug({ lastError: describeError(err) });
+    } finally {
+      this.pollInFlight = false;
     }
   }
 
@@ -796,6 +808,7 @@ export class CallController {
       this.pollTimer = null;
     }
     this.pollCallId = null;
+    this.pollInFlight = false;
   }
 
   private stopHeartbeat(): void {
