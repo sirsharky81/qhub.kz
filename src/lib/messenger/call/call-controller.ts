@@ -2,6 +2,7 @@ import {
   prepareAudioSessionForCall,
   restoreAudioSessionAfterCall,
 } from "@/lib/audio-session";
+import { prepareCallAudioOutput, releaseCallAudioOutput } from "@/lib/platform/call-audio";
 import { ensureMediaPermissions } from "@/lib/platform/media-access";
 import {
   CALL_CONNECT_POLL_INTERVAL_MS,
@@ -426,6 +427,7 @@ export class CallController {
 
   private async ensureLocalAudio(): Promise<void> {
     prepareAudioSessionForCall();
+    await prepareCallAudioOutput();
     await withTimeout(ensureMediaPermissions({ audio: true }), 15000, "media_permissions");
     this.localStream = await withTimeout(
       navigator.mediaDevices.getUserMedia({
@@ -1084,6 +1086,7 @@ export class CallController {
       this.localStream = null;
     }
     restoreAudioSessionAfterCall();
+    void releaseCallAudioOutput();
 
     const phase: CallPhase = "ended";
     this.patch({

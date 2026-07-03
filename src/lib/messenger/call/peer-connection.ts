@@ -1,5 +1,10 @@
 import { prepareAudioSessionForCall } from "@/lib/audio-session";
-import { isIOSDevice, isStandalonePWA } from "@/lib/platform/device";
+import {
+  setCallSpeakerEnabled,
+  shouldKeepMediaElementVisible,
+  usesWebIosElementRouting,
+} from "@/lib/platform/call-audio";
+import { isIOSDevice } from "@/lib/platform/device";
 import type { RTCIceServer } from "./types";
 
 export type IceCandidatePayload = {
@@ -22,16 +27,16 @@ function parseIcePayload(payload: string): RTCIceCandidateInit | null {
   }
 }
 
-/** iOS PWA: display:none silences WebRTC remote audio. Keep a 1px in-viewport element. */
+/** iOS WebKit silences off-screen WebRTC remote audio — keep a 1px in-viewport element. */
 function hideMediaElement(el: HTMLMediaElement): void {
-  const pwaIos = isIOSDevice() && isStandalonePWA();
+  const keepVisible = shouldKeepMediaElementVisible();
   Object.assign(el.style, {
     position: "fixed",
-    left: pwaIos ? "0" : "-9999px",
+    left: keepVisible ? "0" : "-9999px",
     bottom: "0",
     width: "1px",
     height: "1px",
-    opacity: pwaIos ? "0.001" : "0",
+    opacity: keepVisible ? "0.001" : "0",
     pointerEvents: "none",
     zIndex: "-1",
   });
@@ -55,8 +60,6 @@ export class CallPeerConnection {
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
   private remoteMedia: HTMLMediaElement | null = null;
-  private webAudioCtx: AudioContext | null = null;
-  private webAudioSource: MediaStreamAudioSourceNode | null = null;
   private speakerOn = true;
   private onIceCandidate: ((candidate: IceCandidatePayload) => void) | null = null;
   private onConnectionState: ((state: RTCPeerConnectionState) => void) | null = null;
@@ -120,43 +123,28 @@ export class CallPeerConnection {
     this.remoteMedia = null;
   }
 
-  private stopWebAudioPlayback(): void {
-    this.webAudioSource?.disconnect();
-    this.webAudioSource = null;
+  /** Web Safari/PWA: loudspeaker via <video>, earpiece via <audio>. Native apps use AVAudioSession. */
+  private shouldUseVideoElement(): boolean {
+    return usesWebIosElementRouting() && this.speakerOn;
   }
 
   private mountRemoteMedia(): void {
     if (!this.remoteStream) return;
-    this.stopWebAudioPlayback();
+
+    const useVideo = this.shouldUseVideoElement();
+    const currentIsVideo = this.remoteMedia?.tagName === "VIDEO";
+    if (this.remoteMedia?.srcObject === this.remoteStream && currentIsVideo === useVideo) {
+      return;
+    }
+
     this.destroyRemoteMedia();
 
-    // iOS routes WebRTC remote audio to the loudspeaker via <video>, earpiece via <audio>.
-    const useVideo = isIOSDevice() && this.speakerOn;
     const el = document.createElement(useVideo ? "video" : "audio");
     configureMediaElement(el);
     document.body.appendChild(el);
     el.srcObject = this.remoteStream;
     this.remoteMedia = el;
     void this.playRemoteAudio();
-  }
-
-  private async startWebAudioPlayback(): Promise<boolean> {
-    if (!this.remoteStream) return false;
-    try {
-      prepareAudioSessionForCall();
-      if (!this.webAudioCtx) {
-        this.webAudioCtx = new AudioContext();
-      }
-      if (this.webAudioCtx.state === "suspended") {
-        await this.webAudioCtx.resume();
-      }
-      this.stopWebAudioPlayback();
-      this.webAudioSource = this.webAudioCtx.createMediaStreamSource(this.remoteStream);
-      this.webAudioSource.connect(this.webAudioCtx.destination);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   async playRemoteAudio(): Promise<void> {
@@ -179,22 +167,33 @@ export class CallPeerConnection {
       }
     };
 
-    if (await tryElementPlay()) return;
+    if (await tryElementPlay()) {
+      await setCallSpeakerEnabled(this.speakerOn);
+      return;
+    }
 
     if (isIOSDevice()) {
-      if (await this.startWebAudioPlayback()) return;
       await new Promise((resolve) => setTimeout(resolve, 250));
-      if (await tryElementPlay()) return;
+      if (await tryElementPlay()) {
+        await setCallSpeakerEnabled(this.speakerOn);
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 500));
-      await tryElementPlay();
+      if (await tryElementPlay()) {
+        await setCallSpeakerEnabled(this.speakerOn);
+      }
     }
   }
 
   setSpeakerphone(enabled: boolean): void {
+    const routingChanged =
+      usesWebIosElementRouting() && this.speakerOn !== enabled;
     this.speakerOn = enabled;
     prepareAudioSessionForCall();
-    if (this.remoteStream) {
+    if (this.remoteStream && routingChanged) {
       this.mountRemoteMedia();
+    } else {
+      void setCallSpeakerEnabled(enabled).then(() => this.playRemoteAudio());
     }
   }
 
@@ -288,11 +287,6 @@ export class CallPeerConnection {
   close(): void {
     this.pendingRemoteCandidates = [];
     this.remoteDescriptionSet = false;
-    this.stopWebAudioPlayback();
-    if (this.webAudioCtx) {
-      void this.webAudioCtx.close();
-      this.webAudioCtx = null;
-    }
     this.destroyRemoteMedia();
     this.remoteStream = null;
     for (const track of this.localStream?.getTracks() ?? []) {
