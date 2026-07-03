@@ -82,6 +82,9 @@ const INITIAL_DEBUG: CallDebugInfo = {
   mediaTag: null,
   mediaPaused: true,
   remoteTrackMuted: true,
+  hasRemoteTrack: false,
+  receiverCount: 0,
+  speakerOn: true,
 };
 
 const INITIAL_STATE: CallState = {
@@ -320,7 +323,7 @@ export class CallController {
     prepareAudioSessionForCall();
     this.pc?.setSpeakerphone(speakerOn);
     this.patch({ speakerOn });
-    void this.pc?.playRemoteAudio();
+    void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
   }
 
   async handleDeepLink(

@@ -41,6 +41,9 @@ export interface CallDebugInfo {
   mediaTag: string | null;
   mediaPaused: boolean;
   remoteTrackMuted: boolean;
+  hasRemoteTrack: boolean;
+  receiverCount: number;
+  speakerOn: boolean;
 }
 
 export interface CallState {

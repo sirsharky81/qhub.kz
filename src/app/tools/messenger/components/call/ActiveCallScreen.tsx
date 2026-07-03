@@ -38,23 +38,29 @@ interface Props {
 
 function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
   if (phase !== "outgoing" && phase !== "connecting" && phase !== "active") return null;
-  const row = (label: string, value: string | boolean) => (
+  const row = (label: string, value: string | boolean, goodWhenTrue = true) => {
+    const isGood = typeof value === "boolean" ? (goodWhenTrue ? value : !value) : true;
+    return (
     <div className="flex justify-between gap-3">
       <span className="text-white/50">{label}</span>
-      <span className={value === false ? "text-red-400" : "text-emerald-400"}>
+      <span className={isGood ? "text-emerald-400" : "text-red-400"}>
         {typeof value === "boolean" ? (value ? "да" : "нет") : value}
       </span>
     </div>
-  );
+    );
+  };
   return (
     <div className="mx-4 mt-3 rounded-lg bg-black/60 p-3 font-mono text-[11px] leading-tight text-white/80 backdrop-blur">
       {row("время звонка", `${debug.elapsedSec}с`)}
       {row("роль", debug.isCaller ? "звонящий" : "принимающий")}
       {phase === "active" && (
         <>
+          {row("hasRemoteTrack", debug.hasRemoteTrack)}
+          {row("receivers", String(debug.receiverCount))}
+          {row("speakerOn", debug.speakerOn)}
           {row("media", debug.mediaTag ?? "—")}
-          {row("media paused", debug.mediaPaused)}
-          {row("track muted", debug.remoteTrackMuted)}
+          {row("media paused", debug.mediaPaused, false)}
+          {row("track muted", debug.remoteTrackMuted, false)}
         </>
       )}
       {(phase === "outgoing" || phase === "connecting") && (

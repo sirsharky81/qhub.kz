@@ -34,7 +34,6 @@ export { purgeOrphanedCallMediaElements, releaseCallMediaPlayback };
 
 export class CallPeerConnection {
   private pc: RTCPeerConnection | null = null;
-  private audioTransceiver: RTCRtpTransceiver | null = null;
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
   private remoteMedia: HTMLMediaElement | null = null;
@@ -46,6 +45,7 @@ export class CallPeerConnection {
   private onRemoteTrack: (() => void) | null = null;
   private remoteDescriptionSet = false;
   private pendingRemoteCandidates: RTCIceCandidateInit[] = [];
+  private remoteSyncTimers: ReturnType<typeof setTimeout>[] = [];
 
   async init(iceServers: RTCIceServer[]): Promise<void> {
     this.pc = new RTCPeerConnection({
@@ -54,7 +54,6 @@ export class CallPeerConnection {
       bundlePolicy: "max-bundle",
       rtcpMuxPolicy: "require",
     });
-    this.audioTransceiver = this.pc.addTransceiver("audio", { direction: "sendrecv" });
 
     this.pc.onicecandidate = (ev) => {
       if (!this.onIceCandidate) return;
@@ -74,14 +73,19 @@ export class CallPeerConnection {
       this.bindRemoteAudioTrack(ev.track, stream);
     };
     this.pc.onconnectionstatechange = () => {
-      if (this.pc && this.onConnectionState) {
-        this.onConnectionState(this.pc.connectionState);
+      if (!this.pc) return;
+      if (this.pc.connectionState === "connected") {
+        this.syncRemoteAudioFromPeer();
       }
+      this.onConnectionState?.(this.pc.connectionState);
     };
     this.pc.oniceconnectionstatechange = () => {
-      if (this.pc && this.onIceConnectionState) {
-        this.onIceConnectionState(this.pc.iceConnectionState);
+      if (!this.pc) return;
+      const state = this.pc.iceConnectionState;
+      if (state === "connected" || state === "completed") {
+        this.syncRemoteAudioFromPeer();
       }
+      this.onIceConnectionState?.(state);
     };
   }
 
@@ -90,7 +94,7 @@ export class CallPeerConnection {
   }
 
   needsPlaybackRetry(): boolean {
-    if (!this.remoteStream) return false;
+    if (!this.remoteStream) return true;
     if (!this.remoteMedia) return true;
     return this.remoteMedia.paused || this.remoteMedia.ended;
   }
@@ -99,12 +103,67 @@ export class CallPeerConnection {
     mediaTag: string | null;
     mediaPaused: boolean;
     remoteTrackMuted: boolean;
+    hasRemoteTrack: boolean;
+    receiverCount: number;
+    speakerOn: boolean;
   } {
     return {
       mediaTag: this.remoteMedia?.tagName ?? null,
       mediaPaused: this.remoteMedia?.paused ?? true,
       remoteTrackMuted: this.remoteAudioTrack?.muted ?? true,
+      hasRemoteTrack: Boolean(this.remoteAudioTrack),
+      receiverCount: this.pc?.getReceivers().filter((r) => r.track?.kind === "audio").length ?? 0,
+      speakerOn: this.speakerOn,
     };
+  }
+
+  /** Safari often skips ontrack on the caller — attach from RTCRtpReceiver instead. */
+  syncRemoteAudioFromPeer(): boolean {
+    if (!this.pc) return false;
+
+    const tracks: MediaStreamTrack[] = [];
+    for (const receiver of this.pc.getReceivers()) {
+      if (receiver.track?.kind === "audio") {
+        tracks.push(receiver.track);
+      }
+    }
+    for (const transceiver of this.pc.getTransceivers()) {
+      const track = transceiver.receiver.track;
+      if (track?.kind === "audio" && !tracks.includes(track)) {
+        tracks.push(track);
+      }
+    }
+
+    const track = tracks[0];
+    if (!track) return false;
+
+    if (this.remoteAudioTrack === track) {
+      return true;
+    }
+
+    const stream = new MediaStream([track]);
+    this.bindRemoteAudioTrack(track, stream);
+    return true;
+  }
+
+  private scheduleRemoteAudioSync(): void {
+    this.clearRemoteSyncTimers();
+    const delays = isIOSDevice() ? [0, 100, 300, 600, 1200, 2500, 4000] : [0, 300, 1000];
+    for (const delay of delays) {
+      const timer = setTimeout(() => {
+        if (this.syncRemoteAudioFromPeer()) {
+          void this.playRemoteAudio();
+        }
+      }, delay);
+      this.remoteSyncTimers.push(timer);
+    }
+  }
+
+  private clearRemoteSyncTimers(): void {
+    for (const timer of this.remoteSyncTimers) {
+      clearTimeout(timer);
+    }
+    this.remoteSyncTimers = [];
   }
 
   private bindRemoteAudioTrack(track: MediaStreamTrack, stream: MediaStream): void {
@@ -122,6 +181,7 @@ export class CallPeerConnection {
       if (this.remoteMedia) {
         this.remoteMedia.srcObject = null;
       }
+      this.remoteAudioTrack = null;
     };
 
     this.mountRemoteMedia();
@@ -132,12 +192,12 @@ export class CallPeerConnection {
     if (!this.remoteStream) return;
 
     const el = getCallMediaElement(this.speakerOn);
-    const sameElement =
-      this.remoteMedia === el &&
-      this.remoteMedia.srcObject === this.remoteStream;
-    if (sameElement) return;
-
     detachInactiveCallMedia(el);
+
+    if (this.remoteMedia && this.remoteMedia !== el) {
+      this.remoteMedia.srcObject = null;
+    }
+
     el.srcObject = this.remoteStream;
     this.remoteMedia = el;
     void this.playRemoteAudio();
@@ -151,6 +211,9 @@ export class CallPeerConnection {
 
   async playRemoteAudio(): Promise<void> {
     prepareAudioSessionForCall();
+    if (!this.remoteStream) {
+      this.syncRemoteAudioFromPeer();
+    }
     if (!this.remoteStream) return;
 
     if (!this.remoteMedia?.srcObject) {
@@ -175,10 +238,9 @@ export class CallPeerConnection {
   }
 
   setSpeakerphone(enabled: boolean): void {
-    const changed = this.speakerOn !== enabled;
     this.speakerOn = enabled;
     prepareAudioSessionForCall();
-    if (!this.remoteStream || !changed) return;
+    if (!this.remoteStream) return;
     this.mountRemoteMedia();
   }
 
@@ -199,8 +261,9 @@ export class CallPeerConnection {
     const track = stream.getAudioTracks()[0];
     if (!this.pc || !track) return;
 
-    if (this.audioTransceiver?.sender) {
-      await this.audioTransceiver.sender.replaceTrack(track);
+    const audioSender = this.pc.getSenders().find((sender) => sender.track?.kind === "audio");
+    if (audioSender) {
+      await audioSender.replaceTrack(track);
       return;
     }
 
@@ -209,7 +272,10 @@ export class CallPeerConnection {
 
   async createOffer(): Promise<string> {
     if (!this.pc) throw new Error("no_pc");
-    const offer = await this.pc.createOffer();
+    const offer = await this.pc.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: false,
+    });
     await this.pc.setLocalDescription(offer);
     return JSON.stringify(this.pc.localDescription);
   }
@@ -222,6 +288,7 @@ export class CallPeerConnection {
     await this.flushPendingRemoteCandidates();
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
+    this.scheduleRemoteAudioSync();
     return JSON.stringify(this.pc.localDescription);
   }
 
@@ -231,6 +298,9 @@ export class CallPeerConnection {
     await this.pc.setRemoteDescription(answer);
     this.remoteDescriptionSet = true;
     await this.flushPendingRemoteCandidates();
+    this.syncRemoteAudioFromPeer();
+    this.scheduleRemoteAudioSync();
+    void this.playRemoteAudio();
   }
 
   async addIceCandidate(payload: string): Promise<void> {
@@ -261,6 +331,7 @@ export class CallPeerConnection {
       }
     }
     this.pendingRemoteCandidates = remaining;
+    this.syncRemoteAudioFromPeer();
   }
 
   setMuted(muted: boolean): void {
@@ -270,6 +341,7 @@ export class CallPeerConnection {
   }
 
   close(): void {
+    this.clearRemoteSyncTimers();
     this.pendingRemoteCandidates = [];
     this.remoteDescriptionSet = false;
 
@@ -290,7 +362,6 @@ export class CallPeerConnection {
       track.stop();
     }
     this.localStream = null;
-    this.audioTransceiver = null;
 
     if (this.pc) {
       this.pc.close();
