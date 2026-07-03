@@ -40,9 +40,10 @@ function pcmToneWav(frequency: number, durationSec: number, volume = 0.35): stri
 
 export class CallSounds {
   private audio: HTMLAudioElement | null = null;
-  private pulseTimer: ReturnType<typeof setTimeout> | null = null;
+  private pulseTimer: ReturnType<typeof setInterval> | null = null;
   private mode: RingMode | null = null;
   private primed = false;
+  private generation = 0;
 
   prime(): void {
     if (this.primed || typeof document === "undefined") return;
@@ -69,21 +70,30 @@ export class CallSounds {
     this.stop();
 
     this.mode = mode;
+    const gen = this.generation;
     prepareAudioSessionForCall();
 
     const playBurst = async () => {
-      if (!this.mode) return;
-      this.audio?.pause();
-      this.audio = document.createElement("audio");
-      this.audio.setAttribute("playsinline", "true");
-      this.audio.setAttribute("webkit-playsinline", "true");
-      this.audio.volume = 1;
-      this.audio.src =
+      if (!this.mode || gen !== this.generation) return;
+      if (this.audio) {
+        this.audio.pause();
+        this.audio.src = "";
+        this.audio.remove();
+        this.audio = null;
+      }
+      if (!this.mode || gen !== this.generation) return;
+
+      const el = document.createElement("audio");
+      el.setAttribute("playsinline", "true");
+      el.setAttribute("webkit-playsinline", "true");
+      el.volume = 1;
+      el.src =
         mode === "incoming"
           ? pcmToneWav(440, 0.35, 0.45)
           : pcmToneWav(425, 0.45, 0.4);
+      this.audio = el;
       try {
-        await this.audio.play();
+        await el.play();
       } catch {
         // iOS may block until user interacts with the page.
       }
@@ -95,6 +105,7 @@ export class CallSounds {
   }
 
   stop(): void {
+    this.generation += 1;
     this.mode = null;
     if (this.pulseTimer) {
       clearInterval(this.pulseTimer);

@@ -16,7 +16,7 @@ import {
 import { normalizeKzPhone } from "../phone";
 import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
-import { CallPeerConnection, type IceCandidatePayload } from "./peer-connection";
+import { CallPeerConnection, purgeOrphanedCallMediaElements, type IceCandidatePayload } from "./peer-connection";
 import {
   endCallApi,
   fetchIceServers,
@@ -163,6 +163,7 @@ export class CallController {
         callId: data.session.callId,
         channel: this.channel,
         peerPhone: this.peerPhone,
+        speakerOn: !isIOSDevice(),
         endReason: null,
         errorMessage: null,
       });
@@ -215,6 +216,7 @@ export class CallController {
       callId: result.callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
+      speakerOn: !isIOSDevice(),
       endReason: null,
       errorMessage: null,
     });
@@ -327,6 +329,7 @@ export class CallController {
       callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
+      speakerOn: !isIOSDevice(),
       endReason: null,
       errorMessage: null,
     });
@@ -688,6 +691,7 @@ export class CallController {
     if (isIOSDevice()) {
       for (const delay of [300, 800, 1500]) {
         setTimeout(() => {
+          if (!this.pc?.needsPlaybackRetry()) return;
           prepareAudioSessionForCall();
           void this.pc?.playRemoteAudio();
         }, delay);
@@ -1080,6 +1084,7 @@ export class CallController {
 
     this.pc?.close();
     this.pc = null;
+    purgeOrphanedCallMediaElements();
 
     if (this.localStream) {
       for (const t of this.localStream.getTracks()) t.stop();
