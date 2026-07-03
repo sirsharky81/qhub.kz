@@ -1,9 +1,13 @@
 import { prepareAudioSessionForCall } from "@/lib/audio-session";
 import {
+  hasNativeCallAudioRouting,
   setCallSpeakerEnabled,
   shouldKeepMediaElementVisible,
-  usesWebIosElementRouting,
 } from "@/lib/platform/call-audio";
+import {
+  applySinkIdToElement,
+  supportsIosWebSinkId,
+} from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 import type { RTCIceServer } from "./types";
 
@@ -12,6 +16,8 @@ export type IceCandidatePayload = {
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
 };
+
+type PlaybackMode = "ios-sink-id" | "ios-element" | "native-android" | "default";
 
 function parseIcePayload(payload: string): RTCIceCandidateInit | null {
   try {
@@ -54,12 +60,21 @@ function configureMediaElement(el: HTMLMediaElement): void {
   hideMediaElement(el);
 }
 
+function playbackMode(): PlaybackMode {
+  if (isIOSDevice() && supportsIosWebSinkId()) return "ios-sink-id";
+  if (isIOSDevice()) return "ios-element";
+  if (hasNativeCallAudioRouting()) return "native-android";
+  return "default";
+}
+
 export class CallPeerConnection {
   private pc: RTCPeerConnection | null = null;
   private audioTransceiver: RTCRtpTransceiver | null = null;
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
   private remoteMedia: HTMLMediaElement | null = null;
+  private webAudioCtx: AudioContext | null = null;
+  private webAudioSource: MediaStreamAudioSourceNode | null = null;
   private speakerOn = true;
   private onIceCandidate: ((candidate: IceCandidatePayload) => void) | null = null;
   private onConnectionState: ((state: RTCPeerConnectionState) => void) | null = null;
@@ -115,7 +130,17 @@ export class CallPeerConnection {
     this.onRemoteTrack?.();
   }
 
+  private stopWebAudioPlayback(): void {
+    this.webAudioSource?.disconnect();
+    this.webAudioSource = null;
+  }
+
   private destroyRemoteMedia(): void {
+    this.stopWebAudioPlayback();
+    if (this.webAudioCtx) {
+      void this.webAudioCtx.close();
+      this.webAudioCtx = null;
+    }
     if (!this.remoteMedia) return;
     this.remoteMedia.pause();
     this.remoteMedia.srcObject = null;
@@ -123,13 +148,53 @@ export class CallPeerConnection {
     this.remoteMedia = null;
   }
 
-  /** Web Safari/PWA: loudspeaker via <video>, earpiece via <audio>. Native apps use AVAudioSession. */
+  /** iOS <26: loudspeaker via <video>, earpiece via <audio>. */
   private shouldUseVideoElement(): boolean {
-    return usesWebIosElementRouting() && this.speakerOn;
+    return playbackMode() === "ios-element" && this.speakerOn;
+  }
+
+  private async mountIosSinkIdRelay(): Promise<void> {
+    if (!this.remoteStream) return;
+    if (this.remoteMedia?.srcObject && this.webAudioSource) return;
+
+    this.destroyRemoteMedia();
+    prepareAudioSessionForCall();
+
+    this.webAudioCtx = new AudioContext();
+    if (this.webAudioCtx.state === "suspended") {
+      await this.webAudioCtx.resume();
+    }
+
+    const destination = this.webAudioCtx.createMediaStreamDestination();
+    this.webAudioSource = this.webAudioCtx.createMediaStreamSource(this.remoteStream);
+    this.webAudioSource.connect(destination);
+
+    const el = document.createElement("audio");
+    configureMediaElement(el);
+    document.body.appendChild(el);
+    el.srcObject = destination.stream;
+    this.remoteMedia = el;
+  }
+
+  private mountDirectMediaElement(useVideo: boolean): void {
+    if (!this.remoteStream) return;
+
+    const el = document.createElement(useVideo ? "video" : "audio");
+    configureMediaElement(el);
+    document.body.appendChild(el);
+    el.srcObject = this.remoteStream;
+    this.remoteMedia = el;
   }
 
   private mountRemoteMedia(): void {
     if (!this.remoteStream) return;
+
+    const mode = playbackMode();
+
+    if (mode === "ios-sink-id") {
+      void this.mountIosSinkIdRelay().then(() => this.playRemoteAudio());
+      return;
+    }
 
     const useVideo = this.shouldUseVideoElement();
     const currentIsVideo = this.remoteMedia?.tagName === "VIDEO";
@@ -137,22 +202,38 @@ export class CallPeerConnection {
       return;
     }
 
-    this.destroyRemoteMedia();
+    const previous = this.remoteMedia;
+    this.remoteMedia = null;
+    this.mountDirectMediaElement(useVideo);
+    void this.playRemoteAudio().then(() => {
+      if (previous && previous !== this.remoteMedia) {
+        previous.pause();
+        previous.srcObject = null;
+        previous.remove();
+      }
+    });
+  }
 
-    const el = document.createElement(useVideo ? "video" : "audio");
-    configureMediaElement(el);
-    document.body.appendChild(el);
-    el.srcObject = this.remoteStream;
-    this.remoteMedia = el;
-    void this.playRemoteAudio();
+  private async applySpeakerRoute(): Promise<void> {
+    const mode = playbackMode();
+    if (mode === "ios-sink-id" && this.remoteMedia) {
+      await applySinkIdToElement(this.remoteMedia, this.speakerOn);
+      return;
+    }
+    if (mode === "native-android") {
+      await setCallSpeakerEnabled(this.speakerOn);
+    }
   }
 
   async playRemoteAudio(): Promise<void> {
     prepareAudioSessionForCall();
     if (!this.remoteStream) return;
 
-    if (!this.remoteMedia?.srcObject) {
+    if (playbackMode() === "ios-sink-id" && !this.webAudioSource) {
+      await this.mountIosSinkIdRelay();
+    } else if (!this.remoteMedia?.srcObject) {
       this.mountRemoteMedia();
+      return;
     }
 
     const tryElementPlay = async (): Promise<boolean> => {
@@ -168,33 +249,37 @@ export class CallPeerConnection {
     };
 
     if (await tryElementPlay()) {
-      await setCallSpeakerEnabled(this.speakerOn);
+      await this.applySpeakerRoute();
       return;
     }
 
     if (isIOSDevice()) {
       await new Promise((resolve) => setTimeout(resolve, 250));
       if (await tryElementPlay()) {
-        await setCallSpeakerEnabled(this.speakerOn);
+        await this.applySpeakerRoute();
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
       if (await tryElementPlay()) {
-        await setCallSpeakerEnabled(this.speakerOn);
+        await this.applySpeakerRoute();
       }
     }
   }
 
   setSpeakerphone(enabled: boolean): void {
-    const routingChanged =
-      usesWebIosElementRouting() && this.speakerOn !== enabled;
+    const mode = playbackMode();
+    const elementSwapNeeded = mode === "ios-element" && this.speakerOn !== enabled;
     this.speakerOn = enabled;
     prepareAudioSessionForCall();
-    if (this.remoteStream && routingChanged) {
+
+    if (!this.remoteStream) return;
+
+    if (elementSwapNeeded) {
       this.mountRemoteMedia();
-    } else {
-      void setCallSpeakerEnabled(enabled).then(() => this.playRemoteAudio());
+      return;
     }
+
+    void this.applySpeakerRoute().then(() => this.playRemoteAudio());
   }
 
   setHandlers(handlers: {

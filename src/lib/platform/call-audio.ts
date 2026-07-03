@@ -13,11 +13,12 @@ const CallAudioNative = registerPlugin<CallAudioPlugin>("CallAudio", {
   web: () => import("./call-audio.web").then((m) => new m.CallAudioWeb()),
 });
 
-/** Capacitor shell can route speaker/earpiece via native AudioManager / AVAudioSession. */
+/**
+ * Native speaker routing is only available in the Android Capacitor shell.
+ * iOS uses PWA/website only; Android PWA/website has no programmatic routing.
+ */
 export function hasNativeCallAudioRouting(): boolean {
-  if (!isNativePlatform()) return false;
-  const platform = getNativePlatform();
-  return platform === "android" || platform === "ios";
+  return isNativePlatform() && getNativePlatform() === "android";
 }
 
 /** iOS WebKit silences off-screen WebRTC playback — keep a 1px in-viewport element. */
@@ -25,9 +26,9 @@ export function shouldKeepMediaElementVisible(): boolean {
   return isIOSDevice();
 }
 
-/** iOS Safari/PWA speaker hack (<video> vs <audio>) when native routing is unavailable. */
+/** iOS Safari/PWA legacy hack: loudspeaker via <video>, earpiece via <audio>. */
 export function usesWebIosElementRouting(): boolean {
-  return isIOSDevice() && !hasNativeCallAudioRouting();
+  return isIOSDevice();
 }
 
 export async function prepareCallAudioOutput(): Promise<void> {
@@ -36,7 +37,7 @@ export async function prepareCallAudioOutput(): Promise<void> {
   try {
     await CallAudioNative.prepare();
   } catch {
-    // Native plugin missing in older builds — web fallbacks still apply.
+    // Native plugin missing in older Android builds.
   }
 }
 
@@ -46,7 +47,7 @@ export async function setCallSpeakerEnabled(enabled: boolean): Promise<void> {
   try {
     await CallAudioNative.setSpeaker({ enabled });
   } catch {
-    // Ignore — element routing may still work on web iOS.
+    // Best-effort — element playback may still work.
   }
 }
 
