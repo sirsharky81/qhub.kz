@@ -1,4 +1,4 @@
-import { prepareAudioSessionForCall } from "@/lib/audio-session";
+import { getAudioSessionState, prepareAudioSessionForCall } from "@/lib/audio-session";
 import { setCallSpeakerEnabled } from "@/lib/platform/call-audio";
 import { isIOSDevice } from "@/lib/platform/device";
 import {
@@ -6,8 +6,8 @@ import {
   getCallMediaRoute,
   playCallMedia,
   purgeOrphanedCallMediaElements,
+  rebuildCallMediaStream,
   releaseCallMediaPlayback,
-  switchCallSpeakerRoute,
   useIosWebAudioRelay,
 } from "./call-media-playback";
 import type { RTCIceServer } from "./types";
@@ -109,6 +109,7 @@ export class CallPeerConnection {
     receiverCount: number;
     speakerOn: boolean;
     mediaRoute: string;
+    audioSessionState: string | null;
   } {
     return {
       mediaTag: this.remoteMedia?.tagName ?? null,
@@ -118,6 +119,7 @@ export class CallPeerConnection {
       receiverCount: this.pc?.getReceivers().filter((r) => r.track?.kind === "audio").length ?? 0,
       speakerOn: this.speakerOn,
       mediaRoute: getCallMediaRoute(this.speakerOn),
+      audioSessionState: getAudioSessionState(),
     };
   }
 
@@ -255,11 +257,32 @@ export class CallPeerConnection {
   }
 
   private async switchIosSpeakerRoute(): Promise<void> {
-    const el = await switchCallSpeakerRoute(this.remoteStream, this.speakerOn);
-    if (!el) return;
-    this.remoteMedia = el;
-    if (await playCallMedia(el)) {
+    if (!this.remoteStream) return;
+    this.remoteMedia = await rebuildCallMediaStream(this.remoteStream, this.speakerOn);
+    if (await playCallMedia(this.remoteMedia)) {
       await this.applySpeakerRoute();
+    }
+  }
+
+  /** Rebuild playback after iOS audio-session interruption (push sounds, banners). */
+  async recoverRemoteAudioAfterInterruption(): Promise<void> {
+    if (!isIOSDevice() || !this.remoteStream) return;
+
+    this.syncRemoteAudioFromPeer();
+    if (!this.remoteStream) return;
+
+    this.remoteMedia = await rebuildCallMediaStream(this.remoteStream, this.speakerOn);
+
+    const delays = [0, 250, 600, 1200];
+    for (const delay of delays) {
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      if (!this.remoteMedia) return;
+      if (await playCallMedia(this.remoteMedia)) {
+        await this.applySpeakerRoute();
+        return;
+      }
     }
   }
 

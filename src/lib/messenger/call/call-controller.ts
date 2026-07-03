@@ -17,7 +17,8 @@ import {
 import { normalizeKzPhone } from "../phone";
 import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
-import { primeCallMediaPlayback } from "./call-media-playback";
+import { watchCallAudioInterruptions } from "./call-audio-interruption";
+import { primeCallMediaPlayback, resetCallMediaForNewCall } from "./call-media-playback";
 import {
   CallPeerConnection,
   purgeOrphanedCallMediaElements,
@@ -87,6 +88,7 @@ const INITIAL_DEBUG: CallDebugInfo = {
   receiverCount: 0,
   speakerOn: true,
   mediaRoute: "default",
+  audioSessionState: null,
 };
 
 const INITIAL_STATE: CallState = {
@@ -137,6 +139,7 @@ export class CallController {
   private iceOutBatch: IceCandidatePayload[] = [];
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
   private setupWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private interruptionUnsub: (() => void) | null = null;
 
   configure(params: { myPhone: string; peerPhone: string; channel: string }): void {
     this.myPhone = params.myPhone;
@@ -445,6 +448,7 @@ export class CallController {
   }
 
   private async ensureLocalAudio(): Promise<void> {
+    resetCallMediaForNewCall();
     prepareAudioSessionForCall();
     await prepareCallAudioOutput();
     await withTimeout(ensureMediaPermissions({ audio: true }), 15000, "media_permissions");
@@ -702,6 +706,20 @@ export class CallController {
     this.patchDebug(d);
   }
 
+  private startCallAudioWatch(): void {
+    if (!isIOSDevice()) return;
+    this.stopCallAudioWatch();
+    this.interruptionUnsub = watchCallAudioInterruptions(() => {
+      if (this.state.phase !== "active" || !this.pc) return;
+      void this.pc.recoverRemoteAudioAfterInterruption().then(() => this.patchPlaybackDebug());
+    });
+  }
+
+  private stopCallAudioWatch(): void {
+    this.interruptionUnsub?.();
+    this.interruptionUnsub = null;
+  }
+
   private handlePeerConnected(connected: boolean): void {
     if (!connected || this.state.phase === "active") return;
     this.clearIceTimeout();
@@ -709,6 +727,7 @@ export class CallController {
     this.clearSetupWatchdog();
     this.patch({ phase: "active" });
     this.startDurationTimer();
+    this.startCallAudioWatch();
     getCallSounds().stop();
     prepareAudioSessionForCall();
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
@@ -1091,6 +1110,7 @@ export class CallController {
     this.clearIceTimeout();
     this.clearSetupWatchdog();
     this.stopDurationTimer();
+    this.stopCallAudioWatch();
     getCallSounds().stop();
 
     if (this.iceOutTimer) {

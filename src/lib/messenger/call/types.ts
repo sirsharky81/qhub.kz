@@ -45,6 +45,7 @@ export interface CallDebugInfo {
   receiverCount: number;
   speakerOn: boolean;
   mediaRoute: string;
+  audioSessionState: string | null;
 }
 
 export interface CallState {

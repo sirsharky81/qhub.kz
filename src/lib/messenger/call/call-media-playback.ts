@@ -1,6 +1,7 @@
 import {
   kickAudioSessionAfterCapture,
   prepareAudioSessionForCall,
+  recoverAudioSessionAfterInterruption,
 } from "@/lib/audio-session";
 import {
   applySinkIdToElement,
@@ -263,6 +264,35 @@ export async function attachCallMediaStream(
   return mountLegacyRelayOutput(stream, speakerOn);
 }
 
+/** Full pipeline reset — needed after iOS audio-session interruption or speaker toggle. */
+export async function rebuildCallMediaStream(
+  stream: MediaStream,
+  speakerOn: boolean,
+): Promise<HTMLMediaElement> {
+  if (!isIOSDevice()) {
+    const el = ensureDefaultElement();
+    el.srcObject = stream;
+    return el;
+  }
+
+  destroyEarpieceElement();
+  destroySpeakerElement();
+  destroyRelayGraph();
+  unlocked.audio = false;
+  unlocked.video = false;
+
+  recoverAudioSessionAfterInterruption();
+  kickAudioSessionAfterCapture();
+  prepareAudioSessionForCall();
+
+  return attachCallMediaStream(stream, speakerOn);
+}
+
+/** Reset leftover media elements/unlock flags before a new call. */
+export function resetCallMediaForNewCall(): void {
+  releaseCallMediaPlayback();
+}
+
 /** Swap loudspeaker route without rebuilding the WebAudio relay graph. */
 export async function switchCallSpeakerRoute(
   stream: MediaStream | null,
@@ -310,6 +340,7 @@ export async function applyCallSpeakerRoute(
 
 /** WebKit bug #196539: pause() then play() revives silent WebRTC playback on iOS. */
 export async function playCallMedia(el: HTMLMediaElement): Promise<boolean> {
+  recoverAudioSessionAfterInterruption();
   prepareAudioSessionForCall();
   try {
     el.muted = false;
