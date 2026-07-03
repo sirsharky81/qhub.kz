@@ -1,7 +1,15 @@
 "use client";
 
 import { MESSENGER_NATIVE_PUSH_TOKEN_KEY, MESSENGER_PUSH_PREFS_KEY } from "./constants";
-import { isNativePlatform } from "@/lib/platform/runtime";
+import { isNativePlatform, getNativePlatform } from "@/lib/platform/runtime";
+import { platformFetch } from "@/lib/platform/api-client";
+
+export class NativePushNotConfiguredError extends Error {
+  constructor() {
+    super("native_push_not_configured");
+    this.name = "NativePushNotConfiguredError";
+  }
+}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -80,6 +88,12 @@ export async function fetchMessengerVapidPublicKey(): Promise<string | null> {
 
 export async function subscribeMessengerPush(): Promise<boolean> {
   if (isNativePlatform()) {
+    if (getNativePlatform() === "android") {
+      const { isNativePushConfigured } = await import("@/lib/platform/native/app-capabilities");
+      if (!(await isNativePushConfigured())) {
+        throw new NativePushNotConfiguredError();
+      }
+    }
     const { PlatformNotifications } = await import("@/lib/platform/notifications");
     const perm = await PlatformNotifications.requestPermission();
     if (perm !== "granted") {
@@ -116,9 +130,8 @@ export async function subscribeMessengerPush(): Promise<boolean> {
   const json = subscription.toJSON();
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false;
 
-  const res = await fetch("/api/messenger/push/subscribe", {
+  const res = await platformFetch("/api/messenger/push/subscribe", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       subscription: {
         endpoint: json.endpoint,
@@ -159,9 +172,8 @@ export async function unsubscribeMessengerPush(): Promise<boolean> {
   if (subscription) {
     const json = subscription.toJSON();
     if (json.endpoint && json.keys?.p256dh && json.keys?.auth) {
-      await fetch("/api/messenger/push/subscribe", {
+      await platformFetch("/api/messenger/push/subscribe", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           remove: true,
           subscription: {
@@ -196,9 +208,8 @@ export async function ensureMessengerPushSubscription(): Promise<boolean> {
   if (existing) {
     const json = existing.toJSON();
     if (json.endpoint && json.keys?.p256dh && json.keys?.auth) {
-      const res = await fetch("/api/messenger/push/subscribe", {
+      const res = await platformFetch("/api/messenger/push/subscribe", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subscription: {
             endpoint: json.endpoint,

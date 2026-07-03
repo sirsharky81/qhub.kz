@@ -24,6 +24,17 @@ export function prepareAudioSessionForCapture(): void {
 /** Keep duplex audio session for live calls. */
 export function prepareAudioSessionForCall(): void {
   prepareAudioSessionForCapture();
+  if (typeof navigator === "undefined") return;
+  const session = (navigator as AudioSessionNavigator).audioSession;
+  if (!session) return;
+  const extended = session as AudioSession & { mode?: string };
+  if ("mode" in extended) {
+    try {
+      extended.mode = "voice-chat";
+    } catch {
+      /* WebKit versions vary */
+    }
+  }
 }
 
 /**

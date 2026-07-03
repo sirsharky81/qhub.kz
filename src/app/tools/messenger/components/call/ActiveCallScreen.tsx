@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { CallDebugInfo } from "@/lib/messenger/call/types";
 import { isIOSDevice } from "@/lib/platform/device";
 import { CallStatusText } from "./CallStatusText";
@@ -143,9 +143,22 @@ export function ActiveCallScreen({
   onHangup,
 }: Props) {
   const showDuration = phase === "active";
+  const [earpieceBlank, setEarpieceBlank] = useState(false);
+  const iosEarpiece = isIOSDevice() && phase === "active" && !speakerOn;
+
+  useEffect(() => {
+    if (!iosEarpiece) setEarpieceBlank(false);
+  }, [iosEarpiece]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col text-white">
+      {iosEarpiece && earpieceBlank && (
+        <div
+          className="fixed inset-0 z-[60] bg-black touch-none"
+          aria-hidden
+          onClick={() => setEarpieceBlank(false)}
+        />
+      )}
       <div
         className="absolute inset-0 bg-[#0b141a]"
         style={{
@@ -182,10 +195,21 @@ export function ActiveCallScreen({
           <DebugPanel phase={phase} debug={debug} />
         )}
         {phase === "active" && !speakerOn && isIOSDevice() && (
-          <p className="mx-6 mt-2 text-center text-[11px] leading-snug text-white/45">
-            На iPhone в браузере экран может не гаснуть у уха — это ограничение Safari. В Android-приложении
-            QHub затухание работает.
-          </p>
+          <div className="mx-6 mt-2 flex flex-col items-center gap-2">
+            <p className="text-center text-[11px] leading-snug text-white/45">
+              Safari не включает датчик приближения. Нажмите «Погасить экран», чтобы убрать
+              случайные касания у уха.
+            </p>
+            {!earpieceBlank && (
+              <button
+                type="button"
+                onClick={() => setEarpieceBlank(true)}
+                className="rounded-full bg-white/10 px-4 py-1.5 text-xs text-white/80 ring-1 ring-white/20"
+              >
+                Погасить экран
+              </button>
+            )}
+          </div>
         )}
       </div>
 

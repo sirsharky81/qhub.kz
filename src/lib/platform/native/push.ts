@@ -3,27 +3,38 @@ import type { NotificationContext } from "../notifications";
 import { MESSENGER_NATIVE_PUSH_TOKEN_KEY } from "@/lib/messenger/constants";
 import { isNativePlatform, getNativePlatform } from "../runtime";
 import { platformFetch } from "../api-client";
-import { PlatformOfflineQueue } from "../offlineQueue";
 import { PlatformLogger } from "../logger";
+import { isNativePushConfigured } from "./app-capabilities";
 
-export async function registerNativePush(
-  context: NotificationContext,
-  session?: FamilySession,
-): Promise<boolean> {
-  if (!isNativePlatform()) return false;
+let registrationListenersAttached = false;
 
+async function ensureAndroidPushChannel(): Promise<void> {
+  if (getNativePlatform() !== "android") return;
   const { PushNotifications } = await import("@capacitor/push-notifications");
-  const platform = getNativePlatform() === "ios" ? "ios" : "android";
+  try {
+    await PushNotifications.createChannel({
+      id: "qhub_default",
+      name: "QHub",
+      description: "Уведомления QHub",
+      importance: 5,
+      visibility: 1,
+      sound: "default",
+      vibration: true,
+    });
+  } catch {
+    // Older plugin versions may not expose createChannel.
+  }
+}
 
-  return new Promise((resolve) => {
-    let settled = false;
+function attachRegistrationListeners(
+  context: NotificationContext,
+  session: FamilySession | undefined,
+  finish: (ok: boolean) => void,
+): void {
+  if (registrationListenersAttached) return;
+  registrationListenersAttached = true;
 
-    const finish = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
-    };
-
+  void import("@capacitor/push-notifications").then(({ PushNotifications }) => {
     void PushNotifications.addListener("registration", (token) => {
       if (typeof window !== "undefined" && context === "messenger") {
         localStorage.setItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY, token.value);
@@ -31,25 +42,16 @@ export async function registerNativePush(
 
       const endpoint =
         context === "family" ? "/api/family/push/subscribe" : "/api/messenger/push/subscribe";
+      const platform = getNativePlatform() === "ios" ? "ios" : "android";
 
-      const payload =
-        context === "family"
-          ? {
-              subscription: {
-                endpoint: token.value,
-                keys: { p256dh: "native", auth: "native" },
-                platform,
-                nativeToken: token.value,
-              },
-            }
-          : {
-              subscription: {
-                endpoint: token.value,
-                keys: { p256dh: "native", auth: "native" },
-                platform,
-                nativeToken: token.value,
-              },
-            };
+      const payload = {
+        subscription: {
+          endpoint: token.value,
+          keys: { p256dh: "native", auth: "native" },
+          platform,
+          nativeToken: token.value,
+        },
+      };
 
       const headers: Record<string, string> | undefined =
         context === "family" && session
@@ -59,22 +61,62 @@ export async function registerNativePush(
             }
           : undefined;
 
-      void PlatformOfflineQueue.enqueue({
-        type: "pushToken",
-        endpoint,
-        payload,
-        headers,
-      }).then(() => finish(true));
+      void platformFetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify(payload),
+      })
+        .then((res) => finish(res.ok))
+        .catch(() => finish(false));
     });
 
     void PushNotifications.addListener("registrationError", (err) => {
       PlatformLogger.error("Push registration error", new Error(err.error));
       finish(false);
     });
+  });
+}
 
-    void PushNotifications.register().catch(() => finish(false));
+export async function registerNativePush(
+  context: NotificationContext,
+  session?: FamilySession,
+): Promise<boolean> {
+  if (!isNativePlatform()) return false;
 
-    setTimeout(() => finish(false), 15000);
+  if (getNativePlatform() === "android") {
+    const configured = await isNativePushConfigured();
+    if (!configured) {
+      PlatformLogger.warn("Native push skipped — google-services.json missing in Android build");
+      return false;
+    }
+  }
+
+  const { PushNotifications } = await import("@capacitor/push-notifications");
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    attachRegistrationListeners(context, session, finish);
+
+    void (async () => {
+      try {
+        await ensureAndroidPushChannel();
+        await PushNotifications.register();
+      } catch (err) {
+        PlatformLogger.error(
+          "Push register failed",
+          err instanceof Error ? err : new Error(String(err)),
+        );
+        finish(false);
+      }
+    })();
+
+    setTimeout(() => finish(false), 20000);
   });
 }
 

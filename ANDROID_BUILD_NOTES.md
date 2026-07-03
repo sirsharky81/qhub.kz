@@ -17,6 +17,14 @@ npx cap run android
 - **Device ID** — Push notification token
 - **User content** — Messenger messages (E2E encrypted in transit)
 
+## FCM Push (Android)
+1. Firebase Console → создайте проект → добавьте Android app `kz.qhub.app`
+2. Скачайте `google-services.json` → положите в `android/app/google-services.json`
+3. На сервере (Vercel) задайте `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`
+4. Пересоберите: **Run** в Android Studio или `./gradlew installDebug`
+
+Без `google-services.json` переключатель push в настройках **не упадёт**, но покажет подсказку.
+
 ## OEM battery optimization
 Show `OemBatteryGuide` on Xiaomi/Oppo/Vivo/Huawei devices (`src/lib/platform/oem-guide.tsx`).
 

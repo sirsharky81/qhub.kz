@@ -23,6 +23,10 @@ import {
   activateCallMediaSession,
   releaseCallMediaSession,
 } from "./call-media-session";
+import {
+  acquireCallMicrophone,
+  releaseCallMicrophone,
+} from "./call-microphone";
 import { primeCallMediaPlayback, resetCallMediaForNewCall } from "./call-media-playback";
 import {
   CallPeerConnection,
@@ -461,18 +465,7 @@ export class CallController {
     prepareAudioSessionForCall();
     await prepareCallAudioOutput();
     await withTimeout(ensureMediaPermissions({ audio: true }), 15000, "media_permissions");
-    this.localStream = await withTimeout(
-      navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      }),
-      15000,
-      "get_user_media",
-    );
+    this.localStream = await withTimeout(acquireCallMicrophone(), 15000, "get_user_media");
     kickAudioSessionAfterCapture();
   }
 
@@ -576,6 +569,9 @@ export class CallController {
       this.isCaller = true;
       this.clearRingTimeout();
       getCallSounds().stop();
+      if (this.state.phase === "outgoing") {
+        this.patch({ phase: "connecting" });
+      }
       await this.pc.applyAnswer(payload);
       this.patchDebug({ hasRemoteDescription: true });
       await this.flushPendingRemoteIce();
@@ -583,7 +579,12 @@ export class CallController {
         this.patch({ phase: "connecting" });
       }
       this.startIceTimeout();
-      void this.pc.playRemoteAudio();
+      void this.pc.playRemoteAudio().then(() => {
+        this.patchPlaybackDebug();
+        if (this.pc?.getPlaybackDebug()?.hasRemoteTrack) {
+          this.handlePeerConnected(true);
+        }
+      });
     } finally {
       this.sdpApplyInFlight = false;
     }
@@ -850,7 +851,7 @@ export class CallController {
 
       for (const signal of data.signals) {
         this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
-        void this.handleSignal(signal.type, signal.from, signal.payload);
+        await this.handleSignal(signal.type, signal.from, signal.payload);
       }
 
       void this.pc?.flushPendingRemoteCandidates();
@@ -1037,8 +1038,15 @@ export class CallController {
   ): Promise<void> {
     if (this.isSelfSignal(from)) return;
 
-    // "offer"/"answer" are applied via syncSdpFromSession (level-triggered from
-    // the session's offerSdp/answerSdp), which is robust against a dropped signal.
+    if (type === "answer" && payload && this.isCaller) {
+      await this.applyRemoteAnswer(payload);
+      return;
+    }
+
+    if (type === "offer" && payload && !this.isCaller) {
+      await this.applyRemoteOffer(payload);
+      return;
+    }
 
     if (type === "ice" && payload) {
       await this.applyRemoteIcePayloads(payload);
@@ -1174,7 +1182,7 @@ export class CallController {
     releaseCallMediaSession();
 
     if (this.localStream) {
-      for (const t of this.localStream.getTracks()) t.stop();
+      releaseCallMicrophone(this.localStream);
       this.localStream = null;
     }
     restoreAudioSessionAfterCall();

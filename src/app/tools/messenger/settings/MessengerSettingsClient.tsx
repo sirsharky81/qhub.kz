@@ -14,12 +14,14 @@ import {
 import { MAX_DISPLAY_NAME_LENGTH, PIN_LENGTH } from "@/lib/messenger/constants";
 import {
   isMessengerPushEnabledLocally,
+  NativePushNotConfiguredError,
   resolveMessengerPushSupportStatus,
   subscribeMessengerPush,
   unsubscribeMessengerPush,
   type PushSupportStatus,
 } from "@/lib/messenger/push";
-import { isNativePlatform } from "@/lib/platform/runtime";
+import { isNativePlatform, getNativePlatform } from "@/lib/platform/runtime";
+import { isNativePushConfigured } from "@/lib/platform/native/app-capabilities";
 import { isIOS, isStandalone } from "@/lib/pwa-utils";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
@@ -34,6 +36,8 @@ export function MessengerSettingsClient() {
   const [pushStatus, setPushStatus] = useState<PushSupportStatus>("unsupported");
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+  const [nativePushReady, setNativePushReady] = useState(true);
   const [showPinForm, setShowPinForm] = useState(false);
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
@@ -47,6 +51,9 @@ export function MessengerSettingsClient() {
       setPushStatus(status);
       setPushEnabled(isMessengerPushEnabledLocally() && status === "granted");
     });
+    if (isNativePlatform() && getNativePlatform() === "android") {
+      void isNativePushConfigured().then(setNativePushReady);
+    }
   }, []);
 
   useEffect(() => {
@@ -64,6 +71,7 @@ export function MessengerSettingsClient() {
 
   async function handlePushToggle() {
     setPushBusy(true);
+    setPushError(null);
     try {
       if (pushEnabled) {
         await unsubscribeMessengerPush();
@@ -71,7 +79,14 @@ export function MessengerSettingsClient() {
         await subscribeMessengerPush();
       }
       refreshPushState();
-    } catch {
+    } catch (err) {
+      if (err instanceof NativePushNotConfiguredError) {
+        setPushError(
+          "Push не настроен в сборке Android. Добавьте google-services.json из Firebase в android/app/ и пересоберите приложение.",
+        );
+      } else {
+        setPushError("Не удалось включить уведомления. Попробуйте ещё раз.");
+      }
       refreshPushState();
     } finally {
       setPushBusy(false);
@@ -258,6 +273,13 @@ export function MessengerSettingsClient() {
           {pushStatus === "unsupported" && isNativePlatform() && (
             <p className="text-xs text-amber-700">Push недоступен на этом устройстве.</p>
           )}
+          {isNativePlatform() && getNativePlatform() === "android" && !nativePushReady && (
+            <p className="text-xs text-amber-700 leading-relaxed">
+              FCM не настроен: положите файл google-services.json в папку android/app/ и пересоберите
+              APK (Run в Android Studio).
+            </p>
+          )}
+          {pushError && <p className="text-xs text-red-600 leading-relaxed">{pushError}</p>}
           {pushStatus === "denied" && (
             <p className="text-xs text-amber-700">
               {isNativePlatform()

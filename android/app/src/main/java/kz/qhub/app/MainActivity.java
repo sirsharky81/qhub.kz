@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(CallAudioPlugin.class);
+        registerPlugin(QHubAppPlugin.class);
         super.onCreate(savedInstanceState);
     }
 
