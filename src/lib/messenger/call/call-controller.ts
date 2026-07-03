@@ -9,6 +9,7 @@ import {
   CALL_CONNECT_POLL_INTERVAL_MS,
   CALL_DISCOVERY_POLL_INTERVAL_MS,
   CALL_HEARTBEAT_INTERVAL_MS,
+  CALL_HEARTBEAT_ACTIVE_IOS_MS,
   CALL_POLL_INTERVAL_MS,
   DEFAULT_CALL_ICE_TIMEOUT_SEC,
   DEFAULT_CALL_MAX_SETUP_SEC,
@@ -18,6 +19,10 @@ import { normalizeKzPhone } from "../phone";
 import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
 import { watchCallAudioInterruptions } from "./call-audio-interruption";
+import {
+  activateCallMediaSession,
+  releaseCallMediaSession,
+} from "./call-media-session";
 import { primeCallMediaPlayback, resetCallMediaForNewCall } from "./call-media-playback";
 import {
   CallPeerConnection,
@@ -472,6 +477,9 @@ export class CallController {
     this.patchDebug({ turnSource, isCaller: this.isCaller });
     this.pc = new CallPeerConnection();
     await this.pc.init(iceServers);
+    if (isIOSDevice()) {
+      this.startCallAudioWatch();
+    }
     if (this.localStream) {
       await this.pc.attachLocalAudio(this.localStream);
     }
@@ -710,9 +718,27 @@ export class CallController {
     if (!isIOSDevice()) return;
     this.stopCallAudioWatch();
     this.interruptionUnsub = watchCallAudioInterruptions(() => {
-      if (this.state.phase !== "active" || !this.pc) return;
-      void this.pc.recoverRemoteAudioAfterInterruption().then(() => this.patchPlaybackDebug());
+      void this.recoverCallAfterInterruption();
     });
+  }
+
+  private async recoverCallAfterInterruption(): Promise<void> {
+    const inCall =
+      this.state.phase === "connecting" ||
+      this.state.phase === "outgoing" ||
+      this.state.phase === "active";
+    if (!inCall || !this.pc) return;
+
+    prepareAudioSessionForCall();
+    this.pc.reassertLocalCapture(this.state.muted);
+    void this.pc.playRemoteAudio().then(() => this.patchPlaybackDebug());
+
+    if (this.state.phase === "active") {
+      void this.pc.recoverRemoteAudioAfterInterruption().then(() => this.patchPlaybackDebug());
+      if (this.state.callId) {
+        void heartbeatCall(this.state.callId);
+      }
+    }
   }
 
   private stopCallAudioWatch(): void {
@@ -728,6 +754,10 @@ export class CallController {
     this.patch({ phase: "active" });
     this.startDurationTimer();
     this.startCallAudioWatch();
+    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub");
+    if (this.pollCallId) {
+      this.startHeartbeat(this.pollCallId);
+    }
     getCallSounds().stop();
     prepareAudioSessionForCall();
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
@@ -1021,7 +1051,11 @@ export class CallController {
   private startHeartbeat(callId: string): void {
     this.stopHeartbeat();
     void heartbeatCall(callId);
-    this.heartbeatTimer = setInterval(() => void heartbeatCall(callId), CALL_HEARTBEAT_INTERVAL_MS);
+    const intervalMs =
+      isIOSDevice() && this.state.phase === "active"
+        ? CALL_HEARTBEAT_ACTIVE_IOS_MS
+        : CALL_HEARTBEAT_INTERVAL_MS;
+    this.heartbeatTimer = setInterval(() => void heartbeatCall(callId), intervalMs);
   }
 
   private startRingTimeout(): void {
@@ -1130,6 +1164,7 @@ export class CallController {
     this.pc = null;
     releaseCallMediaPlayback();
     purgeOrphanedCallMediaElements();
+    releaseCallMediaSession();
 
     if (this.localStream) {
       for (const t of this.localStream.getTracks()) t.stop();

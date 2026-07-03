@@ -56,6 +56,8 @@ export const CALL_CONNECT_POLL_INTERVAL_MS = 150;
 /** Slower poll while waiting for incoming call (home screen / chat idle). */
 export const CALL_DISCOVERY_POLL_INTERVAL_MS = 400;
 export const CALL_HEARTBEAT_INTERVAL_MS = 30_000;
+/** iOS may suspend the tab briefly during notification banners — ping more often while in call. */
+export const CALL_HEARTBEAT_ACTIVE_IOS_MS = 10_000;
 
 export const MAX_DISPLAY_NAME_LENGTH = 30;
 export const QUOTE_PREVIEW_LENGTH = 80;

@@ -8,6 +8,7 @@ import {
   purgeOrphanedCallMediaElements,
   rebuildCallMediaStream,
   releaseCallMediaPlayback,
+  switchCallSpeakerRoute,
   useIosWebAudioRelay,
 } from "./call-media-playback";
 import type { RTCIceServer } from "./types";
@@ -76,10 +77,12 @@ export class CallPeerConnection {
     };
     this.pc.onconnectionstatechange = () => {
       if (!this.pc) return;
-      if (this.pc.connectionState === "connected") {
+      const state = this.pc.connectionState;
+      if (state === "connected") {
         this.syncRemoteAudioFromPeer();
+        void this.playRemoteAudio();
       }
-      this.onConnectionState?.(this.pc.connectionState);
+      this.onConnectionState?.(state);
     };
     this.pc.oniceconnectionstatechange = () => {
       if (!this.pc) return;
@@ -258,9 +261,17 @@ export class CallPeerConnection {
 
   private async switchIosSpeakerRoute(): Promise<void> {
     if (!this.remoteStream) return;
-    this.remoteMedia = await rebuildCallMediaStream(this.remoteStream, this.speakerOn);
-    if (await playCallMedia(this.remoteMedia)) {
+    const el = await switchCallSpeakerRoute(this.remoteStream, this.speakerOn);
+    if (!el) return;
+    this.remoteMedia = el;
+    if (await playCallMedia(el)) {
       await this.applySpeakerRoute();
+    }
+  }
+
+  reassertLocalCapture(muted: boolean): void {
+    for (const track of this.localStream?.getAudioTracks() ?? []) {
+      track.enabled = !muted;
     }
   }
 

@@ -229,16 +229,17 @@ async function mountLegacyRelayOutput(
   stream: MediaStream,
   speakerOn: boolean,
 ): Promise<HTMLMediaElement> {
-  const routed = await ensureRelayGraph(stream);
-
   if (speakerOn) {
+    // iOS routes loudspeaker only for direct WebRTC on <video>, not WebAudio relay.
+    destroyRelayGraph();
     destroyEarpieceElement();
     const el = createSpeakerElement();
-    el.srcObject = routed;
+    el.srcObject = stream;
     return el;
   }
 
   destroySpeakerElement();
+  const routed = await ensureRelayGraph(stream);
   const el = createEarpieceElement();
   el.srcObject = routed;
   return el;
@@ -312,15 +313,18 @@ export async function switchCallSpeakerRoute(
     return relayEl;
   }
 
-  const routed = relayStream ?? (stream ? await ensureRelayGraph(stream) : null);
-  if (!routed) return null;
+  const routed = relayStream ?? (stream && !speakerOn ? await ensureRelayGraph(stream) : null);
 
   if (speakerOn) {
+    if (!stream) return null;
+    destroyRelayGraph();
     destroyEarpieceElement();
     const el = createSpeakerElement();
-    el.srcObject = routed;
+    el.srcObject = stream;
     return el;
   }
+
+  if (!routed) return null;
 
   destroySpeakerElement();
   const el = createEarpieceElement();

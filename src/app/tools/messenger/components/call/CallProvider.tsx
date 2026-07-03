@@ -76,14 +76,7 @@ export function CallProvider({
   }, [deepLinkCallId]);
 
   useEffect(() => {
-    const onHide = () => {
-      if (controllerRef.current.isInCall()) {
-        void controllerRef.current.hangup();
-      }
-    };
-    window.addEventListener("pagehide", onHide);
     return () => {
-      window.removeEventListener("pagehide", onHide);
       const controller = controllerRef.current;
       if (controller.isInCall()) {
         void controller.hangup();
