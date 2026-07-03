@@ -16,7 +16,13 @@ import {
 import { normalizeKzPhone } from "../phone";
 import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
-import { CallPeerConnection, purgeOrphanedCallMediaElements, type IceCandidatePayload } from "./peer-connection";
+import { primeCallMediaPlayback } from "./call-media-playback";
+import {
+  CallPeerConnection,
+  purgeOrphanedCallMediaElements,
+  releaseCallMediaPlayback,
+  type IceCandidatePayload,
+} from "./peer-connection";
 import {
   endCallApi,
   fetchIceServers,
@@ -73,6 +79,9 @@ const INITIAL_DEBUG: CallDebugInfo = {
   lastSdpSendStatus: null,
   lastPollStatus: null,
   activeCallId: null,
+  mediaTag: null,
+  mediaPaused: true,
+  remoteTrackMuted: true,
 };
 
 const INITIAL_STATE: CallState = {
@@ -188,6 +197,7 @@ export class CallController {
 
   async startOutgoing(): Promise<void> {
     if (this.isInCall()) return;
+    primeCallMediaPlayback();
 
     const result = await initiateCall({
       channel: this.channel,
@@ -248,6 +258,7 @@ export class CallController {
 
   async acceptIncoming(): Promise<void> {
     if (this.state.phase !== "incoming" || !this.state.callId) return;
+    primeCallMediaPlayback();
 
     this.clearRingTimeout();
     this.localAnswerSdp = null;
@@ -487,6 +498,7 @@ export class CallController {
       },
       onRemoteTrack: () => {
         void this.pc?.playRemoteAudio();
+        this.patchPlaybackDebug();
         this.handlePeerConnected(true);
       },
     });
@@ -678,6 +690,12 @@ export class CallController {
     })();
   }
 
+  private patchPlaybackDebug(): void {
+    const d = this.pc?.getPlaybackDebug();
+    if (!d) return;
+    this.patchDebug(d);
+  }
+
   private handlePeerConnected(connected: boolean): void {
     if (!connected || this.state.phase === "active") return;
     this.clearIceTimeout();
@@ -687,13 +705,13 @@ export class CallController {
     this.startDurationTimer();
     getCallSounds().stop();
     prepareAudioSessionForCall();
-    void this.pc?.playRemoteAudio();
+    void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
     if (isIOSDevice()) {
       for (const delay of [300, 800, 1500]) {
         setTimeout(() => {
           if (!this.pc?.needsPlaybackRetry()) return;
           prepareAudioSessionForCall();
-          void this.pc?.playRemoteAudio();
+          void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
         }, delay);
       }
     }
@@ -1084,6 +1102,7 @@ export class CallController {
 
     this.pc?.close();
     this.pc = null;
+    releaseCallMediaPlayback();
     purgeOrphanedCallMediaElements();
 
     if (this.localStream) {

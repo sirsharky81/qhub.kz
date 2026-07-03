@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { getCallController } from "@/lib/messenger/call/call-controller";
+import { primeCallMediaPlayback } from "@/lib/messenger/call/call-media-playback";
 import type { CallState } from "@/lib/messenger/call/types";
 import { ActiveCallScreen } from "./ActiveCallScreen";
 import { IncomingCallOverlay } from "./IncomingCallOverlay";
@@ -92,10 +93,12 @@ export function CallProvider({
   }, []);
 
   const startCall = useCallback(() => {
+    primeCallMediaPlayback();
     void controllerRef.current.startOutgoing();
   }, []);
 
   const acceptCall = useCallback(() => {
+    primeCallMediaPlayback();
     void controllerRef.current.acceptIncoming();
   }, []);
 
@@ -112,6 +115,7 @@ export function CallProvider({
   }, [state.muted]);
 
   const toggleSpeaker = useCallback(() => {
+    primeCallMediaPlayback();
     controllerRef.current.setSpeaker(!state.speakerOn);
   }, [state.speakerOn]);
 

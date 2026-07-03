@@ -38,6 +38,9 @@ export interface CallDebugInfo {
   lastSdpSendStatus: number | null;
   lastPollStatus: number | null;
   activeCallId: string | null;
+  mediaTag: string | null;
+  mediaPaused: boolean;
+  remoteTrackMuted: boolean;
 }
 
 export interface CallState {
