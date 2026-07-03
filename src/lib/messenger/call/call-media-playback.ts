@@ -5,7 +5,7 @@ import {
 } from "@/lib/audio-session";
 import {
   applySinkIdToElement,
-  supportsIosWebSinkId,
+  useIosSinkIdCallRouting,
 } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 
@@ -148,7 +148,7 @@ export function useIosWebAudioRelay(): boolean {
 
 export function getCallMediaRoute(speakerOn: boolean): CallMediaRoute {
   if (!isIOSDevice()) return "default";
-  if (supportsIosWebSinkId()) return "sink";
+  if (useIosSinkIdCallRouting()) return "sink";
   return speakerOn ? "relay-video" : "relay-audio";
 }
 
@@ -161,7 +161,7 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   prepareAudioSessionForCall();
   if (!isIOSDevice()) return;
 
-  if (supportsIosWebSinkId()) {
+  if (useIosSinkIdCallRouting()) {
     if (!relayEl) {
       relayEl = document.createElement("audio");
       configureCallMediaElement(relayEl);
@@ -257,7 +257,7 @@ export async function attachCallMediaStream(
 
   kickAudioSessionAfterCapture();
 
-  if (supportsIosWebSinkId()) {
+  if (useIosSinkIdCallRouting()) {
     return mountSinkRelayOutput(stream, speakerOn);
   }
 
@@ -303,7 +303,7 @@ export async function switchCallSpeakerRoute(
   kickAudioSessionAfterCapture();
   prepareAudioSessionForCall();
 
-  if (supportsIosWebSinkId()) {
+  if (useIosSinkIdCallRouting()) {
     if (!relayEl) {
       if (!stream) return null;
       return mountSinkRelayOutput(stream, speakerOn);
@@ -333,7 +333,7 @@ export async function applyCallSpeakerRoute(
   el: HTMLMediaElement,
   speakerOn: boolean,
 ): Promise<void> {
-  if (supportsIosWebSinkId()) {
+  if (useIosSinkIdCallRouting()) {
     await applySinkIdToElement(el, speakerOn);
   }
 }

@@ -4,11 +4,19 @@ type MediaElementWithSink = HTMLMediaElement & {
   setSinkId?: (deviceId: string) => Promise<void>;
 };
 
-/** iOS 26+ Safari/PWA: setSinkId works on a WebAudio relay element, not on raw WebRTC tracks. */
+/** iOS 26+ Safari/PWA exposes setSinkId on media elements. */
 export function supportsIosWebSinkId(): boolean {
   if (!isIOSDevice() || typeof document === "undefined") return false;
   const probe = document.createElement("audio");
   return typeof probe.setSinkId === "function";
+}
+
+/**
+ * Do not use setSinkId for call routing — on iPhone the enumerated output order is
+ * inverted (index 0 = loudspeaker). The audio/video WebAudio relay is reliable.
+ */
+export function useIosSinkIdCallRouting(): boolean {
+  return false;
 }
 
 export async function findIosAudioOutputId(speaker: boolean): Promise<string | undefined> {
@@ -22,7 +30,7 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
   const matchesSpeaker = (label: string) =>
     /speaker|громк|built.?in.?speaker|main|громкоговор/i.test(label);
   const matchesEarpiece = (label: string) =>
-    /receiver|earpiece|трубк|iphone|built.?in.?receiver/i.test(label);
+    /receiver|earpiece|трубк|built.?in.?receiver/i.test(label);
 
   for (const device of outputs) {
     const label = device.label.toLowerCase();
@@ -31,7 +39,8 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
   }
 
   if (outputs.length >= 2) {
-    return speaker ? outputs[outputs.length - 1]?.deviceId : outputs[0]?.deviceId;
+    // iOS: outputs[0] is typically Built-in Speaker, last is Built-in Receiver.
+    return speaker ? outputs[0]?.deviceId : outputs[outputs.length - 1]?.deviceId;
   }
   return outputs[0]?.deviceId;
 }
