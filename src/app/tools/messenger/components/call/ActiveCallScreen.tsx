@@ -58,6 +58,7 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
           {row("hasRemoteTrack", debug.hasRemoteTrack)}
           {row("receivers", String(debug.receiverCount))}
           {row("speakerOn", debug.speakerOn)}
+          {row("route", debug.mediaRoute)}
           {row("media", debug.mediaTag ?? "—")}
           {row("media paused", debug.mediaPaused, false)}
           {row("track muted", debug.remoteTrackMuted, false)}

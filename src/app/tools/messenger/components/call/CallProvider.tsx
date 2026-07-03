@@ -93,12 +93,12 @@ export function CallProvider({
   }, []);
 
   const startCall = useCallback(() => {
-    primeCallMediaPlayback();
+    primeCallMediaPlayback(false);
     void controllerRef.current.startOutgoing();
   }, []);
 
   const acceptCall = useCallback(() => {
-    primeCallMediaPlayback();
+    primeCallMediaPlayback(false);
     void controllerRef.current.acceptIncoming();
   }, []);
 
@@ -115,8 +115,9 @@ export function CallProvider({
   }, [state.muted]);
 
   const toggleSpeaker = useCallback(() => {
-    primeCallMediaPlayback();
-    controllerRef.current.setSpeaker(!state.speakerOn);
+    const nextSpeakerOn = !state.speakerOn;
+    primeCallMediaPlayback(nextSpeakerOn);
+    controllerRef.current.setSpeaker(nextSpeakerOn);
   }, [state.speakerOn]);
 
   const value = useMemo<CallContextValue>(

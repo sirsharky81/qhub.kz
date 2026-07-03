@@ -1,4 +1,5 @@
 import {
+  kickAudioSessionAfterCapture,
   prepareAudioSessionForCall,
   restoreAudioSessionAfterCall,
 } from "@/lib/audio-session";
@@ -85,6 +86,7 @@ const INITIAL_DEBUG: CallDebugInfo = {
   hasRemoteTrack: false,
   receiverCount: 0,
   speakerOn: true,
+  mediaRoute: "default",
 };
 
 const INITIAL_STATE: CallState = {
@@ -200,7 +202,7 @@ export class CallController {
 
   async startOutgoing(): Promise<void> {
     if (this.isInCall()) return;
-    primeCallMediaPlayback();
+    primeCallMediaPlayback(!isIOSDevice());
 
     const result = await initiateCall({
       channel: this.channel,
@@ -261,7 +263,7 @@ export class CallController {
 
   async acceptIncoming(): Promise<void> {
     if (this.state.phase !== "incoming" || !this.state.callId) return;
-    primeCallMediaPlayback();
+    primeCallMediaPlayback(!isIOSDevice());
 
     this.clearRingTimeout();
     this.localAnswerSdp = null;
@@ -458,6 +460,7 @@ export class CallController {
       15000,
       "get_user_media",
     );
+    kickAudioSessionAfterCapture();
   }
 
   private async setupPeerConnection(): Promise<void> {

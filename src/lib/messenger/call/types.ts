@@ -44,6 +44,7 @@ export interface CallDebugInfo {
   hasRemoteTrack: boolean;
   receiverCount: number;
   speakerOn: boolean;
+  mediaRoute: string;
 }
 
 export interface CallState {
