@@ -21,6 +21,7 @@ import type {
   ExportFormat,
   ManualEditSettings,
   ProgramTransition,
+  BeatGrid,
 } from "@/lib/music-editor/types";
 import {
   DEFAULT_MANUAL_SETTINGS,
@@ -79,7 +80,42 @@ export default function MusicEditorClient() {
     activeObject,
     viewTrackId,
   } = editorState;
-  const player = useAudioPlayer();
+  const {
+    isPlaying,
+    currentTime,
+    currentTimeRef,
+    duration: playerDuration,
+    load,
+    play,
+    pause,
+    stop,
+    seek,
+    skip,
+    setLoop,
+  } = useAudioPlayer();
+
+  const playbackApi = useMemo(
+    () => ({
+      load,
+      stop,
+      isPlaying,
+    }),
+    [load, stop, isPlaying],
+  );
+
+  const player = {
+    isPlaying,
+    currentTime,
+    currentTimeRef,
+    duration: playerDuration,
+    load,
+    play,
+    pause,
+    stop,
+    seek,
+    skip,
+    setLoop,
+  };
 
   const viewTrackIdx = useMemo(() => {
     const idx = getTrackIndexById(tracks, viewTrackId);
@@ -96,7 +132,7 @@ export default function MusicEditorClient() {
     transitions,
     programSettings,
     activeObject,
-    player,
+    playbackApi,
     tracks.length > 0,
   );
 
@@ -124,6 +160,16 @@ export default function MusicEditorClient() {
         }),
         opts,
       );
+    },
+    [updateState],
+  );
+
+  const updateBeatGrid = useCallback(
+    (trackId: string, beatGrid: BeatGrid | null) => {
+      updateState((prev) => ({
+        ...prev,
+        tracks: prev.tracks.map((t) => (t.id === trackId ? { ...t, beatGrid } : t)),
+      }));
     },
     [updateState],
   );
@@ -445,53 +491,56 @@ export default function MusicEditorClient() {
               return (
                 <div
                   key={track.id}
-                  className={`flex items-center gap-2 p-2 rounded-xl border transition-colors cursor-pointer ${
+                  className={`flex items-center gap-2 p-2 rounded-xl border transition-colors cursor-pointer min-w-0 ${
                     isTrackActive(track.id)
                       ? "border-gray-900 bg-white shadow-sm"
                       : "border-gray-200 bg-white hover:border-gray-300"
                   }`}
                   onClick={() => selectTrack(track.id)}
                 >
-                  <span className="text-sm" aria-hidden>
+                  <span className="text-sm shrink-0" aria-hidden>
                     🎵
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-gray-900 truncate">{track.name}</p>
-                    <p className="text-[11px] text-gray-500">
+                    <p className="text-[11px] text-gray-500 truncate">
                       {formatDuration(track.duration)} · {formatFileSize(track.size)}
                       {inProgram && (
                         <span className="ml-1.5 text-emerald-600 font-medium">· В программе</span>
                       )}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (inProgram) removeFromProgram(track.id);
-                      else addToProgram(track.id);
-                    }}
-                    className={[
-                      "text-[10px] px-2 py-1 rounded-lg border whitespace-nowrap",
-                      inProgram
-                        ? "text-emerald-700 border-emerald-200 bg-emerald-50"
-                        : "text-gray-700 border-gray-200 hover:bg-gray-50",
-                    ].join(" ")}
+                  <div
+                    className="flex items-center gap-1 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                   >
-                    {inProgram ? "В программе" : "Добавить в программу выступления"}
-                  </button>
-                  {tracks.length > 1 && (
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeTrack(idx);
+                      onClick={() => {
+                        if (inProgram) removeFromProgram(track.id);
+                        else addToProgram(track.id);
                       }}
-                      className="text-[11px] text-red-500 hover:text-red-700 px-1.5"
+                      className={[
+                        "text-[10px] px-2 py-1 rounded-lg border whitespace-nowrap max-w-[9.5rem] sm:max-w-none truncate",
+                        inProgram
+                          ? "text-emerald-700 border-emerald-200 bg-emerald-50"
+                          : "text-gray-700 border-gray-200 hover:bg-gray-50",
+                      ].join(" ")}
                     >
-                      Удалить
+                      {inProgram ? "В программе" : "В программу"}
                     </button>
-                  )}
+                    {tracks.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeTrack(idx)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 hover:text-red-700 shrink-0"
+                        aria-label="Удалить трек"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -540,6 +589,7 @@ export default function MusicEditorClient() {
               onRemoveFromProgram={removeFromProgram}
               onExportFormatChange={setExportFormat}
               onExport={() => handleExport()}
+              onBeatGridChange={updateBeatGrid}
             />
           )}
         </div>

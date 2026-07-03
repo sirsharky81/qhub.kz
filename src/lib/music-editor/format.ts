@@ -15,6 +15,25 @@ export function formatTimePrecise(seconds: number): string {
   return `${mins.toString().padStart(2, "0")}:${whole.toString().padStart(2, "0")}.${tenths}`;
 }
 
+/** Parse MM:SS.s or MM:SS.mmm */
+export function parseTimeMs(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/^(\d+):(\d{1,2})(?:\.(\d{1,3}))?$/);
+  if (match) {
+    const mins = Number(match[1]);
+    const secs = Number(match[2]);
+    const frac = match[3] ?? "";
+    if (secs >= 60) return null;
+    const ms = frac.padEnd(3, "0").slice(0, 3);
+    return mins * 60 + secs + Number(ms) / 1000;
+  }
+
+  const num = Number(trimmed);
+  return Number.isNaN(num) ? null : num;
+}
+
 /** Parse MM:SS.s or M:SS or SS.s */
 export function parseTimePrecise(value: string): number | null {
   const trimmed = value.trim();
@@ -128,4 +147,36 @@ export function parseBoundedSeconds(
 export function snapToStep(value: number, step: number): number {
   if (step <= 0) return value;
   return Math.round(value / step) * step;
+}
+
+/** Precise time format with milliseconds: MM:SS.mmm */
+export function formatTimeMs(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00.000";
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  const whole = Math.floor(secs);
+  const ms = Math.round((secs - whole) * 1000);
+  return `${mins.toString().padStart(2, "0")}:${whole.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
+}
+
+/** Snap time to nearest beat grid position. */
+export function snapToBeat(
+  time: number,
+  bpm: number,
+  offset: number,
+  thresholdSec = 0.015,
+): number {
+  if (bpm <= 0) return time;
+  const beatInterval = 60 / bpm;
+  const n = Math.round((time - offset) / beatInterval);
+  const snapped = offset + n * beatInterval;
+  return Math.abs(snapped - time) <= thresholdSec ? Math.max(0, snapped) : time;
+}
+
+/** Nearest beat time (always snaps, no threshold). */
+export function nearestBeatTime(time: number, bpm: number, offset: number): number {
+  if (bpm <= 0) return time;
+  const beatInterval = 60 / bpm;
+  const n = Math.round((time - offset) / beatInterval);
+  return Math.max(0, offset + n * beatInterval);
 }

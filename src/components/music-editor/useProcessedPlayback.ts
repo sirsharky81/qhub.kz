@@ -44,37 +44,44 @@ export function useProcessedPlayback(
     if (fingerprint === lastFingerprint.current) return;
 
     let cancelled = false;
-    playerRef.current.stop();
 
-    setIsRendering(true);
-    (async () => {
-      try {
-        let buffer: AudioBuffer;
+    queueMicrotask(() => {
+      if (cancelled) return;
 
-        if (activeObject.type === "program") {
-          buffer = await processProgramOutput(
-            tracks,
-            manualSettings,
-            programTrackIds,
-            transitions,
-            programSettings,
-          );
-          if (!cancelled) setProgramDuration(buffer.duration);
-        } else {
-          const idx = getTrackIndexById(tracks, activeObject.trackId);
-          const track = idx >= 0 ? tracks[idx] : tracks[0];
-          const settings = idx >= 0 ? (manualSettings[idx] ?? DEFAULT_MANUAL_SETTINGS) : DEFAULT_MANUAL_SETTINGS;
-          buffer = await processSingleTrack(track.buffer, settings);
-        }
-
+      void (async () => {
+        playerRef.current.stop();
         if (cancelled) return;
-        lastFingerprint.current = fingerprint;
-        setResultDuration(buffer.duration);
-        playerRef.current.load(buffer);
-      } finally {
-        if (!cancelled) setIsRendering(false);
-      }
-    })();
+        setIsRendering(true);
+
+        try {
+          let buffer: AudioBuffer;
+
+          if (activeObject.type === "program") {
+            buffer = await processProgramOutput(
+              tracks,
+              manualSettings,
+              programTrackIds,
+              transitions,
+              programSettings,
+            );
+            if (!cancelled) setProgramDuration(buffer.duration);
+          } else {
+            const idx = getTrackIndexById(tracks, activeObject.trackId);
+            const track = idx >= 0 ? tracks[idx] : tracks[0];
+            const settings =
+              idx >= 0 ? (manualSettings[idx] ?? DEFAULT_MANUAL_SETTINGS) : DEFAULT_MANUAL_SETTINGS;
+            buffer = await processSingleTrack(track.buffer, settings);
+          }
+
+          if (cancelled) return;
+          lastFingerprint.current = fingerprint;
+          setResultDuration(buffer.duration);
+          playerRef.current.load(buffer);
+        } finally {
+          if (!cancelled) setIsRendering(false);
+        }
+      })();
+    });
 
     return () => {
       cancelled = true;

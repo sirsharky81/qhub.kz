@@ -9,6 +9,8 @@ interface UseAudioPlayerOptions {
 }
 
 export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const ctxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const startTimeRef = useRef(0);
@@ -18,11 +20,24 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const playingRef = useRef(false);
   /** Пользователь хочет воспроизведение (не сбрасывается в stopSource). */
   const wantPlayingRef = useRef(false);
+  const loopRef = useRef<{ start: number; end: number } | null>(null);
+  const loopEnabledRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   /** Актуальное время без ожидания React re-render (для canvas). */
   const currentTimeRef = useRef(0);
+  const lastUiSyncRef = useRef(0);
+  const UI_SYNC_MS = 80;
+
+  const syncUiTime = useCallback((time: number, force = false) => {
+    currentTimeRef.current = time;
+    const now = performance.now();
+    if (force || now - lastUiSyncRef.current >= UI_SYNC_MS) {
+      lastUiSyncRef.current = now;
+      setCurrentTime(time);
+    }
+  }, []);
 
   const getCtx = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === "closed") {
@@ -49,35 +64,50 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     }
   }, []);
 
+  const playRef = useRef<(fromTime?: number) => void>(() => {});
+
+  const restartAt = useCallback(
+    (time: number) => {
+      playRef.current(time);
+    },
+    [],
+  );
+
   const tick = useCallback(() => {
     const ctx = ctxRef.current;
     if (!ctx || ctx.state === "closed" || !sourceRef.current) return;
     const time = offsetRef.current + (ctx.currentTime - startTimeRef.current);
     const dur = bufferRef.current?.duration ?? 0;
+
+    if (loopEnabledRef.current && loopRef.current) {
+      const { start, end } = loopRef.current;
+      if (time >= end - 0.005) {
+        restartAt(start);
+        return;
+      }
+    }
+
     if (time >= dur) {
       stopSource();
       offsetRef.current = dur;
-      setCurrentTime(dur);
-      currentTimeRef.current = dur;
-      options.onEnded?.();
+      syncUiTime(dur, true);
+      optionsRef.current.onEnded?.();
       return;
     }
-    setCurrentTime(time);
-    currentTimeRef.current = time;
-    options.onTimeUpdate?.(time);
+    syncUiTime(time);
+    optionsRef.current.onTimeUpdate?.(time);
     rafRef.current = requestAnimationFrame(tick);
-  }, [options, stopSource]);
+  }, [stopSource, syncUiTime, restartAt]);
 
   const load = useCallback(
     (buffer: AudioBuffer) => {
       stopSource();
       bufferRef.current = buffer;
       setDuration(buffer.duration);
-      setCurrentTime(0);
-      currentTimeRef.current = 0;
+      syncUiTime(0, true);
       offsetRef.current = 0;
     },
-    [stopSource],
+    [stopSource, syncUiTime],
   );
 
   const play = useCallback(
@@ -92,32 +122,58 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       const offset = fromTime ?? offsetRef.current;
       offsetRef.current = Math.max(0, Math.min(offset, buffer.duration));
-      setCurrentTime(offsetRef.current);
-      currentTimeRef.current = offsetRef.current;
+
+      let segmentDuration: number | undefined;
+      if (loopEnabledRef.current && loopRef.current) {
+        const { start, end } = loopRef.current;
+        if (offsetRef.current < start || offsetRef.current >= end - 0.001) {
+          offsetRef.current = start;
+        }
+        segmentDuration = Math.max(0.01, end - offsetRef.current);
+      }
+
+      syncUiTime(offsetRef.current, true);
 
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
       source.onended = () => {
         if (sourceRef.current !== source) return;
+        if (loopEnabledRef.current && loopRef.current) {
+          playRef.current(loopRef.current.start);
+          return;
+        }
         playingRef.current = false;
         wantPlayingRef.current = false;
         setIsPlaying(false);
         cancelAnimationFrame(rafRef.current);
         offsetRef.current = buffer.duration;
-        setCurrentTime(buffer.duration);
-        currentTimeRef.current = buffer.duration;
+        syncUiTime(buffer.duration, true);
         sourceRef.current = null;
-        options.onEnded?.();
+        optionsRef.current.onEnded?.();
       };
-      source.start(0, offsetRef.current);
+      source.start(0, offsetRef.current, segmentDuration);
       sourceRef.current = source;
       startTimeRef.current = ctx.currentTime;
       playingRef.current = true;
       setIsPlaying(true);
       rafRef.current = requestAnimationFrame(tick);
     },
-    [getCtx, stopSource, tick, options],
+    [getCtx, stopSource, tick, syncUiTime],
+  );
+
+  useEffect(() => {
+    playRef.current = play;
+  });
+
+  const setLoop = useCallback(
+    (region: { start: number; end: number } | null, enabled: boolean) => {
+      loopRef.current = region;
+      loopEnabledRef.current = Boolean(
+        enabled && region && region.end > region.start + 0.01,
+      );
+    },
+    [],
   );
 
   const pause = useCallback(() => {
@@ -127,29 +183,26 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       offsetRef.current += ctx.currentTime - startTimeRef.current;
     }
     stopSource();
-    setCurrentTime(offsetRef.current);
-    currentTimeRef.current = offsetRef.current;
-  }, [stopSource]);
+    syncUiTime(offsetRef.current, true);
+  }, [stopSource, syncUiTime]);
 
   const stop = useCallback(() => {
     wantPlayingRef.current = false;
     stopSource();
     offsetRef.current = 0;
-    setCurrentTime(0);
-    currentTimeRef.current = 0;
-  }, [stopSource]);
+    syncUiTime(0, true);
+  }, [stopSource, syncUiTime]);
 
   const seek = useCallback(
     (time: number) => {
       const dur = bufferRef.current?.duration ?? duration;
       offsetRef.current = Math.max(0, Math.min(time, dur));
-      setCurrentTime(offsetRef.current);
-      currentTimeRef.current = offsetRef.current;
+      syncUiTime(offsetRef.current, true);
       if (wantPlayingRef.current) {
         play(offsetRef.current);
       }
     },
-    [duration, play],
+    [duration, play, syncUiTime],
   );
 
   const skip = useCallback(
@@ -187,6 +240,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     seek,
     skip,
     toggle,
+    setLoop,
   };
 }
 

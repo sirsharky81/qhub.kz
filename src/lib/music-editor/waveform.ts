@@ -1,11 +1,29 @@
+export interface PeakMinMax {
+  min: number;
+  max: number;
+}
+
+function sampleRange(
+  channel: Float32Array,
+  sampleRate: number,
+  startSec: number,
+  endSec: number,
+): { startSample: number; endSample: number } {
+  const startSample = Math.max(0, Math.floor(startSec * sampleRate));
+  const endSample = Math.min(channel.length, Math.ceil(endSec * sampleRate));
+  return { startSample, endSample: Math.max(startSample + 1, endSample) };
+}
+
 export function computePeaks(buffer: AudioBuffer, barCount = 800): number[] {
   const channel = buffer.getChannelData(0);
-  const samplesPerBar = Math.max(1, Math.floor(channel.length / barCount));
+  const { startSample, endSample } = sampleRange(channel, buffer.sampleRate, 0, buffer.duration);
+  const rangeLen = endSample - startSample;
+  const samplesPerBar = Math.max(1, Math.floor(rangeLen / barCount));
   const peaks: number[] = [];
 
   for (let i = 0; i < barCount; i++) {
-    const start = i * samplesPerBar;
-    const end = Math.min(start + samplesPerBar, channel.length);
+    const start = startSample + i * samplesPerBar;
+    const end = Math.min(start + samplesPerBar, endSample);
     let max = 0;
     for (let j = start; j < end; j++) {
       const abs = Math.abs(channel[j]);
@@ -16,6 +34,99 @@ export function computePeaks(buffer: AudioBuffer, barCount = 800): number[] {
 
   const globalMax = Math.max(...peaks, 0.001);
   return peaks.map((p) => p / globalMax);
+}
+
+/** Detailed peaks for a visible time range (LOD). */
+export function computePeaksForRange(
+  buffer: AudioBuffer,
+  startSec: number,
+  endSec: number,
+  barCount: number,
+): number[] {
+  const channel = buffer.getChannelData(0);
+  const { startSample, endSample } = sampleRange(channel, buffer.sampleRate, startSec, endSec);
+  const rangeLen = endSample - startSample;
+  const count = Math.max(1, barCount);
+  const samplesPerBar = Math.max(1, Math.floor(rangeLen / count));
+  const peaks: number[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const start = startSample + i * samplesPerBar;
+    const end = Math.min(start + samplesPerBar, endSample);
+    let max = 0;
+    for (let j = start; j < end; j++) {
+      const abs = Math.abs(channel[j]);
+      if (abs > max) max = abs;
+    }
+    peaks.push(max);
+  }
+
+  const globalMax = Math.max(...peaks, 0.001);
+  return peaks.map((p) => p / globalMax);
+}
+
+/** Min/max peaks for mirrored waveform display at high zoom. */
+export function computePeaksMinMaxForRange(
+  buffer: AudioBuffer,
+  startSec: number,
+  endSec: number,
+  barCount: number,
+): PeakMinMax[] {
+  const channel = buffer.getChannelData(0);
+  const { startSample, endSample } = sampleRange(channel, buffer.sampleRate, startSec, endSec);
+  const rangeLen = endSample - startSample;
+  const count = Math.max(1, barCount);
+  const samplesPerBar = Math.max(1, Math.floor(rangeLen / count));
+  const peaks: PeakMinMax[] = [];
+  let globalMax = 0.001;
+
+  for (let i = 0; i < count; i++) {
+    const start = startSample + i * samplesPerBar;
+    const end = Math.min(start + samplesPerBar, endSample);
+    let min = 0;
+    let max = 0;
+    for (let j = start; j < end; j++) {
+      const v = channel[j];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const absMax = Math.max(Math.abs(min), Math.abs(max));
+    if (absMax > globalMax) globalMax = absMax;
+    peaks.push({ min, max });
+  }
+
+  return peaks.map((p) => ({
+    min: p.min / globalMax,
+    max: p.max / globalMax,
+  }));
+}
+
+const LOD_CACHE_MAX = 16;
+
+export class PeaksLodCache {
+  private entries: { key: string; peaks: PeakMinMax[] }[] = [];
+
+  get(
+    buffer: AudioBuffer,
+    startSec: number,
+    endSec: number,
+    barCount: number,
+  ): PeakMinMax[] {
+    const key = `${startSec.toFixed(4)}:${endSec.toFixed(4)}:${barCount}`;
+    const hit = this.entries.find((e) => e.key === key);
+    if (hit) return hit.peaks;
+
+    const peaks = computePeaksMinMaxForRange(buffer, startSec, endSec, barCount);
+    this.entries.push({ key, peaks });
+    if (this.entries.length > LOD_CACHE_MAX) {
+      this.entries.shift();
+    }
+    return peaks;
+  }
+
+  clear() {
+    this.entries = [];
+  }
 }
 
 export async function decodeAudioBuffer(arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {

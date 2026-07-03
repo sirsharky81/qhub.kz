@@ -1,5 +1,12 @@
 export type ExportFormat = "mp3-320" | "mp3-192" | "wav";
 
+export interface BeatGrid {
+  bpm: number;
+  /** Seconds of the first beat. */
+  offset: number;
+  confidence: number;
+}
+
 export interface AudioTrack {
   id: string;
   file: File;
@@ -8,6 +15,7 @@ export interface AudioTrack {
   size: number;
   buffer: AudioBuffer;
   peaks: number[];
+  beatGrid?: BeatGrid | null;
 }
 
 export interface TrimRegion {

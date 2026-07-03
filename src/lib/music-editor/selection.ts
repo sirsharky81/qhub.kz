@@ -125,3 +125,45 @@ export function getPlayheadSourceTime(
 ): number {
   return mapResultTimeToSource(resultTime, duration, settings);
 }
+
+export function mergeCutRegions(cuts: TrimRegion[]): TrimRegion[] {
+  if (cuts.length === 0) return [];
+  const sorted = [...cuts].sort((a, b) => a.start - b.start);
+  const merged: TrimRegion[] = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i].start <= last.end + 0.01) {
+      last.end = Math.max(last.end, sorted[i].end);
+    } else {
+      merged.push({ ...sorted[i] });
+    }
+  }
+  return merged;
+}
+
+/** Cut must lie fully inside one kept segment. */
+export function isCutWithinKeep(
+  cut: TrimRegion,
+  duration: number,
+  settings: ManualEditSettings,
+): boolean {
+  if (cut.end - cut.start < 0.05) return false;
+  const segments = getKeepSegments(
+    duration,
+    settings.trimStart,
+    settings.trimEnd,
+    settings.cutRegions,
+  );
+  return segments.some(
+    (s) => cut.start >= s.start + 0.01 && cut.end <= s.end - 0.01,
+  );
+}
+
+export function addCutRegion(
+  duration: number,
+  settings: ManualEditSettings,
+  cut: TrimRegion,
+): TrimRegion[] | null {
+  if (!isCutWithinKeep(cut, duration, settings)) return null;
+  return mergeCutRegions([...settings.cutRegions, cut]);
+}
