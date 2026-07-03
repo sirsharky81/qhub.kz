@@ -2,11 +2,18 @@ import { prepareAudioSessionForCall } from "@/lib/audio-session";
 
 let wakeLock: WakeLockSentinel | null = null;
 let releaseWakeLockOnVisibility: (() => void) | null = null;
+let keepScreenOn = false;
 
 /** Tell iOS the app is in an active voice call — resists ducking from other apps' sounds. */
-export async function activateCallMediaSession(peerTitle: string): Promise<void> {
+export async function activateCallMediaSession(
+  peerTitle: string,
+  options?: { speakerOn?: boolean },
+): Promise<void> {
   if (typeof navigator === "undefined") return;
   prepareAudioSessionForCall();
+
+  const speakerOn = options?.speakerOn ?? false;
+  keepScreenOn = speakerOn;
 
   if ("mediaSession" in navigator) {
     try {
@@ -14,13 +21,17 @@ export async function activateCallMediaSession(peerTitle: string): Promise<void>
         title: "Звонок",
         artist: peerTitle || "QHub",
       });
-      navigator.mediaSession.playbackState = "playing";
+      navigator.mediaSession.playbackState = speakerOn ? "playing" : "none";
     } catch {
       // Safari versions vary.
     }
   }
 
-  await requestCallWakeLock();
+  if (speakerOn) {
+    await requestCallWakeLock();
+  } else {
+    releaseCallWakeLock();
+  }
 }
 
 async function requestCallWakeLock(): Promise<void> {
@@ -30,7 +41,7 @@ async function requestCallWakeLock(): Promise<void> {
     wakeLock = await navigator.wakeLock.request("screen");
     if (!releaseWakeLockOnVisibility && typeof document !== "undefined") {
       const onVisibility = () => {
-        if (document.visibilityState === "visible") {
+        if (document.visibilityState === "visible" && keepScreenOn) {
           void requestCallWakeLock();
         }
       };
@@ -45,10 +56,16 @@ async function requestCallWakeLock(): Promise<void> {
   }
 }
 
-export function releaseCallMediaSession(): void {
-  releaseWakeLockOnVisibility?.();
+function releaseCallWakeLock(): void {
   void wakeLock?.release().catch(() => {});
   wakeLock = null;
+}
+
+export function releaseCallMediaSession(): void {
+  keepScreenOn = false;
+  releaseWakeLockOnVisibility?.();
+  releaseWakeLockOnVisibility = null;
+  releaseCallWakeLock();
 
   if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
   try {

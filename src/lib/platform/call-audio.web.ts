@@ -6,5 +6,7 @@ export class CallAudioWeb implements CallAudioPlugin {
 
   async setSpeaker(_options: { enabled: boolean }): Promise<void> {}
 
+  async setProximity(_options: { enabled: boolean }): Promise<void> {}
+
   async release(): Promise<void> {}
 }

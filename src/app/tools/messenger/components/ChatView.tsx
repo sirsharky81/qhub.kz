@@ -34,6 +34,7 @@ import { useCoarsePointer } from "@/hooks/useCoarsePointer";
 import { blobToBase64, compressImageIfNeeded } from "@/lib/messenger/files";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
 import { scrollChatListToBottom, isChatListNearBottom } from "@/lib/messenger/use-visual-viewport";
+import { onAppResume } from "@/lib/platform/app-resume";
 import {
   clearRoomUnread,
   incrementRoomUnread,
@@ -316,9 +317,11 @@ export function ChatView({
 
     void tick();
     const id = window.setInterval(() => void tick(), intervalMs());
+    const removeResume = onAppResume(() => void tick());
     return () => {
       cancelled = true;
       clearInterval(id);
+      removeResume();
     };
   }, [channel, ingestEnvelopes, isRoom, onRoomEnded, inCall]);
 

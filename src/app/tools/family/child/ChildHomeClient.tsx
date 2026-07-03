@@ -14,12 +14,13 @@ import {
   createChildPairingApi,
   pollChildPairingApi,
   pollFamilyRoomApi,
-  postLocationApi,
   setShareLocationApi,
   buildChildPairQrUrl,
 } from "@/lib/family/client";
-import { readBatteryLevel } from "@/lib/family/battery";
+import { submitChildLocation } from "@/lib/family/child-location";
 import { startGeoWatch } from "@/lib/family/geo";
+import { PlatformLocation } from "@/lib/platform/location";
+import { isNativePlatform } from "@/lib/platform/runtime";
 import { childMapMemberUrl } from "@/lib/family/map-urls";
 import {
   clearAllFamilyLocalData,
@@ -141,25 +142,28 @@ export function ChildHomeClient() {
 
   useEffect(() => {
     if (view !== "paired" || !shareWithParents) return;
-    const stop = startGeoWatch((pos) => {
-      void (async () => {
-        const s = loadChildSession();
-        if (!s) return;
-        const bat = await readBatteryLevel();
-        try {
-          await postLocationApi(s, {
-            lat: pos.lat,
-            lng: pos.lng,
-            accuracy: pos.accuracy,
-            battery: bat,
-          });
-          setGeoError(null);
-        } catch (e) {
-          setGeoError(e instanceof Error ? e.message : "Ошибка GPS");
-        }
-      })();
-    });
-    return stop;
+
+    const onLocation = (pos: { lat: number; lng: number; accuracy: number }) => {
+      void submitChildLocation(pos)
+        .then(() => setGeoError(null))
+        .catch((e) => setGeoError(e instanceof Error ? e.message : "Ошибка GPS"));
+    };
+
+    if (isNativePlatform()) {
+      let cancelled = false;
+      void PlatformLocation.startBackgroundTracking({
+        onLocation,
+        onError: (err) => {
+          if (!cancelled) setGeoError(err.message);
+        },
+      });
+      return () => {
+        cancelled = true;
+        void PlatformLocation.stopBackgroundTracking();
+      };
+    }
+
+    return startGeoWatch(onLocation);
   }, [view, shareWithParents]);
 
   async function handleShareToggle(enabled: boolean) {

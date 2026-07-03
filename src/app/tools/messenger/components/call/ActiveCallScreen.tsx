@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { CallDebugInfo } from "@/lib/messenger/call/types";
+import { isIOSDevice } from "@/lib/platform/device";
 import { CallStatusText } from "./CallStatusText";
 import {
   MicIcon,
@@ -179,6 +180,12 @@ export function ActiveCallScreen({
 
         {debug && (phase === "outgoing" || phase === "connecting" || phase === "active") && (
           <DebugPanel phase={phase} debug={debug} />
+        )}
+        {phase === "active" && !speakerOn && isIOSDevice() && (
+          <p className="mx-6 mt-2 text-center text-[11px] leading-snug text-white/45">
+            На iPhone в браузере экран может не гаснуть у уха — это ограничение Safari. В Android-приложении
+            QHub затухание работает.
+          </p>
         )}
       </div>
 

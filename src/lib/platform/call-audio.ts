@@ -6,6 +6,7 @@ import { getNativePlatform, isNativePlatform } from "./runtime";
 export interface CallAudioPlugin {
   prepare(): Promise<void>;
   setSpeaker(options: { enabled: boolean }): Promise<void>;
+  setProximity(options: { enabled: boolean }): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -48,6 +49,15 @@ export async function setCallSpeakerEnabled(enabled: boolean): Promise<void> {
     await CallAudioNative.setSpeaker({ enabled });
   } catch {
     // Best-effort — element playback may still work.
+  }
+}
+
+export async function setCallProximityEnabled(enabled: boolean): Promise<void> {
+  if (!hasNativeCallAudioRouting()) return;
+  try {
+    await CallAudioNative.setProximity({ enabled });
+  } catch {
+    // Best-effort.
   }
 }
 

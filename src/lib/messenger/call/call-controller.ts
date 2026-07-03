@@ -3,7 +3,7 @@ import {
   prepareAudioSessionForCall,
   restoreAudioSessionAfterCall,
 } from "@/lib/audio-session";
-import { prepareCallAudioOutput, releaseCallAudioOutput } from "@/lib/platform/call-audio";
+import { prepareCallAudioOutput, releaseCallAudioOutput, setCallProximityEnabled } from "@/lib/platform/call-audio";
 import { ensureMediaPermissions } from "@/lib/platform/media-access";
 import {
   CALL_CONNECT_POLL_INTERVAL_MS,
@@ -333,6 +333,10 @@ export class CallController {
     prepareAudioSessionForCall();
     this.pc?.setSpeakerphone(speakerOn);
     this.patch({ speakerOn });
+    void setCallProximityEnabled(!speakerOn);
+    if (this.state.phase === "active") {
+      void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", { speakerOn });
+    }
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
   }
 
@@ -754,7 +758,10 @@ export class CallController {
     this.patch({ phase: "active" });
     this.startDurationTimer();
     this.startCallAudioWatch();
-    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub");
+    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
+      speakerOn: this.state.speakerOn,
+    });
+    void setCallProximityEnabled(!this.state.speakerOn);
     if (this.pollCallId) {
       this.startHeartbeat(this.pollCallId);
     }

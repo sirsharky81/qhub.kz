@@ -5,7 +5,6 @@ import type {
   Location,
 } from "@capacitor-community/background-geolocation";
 import type { PlatformLocationCallbacks } from "../location";
-import { PlatformOfflineQueue } from "../offlineQueue";
 import { PlatformLogger } from "../logger";
 
 const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>(
@@ -14,19 +13,6 @@ const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>(
 
 let running = false;
 let stopFn: (() => void) | null = null;
-
-async function onCoordinate(coords: { lat: number; lng: number; accuracy: number }): Promise<void> {
-  await PlatformOfflineQueue.enqueue({
-    type: "location",
-    endpoint: "/api/family/location",
-    payload: {
-      lat: coords.lat,
-      lng: coords.lng,
-      accuracy: coords.accuracy,
-      battery: null,
-    },
-  });
-}
 
 export const BackgroundGeolocationNative = {
   async start(callbacks: PlatformLocationCallbacks): Promise<void> {
@@ -55,7 +41,6 @@ export const BackgroundGeolocationNative = {
           accuracy: location.accuracy ?? 0,
         };
         callbacks.onLocation(coords);
-        void onCoordinate(coords);
       },
     );
 

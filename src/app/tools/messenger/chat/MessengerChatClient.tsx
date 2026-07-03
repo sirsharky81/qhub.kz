@@ -12,10 +12,12 @@ import { deriveDmAesKey, getOrCreateDeviceKeyPair } from "@/lib/messenger/crypto
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { deriveDmChatId, maskPhone, normalizeKzPhone } from "@/lib/messenger/phone";
+import { onAppResume } from "@/lib/platform/app-resume";
 
 type Phase = "loading" | "waiting" | "ready" | "auth_error";
 
-const PEER_POLL_MS = 3000;
+const PEER_POLL_VISIBLE_MS = 3000;
+const PEER_POLL_HIDDEN_MS = 12000;
 
 function MessengerChatInner() {
   const searchParams = useSearchParams();
@@ -102,21 +104,30 @@ function MessengerChatInner() {
     if (phase !== "waiting" || !myPhone) return;
 
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     async function poll() {
-      if (document.hidden || cancelled) return;
+      if (cancelled) return;
       try {
         await tryConnectPeer(myPhone);
       } catch {
         // keep waiting
       }
+      if (!cancelled) {
+        const ms = document.hidden ? PEER_POLL_HIDDEN_MS : PEER_POLL_VISIBLE_MS;
+        timeoutId = window.setTimeout(() => void poll(), ms);
+      }
     }
 
     void poll();
-    const id = window.setInterval(() => void poll(), PEER_POLL_MS);
+    const removeResume = onAppResume(() => {
+      if (!cancelled) void tryConnectPeer(myPhone);
+    });
+
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      removeResume();
     };
   }, [phase, myPhone, tryConnectPeer]);
 

@@ -123,14 +123,25 @@ export async function initNativePushListeners(): Promise<void> {
   if (!isNativePlatform()) return;
   const { PushNotifications } = await import("@capacitor/push-notifications");
 
+  function navigateFromPushData(data: Record<string, unknown> | undefined): void {
+    const url = typeof data?.url === "string" ? data.url.trim() : "";
+    if (!url || typeof window === "undefined") return;
+    try {
+      const target = new URL(url, window.location.origin);
+      const current = window.location.pathname + window.location.search;
+      if (target.pathname + target.search === current) return;
+      window.location.href = target.pathname + target.search + target.hash;
+    } catch {
+      window.location.href = url;
+    }
+  }
+
   await PushNotifications.addListener("pushNotificationReceived", (notification) => {
     PlatformLogger.info("Push received in foreground", notification);
+    navigateFromPushData(notification.data as Record<string, unknown> | undefined);
   });
 
   await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-    const data = action.notification.data as { url?: string } | undefined;
-    if (data?.url && typeof window !== "undefined") {
-      window.location.href = data.url;
-    }
+    navigateFromPushData(action.notification.data as Record<string, unknown> | undefined);
   });
 }
