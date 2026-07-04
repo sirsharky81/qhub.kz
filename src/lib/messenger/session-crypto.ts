@@ -1,8 +1,24 @@
 import { MESSENGER_SESSION_COOKIE, MESSENGER_SESSION_MAX_AGE_SEC } from "./constants";
 
+let loggedSecretFallback = false;
+
 function sessionSecret(): string {
-  const fromEnv = process.env.MESSENGER_SESSION_SECRET?.trim();
-  if (fromEnv) return fromEnv;
+  const messengerSecret = process.env.MESSENGER_SESSION_SECRET?.trim();
+  if (messengerSecret) return messengerSecret;
+
+  // Safe migration fallback: reuse already configured admin secret if present.
+  // This avoids production outage while keeping a real secret value.
+  const adminSecret = process.env.ADMIN_SESSION_SECRET?.trim();
+  if (adminSecret) {
+    if (process.env.NODE_ENV === "production" && !loggedSecretFallback) {
+      loggedSecretFallback = true;
+      console.warn(
+        "[messenger] MESSENGER_SESSION_SECRET not set — using ADMIN_SESSION_SECRET fallback",
+      );
+    }
+    return adminSecret;
+  }
+
   if (process.env.NODE_ENV === "production") {
     throw new Error("[messenger] MESSENGER_SESSION_SECRET is required in production");
   }
