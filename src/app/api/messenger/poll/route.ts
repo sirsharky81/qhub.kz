@@ -11,7 +11,12 @@ import {
   pruneStaleRoomParticipants,
   updateRoomHeartbeat,
 } from "@/lib/messenger/store";
-import { getMessengerPresence, isMessengerOnline, setMessengerPresence } from "@/lib/messenger/push-store";
+import {
+  getMessengerPresence,
+  isMessengerOnline,
+  isMessengerTyping,
+  setMessengerPresence,
+} from "@/lib/messenger/push-store";
 import { peerFromDmChannel } from "@/lib/messenger/phone";
 
 export async function GET(request: Request) {
@@ -44,16 +49,18 @@ export async function GET(request: Request) {
       const { meta, messages, envelopes } = await getDmMessagesSince(channel, sinceVersion);
       const peerPhone = peerFromDmChannel(channel, phone);
       let peerOnline = false;
+      let peerTyping = false;
       if (peerPhone) {
         const presence = await getMessengerPresence(peerPhone);
         peerOnline = isMessengerOnline(presence);
+        peerTyping = await isMessengerTyping(channel, peerPhone);
       }
       if (sinceVersion >= meta.version) {
         track(200);
-        return NextResponse.json({ channel, meta, messages: [], envelopes: [], peerOnline });
+        return NextResponse.json({ channel, meta, messages: [], envelopes: [], peerOnline, peerTyping });
       }
       track(200);
-      return NextResponse.json({ channel, meta, messages, envelopes, peerOnline });
+      return NextResponse.json({ channel, meta, messages, envelopes, peerOnline, peerTyping });
     }
 
     if (channel.startsWith("room:")) {

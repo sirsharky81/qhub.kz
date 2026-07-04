@@ -14,6 +14,7 @@ import {
   markDmDialogRead,
   isReceiptEnvelope,
   pollChannel,
+  sendTypingStatus,
   sendEncryptedMessage,
   sendReceipt,
 } from "@/lib/messenger/client";
@@ -90,6 +91,7 @@ export function ChatView({
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; right: number } | null>(null);
   const [connection, setConnection] = useState<"online" | "reconnecting" | "offline">("reconnecting");
   const [peerOnline, setPeerOnline] = useState<boolean | null>(null);
+  const [peerTyping, setPeerTyping] = useState(false);
   const [participantCount, setParticipantCount] = useState<number | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
@@ -104,7 +106,11 @@ export function ChatView({
   const messagesRef = useRef<DisplayMessage[]>([]);
   const initialAnchorDoneRef = useRef(false);
   const storageKeyRef = useRef(storageKey);
+  const lastTypingPingAtRef = useRef(0);
+  const typingActiveRef = useRef(false);
+  const textRef = useRef(text);
   storageKeyRef.current = storageKey;
+  textRef.current = text;
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -211,8 +217,58 @@ export function ChatView({
   }, [channel, isRoom]);
 
   useEffect(() => {
+    setPeerTyping(false);
+  }, [channel]);
+
+  useEffect(() => {
     pendingOwnReceipts.current.clear();
   }, [channel]);
+
+  useEffect(() => {
+    if (isRoom || !channel.startsWith("dm:")) return;
+    const maybeSendTyping = (active: boolean) => {
+      if (active) {
+        const now = Date.now();
+        if (now - lastTypingPingAtRef.current < 1200) return;
+        lastTypingPingAtRef.current = now;
+      }
+      void sendTypingStatus(channel, active);
+    };
+
+    const hasText = text.trim().length > 0;
+    const canTypeNow = hasText && document.visibilityState === "visible";
+    if (canTypeNow) {
+      typingActiveRef.current = true;
+      maybeSendTyping(true);
+    } else if (typingActiveRef.current) {
+      typingActiveRef.current = false;
+      maybeSendTyping(false);
+    }
+  }, [channel, isRoom, text]);
+
+  useEffect(() => {
+    if (isRoom || !channel.startsWith("dm:")) return;
+    const onVisibility = () => {
+      const hasText = textRef.current.trim().length > 0;
+      if (document.visibilityState === "visible" && hasText) {
+        typingActiveRef.current = true;
+        void sendTypingStatus(channel, true);
+        return;
+      }
+      if (typingActiveRef.current) {
+        typingActiveRef.current = false;
+        void sendTypingStatus(channel, false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (typingActiveRef.current) {
+        typingActiveRef.current = false;
+        void sendTypingStatus(channel, false);
+      }
+    };
+  }, [channel, isRoom]);
 
   useEffect(() => {
     if (isRoom && roomId) {
@@ -402,6 +458,9 @@ export function ChatView({
         setConnection("online");
         if (!isRoom && typeof data.peerOnline === "boolean") {
           setPeerOnline(data.peerOnline);
+        }
+        if (!isRoom && typeof data.peerTyping === "boolean") {
+          setPeerTyping(data.peerTyping);
         }
         if (data.meta.version > versionRef.current) {
           versionRef.current = data.meta.version;
@@ -688,6 +747,9 @@ export function ChatView({
     <div className="flex items-center gap-2 flex-wrap">
       {!isRoom && peerOnline !== null && (
         <ConnectionStatus status={peerOnline ? "online" : "offline"} variant="peer" />
+      )}
+      {!isRoom && peerTyping && (
+        <span className="text-xs text-sky-600 font-medium">печатает…</span>
       )}
       {connection !== "online" && (
         <ConnectionStatus status={connection} variant="connection" />

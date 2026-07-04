@@ -4,8 +4,10 @@ import {
   MESSENGER_PUSH_TTL_SEC,
   REDIS_MESSENGER_PRESENCE_PREFIX,
   REDIS_MESSENGER_PUSH_PREFIX,
+  REDIS_MESSENGER_TYPING_PREFIX,
+  MESSENGER_TYPING_TTL_SEC,
 } from "./constants";
-import { redisDel, redisGetJson, redisSet } from "./redis";
+import { redisDel, redisGet, redisGetJson, redisSet } from "./redis";
 import type { MessengerPresence, MessengerPushSubscription } from "./types";
 
 function pushKey(phone: string): string {
@@ -14,6 +16,10 @@ function pushKey(phone: string): string {
 
 function presenceKey(phone: string): string {
   return `${REDIS_MESSENGER_PRESENCE_PREFIX}${phone}`;
+}
+
+function typingKey(channel: string, phone: string): string {
+  return `${REDIS_MESSENGER_TYPING_PREFIX}${channel}:${phone}`;
 }
 
 export async function getMessengerPushSubscriptions(
@@ -60,4 +66,21 @@ export function isViewingChannel(presence: MessengerPresence | null, channel: st
 export function isMessengerOnline(presence: MessengerPresence | null): boolean {
   if (!presence) return false;
   return Date.now() - presence.at < MESSENGER_PRESENCE_TTL_SEC * 1000;
+}
+
+export async function setMessengerTyping(
+  channel: string,
+  phone: string,
+  active: boolean,
+): Promise<void> {
+  if (active) {
+    await redisSet(typingKey(channel, phone), "1", MESSENGER_TYPING_TTL_SEC);
+    return;
+  }
+  await redisDel(typingKey(channel, phone));
+}
+
+export async function isMessengerTyping(channel: string, phone: string): Promise<boolean> {
+  const raw = await redisGet(typingKey(channel, phone));
+  return raw != null;
 }

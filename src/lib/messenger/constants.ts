@@ -44,9 +44,11 @@ export const UNREAD_EVENT = "qhub-messenger-unread-change";
 export const REDIS_PROFILES_KEY = "qhub:messenger:profiles";
 export const REDIS_MESSENGER_PUSH_PREFIX = "qhub:messenger:push:";
 export const REDIS_MESSENGER_PRESENCE_PREFIX = "qhub:messenger:presence:";
+export const REDIS_MESSENGER_TYPING_PREFIX = "qhub:messenger:typing:";
 export const MESSENGER_GLOBAL_PRESENCE_CHANNEL = "__global__";
 export const MESSENGER_PUSH_TTL_SEC = 60 * 60 * 24 * 30;
 export const MESSENGER_PRESENCE_TTL_SEC = 45;
+export const MESSENGER_TYPING_TTL_SEC = 6;
 export const MESSENGER_PUSH_PREFS_KEY = "qhub_messenger_push_enabled";
 export const MESSENGER_NATIVE_PUSH_TOKEN_KEY = "qhub_messenger_native_push_token";
 

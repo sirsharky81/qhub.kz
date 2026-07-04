@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   clearMessengerPresence,
   getMessengerPresence,
+  isMessengerTyping,
   isMessengerOnline,
   isViewingChannel,
+  setMessengerTyping,
   setMessengerGlobalPresence,
   setMessengerPresence,
 } from "./push-store";
@@ -52,5 +54,13 @@ describe("messenger presence", () => {
     const presence = await getMessengerPresence(phone);
     expect(isMessengerOnline(presence)).toBe(false);
     expect(isViewingChannel(presence, channel)).toBe(false);
+  });
+
+  it("stores ephemeral typing signal by channel", async () => {
+    const peer = "+77022220002";
+    await setMessengerTyping(channel, peer, true);
+    expect(await isMessengerTyping(channel, peer)).toBe(true);
+    await setMessengerTyping(channel, peer, false);
+    expect(await isMessengerTyping(channel, peer)).toBe(false);
   });
 });

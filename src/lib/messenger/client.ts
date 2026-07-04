@@ -215,6 +215,18 @@ export async function reorderPinnedDialogs(dialogIds: string[]): Promise<boolean
   return res.ok;
 }
 
+export async function sendTypingStatus(channel: string, active: boolean): Promise<void> {
+  try {
+    await platformFetch("/api/messenger/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel, active }),
+    });
+  } catch {
+    // best-effort ephemeral signal
+  }
+}
+
 export async function markDmDialogRead(chatId: string): Promise<void> {
   try {
     const res = await platformFetch("/api/messenger/dialogs/read", {
@@ -315,6 +327,7 @@ export type PollChannelResult =
       envelopes: ChannelEnvelope[];
       participants?: { phone: string; lastSeen: number; displayName?: string | null }[];
       peerOnline?: boolean;
+      peerTyping?: boolean;
     }
   | { error: "room_gone" };
 
@@ -346,6 +359,7 @@ export async function pollChannel(
     envelopes?: ChannelEnvelope[];
     participants?: { phone: string; lastSeen: number }[];
     peerOnline?: boolean;
+    peerTyping?: boolean;
   };
   const envelopes =
     data.envelopes ??
@@ -356,6 +370,7 @@ export async function pollChannel(
     envelopes,
     participants: data.participants,
     peerOnline: data.peerOnline,
+    peerTyping: data.peerTyping,
   };
 }
 
