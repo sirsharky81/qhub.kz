@@ -1,6 +1,7 @@
 import { checkFamilyRateLimit, getClientIp } from "@/lib/rate-limit";
 import { jsonFamilyAuthError } from "@/lib/family/guard";
 import { consumeBindToken } from "@/lib/family/store";
+import { getWhitelistedMessengerPhoneFromRequest } from "@/lib/family/messenger-contact";
 
 export async function POST(request: Request) {
   try {
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Укажите токен" }, { status: 400 });
     }
 
-    const { member, accessToken, room } = await consumeBindToken(token, body.name);
+    const messengerPhone = await getWhitelistedMessengerPhoneFromRequest();
+    const { member, accessToken, room } = await consumeBindToken(token, body.name, messengerPhone);
 
     return Response.json({
       roomId: room.roomId,

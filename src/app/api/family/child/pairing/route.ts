@@ -3,6 +3,7 @@ import { jsonFamilyAuthError } from "@/lib/family/guard";
 import { createChildPairing, getPairingStatus } from "@/lib/family/store";
 import { buildChildPairShareUrl } from "@/lib/family/qr-pair";
 import { withCors } from "@/lib/api/cors";
+import { getWhitelistedMessengerPhoneFromRequest } from "@/lib/family/messenger-contact";
 
 export async function POST(request: Request) {
   try {
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Неверный формат" }, { status: 400 });
     }
 
-    const result = await createChildPairing(body.name ?? "Участник");
+    const messengerPhone = await getWhitelistedMessengerPhoneFromRequest();
+    const result = await createChildPairing(body.name ?? "Участник", messengerPhone);
     const qrUrl = buildChildPairShareUrl(result.pairToken);
 
     return withCors(Response.json({ ...result, qrUrl }), request);

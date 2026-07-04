@@ -29,6 +29,7 @@ import type {
   FamilySosState,
 } from "./types";
 import { generateAccessToken, generateBindToken, generateFamilyRoomId, generateMemberId, hashToken } from "./tokens";
+import { isPhoneWhitelisted } from "@/lib/messenger/store";
 
 function roomKey(roomId: string): string {
   return `${REDIS_ROOM_PREFIX}${roomId.toUpperCase()}`;
@@ -99,9 +100,23 @@ export async function verifyMemberToken(memberId: string, accessToken: string): 
   return member;
 }
 
+export async function attachMemberMessengerPhone(
+  memberId: string,
+  messengerPhone?: string | null,
+): Promise<void> {
+  if (!messengerPhone) return;
+  const member = await getMember(memberId);
+  if (!member) return;
+  if (member.messengerPhone === messengerPhone) return;
+  member.messengerPhone = messengerPhone;
+  await saveMember(member);
+  if (member.roomId) await bumpRoomVersion(member.roomId);
+}
+
 export async function createFamilyRoom(
   name: string,
   ownerName = "Родитель",
+  ownerMessengerPhone?: string | null,
 ): Promise<{
   room: FamilyRoom;
   ownerMemberId: string;
@@ -132,6 +147,7 @@ export async function createFamilyRoom(
     createdAt: now,
     shareLocationWithChildren: false,
     shareLocationWithParents: false,
+    messengerPhone: ownerMessengerPhone ?? null,
   };
 
   await saveRoom(room);
@@ -171,6 +187,7 @@ export async function createBindToken(
 export async function consumeBindToken(
   token: string,
   name?: string,
+  messengerPhone?: string | null,
 ): Promise<{ member: FamilyMember; accessToken: string; room: FamilyRoom }> {
   const payload = await familyRedisGetJson<FamilyBindToken>(bindKey(token));
   if (!payload) throw new Error("bind_expired");
@@ -198,6 +215,7 @@ export async function consumeBindToken(
     createdAt: Date.now(),
     shareLocationWithParents: payload.role === "tracked" ? true : false,
     shareLocationWithChildren: false,
+    messengerPhone: messengerPhone ?? null,
   };
 
   room.memberIds.push(memberId);
@@ -207,7 +225,10 @@ export async function consumeBindToken(
   return { member, accessToken, room };
 }
 
-export async function createChildPairing(childName: string): Promise<{
+export async function createChildPairing(
+  childName: string,
+  messengerPhone?: string | null,
+): Promise<{
   pairToken: string;
   memberId: string;
   accessToken: string;
@@ -228,6 +249,7 @@ export async function createChildPairing(childName: string): Promise<{
     createdAt: now,
     memberType: "child",
     shareLocationWithParents: true,
+    messengerPhone: messengerPhone ?? null,
   };
 
   const record: FamilyPairingRecord = {
@@ -564,6 +586,7 @@ export async function buildPollSnapshot(
   const locations: FamilyLocation[] = [];
   const sos: FamilySosState[] = [];
   const parents: FamilyParentPublic[] = [];
+  const messengerAllowedCache = new Map<string, boolean>();
 
   function toParentPublic(member: FamilyMember, isCreator: boolean): FamilyParentPublic {
     return {
@@ -572,7 +595,19 @@ export async function buildPollSnapshot(
       isCreator,
       shareLocationWithChildren: member.shareLocationWithChildren ?? false,
       shareLocationWithParents: member.shareLocationWithParents ?? false,
+      messengerPeerPhone: null,
     };
+  }
+
+  async function resolveMessengerPeerPhone(member: FamilyMember): Promise<string | null> {
+    const phone = member.messengerPhone?.trim();
+    if (!phone) return null;
+    if (member.memberId === viewerMemberId) return null;
+    const cached = messengerAllowedCache.get(phone);
+    if (cached !== undefined) return cached ? phone : null;
+    const allowed = await isPhoneWhitelisted(phone);
+    messengerAllowedCache.set(phone, allowed);
+    return allowed ? phone : null;
   }
 
   function includeParentLocation(member: FamilyMember, loc: FamilyLocation): boolean {
@@ -584,7 +619,9 @@ export async function buildPollSnapshot(
 
   const ownerMember = await getMember(room.ownerMemberId);
   if (ownerMember) {
-    parents.push(toParentPublic(ownerMember, true));
+    const ownerPublic = toParentPublic(ownerMember, true);
+    ownerPublic.messengerPeerPhone = await resolveMessengerPeerPhone(ownerMember);
+    parents.push(ownerPublic);
   }
 
   for (const memberId of room.memberIds) {
@@ -592,7 +629,9 @@ export async function buildPollSnapshot(
     if (!member) continue;
 
     if (member.role === "observer") {
-      parents.push(toParentPublic(member, false));
+      const parentPublic = toParentPublic(member, false);
+      parentPublic.messengerPeerPhone = await resolveMessengerPeerPhone(member);
+      parents.push(parentPublic);
     }
 
     if (member.role === "tracked") {
@@ -603,6 +642,7 @@ export async function buildPollSnapshot(
         name: member.name,
         memberType: member.memberType,
         shareLocationWithParents: sharesWithParents,
+        messengerPeerPhone: await resolveMessengerPeerPhone(member),
       });
       const loc = await getLocation(memberId);
       if (loc && sharesWithParents) locations.push(loc);
@@ -625,6 +665,7 @@ export async function buildPollSnapshot(
     isCreator: true,
     shareLocationWithChildren: false,
     shareLocationWithParents: false,
+    messengerPeerPhone: null,
   };
 
   const { ownerMemberId: _omit, ...roomPublic } = room;

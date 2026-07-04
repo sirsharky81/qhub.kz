@@ -1,6 +1,7 @@
 import { checkFamilyRateLimit, getClientIp } from "@/lib/rate-limit";
 import { createFamilyRoom } from "@/lib/family/store";
 import { withCors } from "@/lib/api/cors";
+import { getWhitelistedMessengerPhoneFromRequest } from "@/lib/family/messenger-contact";
 
 export async function POST(request: Request) {
   try {
@@ -23,9 +24,11 @@ export async function POST(request: Request) {
       body = {};
     }
 
+    const messengerPhone = await getWhitelistedMessengerPhoneFromRequest();
     const { room, ownerMemberId, accessToken } = await createFamilyRoom(
       body.name ?? "Семья",
       body.parentName ?? "Родитель",
+      messengerPhone,
     );
 
     return withCors(

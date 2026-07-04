@@ -22,6 +22,7 @@ import { startGeoWatch } from "@/lib/family/geo";
 import { PlatformLocation } from "@/lib/platform/location";
 import { isNativePlatform } from "@/lib/platform/runtime";
 import { childMapMemberUrl } from "@/lib/family/map-urls";
+import { messengerChatUrl } from "@/lib/app-routes";
 import {
   clearAllFamilyLocalData,
   clearChildPairingSession,
@@ -235,6 +236,7 @@ export function ChildHomeClient() {
   }
 
   const sosPhone = snapshot?.room.sosPhone ?? null;
+  const returnTo = "/tools/family/child";
 
   if (view === "onboarding") {
     return (
@@ -333,6 +335,9 @@ export function ChildHomeClient() {
               if (!snapshot?.locations.some((l) => l.memberId === p.memberId)) return null;
               return childMapMemberUrl(p.memberId);
             }}
+            messageHrefFor={(p) =>
+              p.messengerPeerPhone ? messengerChatUrl(p.messengerPeerPhone, returnTo) : null
+            }
           />
         </div>
 

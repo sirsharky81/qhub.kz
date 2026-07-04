@@ -8,7 +8,6 @@ import { MiniMap } from "../../components/MiniMap";
 import { ChildrenList } from "../../components/ChildrenList";
 import { ParentsList } from "../../components/ParentsList";
 import { ShareLocationPanel } from "../../components/ShareLocationPanel";
-import { MessengerLink } from "../../components/MessengerLink";
 import { SosPhoneSettings } from "../../components/SosPhoneSettings";
 import { POLL_HIDDEN_MS, POLL_VISIBLE_MS } from "@/lib/family/constants";
 import {
@@ -25,7 +24,7 @@ import { startGeoWatch } from "@/lib/family/geo";
 import { sendSosToMessengerRoom } from "@/lib/family/messenger-sos";
 import { subscribeFamilyPush } from "@/lib/family/push";
 import { clearParentSession, clearAllFamilyLocalData, loadParentSession } from "@/lib/family/session";
-import { parentMapMemberUrl, parentMapUrl } from "@/lib/app-routes";
+import { messengerChatUrl, parentMapMemberUrl, parentMapUrl, parentRoomUrl } from "@/lib/app-routes";
 import { SettingsHeaderButton } from "@/components/SettingsHeaderButton";
 import type { FamilyPollSnapshot, FamilySession } from "@/lib/family/types";
 
@@ -145,6 +144,12 @@ function ParentRoomInner() {
       .map((p) => ({ memberId: p.memberId, role: "observer" as const, name: p.name })),
   ];
   const parentMemberIds = parents.map((p) => p.memberId);
+  const returnTo = parentRoomUrl(roomId);
+  const childMessageHrefs = new Map(
+    children.flatMap((m) =>
+      m.messengerPeerPhone ? [[m.memberId, messengerChatUrl(m.messengerPeerPhone, returnTo)] as const] : [],
+    ),
+  );
 
   async function handleShareToggle(target: "children" | "parents", enabled: boolean) {
     const s = loadParentSession();
@@ -268,6 +273,7 @@ function ParentRoomInner() {
               ? parentMapMemberUrl(roomId, memberId)
               : null
           }
+          messageHrefFor={(memberId) => childMessageHrefs.get(memberId) ?? null}
         />
 
         <ParentsList
@@ -282,6 +288,9 @@ function ParentRoomInner() {
             if (!locations.some((l) => l.memberId === p.memberId)) return null;
             return parentMapMemberUrl(roomId, p.memberId);
           }}
+          messageHrefFor={(p) =>
+            p.messengerPeerPhone ? messengerChatUrl(p.messengerPeerPhone, returnTo) : null
+          }
         />
 
         {showSettings && session && (
@@ -293,11 +302,6 @@ function ParentRoomInner() {
                 onSaved={() => void poll()}
               />
             )}
-            <MessengerLink
-              session={session}
-              messengerRoomId={snapshot?.room.messengerRoomId}
-              onLinked={() => void poll()}
-            />
             {isOwner ? (
               <button type="button" onClick={handleDeleteRoom} className="w-full text-xs text-red-600 underline">
                 Удалить семью

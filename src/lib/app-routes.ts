@@ -16,8 +16,10 @@ export function childMapMemberUrl(memberId: string): string {
   return `/tools/family/child/map?member=${encodeURIComponent(memberId)}`;
 }
 
-export function messengerChatUrl(peerPhone: string): string {
-  return `/tools/messenger/chat?peer=${encodeURIComponent(peerPhone)}`;
+export function messengerChatUrl(peerPhone: string, returnTo?: string): string {
+  const base = `/tools/messenger/chat?peer=${encodeURIComponent(peerPhone)}`;
+  if (!returnTo) return base;
+  return `${base}&returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function messengerChatCallUrl(peerPhone: string, callId: string): string {

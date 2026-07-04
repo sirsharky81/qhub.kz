@@ -42,6 +42,11 @@ function withBudget<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T>
   });
 }
 
+function safeFamilyReturnTo(raw: string | null): string | null {
+  if (!raw) return null;
+  return raw.startsWith("/tools/family") ? raw : null;
+}
+
 function MessengerChatInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -209,6 +214,7 @@ function MessengerChatInner() {
 
   const peerTitle = profileLabels[peerPhone] ?? maskPhone(peerPhone);
   const deepLinkCallId = searchParams.get("call");
+  const backHref = safeFamilyReturnTo(searchParams.get("returnTo")) ?? "/tools/messenger/home";
 
   const handleTrustIdentity = useCallback(() => {
     if (!currentPeerFingerprint) return;
@@ -218,7 +224,7 @@ function MessengerChatInner() {
 
   if (phase === "auth_error") {
     return (
-      <MessengerShell variant="chat" title={peerTitle} backHref="/tools/messenger/home">
+      <MessengerShell variant="chat" title={peerTitle} backHref={backHref}>
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
           <p className="text-sm text-red-600">Не удалось подготовить защищённый канал.</p>
           <a
@@ -240,7 +246,7 @@ function MessengerChatInner() {
 
   if (phase === "loading" || !aesKey || !myPhone) {
     return (
-      <MessengerShell variant="chat" title={peerTitle} backHref="/tools/messenger/home">
+      <MessengerShell variant="chat" title={peerTitle} backHref={backHref}>
         <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
           Подготовка защищённого канала…
         </div>
@@ -251,7 +257,7 @@ function MessengerChatInner() {
   const channel = deriveDmChatId(myPhone, peerPhone);
 
   return (
-    <PinUnlockGate phone={myPhone} maskedPhone={maskedPhone} title={peerTitle} backHref="/tools/messenger/home">
+    <PinUnlockGate phone={myPhone} maskedPhone={maskedPhone} title={peerTitle} backHref={backHref}>
       <CallProvider
         myPhone={myPhone}
         peerPhone={peerPhone}
@@ -262,7 +268,7 @@ function MessengerChatInner() {
         <ChatView
           channel={channel}
           title={peerTitle}
-          backHref="/tools/messenger/home"
+          backHref={backHref}
           myPhone={myPhone}
           aesKey={aesKey}
           profileLabels={profileLabels}

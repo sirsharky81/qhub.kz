@@ -1,6 +1,7 @@
 "use client";
 
 import type { FamilyParentPublic } from "@/lib/family/types";
+import { MessageMemberLink } from "./MessageMemberLink";
 import { ShowOnMapLink } from "./ShowOnMapLink";
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
   inviteHref?: string;
   canSelectParent?: (parent: FamilyParentPublic) => boolean;
   mapHrefFor?: (parent: FamilyParentPublic) => string | null;
+  messageHrefFor?: (parent: FamilyParentPublic) => string | null;
 }
 
 export function ParentsList({
@@ -27,6 +29,7 @@ export function ParentsList({
   inviteHref,
   canSelectParent,
   mapHrefFor,
+  messageHrefFor,
 }: Props) {
   const hasSecondParent = parents.some((p) => !p.isCreator);
 
@@ -38,6 +41,7 @@ export function ParentsList({
           const isSelected = selectedId === parent.memberId;
           const selectable = !canSelectParent || canSelectParent(parent);
           const mapHref = mapHrefFor?.(parent) ?? null;
+          const messageHref = messageHrefFor?.(parent) ?? null;
           const row = (
             <>
               <div className="flex items-center justify-between gap-3 min-w-0 flex-1">
@@ -87,6 +91,7 @@ export function ParentsList({
                   {row}
                 </div>
               )}
+              {messageHref && <MessageMemberLink href={messageHref} />}
               {mapHref && <ShowOnMapLink href={mapHref} />}
             </div>
           );

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { checkFamilyRateLimit } from "@/lib/rate-limit";
 import { assertRoomMember, jsonFamilyAuthError } from "@/lib/family/guard";
-import { buildPollSnapshot, getRoom, refreshMemberHeartbeat } from "@/lib/family/store";
+import { buildPollSnapshot, getRoom, refreshMemberHeartbeat, attachMemberMessengerPhone } from "@/lib/family/store";
+import { getWhitelistedMessengerPhoneFromRequest } from "@/lib/family/messenger-contact";
 
 export async function GET(request: Request) {
   try {
@@ -15,6 +16,10 @@ export async function GET(request: Request) {
     }
 
     const member = await assertRoomMember(request, roomId);
+    const messengerPhone = await getWhitelistedMessengerPhoneFromRequest();
+    if (messengerPhone) {
+      await attachMemberMessengerPhone(member.memberId, messengerPhone);
+    }
     const { allowed, retryAfterSec } = await checkFamilyRateLimit(`poll:${member.memberId}`);
     if (!allowed) {
       return NextResponse.json(

@@ -29,6 +29,8 @@ export interface FamilyMember {
   shareLocationWithChildren?: boolean;
   /** Родитель делится геопозицией с другими родителями */
   shareLocationWithParents?: boolean;
+  /** Phone for direct Messenger DM shortcut (if user is logged in Messenger). */
+  messengerPhone?: string | null;
 }
 
 export type FamilyPairingStatus = "pending" | "paired";
@@ -50,6 +52,7 @@ export interface FamilyParentPublic {
   isCreator: boolean;
   shareLocationWithChildren: boolean;
   shareLocationWithParents: boolean;
+  messengerPeerPhone?: string | null;
 }
 
 export interface FamilyLocation {
@@ -88,6 +91,7 @@ export interface FamilyMemberPublic {
   name: string;
   memberType?: FamilyMemberType;
   shareLocationWithParents?: boolean;
+  messengerPeerPhone?: string | null;
 }
 
 export interface FamilyPollSnapshot {

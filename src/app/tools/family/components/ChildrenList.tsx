@@ -3,6 +3,7 @@
 import type { FamilyLocation, FamilyMemberPublic, FamilySosState } from "@/lib/family/types";
 import { MEMBER_TYPE_LABELS, normalizeMemberType } from "@/lib/family/member-types";
 import { BatteryBadge } from "./BatteryBadge";
+import { MessageMemberLink } from "./MessageMemberLink";
 import { ParticipantStatusBadge } from "./ParticipantStatusBadge";
 import { ShowOnMapLink } from "./ShowOnMapLink";
 
@@ -15,6 +16,7 @@ interface Props {
   onRemove?: (memberId: string) => void;
   onClearSos?: (memberId: string) => void;
   mapHrefFor?: (memberId: string) => string | null;
+  messageHrefFor?: (memberId: string) => string | null;
 }
 
 export function ChildrenList({
@@ -26,6 +28,7 @@ export function ChildrenList({
   onRemove,
   onClearSos,
   mapHrefFor,
+  messageHrefFor,
 }: Props) {
   const locMap = new Map(locations.map((l) => [l.memberId, l]));
   const sosMap = new Map(sos.map((s) => [s.memberId, s]));
@@ -47,6 +50,7 @@ export function ChildrenList({
           const sosState = sosMap.get(child.memberId);
           const isSelected = selectedId === child.memberId;
           const mapHref = mapHrefFor?.(child.memberId) ?? null;
+          const messageHref = messageHrefFor?.(child.memberId) ?? null;
           const sharesLocation = child.shareLocationWithParents !== false;
           return (
             <li key={child.memberId}>
@@ -82,6 +86,7 @@ export function ChildrenList({
                     <BatteryBadge level={loc?.battery} />
                   </div>
                 </button>
+                {messageHref && <MessageMemberLink href={messageHref} />}
                 {mapHref && <ShowOnMapLink href={mapHref} />}
               </div>
               {(onClearSos && sosState?.active) || onRemove ? (
