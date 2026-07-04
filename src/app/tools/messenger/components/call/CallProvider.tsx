@@ -65,7 +65,8 @@ export function CallProvider({
   useEffect(() => {
     const controller = controllerRef.current;
     controller.configure({ myPhone, peerPhone, channel });
-    controller.startIncomingWatch();
+    // Incoming discovery is owned by MessengerGlobalCallWatcher to avoid
+    // dual polling races (/call/incoming + per-channel /call/poll).
     return controller.subscribe(setState);
   }, [myPhone, peerPhone, channel]);
 
@@ -81,7 +82,6 @@ export function CallProvider({
       if (controller.isInCall()) {
         void controller.hangup();
       }
-      controller.stopIncomingWatch();
     };
   }, []);
 

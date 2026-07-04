@@ -1338,9 +1338,6 @@ export class CallController {
     this.journal.clear();
     this.state = { ...INITIAL_STATE };
     for (const l of this.listeners) l(this.state);
-    if (!this.destroyed) {
-      this.startIncomingWatch();
-    }
   }
 }
 
