@@ -194,9 +194,17 @@ export function speakLottoNumber(text: string): Promise<void> {
       utterance.rate = 0.88;
       const voice = pickRussianVoice();
       if (voice) utterance.voice = voice;
-      const done = () => resolve();
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        resolve();
+      };
       utterance.onend = done;
       utterance.onerror = done;
+      // Some devices occasionally never fire onend/onerror; fail-safe so
+      // the draw loop cannot stay blocked forever.
+      setTimeout(done, 6000);
       window.speechSynthesis.speak(utterance);
     });
 
@@ -205,12 +213,28 @@ export function speakLottoNumber(text: string): Promise<void> {
   }
 
   return new Promise((resolve) => {
+    let settled = false;
+    let speechStarted = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
     const onVoices = () => {
+      if (speechStarted) return;
+      speechStarted = true;
       window.speechSynthesis.removeEventListener("voiceschanged", onVoices);
-      void speak().then(resolve);
+      void speak().then(finish);
     };
     window.speechSynthesis.addEventListener("voiceschanged", onVoices);
     window.speechSynthesis.getVoices();
+    // Extra fallback for browsers where voiceschanged never arrives.
+    setTimeout(() => {
+      if (speechStarted) return;
+      speechStarted = true;
+      window.speechSynthesis.removeEventListener("voiceschanged", onVoices);
+      void speak().then(finish);
+    }, 1000);
   });
 }
 
