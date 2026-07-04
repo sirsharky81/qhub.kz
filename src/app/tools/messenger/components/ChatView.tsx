@@ -472,6 +472,13 @@ export function ChatView({
     scrollChatListToBottom(listRef.current);
   }, []);
 
+  const scrollMessagesToBottomSoon = useCallback(() => {
+    requestAnimationFrame(() => {
+      scrollChatListToBottom(listRef.current);
+      setTimeout(() => scrollChatListToBottom(listRef.current), 40);
+    });
+  }, []);
+
   useEffect(() => {
     const root = listRef.current;
     if (!root) return;
@@ -557,6 +564,7 @@ export function ChatView({
         fromPhone: myPhone,
       };
       setMessages((prev) => [...prev, optimistic]);
+      scrollMessagesToBottomSoon();
       if (persistHistory) await persistMessage(optimistic);
       setReplyTo(null);
 
@@ -598,6 +606,7 @@ export function ChatView({
         setMessages((prev) =>
           prev.map((m) => (m.id === localId ? sent : m)),
         );
+        scrollMessagesToBottomSoon();
         if (persistHistory) {
           await rekeyHistoryMessage(localId, result.messageId, sentStatus);
         }
@@ -605,10 +614,11 @@ export function ChatView({
         setMessages((prev) =>
           prev.map((m) => (m.id === localId ? { ...m, status: "failed" } : m)),
         );
+        scrollMessagesToBottomSoon();
         if (persistHistory) await updateHistoryDeliveryStatus(localId, "failed");
       }
     },
-    [aesKey, buildPlain, channel, myPhone, persistHistory, persistMessage, decryptPayload],
+    [aesKey, buildPlain, channel, myPhone, persistHistory, persistMessage, decryptPayload, scrollMessagesToBottomSoon],
   );
 
   async function handleSend() {
