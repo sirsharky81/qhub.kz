@@ -18,7 +18,8 @@ import { IncomingCallOverlay } from "./IncomingCallOverlay";
 
 interface CallContextValue {
   state: CallState;
-  startCall: () => void;
+  startAudioCall: () => void;
+  startVideoCall: () => void;
   acceptCall: () => void;
   rejectCall: () => void;
   hangup: () => void;
@@ -96,9 +97,14 @@ export function CallProvider({
     };
   }, []);
 
-  const startCall = useCallback(() => {
+  const startAudioCall = useCallback(() => {
     primeCallMediaPlayback(false);
-    void controllerRef.current.startOutgoing();
+    void controllerRef.current.startOutgoing({ video: false });
+  }, []);
+
+  const startVideoCall = useCallback(() => {
+    primeCallMediaPlayback(false);
+    void controllerRef.current.startOutgoing({ video: true });
   }, []);
 
   const acceptCall = useCallback(() => {
@@ -131,7 +137,8 @@ export function CallProvider({
   const value = useMemo<CallContextValue>(
     () => ({
       state,
-      startCall,
+      startAudioCall,
+      startVideoCall,
       acceptCall,
       rejectCall,
       hangup,
@@ -140,7 +147,7 @@ export function CallProvider({
       toggleSpeaker,
       isInCall: state.phase !== "idle" && state.phase !== "ended",
     }),
-    [state, startCall, acceptCall, rejectCall, hangup, toggleMute, toggleVideo, toggleSpeaker],
+    [state, startAudioCall, startVideoCall, acceptCall, rejectCall, hangup, toggleMute, toggleVideo, toggleSpeaker],
   );
 
   const showIncoming = state.phase === "incoming";
@@ -183,13 +190,14 @@ export function CallProvider({
 }
 
 export function useCallButtonProps(peerOnline: boolean | null) {
-  const { startCall, isInCall } = useCall();
+  const { startAudioCall, startVideoCall, isInCall } = useCall();
   const disabled = peerOnline === false;
   const disabledReason = "Собеседник не в сети";
   return {
     disabled,
     disabledReason,
     inCall: isInCall,
-    onCall: startCall,
+    onAudioCall: startAudioCall,
+    onVideoCall: startVideoCall,
   };
 }

@@ -289,7 +289,7 @@ export class CallController {
     }
   }
 
-  async startOutgoing(): Promise<void> {
+  async startOutgoing(options?: { video?: boolean }): Promise<void> {
     if (this.isInCall()) {
       this.recordIgnored("INITIATE");
       return;
@@ -317,13 +317,14 @@ export class CallController {
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
     this.callStartedAt = Date.now();
+    const videoEnabled = options?.video === true;
     this.patch({
       debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: result.callId },
       phase: "outgoing",
       callId: result.callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
-      videoEnabled: true,
+      videoEnabled,
       speakerOn: false,
       endReason: null,
       errorMessage: null,
