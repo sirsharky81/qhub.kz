@@ -191,11 +191,18 @@ export async function unsubscribeMessengerPush(): Promise<boolean> {
 }
 
 export async function ensureMessengerPushSubscription(): Promise<boolean> {
-  if (!isMessengerPushEnabledLocally()) return false;
+  const locallyEnabled = isMessengerPushEnabledLocally();
 
   if (isNativePlatform()) {
     const status = await resolveMessengerPushSupportStatus();
     if (status !== "granted") return false;
+    if (!locallyEnabled) {
+      // App data may be reset while OS permission is still granted.
+      // Re-register token silently without user prompt.
+      const ok = await subscribeMessengerPush();
+      if (ok) setMessengerPushEnabledLocally(true);
+      return ok;
+    }
     return subscribeMessengerPush();
   }
 
@@ -217,9 +224,15 @@ export async function ensureMessengerPushSubscription(): Promise<boolean> {
           },
         }),
       });
+      if (res.ok) setMessengerPushEnabledLocally(true);
       return res.ok;
     }
   }
 
+  if (!locallyEnabled) {
+    // Respect prior user choice: if permission is granted but there is no
+    // subscription object, do not force a fresh prompt here.
+    return false;
+  }
   return subscribeMessengerPush();
 }

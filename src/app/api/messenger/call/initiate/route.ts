@@ -46,12 +46,16 @@ export async function POST(request: Request) {
         callee: peer,
       });
 
-      void notifyIncomingCall({
-        channel,
-        callId: session.callId,
-        callerPhone: phone,
-        calleePhone: peer,
-      });
+      try {
+        await notifyIncomingCall({
+          channel,
+          callId: session.callId,
+          callerPhone: phone,
+          calleePhone: peer,
+        });
+      } catch (err) {
+        console.warn("[call] incoming push dispatch failed:", err);
+      }
 
       return NextResponse.json({ ok: true, callId: session.callId, session });
     } catch (err) {

@@ -6,7 +6,30 @@ import { platformFetch } from "../api-client";
 import { PlatformLogger } from "../logger";
 import { isNativePushConfigured } from "./app-capabilities";
 
-let registrationListenersAttached = false;
+const registrationListenersAttached = new Set<NotificationContext>();
+const pendingRegistrations = new Map<NotificationContext, Set<(ok: boolean) => void>>();
+
+function queueRegistrationWaiter(context: NotificationContext, finish: (ok: boolean) => void): void {
+  const waiters = pendingRegistrations.get(context) ?? new Set<(ok: boolean) => void>();
+  waiters.add(finish);
+  pendingRegistrations.set(context, waiters);
+}
+
+function removeRegistrationWaiter(context: NotificationContext, finish: (ok: boolean) => void): void {
+  const waiters = pendingRegistrations.get(context);
+  if (!waiters) return;
+  waiters.delete(finish);
+  if (waiters.size === 0) {
+    pendingRegistrations.delete(context);
+  }
+}
+
+function resolveRegistrationWaiters(context: NotificationContext, ok: boolean): void {
+  const waiters = pendingRegistrations.get(context);
+  if (!waiters) return;
+  pendingRegistrations.delete(context);
+  for (const resolve of waiters) resolve(ok);
+}
 
 async function ensureAndroidPushChannel(): Promise<void> {
   if (getNativePlatform() !== "android") return;
@@ -29,10 +52,9 @@ async function ensureAndroidPushChannel(): Promise<void> {
 function attachRegistrationListeners(
   context: NotificationContext,
   session: FamilySession | undefined,
-  finish: (ok: boolean) => void,
 ): void {
-  if (registrationListenersAttached) return;
-  registrationListenersAttached = true;
+  if (registrationListenersAttached.has(context)) return;
+  registrationListenersAttached.add(context);
 
   void import("@capacitor/push-notifications").then(({ PushNotifications }) => {
     void PushNotifications.addListener("registration", (token) => {
@@ -66,13 +88,13 @@ function attachRegistrationListeners(
         headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(payload),
       })
-        .then((res) => finish(res.ok))
-        .catch(() => finish(false));
+        .then((res) => resolveRegistrationWaiters(context, res.ok))
+        .catch(() => resolveRegistrationWaiters(context, false));
     });
 
     void PushNotifications.addListener("registrationError", (err) => {
       PlatformLogger.error("Push registration error", new Error(err.error));
-      finish(false);
+      resolveRegistrationWaiters(context, false);
     });
   });
 }
@@ -101,7 +123,8 @@ export async function registerNativePush(
       resolve(ok);
     };
 
-    attachRegistrationListeners(context, session, finish);
+    queueRegistrationWaiter(context, finish);
+    attachRegistrationListeners(context, session);
 
     void (async () => {
       try {
@@ -116,7 +139,10 @@ export async function registerNativePush(
       }
     })();
 
-    setTimeout(() => finish(false), 20000);
+    setTimeout(() => {
+      removeRegistrationWaiter(context, finish);
+      finish(false);
+    }, 20000);
   });
 }
 

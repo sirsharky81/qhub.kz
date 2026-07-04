@@ -105,18 +105,26 @@ export async function POST(request: Request) {
     let version: number;
     if (channel.startsWith("dm:")) {
       version = await pushDmEnvelope(channel, msg);
-      void notifyDmMessage({ channel, fromPhone: phone, type });
+      try {
+        await notifyDmMessage({ channel, fromPhone: phone, type });
+      } catch (err) {
+        console.warn("[messenger/send] dm push notify failed:", err);
+      }
     } else if (channel.startsWith("room:")) {
       const roomId = channel.slice(5);
       version = await pushRoomEnvelope(roomId, msg);
       const participants = await getRoomParticipants(roomId);
-      void notifyRoomMessage({
-        roomId,
-        channel,
-        fromPhone: phone,
-        type,
-        recipientPhones: participants.map((p) => p.phone).filter((p) => p !== phone),
-      });
+      try {
+        await notifyRoomMessage({
+          roomId,
+          channel,
+          fromPhone: phone,
+          type,
+          recipientPhones: participants.map((p) => p.phone).filter((p) => p !== phone),
+        });
+      } catch (err) {
+        console.warn("[messenger/send] room push notify failed:", err);
+      }
     } else {
       return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });
     }

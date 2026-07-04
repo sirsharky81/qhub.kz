@@ -19,7 +19,6 @@ import {
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import {
   ensureMessengerPushSubscription,
-  isMessengerPushEnabledLocally,
 } from "@/lib/messenger/push";
 import { isStandalone } from "@/lib/pwa-utils";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
@@ -112,9 +111,7 @@ export function MessengerLoginClient() {
 
   function finishAfterSetPin() {
     const alreadyShown = localStorage.getItem(MESSENGER_INSTALL_PROMPT_SHOWN);
-    if (isMessengerPushEnabledLocally()) {
-      void ensureMessengerPushSubscription();
-    }
+    void ensureMessengerPushSubscription();
     if (!isStandalone() && !alreadyShown) {
       setShowInstallModal(true);
       return;
@@ -151,9 +148,7 @@ export function MessengerLoginClient() {
       }
       await ensureDeviceKeyPublished().catch(() => {});
       await setStorageKeyFromPin(pin).catch(() => {});
-      if (isMessengerPushEnabledLocally()) {
-        void ensureMessengerPushSubscription();
-      }
+      void ensureMessengerPushSubscription();
       router.replace("/tools/messenger/home");
     } finally {
       setLoading(false);
