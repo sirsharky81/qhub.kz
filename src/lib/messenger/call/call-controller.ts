@@ -776,14 +776,16 @@ export class CallController {
     getCallSounds().stop();
     prepareAudioSessionForCall();
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
-    if (isIOSDevice()) {
-      for (const delay of [300, 800, 1500]) {
-        setTimeout(() => {
-          if (!this.pc?.needsPlaybackRetry()) return;
+    // Faster post-connect retries reduce the "caller hears later" gap on weak
+    // networks and iOS Safari resume quirks.
+    for (const delay of [120, 320, 700, 1400]) {
+      setTimeout(() => {
+        if (!this.pc?.needsPlaybackRetry()) return;
+        if (isIOSDevice()) {
           prepareAudioSessionForCall();
-          void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
-        }, delay);
-      }
+        }
+        void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
+      }, delay);
     }
   }
 

@@ -150,6 +150,16 @@ export function ActiveCallScreen({
     if (!iosEarpiece) setEarpieceBlank(false);
   }, [iosEarpiece]);
 
+  useEffect(() => {
+    if (!iosEarpiece || earpieceBlank) return;
+    const timer = setTimeout(() => {
+      // iOS Safari PWA does not expose a reliable proximity sensor.
+      // Auto-blanking after entering earpiece mode reduces accidental touches.
+      setEarpieceBlank(true);
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [iosEarpiece, earpieceBlank]);
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col text-white">
       {iosEarpiece && earpieceBlank && (
@@ -208,6 +218,11 @@ export function ActiveCallScreen({
               >
                 Погасить экран
               </button>
+            )}
+            {earpieceBlank && (
+              <p className="text-center text-[11px] leading-snug text-white/45">
+                Экран погашен автоматически. Коснитесь экрана, чтобы вернуть интерфейс.
+              </p>
             )}
           </div>
         )}
