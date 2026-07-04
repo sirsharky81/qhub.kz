@@ -41,19 +41,34 @@ function MessengerChatInner() {
 
       const key = await deriveDmAesKey(pair.privateKey, peerPub, me, peerPhone);
       const chatId = deriveDmChatId(me, peerPhone);
-      const profiles = await fetchProfilesMap();
-      const peerLabel = profiles[peerPhone] ?? maskPhone(peerPhone);
-      setProfileLabels(profiles);
+      const peerLabel = maskPhone(peerPhone);
       upsertLocalDialog({
         id: chatId,
         kind: "dm",
         title: peerLabel,
         peerPhone,
-        displayName: profiles[peerPhone],
+        displayName: undefined,
         createdAt: Date.now(),
       });
       setAesKey(key);
       setPhase("ready");
+
+      // Heavy contacts/profile fetch is best-effort and should not block opening chat.
+      void fetchProfilesMap()
+        .then((profiles) => {
+          setProfileLabels(profiles);
+          const enriched = profiles[peerPhone];
+          if (!enriched) return;
+          upsertLocalDialog({
+            id: chatId,
+            kind: "dm",
+            title: enriched,
+            peerPhone,
+            displayName: enriched,
+            createdAt: Date.now(),
+          });
+        })
+        .catch(() => {});
       return true;
     },
     [peerPhone],
@@ -79,15 +94,11 @@ function MessengerChatInner() {
       setMaskedPhone(maskPhone(me));
 
       try {
-        await ensureDeviceKeyPublished();
+        // Do not block first open on network-bound key publishing.
+        void ensureDeviceKeyPublished().catch(() => {});
         pairRef.current = await getOrCreateDeviceKeyPair();
-
-        for (let i = 0; i < 3 && !cancelled; i++) {
-          const connected = await tryConnectPeer(me);
-          if (connected || cancelled) return;
-          if (i < 2) await new Promise((r) => setTimeout(r, 1000));
-        }
-
+        const connected = await tryConnectPeer(me);
+        if (connected || cancelled) return;
         if (!cancelled) setPhase("waiting");
       } catch {
         if (!cancelled) setPhase("auth_error");
