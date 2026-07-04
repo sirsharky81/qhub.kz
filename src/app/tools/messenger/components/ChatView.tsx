@@ -102,6 +102,7 @@ export function ChatView({
   const readSentRef = useRef(new Set<string>());
   const pendingOwnReceipts = useRef(new Map<string, "delivered" | "read">());
   const messagesRef = useRef<DisplayMessage[]>([]);
+  const initialAnchorDoneRef = useRef(false);
   const storageKeyRef = useRef(storageKey);
   storageKeyRef.current = storageKey;
 
@@ -183,6 +184,10 @@ export function ChatView({
   useEffect(() => {
     setActiveChatChannel(channel);
     return () => setActiveChatChannel(null);
+  }, [channel]);
+
+  useEffect(() => {
+    initialAnchorDoneRef.current = false;
   }, [channel]);
 
   useEffect(() => {
@@ -441,6 +446,27 @@ export function ChatView({
     if (!el || !isChatListNearBottom(el)) return;
     scrollChatListToBottom(el);
   }, [messages]);
+
+  useEffect(() => {
+    if (!historyLoaded || initialAnchorDoneRef.current) return;
+    if (messages.length === 0) return;
+    const root = listRef.current;
+    if (!root) return;
+
+    initialAnchorDoneRef.current = true;
+    const firstUnread = messages.find((m) => !m.mine && m.status !== "read");
+    if (!firstUnread) {
+      scrollChatListToBottom(root);
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const target = root.querySelector<HTMLElement>(`[data-message-id="${firstUnread.id}"]`);
+      if (!target) return;
+      target.scrollIntoView({ block: "start", behavior: "auto" });
+      root.scrollTop = Math.max(0, root.scrollTop - 10);
+    });
+  }, [historyLoaded, messages]);
 
   const scrollMessagesToBottom = useCallback(() => {
     scrollChatListToBottom(listRef.current);
