@@ -14,21 +14,27 @@ import {
 import { notifyDmMessage, notifyRoomMessage } from "@/lib/messenger/push-notify";
 import { getMessengerPresence, isViewingChannel } from "@/lib/messenger/push-store";
 import { peerFromDmChannel } from "@/lib/messenger/phone";
+import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
 
 export async function POST(request: Request) {
   try {
+    const respond = (body: unknown, status = 200, headers?: HeadersInit) => {
+      void trackMessengerApiRequest("send", status);
+      return NextResponse.json(body, { status, headers });
+    };
     const { phone } = await assertMessengerSession();
     const { allowed, retryAfterSec } = await checkMessengerRateLimit(`send:${phone}`);
     if (!allowed) {
-      return NextResponse.json(
+      return respond(
         { error: "Слишком много запросов" },
-        { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
+        429,
+        retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined,
       );
     }
 
     const contentLength = Number(request.headers.get("content-length") ?? "0");
     if (contentLength > MAX_MEDIA_RAW_BODY_BYTES) {
-      return NextResponse.json({ error: "Слишком большой запрос" }, { status: 413 });
+      return respond({ error: "Слишком большой запрос" }, 413);
     }
 
     let body: {
@@ -46,12 +52,12 @@ export async function POST(request: Request) {
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ error: "Неверный формат" }, { status: 400 });
+      return respond({ error: "Неверный формат" }, 400);
     }
 
     const channel = body.channel ?? "";
     if (!channel) {
-      return NextResponse.json({ error: "Укажите channel" }, { status: 400 });
+      return respond({ error: "Укажите channel" }, 400);
     }
     await assertChannelParticipant(phone, channel);
 
@@ -59,7 +65,7 @@ export async function POST(request: Request) {
       const refMessageId = body.refMessageId ?? "";
       const receipt = body.receipt;
       if (!refMessageId || (receipt !== "delivered" && receipt !== "read")) {
-        return NextResponse.json({ error: "Неполные данные receipt" }, { status: 400 });
+        return respond({ error: "Неполные данные receipt" }, 400);
       }
       const envelope: ReceiptPayload = {
         kind: "receipt",
@@ -75,9 +81,9 @@ export async function POST(request: Request) {
       } else if (channel.startsWith("room:")) {
         version = await pushRoomEnvelope(channel.slice(5), envelope);
       } else {
-        return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });
+        return respond({ error: "Неизвестный канал" }, 400);
       }
-      return NextResponse.json({ ok: true, messageId: envelope.id, version });
+      return respond({ ok: true, messageId: envelope.id, version }, 200);
     }
 
     const type = body.type ?? "text";
@@ -85,18 +91,18 @@ export async function POST(request: Request) {
     const iv = body.iv ?? "";
 
     if (!ciphertext || !iv) {
-      return NextResponse.json({ error: "Неполные данные" }, { status: 400 });
+      return respond({ error: "Неполные данные" }, 400);
     }
 
     const isMedia = type === "audio" || type === "video";
     const maxCiphertextLen = isMedia ? MAX_MEDIA_RAW_BODY_BYTES : MAX_ENCRYPTED_FILE_BYTES * 2;
 
     if (type === "text" && ciphertext.length > MAX_TEXT_LENGTH * 2) {
-      return NextResponse.json({ error: "Сообщение слишком длинное" }, { status: 400 });
+      return respond({ error: "Сообщение слишком длинное" }, 400);
     }
 
     if (ciphertext.length > maxCiphertextLen) {
-      return NextResponse.json({ error: "Вложение слишком большое" }, { status: 413 });
+      return respond({ error: "Вложение слишком большое" }, 413);
     }
 
     const msg: EncryptedMessagePayload & { kind: "message" } = {
@@ -147,11 +153,13 @@ export async function POST(request: Request) {
         console.warn("[messenger/send] room push notify failed:", err);
       }
     } else {
-      return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });
+      return respond({ error: "Неизвестный канал" }, 400);
     }
 
-    return NextResponse.json({ ok: true, messageId: msg.id, version });
+    return respond({ ok: true, messageId: msg.id, version }, 200);
   } catch (err) {
-    return jsonAuthError(err);
+    const res = jsonAuthError(err);
+    void trackMessengerApiRequest("send", res.status);
+    return res;
   }
 }

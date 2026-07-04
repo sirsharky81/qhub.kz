@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
+import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
 import { getDmDialogSummariesForUser, displayNameForPhone, loadProfiles } from "@/lib/messenger/store";
 import { getMessengerPresence, isMessengerOnline } from "@/lib/messenger/push-store";
 
@@ -19,6 +20,7 @@ export async function GET() {
         };
       }),
     );
+    void trackMessengerApiRequest("dialogs", 200);
     return NextResponse.json(
       { dialogs: enriched },
       {
@@ -29,6 +31,8 @@ export async function GET() {
       },
     );
   } catch (err) {
-    return jsonAuthError(err);
+    const res = jsonAuthError(err);
+    void trackMessengerApiRequest("dialogs", res.status);
+    return res;
   }
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { checkMessengerRateLimit } from "@/lib/rate-limit";
 import { HEARTBEAT_STALE_MS } from "@/lib/messenger/constants";
 import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
+import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
 import {
   getDmMessagesSince,
   getRoomMessagesSince,
@@ -15,9 +16,11 @@ import { peerFromDmChannel } from "@/lib/messenger/phone";
 
 export async function GET(request: Request) {
   try {
+    const track = (status: number) => void trackMessengerApiRequest("poll", status);
     const { phone } = await assertMessengerSession();
     const { allowed, retryAfterSec } = await checkMessengerRateLimit(`poll:${phone}`);
     if (!allowed) {
+      track(429);
       return NextResponse.json(
         { error: "Слишком много запросов" },
         { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
@@ -30,6 +33,7 @@ export async function GET(request: Request) {
     const heartbeat = url.searchParams.get("heartbeat") === "1";
 
     if (!channel) {
+      track(400);
       return NextResponse.json({ error: "Укажите channel" }, { status: 400 });
     }
 
@@ -45,8 +49,10 @@ export async function GET(request: Request) {
         peerOnline = isMessengerOnline(presence);
       }
       if (sinceVersion >= meta.version) {
+        track(200);
         return NextResponse.json({ channel, meta, messages: [], envelopes: [], peerOnline });
       }
+      track(200);
       return NextResponse.json({ channel, meta, messages, envelopes, peerOnline });
     }
 
@@ -55,6 +61,7 @@ export async function GET(request: Request) {
       await pruneInactiveRoom(roomId);
       await pruneStaleRoomParticipants(roomId, HEARTBEAT_STALE_MS);
       if (!(await getRoomMeta(roomId))) {
+        track(410);
         return NextResponse.json({ error: "room_gone" }, { status: 410 });
       }
       if (heartbeat) {
@@ -65,16 +72,22 @@ export async function GET(request: Request) {
         sinceVersion,
       );
       if (sinceVersion >= meta.version && !heartbeat) {
+        track(304);
         return new NextResponse(null, { status: 304 });
       }
       if (sinceVersion >= meta.version) {
+        track(200);
         return NextResponse.json({ channel, meta, messages: [], envelopes: [], participants });
       }
+      track(200);
       return NextResponse.json({ channel, meta, messages, envelopes, participants });
     }
 
+    track(400);
     return NextResponse.json({ error: "Неизвестный канал" }, { status: 400 });
   } catch (err) {
-    return jsonAuthError(err);
+    const res = jsonAuthError(err);
+    void trackMessengerApiRequest("poll", res.status);
+    return res;
   }
 }
