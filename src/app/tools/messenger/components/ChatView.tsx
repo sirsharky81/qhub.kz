@@ -11,6 +11,7 @@ import { useMessengerUnlock } from "./MessengerUnlockProvider";
 import { SENDER_GROUP_MS } from "@/lib/messenger/constants";
 import {
   ackMessage,
+  markDmDialogRead,
   isReceiptEnvelope,
   pollChannel,
   sendEncryptedMessage,
@@ -183,6 +184,22 @@ export function ChatView({
     setActiveChatChannel(channel);
     return () => setActiveChatChannel(null);
   }, [channel]);
+
+  useEffect(() => {
+    if (isRoom || !channel.startsWith("dm:")) return;
+    const markRead = () => {
+      if (document.visibilityState !== "visible") return;
+      void markDmDialogRead(channel);
+    };
+    markRead();
+    const onVisible = () => markRead();
+    document.addEventListener("visibilitychange", onVisible);
+    const removeResume = onAppResume(() => markRead());
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      removeResume();
+    };
+  }, [channel, isRoom]);
 
   useEffect(() => {
     if (!isRoom) setPeerOnline(null);

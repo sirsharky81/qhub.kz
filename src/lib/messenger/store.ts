@@ -220,7 +220,17 @@ type DmUserIndexEntry = {
   chatId: string;
   peerPhone: string;
   lastMessageAt: number;
+  unreadCount?: number;
+  latestUnreadAt?: number | null;
 };
+
+async function loadDmUserIndex(phone: string): Promise<Record<string, DmUserIndexEntry>> {
+  return (await redisGetJson<Record<string, DmUserIndexEntry>>(dmUserIndexKey(phone))) ?? {};
+}
+
+async function saveDmUserIndex(phone: string, index: Record<string, DmUserIndexEntry>): Promise<void> {
+  await redisSet(dmUserIndexKey(phone), JSON.stringify(index), msgTtlSec());
+}
 
 export async function getDmMeta(chatId: string): Promise<ChannelMeta | null> {
   return redisGetJson<ChannelMeta>(dmMetaKey(chatId));
@@ -248,54 +258,91 @@ export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise
   const b = normalizeKzPhone(parts[2] ?? "");
   if (!a || !b) return;
 
-  const ttl = msgTtlSec();
   const updateOne = async (me: string, peer: string) => {
-    const key = dmUserIndexKey(me);
-    const existing = (await redisGetJson<Record<string, DmUserIndexEntry>>(key)) ?? {};
+    const existing = await loadDmUserIndex(me);
     const prev = existing[chatId];
     existing[chatId] = {
       chatId,
       peerPhone: peer,
       lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, at),
+      unreadCount: Math.max(0, prev?.unreadCount ?? 0),
+      latestUnreadAt: prev?.latestUnreadAt ?? null,
     };
-    await redisSet(key, JSON.stringify(existing), ttl);
+    await saveDmUserIndex(me, existing);
   };
 
   await Promise.all([updateOne(a, b), updateOne(b, a)]);
 }
 
+export async function applyDmUnreadOnMessage(params: {
+  chatId: string;
+  senderPhone: string;
+  ts: number;
+  recipientViewingThisChat: boolean;
+}): Promise<void> {
+  const { chatId, senderPhone, ts, recipientViewingThisChat } = params;
+  const parts = chatId.split(":");
+  if (parts.length !== 3 || parts[0] !== "dm") return;
+  const a = normalizeKzPhone(parts[1] ?? "");
+  const b = normalizeKzPhone(parts[2] ?? "");
+  if (!a || !b) return;
+
+  const sender = normalizeKzPhone(senderPhone);
+  const recipient = sender === a ? b : a;
+  const senderPeer = sender === a ? b : a;
+  const recipientPeer = sender;
+
+  const updateOne = async (me: string, peer: string, incrementUnread: boolean) => {
+    const existing = await loadDmUserIndex(me);
+    const prev = existing[chatId];
+    const nextUnread = Math.max(0, (prev?.unreadCount ?? 0) + (incrementUnread ? 1 : 0));
+    existing[chatId] = {
+      chatId,
+      peerPhone: peer,
+      lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, ts),
+      unreadCount: nextUnread,
+      latestUnreadAt: incrementUnread
+        ? Math.max(prev?.latestUnreadAt ?? 0, ts)
+        : (prev?.latestUnreadAt ?? null),
+    };
+    await saveDmUserIndex(me, existing);
+  };
+
+  await Promise.all([
+    updateOne(sender, senderPeer, false),
+    updateOne(recipient, recipientPeer, !recipientViewingThisChat),
+  ]);
+}
+
+export async function markDmDialogRead(phone: string, chatId: string): Promise<void> {
+  const me = normalizeKzPhone(phone);
+  const existing = await loadDmUserIndex(me);
+  const entry = existing[chatId];
+  if (!entry) return;
+  existing[chatId] = {
+    ...entry,
+    unreadCount: 0,
+    latestUnreadAt: null,
+  };
+  await saveDmUserIndex(me, existing);
+}
+
 export async function getDmDialogSummariesForUser(phone: string): Promise<DmDialogSummary[]> {
   const me = normalizeKzPhone(phone);
-  const index =
-    (await redisGetJson<Record<string, DmUserIndexEntry>>(dmUserIndexKey(me))) ?? {};
+  const index = await loadDmUserIndex(me);
   const result: DmDialogSummary[] = [];
 
   for (const entry of Object.values(index)) {
     const channel = entry.chatId;
-    const peer = peerFromDmChannel(channel, me);
+    const peer = entry.peerPhone ? normalizeKzPhone(entry.peerPhone) : peerFromDmChannel(channel, me);
     if (!peer) continue;
-
-    const rawList = await redisLrange(dmMessagesKey(channel), 0, -1);
-    let unreadCount = 0;
-    let latestUnreadAt: number | null = null;
-    let lastMessageAt = entry.lastMessageAt;
-
-    for (const raw of rawList) {
-      const envelope = parseChannelEnvelope(raw);
-      if (!envelope || isReceipt(envelope)) continue;
-      lastMessageAt = Math.max(lastMessageAt, envelope.ts ?? 0);
-      if (normalizeKzPhone(envelope.from) !== me) {
-        unreadCount += 1;
-        latestUnreadAt = Math.max(latestUnreadAt ?? 0, envelope.ts ?? 0);
-      }
-    }
 
     result.push({
       chatId: channel,
       peerPhone: peer,
-      lastMessageAt,
-      latestUnreadAt,
-      unreadCount,
+      lastMessageAt: entry.lastMessageAt ?? 0,
+      latestUnreadAt: entry.latestUnreadAt ?? null,
+      unreadCount: Math.max(0, entry.unreadCount ?? 0),
     });
   }
 

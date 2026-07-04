@@ -4,8 +4,16 @@ import { MAX_ENCRYPTED_FILE_BYTES, MAX_MEDIA_RAW_BODY_BYTES, MAX_TEXT_LENGTH } f
 import { generateMessageId } from "@/lib/messenger/codes";
 import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import type { EncryptedMessagePayload, MessageType, ReceiptPayload } from "@/lib/messenger/types";
-import { pushDmEnvelope, pushRoomEnvelope, getRoomParticipants, touchDmUserIndex } from "@/lib/messenger/store";
+import {
+  applyDmUnreadOnMessage,
+  pushDmEnvelope,
+  pushRoomEnvelope,
+  getRoomParticipants,
+  touchDmUserIndex,
+} from "@/lib/messenger/store";
 import { notifyDmMessage, notifyRoomMessage } from "@/lib/messenger/push-notify";
+import { getMessengerPresence, isViewingChannel } from "@/lib/messenger/push-store";
+import { peerFromDmChannel } from "@/lib/messenger/phone";
 
 export async function POST(request: Request) {
   try {
@@ -108,6 +116,15 @@ export async function POST(request: Request) {
     if (channel.startsWith("dm:")) {
       version = await pushDmEnvelope(channel, msg);
       await touchDmUserIndex(channel, msg.ts);
+      const peerPhone = peerFromDmChannel(channel, phone);
+      const peerPresence = peerPhone ? await getMessengerPresence(peerPhone) : null;
+      const recipientViewingThisChat = peerPresence ? isViewingChannel(peerPresence, channel) : false;
+      await applyDmUnreadOnMessage({
+        chatId: channel,
+        senderPhone: phone,
+        ts: msg.ts,
+        recipientViewingThisChat,
+      });
       try {
         await notifyDmMessage({ channel, fromPhone: phone, type });
       } catch (err) {

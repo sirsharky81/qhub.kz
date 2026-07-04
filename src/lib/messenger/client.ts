@@ -6,6 +6,7 @@ import type {
 } from "./types";
 import { platformFetch } from "@/lib/platform/api-client";
 import { PlatformOfflineQueue } from "@/lib/platform/offlineQueue";
+import { UNREAD_EVENT } from "./constants";
 import {
   clearMessengerSessionToken,
   primeMessengerSessionTokenCache,
@@ -167,6 +168,21 @@ export async function fetchDmDialogs(): Promise<DmDialogsResponseItem[]> {
   if (!res.ok) return [];
   const data = (await res.json()) as { dialogs?: DmDialogsResponseItem[] };
   return data.dialogs ?? [];
+}
+
+export async function markDmDialogRead(chatId: string): Promise<void> {
+  try {
+    const res = await platformFetch("/api/messenger/dialogs/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId }),
+    });
+    if (res.ok && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(UNREAD_EVENT));
+    }
+  } catch {
+    // best-effort
+  }
 }
 
 export async function pingMessengerPresence(): Promise<void> {
