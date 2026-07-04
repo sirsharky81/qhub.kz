@@ -23,6 +23,7 @@ interface CallContextValue {
   rejectCall: () => void;
   hangup: () => void;
   toggleMute: () => void;
+  toggleVideo: () => void;
   toggleSpeaker: () => void;
   isInCall: boolean;
 }
@@ -60,6 +61,8 @@ export function CallProvider({
 }: Props) {
   const controllerRef = useRef(getCallController());
   const [state, setState] = useState<CallState>(controllerRef.current.getState());
+  const [localStream, setLocalStream] = useState<MediaStream | null>(controllerRef.current.getLocalStream());
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(controllerRef.current.getRemoteStream());
   const deepLinkHandled = useRef(false);
 
   useEffect(() => {
@@ -67,7 +70,15 @@ export function CallProvider({
     controller.configure({ myPhone, peerPhone, channel });
     // Incoming discovery is owned by MessengerGlobalCallWatcher to avoid
     // dual polling races (/call/incoming + per-channel /call/poll).
-    return controller.subscribe(setState);
+    const unsubState = controller.subscribe(setState);
+    const unsubMedia = controller.subscribeMedia((media) => {
+      setLocalStream(media.localStream);
+      setRemoteStream(media.remoteStream);
+    });
+    return () => {
+      unsubState();
+      unsubMedia();
+    };
   }, [myPhone, peerPhone, channel]);
 
   useEffect(() => {
@@ -107,6 +118,10 @@ export function CallProvider({
     controllerRef.current.setMuted(!state.muted);
   }, [state.muted]);
 
+  const toggleVideo = useCallback(() => {
+    void controllerRef.current.setVideoEnabled(!state.videoEnabled);
+  }, [state.videoEnabled]);
+
   const toggleSpeaker = useCallback(() => {
     const nextSpeakerOn = !state.speakerOn;
     primeCallMediaPlayback(nextSpeakerOn);
@@ -121,10 +136,11 @@ export function CallProvider({
       rejectCall,
       hangup,
       toggleMute,
+      toggleVideo,
       toggleSpeaker,
       isInCall: state.phase !== "idle" && state.phase !== "ended",
     }),
-    [state, startCall, acceptCall, rejectCall, hangup, toggleMute, toggleSpeaker],
+    [state, startCall, acceptCall, rejectCall, hangup, toggleMute, toggleVideo, toggleSpeaker],
   );
 
   const showIncoming = state.phase === "incoming";
@@ -150,10 +166,14 @@ export function CallProvider({
           phase={state.phase}
           durationSec={state.durationSec}
           muted={state.muted}
+          videoEnabled={state.videoEnabled}
           speakerOn={state.speakerOn}
           errorMessage={state.errorMessage}
           debug={state.debug}
+          localStream={localStream}
+          remoteStream={remoteStream}
           onToggleMute={toggleMute}
+          onToggleVideo={toggleVideo}
           onToggleSpeaker={toggleSpeaker}
           onHangup={hangup}
         />

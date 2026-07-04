@@ -52,6 +52,8 @@ export interface CallDebugInfo {
   mediaPaused: boolean;
   remoteTrackMuted: boolean;
   hasRemoteTrack: boolean;
+  hasRemoteVideoTrack: boolean;
+  hasLocalVideoTrack: boolean;
   receiverCount: number;
   speakerOn: boolean;
   mediaRoute: string;
@@ -66,6 +68,7 @@ export interface CallState {
   channel: string | null;
   peerPhone: string | null;
   muted: boolean;
+  videoEnabled: boolean;
   speakerOn: boolean;
   durationSec: number;
   errorMessage: string | null;

@@ -6,6 +6,8 @@ import type { CallDebugInfo } from "@/lib/messenger/call/types";
 import { isIOSDevice } from "@/lib/platform/device";
 import { CallStatusText } from "./CallStatusText";
 import {
+  CameraIcon,
+  CameraOffIcon,
   MicIcon,
   MicOffIcon,
   PhoneDownIcon,
@@ -30,10 +32,14 @@ interface Props {
   phase: string;
   durationSec: number;
   muted: boolean;
+  videoEnabled: boolean;
   speakerOn: boolean;
   errorMessage?: string | null;
   debug?: CallDebugInfo;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
   onToggleMute: () => void;
+  onToggleVideo: () => void;
   onToggleSpeaker: () => void;
   onHangup: () => void;
 }
@@ -60,6 +66,8 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
           {row("ICE path", debug.networkPath ?? "—")}
           {row("ICE proto", debug.networkProtocol ?? "—")}
           {row("hasRemoteTrack", debug.hasRemoteTrack)}
+          {row("hasRemoteVideo", debug.hasRemoteVideoTrack)}
+          {row("hasLocalVideo", debug.hasLocalVideoTrack)}
           {row("receivers", String(debug.receiverCount))}
           {row("speakerOn", debug.speakerOn)}
           {row("route", debug.mediaRoute)}
@@ -150,16 +158,34 @@ export function ActiveCallScreen({
   phase,
   durationSec,
   muted,
+  videoEnabled,
   speakerOn,
   errorMessage,
   debug,
+  localStream,
+  remoteStream,
   onToggleMute,
+  onToggleVideo,
   onToggleSpeaker,
   onHangup,
 }: Props) {
   const showDuration = phase === "active";
   const [earpieceBlank, setEarpieceBlank] = useState(false);
   const iosEarpiece = isIOSDevice() && phase === "active" && !speakerOn;
+  const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null);
+  const [remoteVideoEl, setRemoteVideoEl] = useState<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (!localVideoEl) return;
+    const hasLocalVideo = Boolean(localStream?.getVideoTracks().length);
+    localVideoEl.srcObject = hasLocalVideo ? localStream : null;
+  }, [localStream, localStream?.getVideoTracks().length, localVideoEl]);
+
+  useEffect(() => {
+    if (!remoteVideoEl) return;
+    const hasRemoteVideo = Boolean(remoteStream?.getVideoTracks().length);
+    remoteVideoEl.srcObject = hasRemoteVideo ? remoteStream : null;
+  }, [remoteStream, remoteStream?.getVideoTracks().length, remoteVideoEl]);
 
   useEffect(() => {
     if (!iosEarpiece) setEarpieceBlank(false);
@@ -206,12 +232,35 @@ export function ActiveCallScreen({
           </div>
         </div>
 
-        <div className="flex flex-1 items-center justify-center px-6">
-          <div className="flex h-40 w-40 items-center justify-center rounded-full bg-[#1f2c34] ring-1 ring-white/10 shadow-2xl">
-            {peerInitial(peerTitle) ? (
-              <span className="text-6xl font-light text-[#00a884]">{peerInitial(peerTitle)}</span>
+        <div className="relative flex flex-1 items-center justify-center px-6">
+          {remoteStream?.getVideoTracks().length ? (
+            <video
+              ref={setRemoteVideoEl}
+              autoPlay
+              playsInline
+              muted
+              className="h-[60vh] w-full max-w-3xl rounded-2xl bg-black object-cover ring-1 ring-white/10"
+            />
+          ) : (
+            <div className="flex h-40 w-40 items-center justify-center rounded-full bg-[#1f2c34] ring-1 ring-white/10 shadow-2xl">
+              {peerInitial(peerTitle) ? (
+                <span className="text-6xl font-light text-[#00a884]">{peerInitial(peerTitle)}</span>
+              ) : (
+                <PhoneIcon className="h-16 w-16 text-[#00a884]" />
+              )}
+            </div>
+          )}
+          <div className="absolute bottom-3 right-8 h-28 w-20 overflow-hidden rounded-xl border border-white/20 bg-black/80">
+            {localStream?.getVideoTracks().length ? (
+              <video
+                ref={setLocalVideoEl}
+                autoPlay
+                playsInline
+                muted
+                className="h-full w-full object-cover"
+              />
             ) : (
-              <PhoneIcon className="h-16 w-16 text-[#00a884]" />
+              <div className="flex h-full w-full items-center justify-center text-[11px] text-white/70">Камера выкл.</div>
             )}
           </div>
         </div>
@@ -254,6 +303,14 @@ export function ActiveCallScreen({
             onClick={onToggleSpeaker}
           >
             {speakerOn ? <SpeakerIcon /> : <SpeakerOffIcon />}
+          </ControlButton>
+
+          <ControlButton
+            active={videoEnabled}
+            label={videoEnabled ? "Выключить камеру" : "Включить камеру"}
+            onClick={onToggleVideo}
+          >
+            {videoEnabled ? <CameraIcon /> : <CameraOffIcon />}
           </ControlButton>
 
           <ControlButton

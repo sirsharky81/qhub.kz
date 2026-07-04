@@ -71,9 +71,16 @@ export class CallPeerConnection {
       });
     };
     this.pc.ontrack = (ev) => {
-      if (ev.track.kind !== "audio") return;
-      const stream = ev.streams[0] ?? new MediaStream([ev.track]);
-      this.bindRemoteAudioTrack(ev.track, stream);
+      const stream = ev.streams[0] ?? this.remoteStream ?? new MediaStream();
+      if (!stream.getTracks().some((t) => t.id === ev.track.id)) {
+        stream.addTrack(ev.track);
+      }
+      this.remoteStream = stream;
+      if (ev.track.kind === "audio") {
+        this.bindRemoteAudioTrack(ev.track, stream);
+      } else {
+        this.onRemoteTrack?.();
+      }
     };
     this.pc.onconnectionstatechange = () => {
       if (!this.pc) return;
@@ -109,6 +116,8 @@ export class CallPeerConnection {
     mediaPaused: boolean;
     remoteTrackMuted: boolean;
     hasRemoteTrack: boolean;
+    hasRemoteVideoTrack: boolean;
+    hasLocalVideoTrack: boolean;
     receiverCount: number;
     speakerOn: boolean;
     mediaRoute: string;
@@ -119,6 +128,8 @@ export class CallPeerConnection {
       mediaPaused: this.remoteMedia?.paused ?? true,
       remoteTrackMuted: this.remoteAudioTrack?.muted ?? true,
       hasRemoteTrack: Boolean(this.remoteAudioTrack),
+      hasRemoteVideoTrack: Boolean(this.remoteStream?.getVideoTracks().length),
+      hasLocalVideoTrack: Boolean(this.localStream?.getVideoTracks().length),
       receiverCount: this.pc?.getReceivers().filter((r) => r.track?.kind === "audio").length ?? 0,
       speakerOn: this.speakerOn,
       mediaRoute: getCallMediaRoute(this.speakerOn),
@@ -373,24 +384,49 @@ export class CallPeerConnection {
   }
 
   async attachLocalAudio(stream: MediaStream): Promise<void> {
+    await this.attachLocalStream(stream);
+  }
+
+  async attachLocalStream(stream: MediaStream): Promise<void> {
     this.localStream = stream;
-    const track = stream.getAudioTracks()[0];
-    if (!this.pc || !track) return;
-
-    const audioSender = this.pc.getSenders().find((sender) => sender.track?.kind === "audio");
-    if (audioSender) {
-      await audioSender.replaceTrack(track);
-      return;
+    if (!this.pc) return;
+    const tracks = stream.getTracks().filter((track) => track.kind === "audio" || track.kind === "video");
+    for (const track of tracks) {
+      const sender = this.pc.getSenders().find((s) => s.track?.kind === track.kind);
+      if (sender) {
+        await sender.replaceTrack(track);
+      } else {
+        this.pc.addTrack(track, stream);
+      }
     }
+  }
 
-    this.pc.addTrack(track, stream);
+  setVideoEnabled(enabled: boolean): void {
+    for (const track of this.localStream?.getVideoTracks() ?? []) {
+      track.enabled = enabled;
+    }
+  }
+
+  async clearLocalVideoTrack(): Promise<void> {
+    if (!this.pc) return;
+    const sender = this.pc.getSenders().find((s) => s.track?.kind === "video");
+    if (!sender) return;
+    await sender.replaceTrack(null);
+  }
+
+  getLocalStream(): MediaStream | null {
+    return this.localStream;
+  }
+
+  getRemoteStream(): MediaStream | null {
+    return this.remoteStream;
   }
 
   async createOffer(): Promise<string> {
     if (!this.pc) throw new Error("no_pc");
     const offer = await this.pc.createOffer({
       offerToReceiveAudio: true,
-      offerToReceiveVideo: false,
+      offerToReceiveVideo: true,
     });
     await this.pc.setLocalDescription(offer);
     return JSON.stringify(this.pc.localDescription);

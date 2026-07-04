@@ -36,6 +36,22 @@ export function SpeakerOffIcon({ className = "h-6 w-6" }: IconProps) {
   );
 }
 
+export function CameraIcon({ className = "h-6 w-6" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
+      <path d="M4 7a2 2 0 012-2h8a2 2 0 012 2v1.2l3.1-1.9c.66-.4 1.5.07 1.5.84v9.7c0 .77-.84 1.24-1.5.84L16 14.8V16a2 2 0 01-2 2H6a2 2 0 01-2-2V7z" />
+    </svg>
+  );
+}
+
+export function CameraOffIcon({ className = "h-6 w-6" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
+      <path d="M4 7a2 2 0 012-2h8a2 2 0 012 2v1.2l1.85-1.13 1.15 1.15v7.56c0 .77-.84 1.24-1.5.84L16 14.8V16a2 2 0 01-2 2H7.8l-3-3V7zm14.73 14L3 5.27 4.27 4l15.73 15.73L18.73 21z" />
+    </svg>
+  );
+}
+
 export function PhoneIcon({ className = "h-16 w-16" }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>

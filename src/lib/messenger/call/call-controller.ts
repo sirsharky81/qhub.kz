@@ -47,6 +47,7 @@ import type { CallDebugInfo, CallEndReason, CallPhase, CallState, TransportPhase
 import type { CallPollResponse } from "./types";
 
 type Listener = (state: CallState) => void;
+type MediaListener = (media: { localStream: MediaStream | null; remoteStream: MediaStream | null }) => void;
 
 function describeError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -93,6 +94,8 @@ const INITIAL_DEBUG: CallDebugInfo = {
   mediaPaused: true,
   remoteTrackMuted: true,
   hasRemoteTrack: false,
+  hasRemoteVideoTrack: false,
+  hasLocalVideoTrack: false,
   receiverCount: 0,
   speakerOn: false,
   mediaRoute: "default",
@@ -107,6 +110,7 @@ const INITIAL_STATE: CallState = {
   channel: null,
   peerPhone: null,
   muted: false,
+  videoEnabled: true,
   speakerOn: false,
   durationSec: 0,
   errorMessage: null,
@@ -117,6 +121,7 @@ const INITIAL_STATE: CallState = {
 export class CallController {
   private state: CallState = { ...INITIAL_STATE };
   private listeners = new Set<Listener>();
+  private mediaListeners = new Set<MediaListener>();
   private myPhone = "";
   private peerPhone = "";
   private channel = "";
@@ -172,8 +177,22 @@ export class CallController {
     return () => this.listeners.delete(listener);
   }
 
+  subscribeMedia(listener: MediaListener): () => void {
+    this.mediaListeners.add(listener);
+    listener({ localStream: this.localStream, remoteStream: this.pc?.getRemoteStream() ?? null });
+    return () => this.mediaListeners.delete(listener);
+  }
+
   getState(): CallState {
     return this.state;
+  }
+
+  getLocalStream(): MediaStream | null {
+    return this.localStream;
+  }
+
+  getRemoteStream(): MediaStream | null {
+    return this.pc?.getRemoteStream() ?? null;
   }
 
   exportCallJournal(): string {
@@ -182,6 +201,14 @@ export class CallController {
 
   isInCall(): boolean {
     return this.state.phase !== "idle" && this.state.phase !== "ended";
+  }
+
+  private emitMedia(): void {
+    const payload = {
+      localStream: this.localStream,
+      remoteStream: this.pc?.getRemoteStream() ?? null,
+    };
+    for (const listener of this.mediaListeners) listener(payload);
   }
 
   private nextSessionId(): string {
@@ -238,6 +265,7 @@ export class CallController {
         callId: data.session.callId,
         channel: this.channel,
         peerPhone: this.peerPhone,
+        videoEnabled: true,
         speakerOn: false,
         endReason: null,
         errorMessage: null,
@@ -295,6 +323,7 @@ export class CallController {
       callId: result.callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
+      videoEnabled: true,
       speakerOn: false,
       endReason: null,
       errorMessage: null,
@@ -309,7 +338,7 @@ export class CallController {
     this.startSdpKeepalive();
 
     try {
-      await this.ensureLocalAudio();
+      await this.ensureLocalMedia();
       await this.setupPeerConnection();
       const offerSdp = await this.pc!.createOffer();
       this.localOfferSdp = offerSdp;
@@ -346,7 +375,7 @@ export class CallController {
       // wrong session forever and never see session.offer.
       await this.refreshCallFromServer();
 
-      await this.ensureLocalAudio();
+      await this.ensureLocalMedia();
       await this.setupPeerConnection();
       await this.ensureSdpApplied();
 
@@ -397,6 +426,41 @@ export class CallController {
     this.patch({ muted });
   }
 
+  async setVideoEnabled(enabled: boolean): Promise<void> {
+    this.patch({ videoEnabled: enabled });
+    if (!this.localStream) return;
+    const hasLocalVideo = this.localStream.getVideoTracks().length > 0;
+    if (!enabled) {
+      for (const track of this.localStream.getVideoTracks()) {
+        track.stop();
+        this.localStream.removeTrack(track);
+      }
+      await this.pc?.clearLocalVideoTrack();
+      this.patchPlaybackDebug();
+      this.emitMedia();
+      return;
+    }
+    if (enabled && !hasLocalVideo) {
+      try {
+        const videoOnly = await withTimeout(
+          navigator.mediaDevices.getUserMedia({ audio: false, video: { width: 640, height: 360, frameRate: 15 } }),
+          12000,
+          "get_user_media_video",
+        );
+        const videoTrack = videoOnly.getVideoTracks()[0];
+        if (videoTrack) {
+          this.localStream.addTrack(videoTrack);
+          await this.pc?.attachLocalStream(this.localStream);
+        }
+      } catch {
+        this.patch({ videoEnabled: false });
+      }
+    }
+    this.pc?.setVideoEnabled(enabled);
+    this.patchPlaybackDebug();
+    this.emitMedia();
+  }
+
   setSpeaker(speakerOn: boolean): void {
     prepareAudioSessionForCall();
     this.pc?.setSpeakerphone(speakerOn);
@@ -428,6 +492,7 @@ export class CallController {
       callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
+      videoEnabled: true,
       speakerOn: false,
       endReason: null,
       errorMessage: null,
@@ -530,24 +595,53 @@ export class CallController {
     return null;
   }
 
-  private async ensureLocalAudio(): Promise<void> {
+  private async ensureLocalMedia(): Promise<void> {
     resetCallMediaForNewCall();
     prepareAudioSessionForCall();
     await prepareCallAudioOutput();
-    await withTimeout(ensureMediaPermissions({ audio: true }), 15000, "media_permissions");
-    this.localStream = await withTimeout(
-      navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      }),
+    await withTimeout(
+      ensureMediaPermissions({ audio: true, video: this.state.videoEnabled }),
       15000,
-      "get_user_media",
+      "media_permissions",
     );
+    try {
+      this.localStream = await withTimeout(
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: this.state.videoEnabled
+            ? {
+                width: { ideal: 640, max: 1280 },
+                height: { ideal: 360, max: 720 },
+                frameRate: { ideal: 15, max: 24 },
+              }
+            : false,
+        }),
+        15000,
+        "get_user_media",
+      );
+    } catch {
+      // Graceful fallback to audio-only if camera is unavailable/denied.
+      this.localStream = await withTimeout(
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        }),
+        15000,
+        "get_user_media_audio_only",
+      );
+      this.patch({ videoEnabled: false });
+    }
     kickAudioSessionAfterCapture();
+    this.patchPlaybackDebug();
+    this.emitMedia();
   }
 
   private async setupPeerConnection(): Promise<void> {
@@ -562,7 +656,7 @@ export class CallController {
       this.startCallAudioWatch();
     }
     if (this.localStream) {
-      await this.pc.attachLocalAudio(this.localStream);
+      await this.pc.attachLocalStream(this.localStream);
     }
     this.pc.setSpeakerphone(this.state.speakerOn);
     this.pc.setHandlers({
@@ -614,9 +708,12 @@ export class CallController {
         this.journal.record("TRACK_REMOTE");
         void this.pc?.playRemoteAudio();
         this.patchPlaybackDebug();
+        this.emitMedia();
         this.handlePeerConnected(true);
       },
     });
+    this.patchPlaybackDebug();
+    this.emitMedia();
   }
 
   private async sendSignalReliable(params: {
@@ -697,7 +794,7 @@ export class CallController {
     this.sdpApplyInFlight = true;
     try {
       if (!this.pc) {
-        await this.ensureLocalAudio();
+        await this.ensureLocalMedia();
         await this.setupPeerConnection();
       }
       const answerSdp = await this.pc!.createAnswer(offerPayload);
@@ -1336,6 +1433,7 @@ export class CallController {
       for (const t of this.localStream.getTracks()) t.stop();
       this.localStream = null;
     }
+    this.emitMedia();
     restoreAudioSessionAfterCall();
     void releaseCallAudioOutput();
 
@@ -1366,6 +1464,7 @@ export class CallController {
     this.journal.clear();
     this.state = { ...INITIAL_STATE };
     for (const l of this.listeners) l(this.state);
+    this.emitMedia();
   }
 }
 
