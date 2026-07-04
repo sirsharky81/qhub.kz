@@ -78,7 +78,7 @@ export function ParentScanClient() {
     }
   }
 
-  const scanHref = `${CODE_SCANNER_SIMPLE_URL}?returnTo=${encodeURIComponent("/tools/family/parent/scan")}`;
+  const scanHref = `${CODE_SCANNER_SIMPLE_URL}&returnTo=${encodeURIComponent("/tools/family/parent/scan")}`;
   const session = loadParentSession();
   const backHref = session ? parentRoomUrl(session.roomId) : "/tools/family/parent";
 

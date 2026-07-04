@@ -17,7 +17,7 @@ export function BindQr({ bindUrl, roleLabel }: Props) {
     void QRCode.toDataURL(bindUrl, { margin: 2, width: 220 }).then(setQrDataUrl);
   }, [bindUrl]);
 
-  const scanHref = `${CODE_SCANNER_SIMPLE_URL}?returnTo=${encodeURIComponent(
+  const scanHref = `${CODE_SCANNER_SIMPLE_URL}&returnTo=${encodeURIComponent(
     typeof window !== "undefined" ? window.location.pathname + window.location.search : "/tools/family/join",
   )}`;
 

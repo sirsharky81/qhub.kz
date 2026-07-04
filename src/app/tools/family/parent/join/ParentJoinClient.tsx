@@ -74,7 +74,7 @@ function JoinInner() {
     }
   }
 
-  const scanHref = `${CODE_SCANNER_SIMPLE_URL}?returnTo=${encodeURIComponent("/tools/family/parent/join")}`;
+  const scanHref = `${CODE_SCANNER_SIMPLE_URL}&returnTo=${encodeURIComponent("/tools/family/parent/join")}`;
 
   return (
     <FamilyShell title="Присоединиться" subtitle="Второй родитель в семье" backHref="/tools/family">
