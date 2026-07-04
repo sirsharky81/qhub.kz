@@ -10,6 +10,7 @@ import {
 import { normalizeKzPhone } from "./phone";
 
 const MESSENGER_ICON = "/tools/messenger/icon-192.png";
+const ACTIVE_VIEW_SUPPRESS_PUSH_MS = 7000;
 
 function messagePreview(type: MessageType): string {
   if (type === "image") return "Фото";
@@ -41,7 +42,15 @@ async function pushToPhone(
   payload: { title: string; body: string; url: string },
 ): Promise<void> {
   const presence = await getMessengerPresence(recipientPhone);
-  if (isViewingChannel(presence, channel)) return;
+  // Presence can stay stale for a short period after app background on mobile.
+  // Suppress push only for very fresh "actively viewing this chat" state.
+  if (
+    presence &&
+    isViewingChannel(presence, channel) &&
+    Date.now() - presence.at <= ACTIVE_VIEW_SUPPRESS_PUSH_MS
+  ) {
+    return;
+  }
 
   const subs = await getMessengerPushSubscriptions(recipientPhone);
   if (subs.length === 0) return;

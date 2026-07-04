@@ -255,14 +255,14 @@ export function MessengerSettingsClient() {
               type="button"
               disabled={pushBusy || pushStatus === "unsupported" || pushStatus === "denied"}
               onClick={() => void handlePushToggle()}
-              className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
                 pushEnabled ? "bg-sky-600" : "bg-gray-200"
               } disabled:opacity-50`}
               aria-label={pushEnabled ? "Отключить уведомления" : "Включить уведомления"}
             >
               <span
-                className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
-                  pushEnabled ? "translate-x-5" : "translate-x-0.5"
+                className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  pushEnabled ? "translate-x-5" : "translate-x-0"
                 }`}
               />
             </button>

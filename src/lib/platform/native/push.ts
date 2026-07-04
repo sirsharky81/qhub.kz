@@ -8,6 +8,8 @@ import { isNativePushConfigured } from "./app-capabilities";
 
 const registrationListenersAttached = new Set<NotificationContext>();
 const pendingRegistrations = new Map<NotificationContext, Set<(ok: boolean) => void>>();
+const SUBSCRIBE_RETRY_DELAY_MS = 800;
+const SUBSCRIBE_MAX_ATTEMPTS = 3;
 
 function queueRegistrationWaiter(context: NotificationContext, finish: (ok: boolean) => void): void {
   const waiters = pendingRegistrations.get(context) ?? new Set<(ok: boolean) => void>();
@@ -29,6 +31,29 @@ function resolveRegistrationWaiters(context: NotificationContext, ok: boolean): 
   if (!waiters) return;
   pendingRegistrations.delete(context);
   for (const resolve of waiters) resolve(ok);
+}
+
+async function postNativeSubscription(
+  endpoint: string,
+  payload: unknown,
+  headers: Record<string, string> | undefined,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < SUBSCRIBE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await platformFetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return true;
+    } catch {
+      // retry
+    }
+    if (attempt < SUBSCRIBE_MAX_ATTEMPTS - 1) {
+      await new Promise((resolve) => setTimeout(resolve, SUBSCRIBE_RETRY_DELAY_MS * (attempt + 1)));
+    }
+  }
+  return false;
 }
 
 async function ensureAndroidPushChannel(): Promise<void> {
@@ -83,13 +108,9 @@ function attachRegistrationListeners(
             }
           : undefined;
 
-      void platformFetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...headers },
-        body: JSON.stringify(payload),
-      })
-        .then((res) => resolveRegistrationWaiters(context, res.ok))
-        .catch(() => resolveRegistrationWaiters(context, false));
+      void postNativeSubscription(endpoint, payload, headers).then((ok) => {
+        resolveRegistrationWaiters(context, ok);
+      });
     });
 
     void PushNotifications.addListener("registrationError", (err) => {
