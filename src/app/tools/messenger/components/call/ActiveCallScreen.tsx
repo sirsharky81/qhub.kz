@@ -174,6 +174,7 @@ export function ActiveCallScreen({
   const showDuration = phase === "active";
   const isDialing = phase === "outgoing" || phase === "connecting";
   const isVideoCall = callMode === "video";
+  const showDebugOverlay = process.env.NEXT_PUBLIC_MESSENGER_CALL_DEBUG_OVERLAY === "1";
   const [earpieceBlank, setEarpieceBlank] = useState(false);
   const iosEarpiece = isIOSDevice() && phase === "active" && !speakerOn;
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null);
@@ -222,11 +223,8 @@ export function ActiveCallScreen({
         }}
       />
 
-      <div
-        className="relative flex flex-1 flex-col"
-        style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
-      >
-        <div className="px-6 pt-4 text-center">
+      <div className="relative flex min-h-0 flex-1 flex-col" style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}>
+        <div className="z-20 px-6 pt-4 text-center">
           <h2 className="text-2xl font-semibold tracking-tight">{peerTitle}</h2>
           <div className="mt-2 flex flex-col items-center gap-1">
             <CallStatusText phase={phase} errorMessage={errorMessage} variant="dark" />
@@ -236,14 +234,14 @@ export function ActiveCallScreen({
           </div>
         </div>
 
-        <div className="relative flex flex-1 items-center justify-center px-6">
+        <div className="relative flex min-h-0 flex-1 items-center justify-center px-6">
           {isVideoCall && remoteStream?.getVideoTracks().length ? (
             <video
               ref={setRemoteVideoEl}
               autoPlay
               playsInline
               muted
-              className="h-[60vh] w-full max-w-3xl rounded-2xl bg-black object-cover ring-1 ring-white/10"
+              className="absolute inset-0 h-full w-full bg-black object-cover"
             />
           ) : (
             <div className="flex h-40 w-40 items-center justify-center rounded-full bg-[#1f2c34] ring-1 ring-white/10 shadow-2xl">
@@ -255,7 +253,7 @@ export function ActiveCallScreen({
             </div>
           )}
           {isVideoCall && (
-            <div className="absolute bottom-3 right-8 h-28 w-20 overflow-hidden rounded-xl border border-white/20 bg-black/80">
+            <div className="absolute bottom-6 right-6 z-20 h-32 w-24 overflow-hidden rounded-xl border border-white/20 bg-black/80 shadow-lg">
               {localStream?.getVideoTracks().length ? (
                 <video
                   ref={setLocalVideoEl}
@@ -273,7 +271,7 @@ export function ActiveCallScreen({
           )}
         </div>
 
-        {debug && (phase === "outgoing" || phase === "connecting" || phase === "active") && (
+        {showDebugOverlay && debug && (phase === "outgoing" || phase === "connecting" || phase === "active") && (
           <DebugPanel phase={phase} debug={debug} />
         )}
         {phase === "active" && !speakerOn && isIOSDevice() && (
