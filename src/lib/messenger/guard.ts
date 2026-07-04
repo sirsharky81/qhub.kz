@@ -1,6 +1,6 @@
 import { getMessengerSession } from "./session";
-import { isPhoneWhitelisted } from "./store";
-import { isValidKzPhone, normalizeKzPhone } from "./phone";
+import { isPhoneWhitelisted, getRoomParticipants } from "./store";
+import { isValidKzPhone, normalizeKzPhone, peerFromDmChannel } from "./phone";
 
 export const ACCESS_DENIED_MSG = "Доступ недоступен";
 
@@ -37,6 +37,31 @@ export async function assertMessengerSession(): Promise<{ phone: string }> {
     throw new MessengerAuthError("Доступ запрещён", 403);
   }
   return { phone };
+}
+
+/** Channel ACL guard for messenger APIs (poll/send/ack). */
+export async function assertChannelParticipant(phone: string, channel: string): Promise<void> {
+  const me = normalizeKzPhone(phone);
+
+  if (channel.startsWith("dm:")) {
+    const peer = peerFromDmChannel(channel, me);
+    if (!peer) {
+      throw new MessengerAuthError("Доступ запрещён", 403);
+    }
+    return;
+  }
+
+  if (channel.startsWith("room:")) {
+    const roomId = channel.slice(5);
+    const participants = await getRoomParticipants(roomId);
+    const isMember = participants.some((p) => normalizeKzPhone(p.phone) === me);
+    if (!isMember) {
+      throw new MessengerAuthError("Доступ запрещён", 403);
+    }
+    return;
+  }
+
+  throw new MessengerAuthError("Неизвестный канал", 400);
 }
 
 export function jsonAuthError(err: unknown): Response {

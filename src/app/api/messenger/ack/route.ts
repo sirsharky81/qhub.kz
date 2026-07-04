@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
+import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import { ackDmMessage, ackRoomMessage } from "@/lib/messenger/store";
 
 export async function POST(request: Request) {
   try {
-    await assertMessengerSession();
+    const { phone } = await assertMessengerSession();
     let body: { channel?: string; messageId?: string };
     try {
       body = await request.json();
@@ -17,6 +17,7 @@ export async function POST(request: Request) {
     if (!channel || !messageId) {
       return NextResponse.json({ error: "Укажите channel и messageId" }, { status: 400 });
     }
+    await assertChannelParticipant(phone, channel);
 
     if (channel.startsWith("dm:")) {
       await ackDmMessage(channel, messageId);

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { checkMessengerRateLimit } from "@/lib/rate-limit";
 import { HEARTBEAT_STALE_MS } from "@/lib/messenger/constants";
-import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
+import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import {
   getDmMessagesSince,
   getRoomMessagesSince,
@@ -33,6 +33,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Укажите channel" }, { status: 400 });
     }
 
+    await assertChannelParticipant(phone, channel);
     await setMessengerPresence(phone, channel);
 
     if (channel.startsWith("dm:")) {

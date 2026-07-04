@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { checkMessengerRateLimit } from "@/lib/rate-limit";
 import { MAX_ENCRYPTED_FILE_BYTES, MAX_MEDIA_RAW_BODY_BYTES, MAX_TEXT_LENGTH } from "@/lib/messenger/constants";
 import { generateMessageId } from "@/lib/messenger/codes";
-import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
+import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import type { EncryptedMessagePayload, MessageType, ReceiptPayload } from "@/lib/messenger/types";
 import { pushDmEnvelope, pushRoomEnvelope, getRoomParticipants } from "@/lib/messenger/store";
 import { notifyDmMessage, notifyRoomMessage } from "@/lib/messenger/push-notify";
@@ -44,6 +44,7 @@ export async function POST(request: Request) {
     if (!channel) {
       return NextResponse.json({ error: "Укажите channel" }, { status: 400 });
     }
+    await assertChannelParticipant(phone, channel);
 
     if (body.kind === "receipt") {
       const refMessageId = body.refMessageId ?? "";
