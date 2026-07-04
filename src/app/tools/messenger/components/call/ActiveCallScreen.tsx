@@ -233,15 +233,6 @@ export function ActiveCallScreen({
             {showDuration && (
               <span className="text-base text-gray-300 tabular-nums">{formatDuration(durationSec)}</span>
             )}
-            {isDialing && (
-              <button
-                type="button"
-                onClick={onHangup}
-                className="mt-2 rounded-full bg-red-500/90 px-4 py-1.5 text-sm font-medium text-white shadow-lg shadow-red-900/40 transition-colors hover:bg-red-600"
-              >
-                Отменить вызов
-              </button>
-            )}
           </div>
         </div>
 
@@ -263,21 +254,23 @@ export function ActiveCallScreen({
               )}
             </div>
           )}
-          <div className="absolute bottom-3 right-8 h-28 w-20 overflow-hidden rounded-xl border border-white/20 bg-black/80">
-            {isVideoCall && localStream?.getVideoTracks().length ? (
-              <video
-                ref={setLocalVideoEl}
-                autoPlay
-                playsInline
-                muted
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-[11px] text-white/70">
-                {isVideoCall ? "Камера выкл." : "Аудиозвонок"}
-              </div>
-            )}
-          </div>
+          {isVideoCall && (
+            <div className="absolute bottom-3 right-8 h-28 w-20 overflow-hidden rounded-xl border border-white/20 bg-black/80">
+              {localStream?.getVideoTracks().length ? (
+                <video
+                  ref={setLocalVideoEl}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[11px] text-white/70">
+                  Камера выкл.
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {debug && (phase === "outgoing" || phase === "connecting" || phase === "active") && (
