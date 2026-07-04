@@ -25,6 +25,7 @@ export async function POST(request: Request) {
 
     let body: {
       channel?: string;
+      clientMessageId?: string;
       kind?: "message" | "receipt";
       type?: MessageType;
       ciphertext?: string;
@@ -93,6 +94,7 @@ export async function POST(request: Request) {
     const msg: EncryptedMessagePayload & { kind: "message" } = {
       kind: "message",
       id: generateMessageId(),
+      clientMessageId: typeof body.clientMessageId === "string" ? body.clientMessageId : undefined,
       from: phone,
       ts: Date.now(),
       type,

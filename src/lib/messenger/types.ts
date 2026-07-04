@@ -16,7 +16,7 @@ export interface MessengerAuthRecord {
   lockedUntil: number | null;
 }
 
-export type DeliveryStatus = "pending" | "sent" | "delivered" | "read" | "failed";
+export type DeliveryStatus = "pending" | "queued" | "sent" | "delivered" | "read" | "failed";
 
 export interface ReceiptPayload {
   kind: "receipt";
@@ -41,6 +41,7 @@ export type MessageType = "text" | "image" | "file" | "audio" | "video";
 
 export interface EncryptedMessagePayload {
   id: string;
+  clientMessageId?: string;
   from: string;
   ts: number;
   type: MessageType;

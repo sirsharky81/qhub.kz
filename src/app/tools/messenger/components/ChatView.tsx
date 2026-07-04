@@ -25,6 +25,7 @@ import { senderColorClass, truncateQuote, messagePreview } from "@/lib/messenger
 import {
   clearChatHistory,
   loadChatHistory,
+  rekeyHistoryMessage,
   saveHistoryMessage,
   updateHistoryDeliveryStatus,
 } from "@/lib/messenger/history-db";
@@ -249,6 +250,40 @@ export function ChatView({
         const msg = envelope;
         if (seenIds.current.has(msg.id)) continue;
         if (msg.from === myPhone) {
+          const clientMessageId =
+            typeof msg.clientMessageId === "string" ? msg.clientMessageId.trim() : "";
+          if (clientMessageId) {
+            const hasPendingLocal = messagesRef.current.some(
+              (m) => m.id === clientMessageId && m.mine,
+            );
+            if (hasPendingLocal) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === clientMessageId
+                    ? {
+                        ...m,
+                        id: msg.id,
+                        ts: msg.ts,
+                        fromPhone: msg.from,
+                        status: m.status === "read" ? "read" : "sent",
+                      }
+                    : m,
+                ),
+              );
+              if (persistHistory) {
+                await rekeyHistoryMessage(clientMessageId, msg.id, "sent");
+              }
+              seenIds.current.add(clientMessageId);
+              seenIds.current.add(msg.id);
+              continue;
+            }
+          }
+          if (seenIds.current.has(msg.id)) continue;
+          const ownDisplay = await decryptPayload(msg);
+          if (!ownDisplay) continue;
+          const own = { ...ownDisplay, mine: true, status: "sent" as const };
+          setMessages((prev) => (prev.some((m) => m.id === own.id) ? prev : [...prev, own]));
+          if (persistHistory) await persistMessage(own);
           seenIds.current.add(msg.id);
           continue;
         }
@@ -420,12 +455,14 @@ export function ChatView({
         fromPhone: myPhone,
       };
       setMessages((prev) => [...prev, optimistic]);
+      if (persistHistory) await persistMessage(optimistic);
       setReplyTo(null);
 
       try {
         const { ciphertext, iv } = await encryptMessage(aesKey, fullPlain);
         const result = await sendEncryptedMessage({
           channel,
+          clientMessageId: localId,
           type,
           ciphertext,
           iv,
@@ -433,7 +470,17 @@ export function ChatView({
           filename: fullPlain.filename,
         });
         if (!result) throw new Error("send failed");
-        versionRef.current = result.version;
+        if (result.version > 0) {
+          versionRef.current = Math.max(versionRef.current, result.version);
+        }
+        if (result.queued) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === localId ? { ...m, status: "queued" } : m)),
+          );
+          if (persistHistory) await updateHistoryDeliveryStatus(localId, "queued");
+          return;
+        }
+        seenIds.current.add(localId);
         seenIds.current.add(result.messageId);
         const sent: DisplayMessage = {
           ...optimistic,
@@ -443,14 +490,17 @@ export function ChatView({
         setMessages((prev) =>
           prev.map((m) => (m.id === localId ? sent : m)),
         );
-        if (persistHistory) await persistMessage(sent);
+        if (persistHistory) {
+          await rekeyHistoryMessage(localId, result.messageId, "sent");
+        }
       } catch {
         setMessages((prev) =>
           prev.map((m) => (m.id === localId ? { ...m, status: "failed" } : m)),
         );
+        if (persistHistory) await updateHistoryDeliveryStatus(localId, "failed");
       }
     },
-    [aesKey, buildPlain, channel, myPhone, persistHistory, persistMessage],
+    [aesKey, buildPlain, channel, myPhone, persistHistory, persistMessage, decryptPayload],
   );
 
   async function handleSend() {

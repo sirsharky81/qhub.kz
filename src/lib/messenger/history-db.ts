@@ -118,6 +118,42 @@ export async function updateHistoryDeliveryStatus(
   }
 }
 
+export async function rekeyHistoryMessage(
+  oldMessageId: string,
+  newMessageId: string,
+  deliveryStatus?: DeliveryStatus,
+): Promise<void> {
+  if (oldMessageId === newMessageId) {
+    if (deliveryStatus) {
+      await updateHistoryDeliveryStatus(oldMessageId, deliveryStatus);
+    }
+    return;
+  }
+
+  const source = await tx<HistoryMessageRecord>("readonly", (store) => store.get(oldMessageId));
+  if (!source) {
+    if (deliveryStatus) {
+      await updateHistoryDeliveryStatus(newMessageId, deliveryStatus);
+    }
+    return;
+  }
+
+  const target = await tx<HistoryMessageRecord>("readonly", (store) => store.get(newMessageId));
+  const merged: HistoryMessageRecord = {
+    ...(target ?? source),
+    id: newMessageId,
+    deliveryStatus: deliveryStatus ?? target?.deliveryStatus ?? source.deliveryStatus,
+  };
+
+  await tx("readwrite", (store) => {
+    store.put(merged);
+    store.delete(oldMessageId);
+  });
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(UNREAD_EVENT));
+  }
+}
+
 export async function loadChatHistory(
   storageKey: CryptoKey,
   chatId: string,

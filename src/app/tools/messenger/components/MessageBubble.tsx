@@ -31,7 +31,7 @@ interface Props {
 }
 
 function DeliveryTicks({ status, mine }: { status?: DeliveryStatus; mine: boolean }) {
-  if (!mine || !status || status === "pending" || status === "failed") return null;
+  if (!mine || !status || status === "pending" || status === "queued" || status === "failed") return null;
   const isRead = status === "read";
   const isDelivered = status === "delivered" || isRead;
   const color = isRead ? "text-sky-200" : "text-sky-100/80";
@@ -222,6 +222,9 @@ export function MessageBubble({
               })}
             </span>
             <DeliveryTicks status={message.status} mine={message.mine} />
+            {message.mine && message.status === "queued" && (
+              <span className="ml-1 text-[10px] text-amber-200">в очереди</span>
+            )}
             {message.status === "failed" && (
               <button type="button" onClick={() => onRetry?.(message.id)} className="ml-2 underline">
                 повторить

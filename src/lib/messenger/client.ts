@@ -274,26 +274,28 @@ export async function pollChannel(
 
 export async function sendEncryptedMessage(input: {
   channel: string;
+  clientMessageId?: string;
   type: MessageType;
   ciphertext: string;
   iv: string;
   mime?: string;
   filename?: string;
-}): Promise<{ messageId: string; version: number } | null> {
+}): Promise<{ messageId: string; version: number; queued: boolean } | null> {
   const res = await platformFetch("/api/messenger/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
   if (res.ok) {
-    return res.json() as Promise<{ messageId: string; version: number }>;
+    const data = (await res.json()) as { messageId: string; version: number };
+    return { ...data, queued: false };
   }
   await PlatformOfflineQueue.enqueue({
     type: "message",
     endpoint: "/api/messenger/send",
     payload: input,
   });
-  return { messageId: `pending-${Date.now()}`, version: 0 };
+  return { messageId: input.clientMessageId ?? `pending-${Date.now()}`, version: 0, queued: true };
 }
 
 export async function sendReceipt(input: {
