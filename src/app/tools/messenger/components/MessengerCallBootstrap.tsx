@@ -29,6 +29,7 @@ function MessengerGlobalCallWatcher() {
       const deepLinkOpts = {
         channel: data.channel,
         peerPhone: data.callerPhone,
+        media: data.media,
       };
 
       if (pathname?.startsWith("/tools/messenger/chat")) {

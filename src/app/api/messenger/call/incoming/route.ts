@@ -29,6 +29,7 @@ export async function GET() {
       callId: pending.callId,
       channel: pending.channel,
       callerPhone: pending.caller,
+      media: session.media === "video" ? "video" : "audio",
       session,
     });
   } catch (err) {

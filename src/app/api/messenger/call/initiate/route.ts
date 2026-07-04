@@ -20,12 +20,14 @@ export async function POST(request: Request) {
       );
     }
 
-    let body: { channel?: string; peerPhone?: string };
+    let body: { channel?: string; peerPhone?: string; media?: "audio" | "video" };
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ error: "Неверный формат" }, { status: 400 });
     }
+
+    const media = body.media === "video" ? "video" : "audio";
 
     const channel =
       body.channel?.trim() ||
@@ -44,6 +46,7 @@ export async function POST(request: Request) {
         channel,
         caller: phone,
         callee: peer,
+        media,
       });
 
       try {

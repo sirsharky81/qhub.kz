@@ -54,6 +54,11 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
+function hasVideoInSdp(payload: string | null | undefined): boolean {
+  if (!payload) return false;
+  return /m=video\s+\d+/i.test(payload);
+}
+
 /** Race a promise against a hard deadline so a stuck browser API (e.g. a
  * getUserMedia permission prompt that never gets answered) can't freeze the
  * whole call setup chain forever. */
@@ -109,8 +114,9 @@ const INITIAL_STATE: CallState = {
   callId: null,
   channel: null,
   peerPhone: null,
+  callMode: "audio",
   muted: false,
-  videoEnabled: true,
+  videoEnabled: false,
   speakerOn: false,
   durationSec: 0,
   errorMessage: null,
@@ -265,7 +271,8 @@ export class CallController {
         callId: data.session.callId,
         channel: this.channel,
         peerPhone: this.peerPhone,
-        videoEnabled: true,
+        callMode: data.session.media === "video" ? "video" : "audio",
+        videoEnabled: data.session.media === "video",
         speakerOn: false,
         endReason: null,
         errorMessage: null,
@@ -296,9 +303,11 @@ export class CallController {
     }
     primeCallMediaPlayback(false);
 
+    const callMode: "audio" | "video" = options?.video === true ? "video" : "audio";
     const result = await initiateCall({
       channel: this.channel,
       peerPhone: this.peerPhone,
+      media: callMode,
     });
 
     if (!result.ok || !result.callId) {
@@ -317,13 +326,14 @@ export class CallController {
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
     this.callStartedAt = Date.now();
-    const videoEnabled = options?.video === true;
+    const videoEnabled = callMode === "video";
     this.patch({
       debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: result.callId },
       phase: "outgoing",
       callId: result.callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
+      callMode,
       videoEnabled,
       speakerOn: false,
       endReason: null,
@@ -345,7 +355,9 @@ export class CallController {
     try {
       await this.ensureLocalMedia();
       await this.setupPeerConnection();
-      const offerSdp = await this.pc!.createOffer();
+      const offerSdp = await this.pc!.createOffer({
+        receiveVideo: this.state.callMode === "video",
+      });
       this.localOfferSdp = offerSdp;
       this.patchDebug({ hasLocalOffer: true });
       this.setTransportPhase("offer_sent");
@@ -372,17 +384,24 @@ export class CallController {
     this.clearRingTimeout();
     this.localAnswerSdp = null;
     this.patch({ phase: "connecting" });
-    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
-      speakerOn: this.state.speakerOn,
-      videoEnabled: this.state.videoEnabled,
-    });
 
     try {
       // Always reconcile with the server's active call for this DM channel.
       // Deep links and push notifications often carry a stale callId while a
       // newer call (with the offer) is already active — callee would poll the
       // wrong session forever and never see session.offer.
-      await this.refreshCallFromServer();
+      const serverSession = await this.refreshCallFromServer();
+      const offerHasVideo = hasVideoInSdp(serverSession?.offerSdp);
+      const mode: "audio" | "video" =
+        serverSession?.media === "video" || offerHasVideo ? "video" : "audio";
+      this.patch({
+        callMode: mode,
+        videoEnabled: mode === "video" ? this.state.videoEnabled || offerHasVideo : false,
+      });
+      void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
+        speakerOn: this.state.speakerOn,
+        videoEnabled: mode === "video" && (this.state.videoEnabled || offerHasVideo),
+      });
 
       await this.ensureLocalMedia();
       await this.setupPeerConnection();
@@ -436,6 +455,7 @@ export class CallController {
   }
 
   async setVideoEnabled(enabled: boolean): Promise<void> {
+    if (this.state.callMode !== "video") return;
     this.patch({ videoEnabled: enabled });
     if (!this.localStream) return;
     const hasLocalVideo = this.localStream.getVideoTracks().length > 0;
@@ -496,7 +516,7 @@ export class CallController {
 
   async handleDeepLink(
     callId: string,
-    opts?: { channel?: string; peerPhone?: string },
+    opts?: { channel?: string; peerPhone?: string; media?: "audio" | "video" },
   ): Promise<void> {
     if (this.isInCall()) {
       this.recordIgnored("DEEP_LINK_INITIATE");
@@ -514,7 +534,8 @@ export class CallController {
       callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
-      videoEnabled: true,
+      callMode: opts?.media === "video" ? "video" : "audio",
+      videoEnabled: opts?.media === "video",
       speakerOn: false,
       endReason: null,
       errorMessage: null,
@@ -526,7 +547,13 @@ export class CallController {
     this.startElapsedTimer();
     this.startSdpKeepalive();
 
-    await this.refreshCallFromServer();
+    const serverSession = await this.refreshCallFromServer();
+    const mode: "audio" | "video" =
+      serverSession?.media === "video" || hasVideoInSdp(serverSession?.offerSdp) ? "video" : "audio";
+    this.patch({
+      callMode: mode,
+      videoEnabled: mode === "video",
+    });
   }
 
   destroy(): void {
@@ -621,8 +648,9 @@ export class CallController {
     resetCallMediaForNewCall();
     prepareAudioSessionForCall();
     await prepareCallAudioOutput();
+    const needVideo = this.state.callMode === "video" && this.state.videoEnabled;
     await withTimeout(
-      ensureMediaPermissions({ audio: true, video: this.state.videoEnabled }),
+      ensureMediaPermissions({ audio: true, video: needVideo }),
       15000,
       "media_permissions",
     );
@@ -634,7 +662,7 @@ export class CallController {
             noiseSuppression: true,
             autoGainControl: true,
           },
-          video: this.state.videoEnabled
+          video: needVideo
             ? {
                 width: { ideal: 640, max: 1280 },
                 height: { ideal: 360, max: 720 },
@@ -815,6 +843,9 @@ export class CallController {
     if (this.pc?.hasRemoteDescription() || this.sdpApplyInFlight) return;
     this.sdpApplyInFlight = true;
     try {
+      if (hasVideoInSdp(offerPayload) && this.state.callMode !== "video") {
+        this.patch({ callMode: "video", videoEnabled: true });
+      }
       if (!this.pc) {
         await this.ensureLocalMedia();
         await this.setupPeerConnection();

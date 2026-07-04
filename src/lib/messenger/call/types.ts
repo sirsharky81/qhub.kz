@@ -67,6 +67,7 @@ export interface CallState {
   callId: string | null;
   channel: string | null;
   peerPhone: string | null;
+  callMode: "audio" | "video";
   muted: boolean;
   videoEnabled: boolean;
   speakerOn: boolean;
@@ -82,6 +83,7 @@ export interface CallPollResponse {
     channel: string;
     caller: string;
     callee: string;
+    media?: "audio" | "video";
     status: string;
     version: number;
     createdAt: number;

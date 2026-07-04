@@ -75,6 +75,7 @@ export async function createCallSession(params: {
   channel: string;
   caller: string;
   callee: string;
+  media?: "audio" | "video";
 }): Promise<CallSession> {
   const existing = await getActiveCallForChannel(params.channel);
   if (existing && existing.status !== "ended") {
@@ -89,6 +90,7 @@ export async function createCallSession(params: {
     channel: params.channel,
     caller,
     callee,
+    media: params.media === "video" ? "video" : "audio",
     status: "ringing",
     version: 1,
     signalSeq: 0,

@@ -124,12 +124,14 @@ export interface DmDialogSummary {
 
 export type CallSignalType = "offer" | "answer" | "ice" | "reject" | "end" | "busy";
 export type CallStatus = "ringing" | "connecting" | "active" | "ended";
+export type CallMediaMode = "audio" | "video";
 
 export interface CallSession {
   callId: string;
   channel: string;
   caller: string;
   callee: string;
+  media?: CallMediaMode;
   status: CallStatus;
   version: number;
   signalSeq: number;

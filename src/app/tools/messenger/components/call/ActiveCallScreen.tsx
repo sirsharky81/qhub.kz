@@ -30,6 +30,7 @@ function peerInitial(title: string): string | null {
 interface Props {
   peerTitle: string;
   phase: string;
+  callMode: "audio" | "video";
   durationSec: number;
   muted: boolean;
   videoEnabled: boolean;
@@ -156,6 +157,7 @@ function ControlButton({
 export function ActiveCallScreen({
   peerTitle,
   phase,
+  callMode,
   durationSec,
   muted,
   videoEnabled,
@@ -171,6 +173,7 @@ export function ActiveCallScreen({
 }: Props) {
   const showDuration = phase === "active";
   const isDialing = phase === "outgoing" || phase === "connecting";
+  const isVideoCall = callMode === "video";
   const [earpieceBlank, setEarpieceBlank] = useState(false);
   const iosEarpiece = isIOSDevice() && phase === "active" && !speakerOn;
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null);
@@ -178,15 +181,15 @@ export function ActiveCallScreen({
 
   useEffect(() => {
     if (!localVideoEl) return;
-    const hasLocalVideo = Boolean(localStream?.getVideoTracks().length);
+    const hasLocalVideo = isVideoCall && Boolean(localStream?.getVideoTracks().length);
     localVideoEl.srcObject = hasLocalVideo ? localStream : null;
-  }, [localStream, localStream?.getVideoTracks().length, localVideoEl]);
+  }, [isVideoCall, localStream, localStream?.getVideoTracks().length, localVideoEl]);
 
   useEffect(() => {
     if (!remoteVideoEl) return;
-    const hasRemoteVideo = Boolean(remoteStream?.getVideoTracks().length);
+    const hasRemoteVideo = isVideoCall && Boolean(remoteStream?.getVideoTracks().length);
     remoteVideoEl.srcObject = hasRemoteVideo ? remoteStream : null;
-  }, [remoteStream, remoteStream?.getVideoTracks().length, remoteVideoEl]);
+  }, [isVideoCall, remoteStream, remoteStream?.getVideoTracks().length, remoteVideoEl]);
 
   useEffect(() => {
     if (!iosEarpiece) setEarpieceBlank(false);
@@ -243,7 +246,7 @@ export function ActiveCallScreen({
         </div>
 
         <div className="relative flex flex-1 items-center justify-center px-6">
-          {remoteStream?.getVideoTracks().length ? (
+          {isVideoCall && remoteStream?.getVideoTracks().length ? (
             <video
               ref={setRemoteVideoEl}
               autoPlay
@@ -261,7 +264,7 @@ export function ActiveCallScreen({
             </div>
           )}
           <div className="absolute bottom-3 right-8 h-28 w-20 overflow-hidden rounded-xl border border-white/20 bg-black/80">
-            {localStream?.getVideoTracks().length ? (
+            {isVideoCall && localStream?.getVideoTracks().length ? (
               <video
                 ref={setLocalVideoEl}
                 autoPlay
@@ -270,7 +273,9 @@ export function ActiveCallScreen({
                 className="h-full w-full object-cover"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-[11px] text-white/70">Камера выкл.</div>
+              <div className="flex h-full w-full items-center justify-center text-[11px] text-white/70">
+                {isVideoCall ? "Камера выкл." : "Аудиозвонок"}
+              </div>
             )}
           </div>
         </div>
@@ -315,13 +320,15 @@ export function ActiveCallScreen({
             {speakerOn ? <SpeakerIcon /> : <SpeakerOffIcon />}
           </ControlButton>
 
-          <ControlButton
-            active={videoEnabled}
-            label={videoEnabled ? "Выключить камеру" : "Включить камеру"}
-            onClick={onToggleVideo}
-          >
-            {videoEnabled ? <CameraIcon /> : <CameraOffIcon />}
-          </ControlButton>
+          {isVideoCall && (
+            <ControlButton
+              active={videoEnabled}
+              label={videoEnabled ? "Выключить камеру" : "Включить камеру"}
+              onClick={onToggleVideo}
+            >
+              {videoEnabled ? <CameraIcon /> : <CameraOffIcon />}
+            </ControlButton>
+          )}
 
           <ControlButton
             active={muted}

@@ -171,6 +171,7 @@ export function CallProvider({
         <ActiveCallScreen
           peerTitle={peerTitle}
           phase={state.phase}
+          callMode={state.callMode}
           durationSec={state.durationSec}
           muted={state.muted}
           videoEnabled={state.videoEnabled}

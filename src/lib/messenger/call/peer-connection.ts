@@ -422,11 +422,12 @@ export class CallPeerConnection {
     return this.remoteStream;
   }
 
-  async createOffer(): Promise<string> {
+  async createOffer(options?: { receiveVideo?: boolean }): Promise<string> {
     if (!this.pc) throw new Error("no_pc");
+    const receiveVideo = options?.receiveVideo ?? false;
     const offer = await this.pc.createOffer({
       offerToReceiveAudio: true,
-      offerToReceiveVideo: true,
+      offerToReceiveVideo: receiveVideo,
     });
     await this.pc.setLocalDescription(offer);
     return JSON.stringify(this.pc.localDescription);

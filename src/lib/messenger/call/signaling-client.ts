@@ -62,12 +62,13 @@ export async function fetchIceServers(): Promise<{
 export async function initiateCall(params: {
   channel: string;
   peerPhone: string;
+  media: "audio" | "video";
 }): Promise<InitiateCallResponse> {
   try {
     const res = await fetchWithTimeout("/api/messenger/call/initiate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel: params.channel, peerPhone: params.peerPhone }),
+      body: JSON.stringify({ channel: params.channel, peerPhone: params.peerPhone, media: params.media }),
     });
     return (await res.json()) as InitiateCallResponse;
   } catch {
@@ -166,6 +167,7 @@ export async function pollIncomingCall(): Promise<{
   callId?: string;
   channel?: string;
   callerPhone?: string;
+  media?: "audio" | "video";
 } | null> {
   try {
     const res = await fetchWithRetry("/api/messenger/call/incoming");
@@ -175,6 +177,7 @@ export async function pollIncomingCall(): Promise<{
       callId?: string;
       channel?: string;
       callerPhone?: string;
+      media?: "audio" | "video";
     };
   } catch {
     return null;
