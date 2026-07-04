@@ -344,21 +344,78 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
   const me = normalizeKzPhone(phone);
   const index = await loadDmUserIndex(me);
   const result: DmDialogSummary[] = [];
+  let touchedIndex = false;
 
-  for (const entry of Object.values(index)) {
+  for (const [chatId, entry] of Object.entries(index)) {
     const channel = entry.chatId;
     const peer = entry.peerPhone ? normalizeKzPhone(entry.peerPhone) : peerFromDmChannel(channel, me);
     if (!peer) continue;
 
+    let lastMessageAt = entry.lastMessageAt ?? 0;
+    let lastMessageType = entry.lastMessageType ?? null;
+    let lastMessageFromMe = Boolean(entry.lastMessageFromMe);
+    let unreadCount = entry.unreadCount;
+    let latestUnreadAt = entry.latestUnreadAt;
+
+    const needsBackfill =
+      unreadCount === undefined ||
+      latestUnreadAt === undefined ||
+      entry.lastMessageType === undefined ||
+      entry.lastMessageFromMe === undefined;
+
+    if (needsBackfill) {
+      const rawList = await redisLrange(dmMessagesKey(chatId), 0, -1);
+      let computedUnread = 0;
+      let computedLatestUnreadAt: number | null = null;
+      let computedLastAt = lastMessageAt;
+      let computedLastType: MessageType | null = lastMessageType;
+      let computedLastFromMe = lastMessageFromMe;
+
+      for (const raw of rawList) {
+        const envelope = parseChannelEnvelope(raw);
+        if (!envelope || isReceipt(envelope)) continue;
+        if (envelope.ts >= computedLastAt) {
+          computedLastAt = envelope.ts;
+          computedLastType = envelope.type;
+          computedLastFromMe = normalizeKzPhone(envelope.from) === me;
+        }
+        if (normalizeKzPhone(envelope.from) !== me) {
+          computedUnread += 1;
+          computedLatestUnreadAt = Math.max(computedLatestUnreadAt ?? 0, envelope.ts ?? 0);
+        }
+      }
+
+      lastMessageAt = computedLastAt;
+      lastMessageType = computedLastType;
+      lastMessageFromMe = computedLastFromMe;
+      unreadCount = computedUnread;
+      latestUnreadAt = computedLatestUnreadAt;
+
+      index[chatId] = {
+        chatId,
+        peerPhone: peer,
+        lastMessageAt,
+        lastMessageType,
+        lastMessageFromMe,
+        unreadCount,
+        latestUnreadAt,
+      };
+      touchedIndex = true;
+    }
+
     result.push({
       chatId: channel,
       peerPhone: peer,
-      lastMessageAt: entry.lastMessageAt ?? 0,
-      lastMessageType: entry.lastMessageType ?? null,
-      lastMessageFromMe: Boolean(entry.lastMessageFromMe),
-      latestUnreadAt: entry.latestUnreadAt ?? null,
-      unreadCount: Math.max(0, entry.unreadCount ?? 0),
+      lastMessageAt,
+      lastMessageType,
+      lastMessageFromMe,
+      latestUnreadAt: latestUnreadAt ?? null,
+      unreadCount: Math.max(0, unreadCount ?? 0),
     });
+  }
+
+  if (touchedIndex) {
+    await saveDmUserIndex(me, index);
   }
 
   result.sort((a, b) => {
