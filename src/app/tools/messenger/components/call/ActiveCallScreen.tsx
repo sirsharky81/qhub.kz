@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { getCallController } from "@/lib/messenger/call/call-controller";
 import type { CallDebugInfo } from "@/lib/messenger/call/types";
 import { isIOSDevice } from "@/lib/platform/device";
 import { CallStatusText } from "./CallStatusText";
@@ -95,6 +96,16 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
       {debug.lastError && (
         <div className="mt-1 break-words text-red-400">err: {debug.lastError}</div>
       )}
+      <button
+        type="button"
+        className="mt-2 text-emerald-300 underline"
+        onClick={() => {
+          const text = getCallController().exportCallJournal();
+          void navigator.clipboard.writeText(text || "Journal is empty");
+        }}
+      >
+        Отправить лог звонка
+      </button>
     </div>
   );
 }

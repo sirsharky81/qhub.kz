@@ -40,7 +40,10 @@ import {
   sendCallSignal,
   sendCallSignalDetailed,
 } from "./signaling-client";
-import type { CallDebugInfo, CallEndReason, CallPhase, CallState } from "./types";
+import { CallJournal } from "./call-journal";
+import { checkCallInvariants } from "./call-invariants";
+import { isCallObservabilityEnabled } from "./call-observability";
+import type { CallDebugInfo, CallEndReason, CallPhase, CallState, TransportPhase } from "./types";
 import type { CallPollResponse } from "./types";
 
 type Listener = (state: CallState) => void;
@@ -145,6 +148,14 @@ export class CallController {
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
   private setupWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   private interruptionUnsub: (() => void) | null = null;
+  private transportPhase: TransportPhase = "new";
+  private sessionId = "s-init";
+  private journal = new CallJournal(() => ({
+    elapsedMs: this.callStartedAt > 0 ? Date.now() - this.callStartedAt : 0,
+    callId: this.state.callId,
+    sessionId: this.sessionId,
+    peer: this.peerPhone || this.state.peerPhone || null,
+  }));
 
   configure(params: { myPhone: string; peerPhone: string; channel: string }): void {
     this.myPhone = params.myPhone;
@@ -162,8 +173,47 @@ export class CallController {
     return this.state;
   }
 
+  exportCallJournal(): string {
+    return this.journal.exportText();
+  }
+
   isInCall(): boolean {
     return this.state.phase !== "idle" && this.state.phase !== "ended";
+  }
+
+  private nextSessionId(): string {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `s-${crypto.randomUUID().slice(0, 8)}`;
+    }
+    return `s-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  private setTransportPhase(next: TransportPhase): void {
+    this.transportPhase = next;
+  }
+
+  private recordIgnored(event: string, meta?: Record<string, string | number | boolean | null>): void {
+    this.journal.record("IGNORED_EVENT", event, {
+      phase: this.state.phase,
+      ...meta,
+    });
+  }
+
+  private checkInvariantsOnTransition(): void {
+    if (!isCallObservabilityEnabled()) return;
+    const violations = checkCallInvariants({
+      phase: this.state.phase,
+      callId: this.state.callId,
+      hasPeerConnection: Boolean(this.pc),
+      hasLocalStream: Boolean(this.localStream),
+      hasRemoteTrack: Boolean(this.state.debug.hasRemoteTrack),
+      hasPolling: Boolean(this.pollTimer),
+      transportPhase: this.transportPhase,
+    });
+    for (const violation of violations) {
+      this.journal.record("INVARIANT_VIOLATION", violation, { tzGap: true });
+      console.warn("[call-invariant]", violation);
+    }
   }
 
   startIncomingWatch(): void {
@@ -209,7 +259,10 @@ export class CallController {
   }
 
   async startOutgoing(): Promise<void> {
-    if (this.isInCall()) return;
+    if (this.isInCall()) {
+      this.recordIgnored("INITIATE");
+      return;
+    }
     primeCallMediaPlayback(false);
 
     const result = await initiateCall({
@@ -243,6 +296,7 @@ export class CallController {
       endReason: null,
       errorMessage: null,
     });
+    this.journal.record("INITIATE", "outgoing");
 
     // Start signaling immediately — don't wait for getUserMedia / ICE config.
     this.adoptCallId(result.callId);
@@ -257,6 +311,8 @@ export class CallController {
       const offerSdp = await this.pc!.createOffer();
       this.localOfferSdp = offerSdp;
       this.patchDebug({ hasLocalOffer: true });
+      this.setTransportPhase("offer_sent");
+      this.journal.record("OFFER_SENT");
 
       void this.sendSignalReliable({
         callId: result.callId,
@@ -270,7 +326,10 @@ export class CallController {
   }
 
   async acceptIncoming(): Promise<void> {
-    if (this.state.phase !== "incoming" || !this.state.callId) return;
+    if (this.state.phase !== "incoming" || !this.state.callId) {
+      this.recordIgnored("ACCEPT");
+      return;
+    }
     primeCallMediaPlayback(false);
 
     this.clearRingTimeout();
@@ -301,8 +360,12 @@ export class CallController {
   }
 
   async rejectIncoming(): Promise<void> {
-    if (!this.state.callId) return;
+    if (!this.state.callId) {
+      this.recordIgnored("DECLINE");
+      return;
+    }
     const callId = this.state.callId;
+    this.journal.record("DECLINE", "local");
     await this.sendSignalReliable({ callId, type: "reject" });
     await this.endCallReliable(callId, "reject");
     await this.cleanup("reject");
@@ -310,10 +373,12 @@ export class CallController {
 
   async hangup(): Promise<void> {
     if (!this.state.callId) {
+      this.recordIgnored("HANGUP");
       this.reset();
       return;
     }
     const callId = this.state.callId;
+    this.journal.record("HANGUP", "local");
     await this.flushLocalIce();
     // endCallReliable (POST /call/end) already appends the "end" signal AND
     // sets endReason to the specific reason ("hangup"). Sending a separate
@@ -344,7 +409,10 @@ export class CallController {
     callId: string,
     opts?: { channel?: string; peerPhone?: string },
   ): Promise<void> {
-    if (this.isInCall()) return;
+    if (this.isInCall()) {
+      this.recordIgnored("DEEP_LINK_INITIATE");
+      return;
+    }
     if (opts?.channel) this.channel = opts.channel;
     if (opts?.peerPhone) this.peerPhone = opts.peerPhone;
     this.isCaller = false;
@@ -361,6 +429,7 @@ export class CallController {
       endReason: null,
       errorMessage: null,
     });
+    this.journal.record("INITIATE", "deep_link");
     this.adoptCallId(callId);
     this.startRingTimeout();
     this.startSetupWatchdog();
@@ -386,6 +455,8 @@ export class CallController {
     for (const l of this.listeners) l(this.state);
 
     if (prevPhase !== this.state.phase) {
+      this.journal.record("CALL_STATE", `${prevPhase} → ${this.state.phase}`);
+      this.checkInvariantsOnTransition();
       this.updateSoundsForPhase(this.state.phase);
       if (this.state.phase === "connecting" || this.state.phase === "active") {
         this.clearRingTimeout();
@@ -477,6 +548,9 @@ export class CallController {
   }
 
   private async setupPeerConnection(): Promise<void> {
+    this.sessionId = this.nextSessionId();
+    this.setTransportPhase("new");
+    this.journal.record("CREATE_PC");
     const { iceServers, turnSource } = await fetchIceServers();
     this.patchDebug({ turnSource, isCaller: this.isCaller });
     this.pc = new CallPeerConnection();
@@ -509,6 +583,19 @@ export class CallController {
       },
       onIceConnectionState: (iceState) => {
         this.patchDebug({ iceConnectionState: iceState });
+        if (iceState === "checking") {
+          this.setTransportPhase("ice_connecting");
+          this.journal.record("ICE_CONNECTING");
+        } else if (iceState === "connected" || iceState === "completed") {
+          this.setTransportPhase("ice_connected");
+          this.journal.record("ICE_CONNECTED");
+        } else if (iceState === "disconnected") {
+          this.setTransportPhase("ice_disconnected");
+          this.journal.record("ICE_DISCONNECTED");
+        } else if (iceState === "failed") {
+          this.setTransportPhase("ice_failed");
+          this.journal.record("ICE_FAILED");
+        }
         if (iceState === "failed") {
           void this.cleanup(
             "error",
@@ -519,6 +606,7 @@ export class CallController {
         this.handlePeerConnected(iceState === "connected" || iceState === "completed");
       },
       onRemoteTrack: () => {
+        this.journal.record("TRACK_REMOTE");
         void this.pc?.playRemoteAudio();
         this.patchPlaybackDebug();
         this.handlePeerConnected(true);
@@ -580,6 +668,8 @@ export class CallController {
         this.patch({ phase: "connecting" });
       }
       await this.pc.applyAnswer(payload);
+      this.setTransportPhase("answer_received");
+      this.journal.record("ANSWER_RECEIVED");
       this.patchDebug({ hasRemoteDescription: true });
       await this.flushPendingRemoteIce();
       if (this.state.phase !== "active") {
@@ -759,7 +849,11 @@ export class CallController {
   }
 
   private handlePeerConnected(connected: boolean): void {
-    if (!connected || this.state.phase === "active") return;
+    if (!connected) return;
+    if (this.state.phase === "active") {
+      this.recordIgnored("ICE_CONNECTED");
+      return;
+    }
     this.clearIceTimeout();
     this.clearRingTimeout();
     this.clearSetupWatchdog();
@@ -1045,11 +1139,17 @@ export class CallController {
     from: string,
     payload?: string,
   ): Promise<void> {
-    if (this.isSelfSignal(from)) return;
+    if (this.isSelfSignal(from)) {
+      this.recordIgnored("SELF_SIGNAL", { type });
+      return;
+    }
+    this.journal.record("SIGNAL_RECEIVED", type, { from });
 
     if (type === "answer" && payload && this.isCaller) {
       if (this.state.phase === "outgoing" || this.state.phase === "connecting") {
         await this.applyRemoteAnswer(payload);
+      } else {
+        this.recordIgnored("ANSWER", { from });
       }
       return;
     }
@@ -1058,6 +1158,8 @@ export class CallController {
       // Never auto-answer during incoming ring — wait until user taps Accept.
       if (this.state.phase === "connecting" || this.state.phase === "active") {
         await this.applyRemoteOffer(payload);
+      } else {
+        this.recordIgnored("OFFER", { from });
       }
       return;
     }
@@ -1165,6 +1267,7 @@ export class CallController {
     endReason: CallEndReason,
     errorMessage?: string,
   ): Promise<void> {
+    this.journal.record("CLEANUP_START", endReason ?? "null");
     const callId = this.state.callId;
     if (callId) {
       await this.endCallReliable(callId, endReason ?? "error");
@@ -1196,6 +1299,7 @@ export class CallController {
 
     this.pc?.close();
     this.pc = null;
+    this.setTransportPhase("closed");
     releaseCallMediaPlayback();
     purgeOrphanedCallMediaElements();
     releaseCallMediaSession();
@@ -1213,6 +1317,7 @@ export class CallController {
       endReason,
       errorMessage: errorMessage ?? null,
     });
+    this.journal.record("CLEANUP_COMPLETE");
 
     if (endReason !== null) {
       this.scheduleReset();
@@ -1228,6 +1333,9 @@ export class CallController {
     this.isCaller = false;
     this.lastSession = null;
     this.pendingRemoteIce = [];
+    this.transportPhase = "new";
+    this.sessionId = "s-init";
+    this.journal.clear();
     this.state = { ...INITIAL_STATE };
     for (const l of this.listeners) l(this.state);
     if (!this.destroyed) {

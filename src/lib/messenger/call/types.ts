@@ -4,6 +4,16 @@ export interface RTCIceServer {
   credential?: string;
 }
 
+export type TransportPhase =
+  | "new"
+  | "offer_sent"
+  | "answer_received"
+  | "ice_connecting"
+  | "ice_connected"
+  | "ice_disconnected"
+  | "ice_failed"
+  | "closed";
+
 export type CallPhase =
   | "idle"
   | "outgoing"
