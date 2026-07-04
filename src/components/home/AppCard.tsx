@@ -156,7 +156,7 @@ export function AppCard({
               </h3>
               {isMessengerApp && messengerUnread > 0 && (
                 <span className="inline-flex items-center rounded-full bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
-                  {messengerUnread > 99 ? "99+" : messengerUnread} непрочит.
+                  {messengerUnread > 99 ? "99+" : messengerUnread}
                 </span>
               )}
               {app.beta && showPin && <TestingBadge />}
