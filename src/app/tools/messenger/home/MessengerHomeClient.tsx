@@ -9,7 +9,9 @@ import { MessengerShell } from "../components/MessengerShell";
 import { fetchAccessCheck, fetchDmDialogs, logoutMessenger, type DmDialogsResponseItem } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { saveLocalDialogs, syncRoomDialogs } from "@/lib/messenger/dialogs";
+import { loadChatHistory } from "@/lib/messenger/history-db";
 import { maskPhone } from "@/lib/messenger/phone-format";
+import { messagePreview, truncateQuote } from "@/lib/messenger/display";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
 import {
   ensureMessengerPushSubscription,
@@ -17,6 +19,7 @@ import {
 import { getRoomUnread, subscribeUnreadChange, totalRoomUnread } from "@/lib/messenger/unread";
 import type { LocalDialog } from "@/lib/messenger/types";
 import { onAppResume } from "@/lib/platform/app-resume";
+import { useMessengerUnlockOptional } from "../components/MessengerUnlockProvider";
 
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -58,9 +61,11 @@ function dmPreview(summary: DmDialogsResponseItem | undefined): string {
 
 export function MessengerHomeClient() {
   const router = useRouter();
+  const unlock = useMessengerUnlockOptional();
   const [dialogs, setDialogs] = useState<LocalDialog[]>([]);
   const [phone, setPhone] = useState("");
   const [dmSummaries, setDmSummaries] = useState<Record<string, DmDialogsResponseItem>>({});
+  const [localTextPreviewByChat, setLocalTextPreviewByChat] = useState<Record<string, string>>({});
   const [dmUnreadTotal, setDmUnreadTotal] = useState(0);
   const [roomUnreadTotal, setRoomUnreadTotal] = useState(0);
   const dialogsRef = useRef<LocalDialog[]>([]);
@@ -117,6 +122,41 @@ export function MessengerHomeClient() {
     setRoomUnreadTotal(roomUnread);
     void refreshAppBadge(dmUnread);
   }
+
+  useEffect(() => {
+    const key = unlock?.storageKey;
+    if (!key) {
+      setLocalTextPreviewByChat({});
+      return;
+    }
+    let cancelled = false;
+
+    const dmDialogs = dialogs.filter((d) => d.kind === "dm").slice(0, 30);
+    void (async () => {
+      const next: Record<string, string> = {};
+      await Promise.all(
+        dmDialogs.map(async (d) => {
+          try {
+            const history = await loadChatHistory(key, d.id);
+            const last = history[history.length - 1];
+            if (!last) return;
+            const raw = messagePreview({ ...last.plain, type: last.type, mime: last.plain.mime });
+            const text = truncateQuote(raw, 52);
+            next[d.id] = last.mine ? `Вы: ${text}` : text;
+          } catch {
+            // ignore undecryptable/local failures
+          }
+        }),
+      );
+      if (!cancelled) {
+        setLocalTextPreviewByChat(next);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dialogs, unlock?.storageKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -246,7 +286,7 @@ export function MessengerHomeClient() {
                         <p className={`text-xs truncate ${unread > 0 ? "text-gray-700" : "text-gray-400"}`}>
                           {d.kind === "room"
                             ? "комната"
-                            : `${dmPreview(dm)}${dm?.peerOnline ? " · в сети" : ""}`}
+                            : `${localTextPreviewByChat[d.id] ?? dmPreview(dm)}${dm?.peerOnline ? " · в сети" : ""}`}
                         </p>
                       </div>
                       <UnreadBadge count={unread} />
