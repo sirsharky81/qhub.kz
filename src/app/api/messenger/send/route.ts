@@ -4,7 +4,7 @@ import { MAX_ENCRYPTED_FILE_BYTES, MAX_MEDIA_RAW_BODY_BYTES, MAX_TEXT_LENGTH } f
 import { generateMessageId } from "@/lib/messenger/codes";
 import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import type { EncryptedMessagePayload, MessageType, ReceiptPayload } from "@/lib/messenger/types";
-import { pushDmEnvelope, pushRoomEnvelope, getRoomParticipants } from "@/lib/messenger/store";
+import { pushDmEnvelope, pushRoomEnvelope, getRoomParticipants, touchDmUserIndex } from "@/lib/messenger/store";
 import { notifyDmMessage, notifyRoomMessage } from "@/lib/messenger/push-notify";
 
 export async function POST(request: Request) {
@@ -107,6 +107,7 @@ export async function POST(request: Request) {
     let version: number;
     if (channel.startsWith("dm:")) {
       version = await pushDmEnvelope(channel, msg);
+      await touchDmUserIndex(channel, msg.ts);
       try {
         await notifyDmMessage({ channel, fromPhone: phone, type });
       } catch (err) {

@@ -1,10 +1,11 @@
 import {
+  MESSENGER_GLOBAL_PRESENCE_CHANNEL,
   MESSENGER_PRESENCE_TTL_SEC,
   MESSENGER_PUSH_TTL_SEC,
   REDIS_MESSENGER_PRESENCE_PREFIX,
   REDIS_MESSENGER_PUSH_PREFIX,
 } from "./constants";
-import { redisGetJson, redisSet } from "./redis";
+import { redisDel, redisGetJson, redisSet } from "./redis";
 import type { MessengerPresence, MessengerPushSubscription } from "./types";
 
 function pushKey(phone: string): string {
@@ -33,6 +34,16 @@ export async function setMessengerPresence(phone: string, channel: string): Prom
   await redisSet(presenceKey(phone), JSON.stringify(presence), MESSENGER_PRESENCE_TTL_SEC);
 }
 
+export async function touchMessengerPresence(phone: string): Promise<void> {
+  const existing = await getMessengerPresence(phone);
+  const channel = existing?.channel ?? MESSENGER_GLOBAL_PRESENCE_CHANNEL;
+  await setMessengerPresence(phone, channel);
+}
+
+export async function clearMessengerPresence(phone: string): Promise<void> {
+  await redisDel(presenceKey(phone));
+}
+
 export async function getMessengerPresence(phone: string): Promise<MessengerPresence | null> {
   return redisGetJson<MessengerPresence>(presenceKey(phone));
 }
@@ -40,4 +51,9 @@ export async function getMessengerPresence(phone: string): Promise<MessengerPres
 export function isViewingChannel(presence: MessengerPresence | null, channel: string): boolean {
   if (!presence) return false;
   return presence.channel === channel && Date.now() - presence.at < MESSENGER_PRESENCE_TTL_SEC * 1000;
+}
+
+export function isMessengerOnline(presence: MessengerPresence | null): boolean {
+  if (!presence) return false;
+  return Date.now() - presence.at < MESSENGER_PRESENCE_TTL_SEC * 1000;
 }

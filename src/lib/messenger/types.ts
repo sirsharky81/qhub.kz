@@ -103,6 +103,14 @@ export interface LocalDialog {
   displayName?: string;
 }
 
+export interface DmDialogSummary {
+  chatId: string;
+  peerPhone: string;
+  lastMessageAt: number;
+  latestUnreadAt: number | null;
+  unreadCount: number;
+}
+
 export type CallSignalType = "offer" | "answer" | "ice" | "reject" | "end" | "busy";
 export type CallStatus = "ringing" | "connecting" | "active" | "ended";
 

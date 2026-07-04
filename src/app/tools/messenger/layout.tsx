@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { MessengerCallBootstrap } from "./components/MessengerCallBootstrap";
+import { MessengerPresenceHeartbeat } from "./components/MessengerPresenceHeartbeat";
 import { MessengerUnlockProvider } from "./components/MessengerUnlockProvider";
 
 const ICON_BASE = "/tools/messenger";
@@ -40,6 +41,7 @@ export default function MessengerLayout({ children }: { children: ReactNode }) {
   return (
     <MessengerUnlockProvider>
       <MessengerCallBootstrap />
+      <MessengerPresenceHeartbeat />
       {children}
     </MessengerUnlockProvider>
   );

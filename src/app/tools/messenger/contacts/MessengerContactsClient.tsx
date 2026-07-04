@@ -8,23 +8,43 @@ import { MessengerShell } from "../components/MessengerShell";
 import { fetchAccessCheck, fetchContacts } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { maskPhone } from "@/lib/messenger/phone-format";
+import { onAppResume } from "@/lib/platform/app-resume";
 
 export function MessengerContactsClient() {
   const router = useRouter();
   const [contacts, setContacts] = useState<
-    { phone: string; displayName: string | null; label: string }[]
+    { phone: string; displayName: string | null; label: string; online?: boolean }[]
   >([]);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+    const refreshContacts = async () => {
+      const list = await fetchContacts();
+      if (!cancelled) setContacts(list);
+    };
+
     void fetchAccessCheck().then((data) => {
       if (!data.messengerLoggedIn) {
         router.replace("/tools/messenger/login");
         return;
       }
-      void fetchContacts().then(setContacts);
+      void refreshContacts();
       void ensureDeviceKeyPublished().catch(() => {});
     });
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshContacts();
+      }
+    }, 10000);
+    const removeResume = onAppResume(() => {
+      void refreshContacts();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      removeResume();
+    };
   }, [router]);
 
   const filtered = contacts.filter((c) => {
@@ -63,10 +83,13 @@ export function MessengerContactsClient() {
                 onClick={() => openChat(c.phone)}
                 className="w-full text-left px-4 py-3 hover:bg-gray-50"
               >
-                <p className="text-sm font-medium">{c.label}</p>
-                {c.displayName && (
-                  <p className="text-xs text-gray-400">{maskPhone(c.phone)}</p>
-                )}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">{c.label}</p>
+                  <span className={`h-2.5 w-2.5 rounded-full ${c.online ? "bg-emerald-500" : "bg-gray-300"}`} />
+                </div>
+                <p className="text-xs text-gray-400">
+                  {c.displayName ? maskPhone(c.phone) : c.phone} {c.online ? "· в сети" : ""}
+                </p>
               </button>
             </li>
           ))}

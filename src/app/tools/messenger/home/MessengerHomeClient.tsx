@@ -3,13 +3,12 @@
 import Link from "next/link";
 import { messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SettingsHeaderLink } from "@/components/SettingsHeaderButton";
 import { MessengerShell } from "../components/MessengerShell";
-import { fetchAccessCheck, logoutMessenger } from "@/lib/messenger/client";
+import { fetchAccessCheck, fetchDmDialogs, logoutMessenger, type DmDialogsResponseItem } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
-import { syncRoomDialogs } from "@/lib/messenger/dialogs";
-import { countAllUnreadDm, countUnreadInChat } from "@/lib/messenger/history-db";
+import { saveLocalDialogs, syncRoomDialogs } from "@/lib/messenger/dialogs";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
 import {
@@ -17,6 +16,7 @@ import {
 } from "@/lib/messenger/push";
 import { getRoomUnread, subscribeUnreadChange, totalRoomUnread } from "@/lib/messenger/unread";
 import type { LocalDialog } from "@/lib/messenger/types";
+import { onAppResume } from "@/lib/platform/app-resume";
 
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -31,42 +31,98 @@ export function MessengerHomeClient() {
   const router = useRouter();
   const [dialogs, setDialogs] = useState<LocalDialog[]>([]);
   const [phone, setPhone] = useState("");
-  const [dmUnread, setDmUnread] = useState(0);
+  const [dmSummaries, setDmSummaries] = useState<Record<string, DmDialogsResponseItem>>({});
+  const [dmUnreadTotal, setDmUnreadTotal] = useState(0);
   const [roomUnreadTotal, setRoomUnreadTotal] = useState(0);
-  const [dmUnreadByChat, setDmUnreadByChat] = useState<Record<string, number>>({});
+  const dialogsRef = useRef<LocalDialog[]>([]);
+  dialogsRef.current = dialogs;
 
-  async function refreshUnread(dialogList: LocalDialog[] = dialogs) {
-    const dm = await countAllUnreadDm().catch(() => 0);
-    setDmUnread(dm);
-    setRoomUnreadTotal(totalRoomUnread());
-    const dmMap: Record<string, number> = {};
-    await Promise.all(
-      dialogList
-        .filter((d) => d.kind === "dm")
-        .map(async (d) => {
-          dmMap[d.id] = await countUnreadInChat(d.id).catch(() => 0);
-        }),
-    );
-    setDmUnreadByChat(dmMap);
-    void refreshAppBadge(dm);
+  function sortDialogsByPriority(
+    list: LocalDialog[],
+    summaryMap: Record<string, DmDialogsResponseItem>,
+  ): LocalDialog[] {
+    return [...list].sort((a, b) => {
+      const aUnread = a.kind === "room" ? getRoomUnread(a.id) : (summaryMap[a.id]?.unreadCount ?? 0);
+      const bUnread = b.kind === "room" ? getRoomUnread(b.id) : (summaryMap[b.id]?.unreadCount ?? 0);
+
+      const aTs =
+        a.kind === "dm"
+          ? (summaryMap[a.id]?.latestUnreadAt ?? summaryMap[a.id]?.lastMessageAt ?? a.createdAt)
+          : a.createdAt;
+      const bTs =
+        b.kind === "dm"
+          ? (summaryMap[b.id]?.latestUnreadAt ?? summaryMap[b.id]?.lastMessageAt ?? b.createdAt)
+          : b.createdAt;
+
+      if (aUnread > 0 && bUnread === 0) return -1;
+      if (bUnread > 0 && aUnread === 0) return 1;
+      return bTs - aTs;
+    });
+  }
+
+  async function refreshDialogsAndUnread(baseDialogs?: LocalDialog[]) {
+    const localDialogs = baseDialogs ?? dialogsRef.current;
+    const serverDm = await fetchDmDialogs();
+    const summaryMap: Record<string, DmDialogsResponseItem> = {};
+    for (const item of serverDm) summaryMap[item.chatId] = item;
+
+    const mergedMap = new Map(localDialogs.map((d) => [d.id, d]));
+    for (const item of serverDm) {
+      mergedMap.set(item.chatId, {
+        id: item.chatId,
+        kind: "dm",
+        title: item.label,
+        peerPhone: item.peerPhone,
+        displayName: item.displayName ?? undefined,
+        createdAt: item.lastMessageAt || Date.now(),
+      });
+    }
+    const merged = sortDialogsByPriority(Array.from(mergedMap.values()), summaryMap);
+    setDialogs(merged);
+    saveLocalDialogs(merged);
+
+    setDmSummaries(summaryMap);
+    const dmUnread = serverDm.reduce((sum, d) => sum + d.unreadCount, 0);
+    setDmUnreadTotal(dmUnread);
+    const roomUnread = totalRoomUnread();
+    setRoomUnreadTotal(roomUnread);
+    void refreshAppBadge(dmUnread);
   }
 
   useEffect(() => {
+    let cancelled = false;
+
     void fetchAccessCheck(true).then(async (data) => {
       if (!data.messengerLoggedIn) {
         router.replace("/tools/messenger/login");
         return;
       }
+      if (cancelled) return;
       setPhone(data.phone ?? "");
       void ensureDeviceKeyPublished().catch(() => {});
       void ensureMessengerPushSubscription();
       const synced = await syncRoomDialogs();
+      if (cancelled) return;
       setDialogs(synced);
-      void refreshUnread(synced);
+      void refreshDialogsAndUnread(synced);
     });
-    return subscribeUnreadChange(() => {
-      void refreshUnread();
+    const unsubUnread = subscribeUnreadChange(() => {
+      void refreshDialogsAndUnread();
     });
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshDialogsAndUnread();
+      }
+    }, 7000);
+    const removeResume = onAppResume(() => {
+      void refreshDialogsAndUnread();
+    });
+    return () => {
+      cancelled = true;
+      unsubUnread();
+      clearInterval(timer);
+      removeResume();
+    };
   }, [router]);
 
   async function handleLogout() {
@@ -86,7 +142,7 @@ export function MessengerHomeClient() {
 
   function dialogUnread(d: LocalDialog): number {
     if (d.kind === "room") return getRoomUnread(d.id);
-    return dmUnreadByChat[d.id] ?? 0;
+    return dmSummaries[d.id]?.unreadCount ?? 0;
   }
 
   return (
@@ -105,9 +161,9 @@ export function MessengerHomeClient() {
       }
     >
       <div className="p-4 space-y-4 w-full">
-        {(dmUnread + roomUnreadTotal) > 0 && (
+        {(dmUnreadTotal + roomUnreadTotal) > 0 && (
           <p className="text-xs text-gray-500 text-center">
-            Непрочитанных: {dmUnread + roomUnreadTotal}
+            Непрочитанных: {dmUnreadTotal + roomUnreadTotal}
           </p>
         )}
         <div className="grid gap-2">
@@ -149,7 +205,11 @@ export function MessengerHomeClient() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium truncate">{d.title}</p>
                         <p className="text-xs text-gray-400">
-                          {d.kind === "room" ? "комната" : "личный чат"}
+                          {d.kind === "room"
+                            ? "комната"
+                            : dmSummaries[d.id]?.peerOnline
+                              ? "личный чат · в сети"
+                              : "личный чат"}
                         </p>
                       </div>
                       <UnreadBadge count={unread} />

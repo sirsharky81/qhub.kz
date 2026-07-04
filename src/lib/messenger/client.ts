@@ -141,14 +141,40 @@ export async function fetchPeerPublicKey(phone: string): Promise<string | null> 
 }
 
 export async function fetchContacts(): Promise<
-  { phone: string; displayName: string | null; label: string }[]
+  { phone: string; displayName: string | null; label: string; online?: boolean }[]
 > {
   const res = await platformFetch("/api/messenger/contacts");
   if (!res.ok) return [];
   const data = (await res.json()) as {
-    contacts: { phone: string; displayName: string | null; label: string }[];
+    contacts: { phone: string; displayName: string | null; label: string; online?: boolean }[];
   };
   return data.contacts;
+}
+
+export interface DmDialogsResponseItem {
+  chatId: string;
+  peerPhone: string;
+  label: string;
+  displayName: string | null;
+  lastMessageAt: number;
+  latestUnreadAt: number | null;
+  unreadCount: number;
+  peerOnline: boolean;
+}
+
+export async function fetchDmDialogs(): Promise<DmDialogsResponseItem[]> {
+  const res = await platformFetch("/api/messenger/dialogs");
+  if (!res.ok) return [];
+  const data = (await res.json()) as { dialogs?: DmDialogsResponseItem[] };
+  return data.dialogs ?? [];
+}
+
+export async function pingMessengerPresence(): Promise<void> {
+  try {
+    await platformFetch("/api/messenger/presence", { method: "POST" });
+  } catch {
+    // best-effort heartbeat
+  }
 }
 
 export async function fetchProfile(): Promise<{

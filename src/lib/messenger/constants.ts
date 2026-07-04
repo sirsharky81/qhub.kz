@@ -5,6 +5,7 @@ export const REDIS_WHITELIST_KEY = "qhub:messenger:whitelist";
 export const REDIS_AUTH_PREFIX = "qhub:messenger:auth:";
 export const REDIS_PUBKEY_PREFIX = "qhub:messenger:pubkey:";
 export const REDIS_DM_PREFIX = "qhub:messenger:dm:";
+export const REDIS_DM_USER_INDEX_PREFIX = "qhub:messenger:dm:user:";
 export const REDIS_ROOM_PREFIX = "qhub:messenger:room:";
 
 export const PIN_LENGTH = 4;
@@ -38,6 +39,7 @@ export const UNREAD_EVENT = "qhub-messenger-unread-change";
 export const REDIS_PROFILES_KEY = "qhub:messenger:profiles";
 export const REDIS_MESSENGER_PUSH_PREFIX = "qhub:messenger:push:";
 export const REDIS_MESSENGER_PRESENCE_PREFIX = "qhub:messenger:presence:";
+export const MESSENGER_GLOBAL_PRESENCE_CHANNEL = "__global__";
 export const MESSENGER_PUSH_TTL_SEC = 60 * 60 * 24 * 30;
 export const MESSENGER_PRESENCE_TTL_SEC = 45;
 export const MESSENGER_PUSH_PREFS_KEY = "qhub_messenger_push_enabled";

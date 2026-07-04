@@ -3,6 +3,7 @@ import {
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
   REDIS_AUTH_PREFIX,
   REDIS_DM_PREFIX,
+  REDIS_DM_USER_INDEX_PREFIX,
   REDIS_PUBKEY_PREFIX,
   REDIS_PROFILES_KEY,
   REDIS_ROOM_PREFIX,
@@ -19,6 +20,7 @@ import type {
   RoomMeta,
   RoomParticipant,
   WhitelistEntry,
+  DmDialogSummary,
 } from "./types";
 import {
   parseRedisJsonValue,
@@ -32,6 +34,7 @@ import {
   redisLrem,
   redisSet,
 } from "./redis";
+import { normalizeKzPhone, peerFromDmChannel } from "./phone";
 
 function msgTtlSec(): number {
   const hours = Number(process.env.MESSENGER_MSG_TTL_HOURS ?? DEFAULT_MSG_TTL_HOURS);
@@ -209,6 +212,16 @@ function dmMessagesKey(chatId: string): string {
   return `${REDIS_DM_PREFIX}${chatId}:messages`;
 }
 
+function dmUserIndexKey(phone: string): string {
+  return `${REDIS_DM_USER_INDEX_PREFIX}${normalizeKzPhone(phone)}`;
+}
+
+type DmUserIndexEntry = {
+  chatId: string;
+  peerPhone: string;
+  lastMessageAt: number;
+};
+
 export async function getDmMeta(chatId: string): Promise<ChannelMeta | null> {
   return redisGetJson<ChannelMeta>(dmMetaKey(chatId));
 }
@@ -226,6 +239,72 @@ export async function pushDmEnvelope(chatId: string, envelope: ChannelEnvelope):
     msgTtlSec(),
     msgTtlSec(),
   );
+}
+
+export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise<void> {
+  const parts = chatId.split(":");
+  if (parts.length !== 3 || parts[0] !== "dm") return;
+  const a = normalizeKzPhone(parts[1] ?? "");
+  const b = normalizeKzPhone(parts[2] ?? "");
+  if (!a || !b) return;
+
+  const ttl = msgTtlSec();
+  const updateOne = async (me: string, peer: string) => {
+    const key = dmUserIndexKey(me);
+    const existing = (await redisGetJson<Record<string, DmUserIndexEntry>>(key)) ?? {};
+    const prev = existing[chatId];
+    existing[chatId] = {
+      chatId,
+      peerPhone: peer,
+      lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, at),
+    };
+    await redisSet(key, JSON.stringify(existing), ttl);
+  };
+
+  await Promise.all([updateOne(a, b), updateOne(b, a)]);
+}
+
+export async function getDmDialogSummariesForUser(phone: string): Promise<DmDialogSummary[]> {
+  const me = normalizeKzPhone(phone);
+  const index =
+    (await redisGetJson<Record<string, DmUserIndexEntry>>(dmUserIndexKey(me))) ?? {};
+  const result: DmDialogSummary[] = [];
+
+  for (const entry of Object.values(index)) {
+    const channel = entry.chatId;
+    const peer = peerFromDmChannel(channel, me);
+    if (!peer) continue;
+
+    const rawList = await redisLrange(dmMessagesKey(channel), 0, -1);
+    let unreadCount = 0;
+    let latestUnreadAt: number | null = null;
+    let lastMessageAt = entry.lastMessageAt;
+
+    for (const raw of rawList) {
+      const envelope = parseChannelEnvelope(raw);
+      if (!envelope || isReceipt(envelope)) continue;
+      lastMessageAt = Math.max(lastMessageAt, envelope.ts ?? 0);
+      if (normalizeKzPhone(envelope.from) !== me) {
+        unreadCount += 1;
+        latestUnreadAt = Math.max(latestUnreadAt ?? 0, envelope.ts ?? 0);
+      }
+    }
+
+    result.push({
+      chatId: channel,
+      peerPhone: peer,
+      lastMessageAt,
+      latestUnreadAt,
+      unreadCount,
+    });
+  }
+
+  result.sort((a, b) => {
+    const aPriority = a.latestUnreadAt ?? a.lastMessageAt;
+    const bPriority = b.latestUnreadAt ?? b.lastMessageAt;
+    return bPriority - aPriority;
+  });
+  return result;
 }
 
 export async function getDmMessagesSince(

@@ -10,7 +10,7 @@ import {
   pruneStaleRoomParticipants,
   updateRoomHeartbeat,
 } from "@/lib/messenger/store";
-import { getMessengerPresence, isViewingChannel, setMessengerPresence } from "@/lib/messenger/push-store";
+import { getMessengerPresence, isMessengerOnline, setMessengerPresence } from "@/lib/messenger/push-store";
 import { peerFromDmChannel } from "@/lib/messenger/phone";
 
 export async function GET(request: Request) {
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
       let peerOnline = false;
       if (peerPhone) {
         const presence = await getMessengerPresence(peerPhone);
-        peerOnline = isViewingChannel(presence, channel);
+        peerOnline = isMessengerOnline(presence);
       }
       if (sinceVersion >= meta.version) {
         return NextResponse.json({ channel, meta, messages: [], envelopes: [], peerOnline });

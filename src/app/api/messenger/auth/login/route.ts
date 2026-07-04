@@ -10,6 +10,8 @@ import {
   getMessengerSession,
   messengerSessionCookieOptions,
 } from "@/lib/messenger/session";
+import { setMessengerPresence } from "@/lib/messenger/push-store";
+import { MESSENGER_GLOBAL_PRESENCE_CHANNEL } from "@/lib/messenger/constants";
 
 export async function POST(request: Request) {
   const ip = getClientIp(request);
@@ -53,6 +55,7 @@ export async function POST(request: Request) {
     }
 
     const token = await createMessengerSessionToken(phone);
+    await setMessengerPresence(phone, MESSENGER_GLOBAL_PRESENCE_CHANNEL);
     const jar = await cookies();
     jar.set(messengerSessionCookieOptions(token));
     return NextResponse.json({
