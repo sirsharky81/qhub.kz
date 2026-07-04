@@ -166,7 +166,8 @@ export interface DmDialogsResponseItem {
 }
 
 export async function fetchDmDialogs(): Promise<DmDialogsResponseItem[]> {
-  const res = await platformFetch("/api/messenger/dialogs");
+  const url = `/api/messenger/dialogs?ts=${Date.now()}`;
+  const res = await platformFetch(url, { cache: "no-store" });
   if (!res.ok) return [];
   const data = (await res.json()) as { dialogs?: DmDialogsResponseItem[] };
   return data.dialogs ?? [];
