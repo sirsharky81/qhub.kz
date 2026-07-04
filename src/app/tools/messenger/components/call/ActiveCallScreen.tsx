@@ -175,6 +175,15 @@ export function ActiveCallScreen({
   const isDialing = phase === "outgoing" || phase === "connecting";
   const isVideoCall = callMode === "video";
   const showDebugOverlay = process.env.NEXT_PUBLIC_MESSENGER_CALL_DEBUG_OVERLAY === "1";
+  const localVideoTrack = localStream?.getVideoTracks()[0] ?? null;
+  const remoteVideoTrack = remoteStream?.getVideoTracks()[0] ?? null;
+  const hasLocalVideo =
+    isVideoCall &&
+    videoEnabled &&
+    Boolean(localVideoTrack && localVideoTrack.readyState === "live" && localVideoTrack.enabled);
+  const hasRemoteVideo =
+    isVideoCall &&
+    Boolean(remoteVideoTrack && remoteVideoTrack.readyState === "live" && !remoteVideoTrack.muted);
   const [earpieceBlank, setEarpieceBlank] = useState(false);
   const iosEarpiece = isIOSDevice() && phase === "active" && !speakerOn;
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null);
@@ -182,15 +191,13 @@ export function ActiveCallScreen({
 
   useEffect(() => {
     if (!localVideoEl) return;
-    const hasLocalVideo = isVideoCall && Boolean(localStream?.getVideoTracks().length);
     localVideoEl.srcObject = hasLocalVideo ? localStream : null;
-  }, [isVideoCall, localStream, localStream?.getVideoTracks().length, localVideoEl]);
+  }, [hasLocalVideo, localStream, localVideoEl]);
 
   useEffect(() => {
     if (!remoteVideoEl) return;
-    const hasRemoteVideo = isVideoCall && Boolean(remoteStream?.getVideoTracks().length);
     remoteVideoEl.srcObject = hasRemoteVideo ? remoteStream : null;
-  }, [isVideoCall, remoteStream, remoteStream?.getVideoTracks().length, remoteVideoEl]);
+  }, [hasRemoteVideo, remoteStream, remoteVideoEl]);
 
   useEffect(() => {
     if (!iosEarpiece) setEarpieceBlank(false);
@@ -235,7 +242,7 @@ export function ActiveCallScreen({
         </div>
 
         <div className="relative flex min-h-0 flex-1 items-center justify-center px-6">
-          {isVideoCall && remoteStream?.getVideoTracks().length ? (
+          {hasRemoteVideo ? (
             <video
               ref={setRemoteVideoEl}
               autoPlay
@@ -254,7 +261,7 @@ export function ActiveCallScreen({
           )}
           {isVideoCall && (
             <div className="absolute bottom-6 right-6 z-20 h-32 w-24 overflow-hidden rounded-xl border border-white/20 bg-black/80 shadow-lg">
-              {localStream?.getVideoTracks().length ? (
+              {hasLocalVideo ? (
                 <video
                   ref={setLocalVideoEl}
                   autoPlay

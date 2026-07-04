@@ -473,11 +473,12 @@ export class CallController {
     const localVideoTracks = this.localStream.getVideoTracks();
     const hasLiveLocalVideo = localVideoTracks.some((track) => track.readyState === "live");
     if (!enabled) {
+      // Keep sender/transceiver alive and just pause camera track.
+      // This avoids renegotiation races and improves toggle reliability.
       for (const track of localVideoTracks) {
-        track.stop();
-        this.localStream.removeTrack(track);
+        track.enabled = false;
       }
-      await this.pc?.clearLocalVideoTrack();
+      this.pc?.setVideoEnabled(false);
       this.stopVideoHealthWatch();
       this.patchPlaybackDebug();
       this.emitMedia();
@@ -502,6 +503,12 @@ export class CallController {
         }
       } catch {
         this.patch({ videoEnabled: false });
+      }
+    } else {
+      for (const track of localVideoTracks) {
+        if (track.readyState === "live") {
+          track.enabled = true;
+        }
       }
     }
     this.pc?.setVideoEnabled(enabled);
