@@ -8,6 +8,7 @@ export type CallJournalEventType =
   | "ICE_DISCONNECTED"
   | "ICE_FAILED"
   | "TRACK_REMOTE"
+  | "VIDEO_RECOVER"
   | "CALL_STATE"
   | "IGNORED_EVENT"
   | "SIGNAL_RECEIVED"
