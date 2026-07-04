@@ -59,6 +59,11 @@ function hasVideoInSdp(payload: string | null | undefined): boolean {
   return /m=video\s+\d+/i.test(payload);
 }
 
+function defaultSpeakerForMode(mode: "audio" | "video"): boolean {
+  // Video calls should default to loudspeaker (WhatsApp-like UX on mobile).
+  return mode === "video";
+}
+
 /** Race a promise against a hard deadline so a stuck browser API (e.g. a
  * getUserMedia permission prompt that never gets answered) can't freeze the
  * whole call setup chain forever. */
@@ -273,7 +278,7 @@ export class CallController {
         peerPhone: this.peerPhone,
         callMode: data.session.media === "video" ? "video" : "audio",
         videoEnabled: data.session.media === "video",
-        speakerOn: false,
+        speakerOn: defaultSpeakerForMode(data.session.media === "video" ? "video" : "audio"),
         endReason: null,
         errorMessage: null,
       });
@@ -327,6 +332,7 @@ export class CallController {
     this.localAnswerSdp = null;
     this.callStartedAt = Date.now();
     const videoEnabled = callMode === "video";
+    const speakerOn = defaultSpeakerForMode(callMode);
     this.patch({
       debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: result.callId },
       phase: "outgoing",
@@ -335,12 +341,12 @@ export class CallController {
       peerPhone: this.peerPhone,
       callMode,
       videoEnabled,
-      speakerOn: false,
+      speakerOn,
       endReason: null,
       errorMessage: null,
     });
     void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
-      speakerOn: false,
+      speakerOn,
       videoEnabled,
     });
     this.journal.record("INITIATE", "outgoing");
@@ -394,12 +400,14 @@ export class CallController {
       const offerHasVideo = hasVideoInSdp(serverSession?.offerSdp);
       const mode: "audio" | "video" =
         serverSession?.media === "video" || offerHasVideo ? "video" : "audio";
+      const speakerOn = defaultSpeakerForMode(mode);
       this.patch({
         callMode: mode,
         videoEnabled: mode === "video" ? this.state.videoEnabled || offerHasVideo : false,
+        speakerOn,
       });
       void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
-        speakerOn: this.state.speakerOn,
+        speakerOn,
         videoEnabled: mode === "video" && (this.state.videoEnabled || offerHasVideo),
       });
 
@@ -536,7 +544,7 @@ export class CallController {
       peerPhone: this.peerPhone,
       callMode: opts?.media === "video" ? "video" : "audio",
       videoEnabled: opts?.media === "video",
-      speakerOn: false,
+      speakerOn: defaultSpeakerForMode(opts?.media === "video" ? "video" : "audio"),
       endReason: null,
       errorMessage: null,
     });
@@ -553,6 +561,7 @@ export class CallController {
     this.patch({
       callMode: mode,
       videoEnabled: mode === "video",
+      speakerOn: defaultSpeakerForMode(mode),
     });
   }
 
