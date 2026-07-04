@@ -155,7 +155,7 @@ export function AppCard({
                 {app.title}
               </h3>
               {isMessengerApp && messengerUnread > 0 && (
-                <span className="inline-flex items-center rounded-full bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                <span className="inline-flex items-center rounded-full bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] font-semibold text-sky-700 motion-safe:animate-pulse">
                   {messengerUnread > 99 ? "99+" : messengerUnread}
                 </span>
               )}
