@@ -24,6 +24,23 @@ type Phase = "loading" | "waiting" | "ready" | "auth_error";
 
 const PEER_POLL_VISIBLE_MS = 3000;
 const PEER_POLL_HIDDEN_MS = 12000;
+const FIRST_CONNECT_BUDGET_MS = 1800;
+
+function withBudget<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
 
 function MessengerChatInner() {
   const searchParams = useSearchParams();
@@ -41,6 +58,7 @@ function MessengerChatInner() {
   } | null>(null);
   const [currentPeerFingerprint, setCurrentPeerFingerprint] = useState<string | null>(null);
   const pairRef = useRef<CryptoKeyPair | null>(null);
+  const connectInFlightRef = useRef<Promise<boolean> | null>(null);
 
   const tryConnectPeer = useCallback(
     async (me: string): Promise<boolean> => {
@@ -96,6 +114,21 @@ function MessengerChatInner() {
     [peerPhone],
   );
 
+  const connectPeerOnce = useCallback(
+    (me: string) => {
+      const running = connectInFlightRef.current;
+      if (running) return running;
+      const next = tryConnectPeer(me).finally(() => {
+        if (connectInFlightRef.current === next) {
+          connectInFlightRef.current = null;
+        }
+      });
+      connectInFlightRef.current = next;
+      return next;
+    },
+    [tryConnectPeer],
+  );
+
   useEffect(() => {
     if (!peerPhone) {
       router.replace("/tools/messenger/home");
@@ -119,7 +152,7 @@ function MessengerChatInner() {
         // Do not block first open on network-bound key publishing.
         void ensureDeviceKeyPublished().catch(() => {});
         pairRef.current = await getOrCreateDeviceKeyPair();
-        const connected = await tryConnectPeer(me);
+        const connected = await withBudget(connectPeerOnce(me), FIRST_CONNECT_BUDGET_MS, false);
         if (connected || cancelled) return;
         if (!cancelled) setPhase("waiting");
       } catch {
@@ -142,7 +175,7 @@ function MessengerChatInner() {
     async function poll() {
       if (cancelled) return;
       try {
-        await tryConnectPeer(myPhone);
+        await connectPeerOnce(myPhone);
       } catch {
         // keep waiting
       }
@@ -154,7 +187,7 @@ function MessengerChatInner() {
 
     void poll();
     const removeResume = onAppResume(() => {
-      if (!cancelled) void tryConnectPeer(myPhone);
+      if (!cancelled) void connectPeerOnce(myPhone);
     });
 
     return () => {
@@ -162,17 +195,17 @@ function MessengerChatInner() {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       removeResume();
     };
-  }, [phase, myPhone, tryConnectPeer]);
+  }, [phase, myPhone, connectPeerOnce]);
 
   const handleCheckNow = useCallback(async () => {
     if (!myPhone || checking) return;
     setChecking(true);
     try {
-      await tryConnectPeer(myPhone);
+      await connectPeerOnce(myPhone);
     } finally {
       setChecking(false);
     }
-  }, [myPhone, checking, tryConnectPeer]);
+  }, [myPhone, checking, connectPeerOnce]);
 
   const peerTitle = profileLabels[peerPhone] ?? maskPhone(peerPhone);
   const deepLinkCallId = searchParams.get("call");
