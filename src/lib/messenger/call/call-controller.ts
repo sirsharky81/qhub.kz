@@ -167,6 +167,8 @@ export class CallController {
   private setupWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   private interruptionUnsub: (() => void) | null = null;
   private networkDebugTimer: ReturnType<typeof setInterval> | null = null;
+  private videoHealthTimer: ReturnType<typeof setInterval> | null = null;
+  private videoRecoveryInFlight = false;
   private transportPhase: TransportPhase = "new";
   private sessionId = "s-init";
   private journal = new CallJournal(() => ({
@@ -349,6 +351,7 @@ export class CallController {
       speakerOn,
       videoEnabled,
     });
+    this.startVideoHealthWatch();
     this.journal.record("INITIATE", "outgoing");
 
     // Start signaling immediately — don't wait for getUserMedia / ICE config.
@@ -410,6 +413,7 @@ export class CallController {
         speakerOn,
         videoEnabled: mode === "video" && (this.state.videoEnabled || offerHasVideo),
       });
+      this.startVideoHealthWatch();
 
       await this.ensureLocalMedia();
       await this.setupPeerConnection();
@@ -466,18 +470,25 @@ export class CallController {
     if (this.state.callMode !== "video") return;
     this.patch({ videoEnabled: enabled });
     if (!this.localStream) return;
-    const hasLocalVideo = this.localStream.getVideoTracks().length > 0;
+    const localVideoTracks = this.localStream.getVideoTracks();
+    const hasLiveLocalVideo = localVideoTracks.some((track) => track.readyState === "live");
     if (!enabled) {
-      for (const track of this.localStream.getVideoTracks()) {
+      for (const track of localVideoTracks) {
         track.stop();
         this.localStream.removeTrack(track);
       }
       await this.pc?.clearLocalVideoTrack();
+      this.stopVideoHealthWatch();
       this.patchPlaybackDebug();
       this.emitMedia();
       return;
     }
-    if (enabled && !hasLocalVideo) {
+    if (enabled && !hasLiveLocalVideo) {
+      for (const track of localVideoTracks) {
+        if (track.readyState !== "live") {
+          this.localStream.removeTrack(track);
+        }
+      }
       try {
         const videoOnly = await withTimeout(
           navigator.mediaDevices.getUserMedia({ audio: false, video: { width: 640, height: 360, frameRate: 15 } }),
@@ -504,6 +515,7 @@ export class CallController {
         videoEnabled: enabled,
       });
     }
+    this.startVideoHealthWatch();
     this.patchPlaybackDebug();
     this.emitMedia();
   }
@@ -548,6 +560,7 @@ export class CallController {
       endReason: null,
       errorMessage: null,
     });
+    this.startVideoHealthWatch();
     this.journal.record("INITIATE", "deep_link");
     this.adoptCallId(callId);
     this.startRingTimeout();
@@ -563,6 +576,7 @@ export class CallController {
       videoEnabled: mode === "video",
       speakerOn: defaultSpeakerForMode(mode),
     });
+    this.startVideoHealthWatch();
   }
 
   destroy(): void {
@@ -1000,6 +1014,43 @@ export class CallController {
     }
   }
 
+  private startVideoHealthWatch(): void {
+    this.stopVideoHealthWatch();
+    if (this.state.callMode !== "video" || !this.state.videoEnabled) return;
+    this.videoHealthTimer = setInterval(() => void this.ensureVideoHealth(), 4000);
+  }
+
+  private stopVideoHealthWatch(): void {
+    if (this.videoHealthTimer) {
+      clearInterval(this.videoHealthTimer);
+      this.videoHealthTimer = null;
+    }
+  }
+
+  private async ensureVideoHealth(): Promise<void> {
+    if (this.videoRecoveryInFlight) return;
+    if (this.state.callMode !== "video" || !this.state.videoEnabled) return;
+    if (
+      this.state.phase !== "outgoing" &&
+      this.state.phase !== "connecting" &&
+      this.state.phase !== "active"
+    ) {
+      return;
+    }
+    const tracks = this.localStream?.getVideoTracks() ?? [];
+    const hasLiveVideo = tracks.some((track) => track.readyState === "live");
+    if (hasLiveVideo) return;
+    this.videoRecoveryInFlight = true;
+    try {
+      this.journal.record("VIDEO_RECOVER", "restart_local_video_track");
+      await this.setVideoEnabled(true);
+    } catch (err) {
+      this.patchDebug({ lastError: describeError(err) });
+    } finally {
+      this.videoRecoveryInFlight = false;
+    }
+  }
+
   private startCallAudioWatch(): void {
     if (!isIOSDevice()) return;
     this.stopCallAudioWatch();
@@ -1025,6 +1076,9 @@ export class CallController {
         void heartbeatCall(this.state.callId);
       }
     }
+    if (this.state.callMode === "video" && this.state.videoEnabled) {
+      void this.setVideoEnabled(true);
+    }
   }
 
   private stopCallAudioWatch(): void {
@@ -1044,6 +1098,7 @@ export class CallController {
     this.patch({ phase: "active" });
     this.startDurationTimer();
     this.startNetworkDebugTimer();
+    this.startVideoHealthWatch();
     this.startCallAudioWatch();
     void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
       speakerOn: this.state.speakerOn,
@@ -1465,6 +1520,7 @@ export class CallController {
     this.stopElapsedTimer();
     this.stopSdpKeepalive();
     this.stopNetworkDebugTimer();
+    this.stopVideoHealthWatch();
     this.clearRingTimeout();
     this.clearIceTimeout();
     this.clearSetupWatchdog();
@@ -1483,6 +1539,7 @@ export class CallController {
     this.localAnswerSdp = null;
     this.resendInFlight = false;
     this.sdpApplyInFlight = false;
+    this.videoRecoveryInFlight = false;
     this.pendingRemoteIce = [];
 
     this.pc?.close();
@@ -1522,6 +1579,7 @@ export class CallController {
     this.isCaller = false;
     this.lastSession = null;
     this.pendingRemoteIce = [];
+    this.videoRecoveryInFlight = false;
     this.transportPhase = "new";
     this.sessionId = "s-init";
     this.journal.clear();
