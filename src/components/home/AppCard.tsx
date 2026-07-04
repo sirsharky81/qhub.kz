@@ -154,6 +154,11 @@ export function AppCard({
               <h3 className="font-semibold text-base text-gray-900 leading-tight tracking-tight">
                 {app.title}
               </h3>
+              {isMessengerApp && messengerUnread > 0 && (
+                <span className="inline-flex items-center rounded-full bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                  {messengerUnread > 99 ? "99+" : messengerUnread} непрочит.
+                </span>
+              )}
               {app.beta && showPin && <TestingBadge />}
               {adminHiddenBadge && (
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
