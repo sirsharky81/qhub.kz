@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PinInput } from "./PinInput";
 import { MessengerShell } from "./MessengerShell";
 import { useMessengerUnlock } from "./MessengerUnlockProvider";
 import { PIN_LENGTH } from "@/lib/messenger/constants";
+import { primeHistoryDb } from "@/lib/messenger/history-db";
 
 interface Props {
   phone: string;
@@ -21,6 +22,10 @@ export function PinUnlockGate({ phone, maskedPhone, title, backHref, children }:
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    void primeHistoryDb();
+  }, []);
 
   if (isUnlocked) {
     return <>{children}</>;

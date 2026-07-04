@@ -261,6 +261,15 @@ export async function verifyStorageKeyAgainstHistory(
   }
 }
 
+/** Warm up IndexedDB connection to reduce first-unlock latency on mobile WebView. */
+export async function primeHistoryDb(): Promise<void> {
+  try {
+    await openDb();
+  } catch {
+    // best-effort warmup
+  }
+}
+
 export async function markIncomingAsRead(chatId: string): Promise<void> {
   const db = await openDb();
   const records = await new Promise<HistoryMessageRecord[]>((resolve, reject) => {
