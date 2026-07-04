@@ -7,6 +7,7 @@ import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
 import { MessengerWhitelistSection } from "@/components/admin/MessengerWhitelistSection";
 import { MessengerHealthSection } from "@/components/admin/MessengerHealthSection";
 import { MessengerStorageHygieneSection } from "@/components/admin/MessengerStorageHygieneSection";
+import { MessengerPushDiagnosticsSection } from "@/components/admin/MessengerPushDiagnosticsSection";
 
 interface AdminAppRow {
   id: string;
@@ -26,6 +27,7 @@ export function AdminDashboard() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [pwdLoading, setPwdLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"apps" | "messenger" | "push">("apps");
 
   const loadApps = useCallback(async () => {
     setLoading(true);
@@ -98,9 +100,11 @@ export function AdminDashboard() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Управление карточками</h1>
+          <h1 className="text-xl font-bold text-gray-900">Админ-панель</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Скрытые карточки не видны на главной. Админ видит все. Удаление недоступно.
+            {activeTab === "apps" && "Скрытые карточки не видны на главной. Админ видит все. Удаление недоступно."}
+            {activeTab === "messenger" && "Разделы управления и мониторинга Messenger."}
+            {activeTab === "push" && "Отдельная вкладка диагностики push-уведомлений Messenger."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -126,6 +130,37 @@ export function AdminDashboard() {
         </p>
       )}
 
+      <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab("apps")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "apps" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          Карточки
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("messenger")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "messenger" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          Messenger
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("push")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "push" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          Push Diagnostics
+        </button>
+      </div>
+
+      {activeTab === "apps" && (
       <section className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-xs font-mono uppercase tracking-wider text-gray-500">
           Приложения на главной
@@ -161,11 +196,19 @@ export function AdminDashboard() {
           </ul>
         )}
       </section>
+      )}
 
-      <MessengerWhitelistSection />
-      <MessengerHealthSection />
-      <MessengerStorageHygieneSection />
+      {activeTab === "messenger" && (
+        <>
+          <MessengerWhitelistSection />
+          <MessengerHealthSection />
+          <MessengerStorageHygieneSection />
+        </>
+      )}
 
+      {activeTab === "push" && <MessengerPushDiagnosticsSection />}
+
+      {activeTab === "apps" && (
       <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
         <h2 className="text-sm font-semibold text-gray-900">Сменить пароль</h2>
         <form onSubmit={handleChangePassword} className="space-y-3 max-w-md">
@@ -198,6 +241,7 @@ export function AdminDashboard() {
           {pwdMsg && <p className="text-sm text-gray-600">{pwdMsg}</p>}
         </form>
       </section>
+      )}
     </div>
   );
 }
