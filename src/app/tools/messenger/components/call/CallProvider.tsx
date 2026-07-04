@@ -12,7 +12,6 @@ import {
 } from "react";
 import { getCallController } from "@/lib/messenger/call/call-controller";
 import { primeCallMediaPlayback } from "@/lib/messenger/call/call-media-playback";
-import { warmCallMicrophone } from "@/lib/messenger/call/call-microphone";
 import type { CallState } from "@/lib/messenger/call/types";
 import { ActiveCallScreen } from "./ActiveCallScreen";
 import { IncomingCallOverlay } from "./IncomingCallOverlay";
@@ -67,7 +66,6 @@ export function CallProvider({
     const controller = controllerRef.current;
     controller.configure({ myPhone, peerPhone, channel });
     controller.startIncomingWatch();
-    void warmCallMicrophone();
     return controller.subscribe(setState);
   }, [myPhone, peerPhone, channel]);
 

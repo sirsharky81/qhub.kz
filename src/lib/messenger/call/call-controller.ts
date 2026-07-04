@@ -23,10 +23,6 @@ import {
   activateCallMediaSession,
   releaseCallMediaSession,
 } from "./call-media-session";
-import {
-  acquireCallMicrophone,
-  releaseCallMicrophone,
-} from "./call-microphone";
 import { primeCallMediaPlayback, resetCallMediaForNewCall } from "./call-media-playback";
 import {
   CallPeerConnection,
@@ -465,7 +461,18 @@ export class CallController {
     prepareAudioSessionForCall();
     await prepareCallAudioOutput();
     await withTimeout(ensureMediaPermissions({ audio: true }), 15000, "media_permissions");
-    this.localStream = await withTimeout(acquireCallMicrophone(), 15000, "get_user_media");
+    this.localStream = await withTimeout(
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      }),
+      15000,
+      "get_user_media",
+    );
     kickAudioSessionAfterCapture();
   }
 
@@ -1039,12 +1046,17 @@ export class CallController {
     if (this.isSelfSignal(from)) return;
 
     if (type === "answer" && payload && this.isCaller) {
-      await this.applyRemoteAnswer(payload);
+      if (this.state.phase === "outgoing" || this.state.phase === "connecting") {
+        await this.applyRemoteAnswer(payload);
+      }
       return;
     }
 
     if (type === "offer" && payload && !this.isCaller) {
-      await this.applyRemoteOffer(payload);
+      // Never auto-answer during incoming ring — wait until user taps Accept.
+      if (this.state.phase === "connecting" || this.state.phase === "active") {
+        await this.applyRemoteOffer(payload);
+      }
       return;
     }
 
@@ -1151,6 +1163,11 @@ export class CallController {
     endReason: CallEndReason,
     errorMessage?: string,
   ): Promise<void> {
+    const callId = this.state.callId;
+    if (callId) {
+      await this.endCallReliable(callId, endReason ?? "error");
+    }
+
     this.stopPolling();
     this.stopHeartbeat();
     this.stopElapsedTimer();
@@ -1182,7 +1199,7 @@ export class CallController {
     releaseCallMediaSession();
 
     if (this.localStream) {
-      releaseCallMicrophone(this.localStream);
+      for (const t of this.localStream.getTracks()) t.stop();
       this.localStream = null;
     }
     restoreAudioSessionAfterCall();
