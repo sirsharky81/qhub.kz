@@ -329,6 +329,10 @@ export class CallController {
       endReason: null,
       errorMessage: null,
     });
+    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
+      speakerOn: false,
+      videoEnabled,
+    });
     this.journal.record("INITIATE", "outgoing");
 
     // Start signaling immediately — don't wait for getUserMedia / ICE config.
@@ -368,6 +372,10 @@ export class CallController {
     this.clearRingTimeout();
     this.localAnswerSdp = null;
     this.patch({ phase: "connecting" });
+    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
+      speakerOn: this.state.speakerOn,
+      videoEnabled: this.state.videoEnabled,
+    });
 
     try {
       // Always reconcile with the server's active call for this DM channel.
@@ -458,6 +466,16 @@ export class CallController {
       }
     }
     this.pc?.setVideoEnabled(enabled);
+    if (
+      this.state.phase === "outgoing" ||
+      this.state.phase === "connecting" ||
+      this.state.phase === "active"
+    ) {
+      void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
+        speakerOn: this.state.speakerOn,
+        videoEnabled: enabled,
+      });
+    }
     this.patchPlaybackDebug();
     this.emitMedia();
   }
@@ -468,7 +486,10 @@ export class CallController {
     this.patch({ speakerOn });
     void setCallProximityEnabled(!speakerOn);
     if (this.state.phase === "active") {
-      void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", { speakerOn });
+      void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
+        speakerOn,
+        videoEnabled: this.state.videoEnabled,
+      });
     }
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
   }
@@ -986,6 +1007,7 @@ export class CallController {
     this.startCallAudioWatch();
     void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
       speakerOn: this.state.speakerOn,
+      videoEnabled: this.state.videoEnabled,
     });
     void setCallProximityEnabled(!this.state.speakerOn);
     if (this.pollCallId) {

@@ -7,13 +7,14 @@ let keepScreenOn = false;
 /** Tell iOS the app is in an active voice call — resists ducking from other apps' sounds. */
 export async function activateCallMediaSession(
   peerTitle: string,
-  options?: { speakerOn?: boolean },
+  options?: { speakerOn?: boolean; videoEnabled?: boolean },
 ): Promise<void> {
   if (typeof navigator === "undefined") return;
   prepareAudioSessionForCall();
 
   const speakerOn = options?.speakerOn ?? false;
-  keepScreenOn = speakerOn;
+  const videoEnabled = options?.videoEnabled ?? false;
+  keepScreenOn = speakerOn || videoEnabled;
 
   if ("mediaSession" in navigator) {
     try {
@@ -21,13 +22,13 @@ export async function activateCallMediaSession(
         title: "Звонок",
         artist: peerTitle || "QHub",
       });
-      navigator.mediaSession.playbackState = speakerOn ? "playing" : "none";
+      navigator.mediaSession.playbackState = keepScreenOn ? "playing" : "none";
     } catch {
       // Safari versions vary.
     }
   }
 
-  if (speakerOn) {
+  if (keepScreenOn) {
     await requestCallWakeLock();
   } else {
     releaseCallWakeLock();

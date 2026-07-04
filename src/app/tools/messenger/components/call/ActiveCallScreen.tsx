@@ -170,6 +170,7 @@ export function ActiveCallScreen({
   onHangup,
 }: Props) {
   const showDuration = phase === "active";
+  const isDialing = phase === "outgoing" || phase === "connecting";
   const [earpieceBlank, setEarpieceBlank] = useState(false);
   const iosEarpiece = isIOSDevice() && phase === "active" && !speakerOn;
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null);
@@ -228,6 +229,15 @@ export function ActiveCallScreen({
             <CallStatusText phase={phase} errorMessage={errorMessage} variant="dark" />
             {showDuration && (
               <span className="text-base text-gray-300 tabular-nums">{formatDuration(durationSec)}</span>
+            )}
+            {isDialing && (
+              <button
+                type="button"
+                onClick={onHangup}
+                className="mt-2 rounded-full bg-red-500/90 px-4 py-1.5 text-sm font-medium text-white shadow-lg shadow-red-900/40 transition-colors hover:bg-red-600"
+              >
+                Отменить вызов
+              </button>
             )}
           </div>
         </div>
@@ -321,7 +331,7 @@ export function ActiveCallScreen({
             {muted ? <MicOffIcon /> : <MicIcon />}
           </ControlButton>
 
-          <ControlButton danger label="Завершить звонок" onClick={onHangup}>
+          <ControlButton danger label={isDialing ? "Отменить вызов" : "Завершить звонок"} onClick={onHangup}>
             <PhoneDownIcon />
           </ControlButton>
         </div>
