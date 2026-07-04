@@ -4,7 +4,7 @@ function sessionSecret(): string {
   const fromEnv = process.env.MESSENGER_SESSION_SECRET?.trim();
   if (fromEnv) return fromEnv;
   if (process.env.NODE_ENV === "production") {
-    console.warn("[messenger] MESSENGER_SESSION_SECRET not set — using insecure fallback");
+    throw new Error("[messenger] MESSENGER_SESSION_SECRET is required in production");
   }
   return "qhub-dev-messenger-session-secret-change-me";
 }
