@@ -21,7 +21,11 @@ function syncViewportCssVars(): { keyboardOpen: boolean } {
   // Without top=offsetTop, fixed top:0 content scrolls off-screen and only a
   // random slice (often the composer) remains visible at the top.
   const shellHeight = keyboardOpen ? h : window.innerHeight;
-  const shellTop = keyboardOpen ? off : 0;
+  // iOS occasionally reports a very large offsetTop while focusing textarea,
+  // which can push the whole messenger shell down and make the composer appear
+  // "floating" in the middle of screen. Clamp to a small safe range.
+  const clampedOffsetTop = off > Math.round(h * 0.4) ? 0 : Math.min(off, 24);
+  const shellTop = keyboardOpen ? clampedOffsetTop : 0;
 
   root.style.setProperty("--messenger-vvh", `${shellHeight}px`);
   root.style.setProperty("--messenger-vv-top", `${shellTop}px`);
