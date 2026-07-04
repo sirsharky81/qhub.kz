@@ -30,6 +30,32 @@ function UnreadBadge({ count }: { count: number }) {
   );
 }
 
+function DialogKindIcon({ kind }: { kind: LocalDialog["kind"] }) {
+  if (kind === "room") {
+    return (
+      <span
+        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-500"
+        aria-hidden
+      >
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a3 3 0 1 1 0 6a3 3 0 0 1 0-6M8 8a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0-5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 18.5c.2-2.2 2.1-3.5 4.2-3.5c1.3 0 2.5.4 3.3 1.1M2 18.5c.3-2.1 2.2-3.5 4.5-3.5s4.2 1.4 4.5 3.5" />
+        </svg>
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-500"
+      aria-hidden
+    >
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6.5 9.5h11M6.5 13h8M5.5 5h13A1.5 1.5 0 0 1 20 6.5v8A1.5 1.5 0 0 1 18.5 16H12l-4.3 3.1c-.5.4-1.2 0-1.2-.6V16h-1A1.5 1.5 0 0 1 4 14.5v-8A1.5 1.5 0 0 1 5.5 5Z" />
+      </svg>
+    </span>
+  );
+}
+
 function formatDialogTime(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -275,7 +301,7 @@ export function MessengerHomeClient() {
                       href={dialogHref(d)}
                       className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50"
                     >
-                      <span className="text-xl">{d.kind === "room" ? "👥" : "💬"}</span>
+                      <DialogKindIcon kind={d.kind} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <p className={`text-sm truncate ${unread > 0 ? "font-semibold text-gray-900" : "font-medium"}`}>
