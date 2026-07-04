@@ -58,6 +58,8 @@ interface Props {
   onLeaveRoom?: (participantCount: number) => void | Promise<void>;
   onRoomEnded?: () => void;
   profileLabels?: Record<string, string>;
+  identityAlert?: { previousShort: string | null; currentShort: string };
+  onTrustIdentity?: () => void;
 }
 
 function isMessageEnvelope(e: ChannelEnvelope): e is EncryptedMessagePayload {
@@ -76,6 +78,8 @@ export function ChatView({
   onLeaveRoom,
   onRoomEnded,
   profileLabels = {},
+  identityAlert,
+  onTrustIdentity,
 }: Props) {
   const { storageKey, isUnlocked } = useMessengerUnlock();
   const callCtx = useCallOptional();
@@ -826,6 +830,34 @@ export function ChatView({
             WebkitOverflowScrolling: "touch",
           }}
         >
+        {!isRoom && identityAlert && (
+          <div
+            className="max-w-2xl"
+            style={{
+              marginLeft: "max(0.75rem, env(safe-area-inset-left))",
+              marginRight: "max(0.75rem, env(safe-area-inset-right))",
+            }}
+          >
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+              <p className="font-semibold">Ключ безопасности контакта изменился</p>
+              <p className="mt-1 text-xs text-amber-900/80">
+                Это может быть переустановка приложения у собеседника или потенциальная подмена ключа.
+              </p>
+              <p className="mt-1 text-[11px] text-amber-900/80">
+                Было: {identityAlert.previousShort ?? "—"} · Сейчас: {identityAlert.currentShort}
+              </p>
+              {onTrustIdentity && (
+                <button
+                  type="button"
+                  onClick={onTrustIdentity}
+                  className="mt-2 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white"
+                >
+                  Доверять новому ключу
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {messages.length === 0 && persistHistory && (
           <div
             className="max-w-md"

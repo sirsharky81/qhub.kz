@@ -11,6 +11,12 @@ import { fetchAccessCheck, fetchPeerPublicKey, fetchProfilesMap } from "@/lib/me
 import { deriveDmAesKey, getOrCreateDeviceKeyPair } from "@/lib/messenger/crypto";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
+import {
+  checkPeerIdentity,
+  fingerprintPublicKeyJwk,
+  shortFingerprint,
+  trustPeerIdentity,
+} from "@/lib/messenger/identity";
 import { deriveDmChatId, maskPhone, normalizeKzPhone } from "@/lib/messenger/phone";
 import { onAppResume } from "@/lib/platform/app-resume";
 
@@ -29,6 +35,11 @@ function MessengerChatInner() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [checking, setChecking] = useState(false);
   const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
+  const [identityAlert, setIdentityAlert] = useState<{
+    previousFingerprint: string | null;
+    currentFingerprint: string;
+  } | null>(null);
+  const [currentPeerFingerprint, setCurrentPeerFingerprint] = useState<string | null>(null);
   const pairRef = useRef<CryptoKeyPair | null>(null);
 
   const tryConnectPeer = useCallback(
@@ -38,6 +49,17 @@ function MessengerChatInner() {
 
       const peerPub = await fetchPeerPublicKey(peerPhone);
       if (!peerPub) return false;
+      const fingerprint = await fingerprintPublicKeyJwk(peerPub);
+      setCurrentPeerFingerprint(fingerprint);
+      const identity = checkPeerIdentity(peerPhone, fingerprint);
+      if (identity.status === "changed") {
+        setIdentityAlert({
+          previousFingerprint: identity.previousFingerprint,
+          currentFingerprint: fingerprint,
+        });
+      } else {
+        setIdentityAlert(null);
+      }
 
       const key = await deriveDmAesKey(pair.privateKey, peerPub, me, peerPhone);
       const chatId = deriveDmChatId(me, peerPhone);
@@ -155,6 +177,12 @@ function MessengerChatInner() {
   const peerTitle = profileLabels[peerPhone] ?? maskPhone(peerPhone);
   const deepLinkCallId = searchParams.get("call");
 
+  const handleTrustIdentity = useCallback(() => {
+    if (!currentPeerFingerprint) return;
+    trustPeerIdentity(peerPhone, currentPeerFingerprint);
+    setIdentityAlert(null);
+  }, [currentPeerFingerprint, peerPhone]);
+
   if (phase === "auth_error") {
     return (
       <MessengerShell variant="chat" title={peerTitle} backHref="/tools/messenger/home">
@@ -205,6 +233,17 @@ function MessengerChatInner() {
           myPhone={myPhone}
           aesKey={aesKey}
           profileLabels={profileLabels}
+          identityAlert={
+            identityAlert
+              ? {
+                  previousShort: identityAlert.previousFingerprint
+                    ? shortFingerprint(identityAlert.previousFingerprint)
+                    : null,
+                  currentShort: shortFingerprint(identityAlert.currentFingerprint),
+                }
+              : undefined
+          }
+          onTrustIdentity={identityAlert ? () => handleTrustIdentity() : undefined}
         />
       </CallProvider>
     </PinUnlockGate>
