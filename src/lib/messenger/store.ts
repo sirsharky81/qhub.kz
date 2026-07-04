@@ -1,5 +1,7 @@
 import {
   DEFAULT_MSG_TTL_HOURS,
+  DEFAULT_MAX_DM_ENVELOPES,
+  DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
   REDIS_AUTH_PREFIX,
   REDIS_DM_PREFIX,
@@ -33,6 +35,7 @@ import {
   redisLpush,
   redisLrange,
   redisLrem,
+  redisLtrim,
   redisSet,
 } from "./redis";
 import { normalizeKzPhone, peerFromDmChannel } from "./phone";
@@ -45,6 +48,16 @@ function msgTtlSec(): number {
 function roomInactiveTtlSec(): number {
   const hours = Number(process.env.MESSENGER_ROOM_INACTIVE_TTL_HOURS ?? DEFAULT_ROOM_INACTIVE_TTL_HOURS);
   return Math.max(1, hours) * 3600;
+}
+
+function maxDmEnvelopes(): number {
+  const n = Number(process.env.MESSENGER_MAX_DM_ENVELOPES ?? DEFAULT_MAX_DM_ENVELOPES);
+  return Math.max(100, Math.floor(n));
+}
+
+function maxRoomEnvelopes(): number {
+  const n = Number(process.env.MESSENGER_MAX_ROOM_ENVELOPES ?? DEFAULT_MAX_ROOM_ENVELOPES);
+  return Math.max(200, Math.floor(n));
 }
 
 // --- Whitelist ---
@@ -160,6 +173,7 @@ async function pushEnvelope(
   getMeta: () => Promise<ChannelMeta | RoomMeta | null>,
   metaTtl: number,
   msgTtl: number,
+  maxEnvelopes: number,
 ): Promise<number> {
   const now = Date.now();
   const versionCounterKey = `${metaKey}:version`;
@@ -171,6 +185,7 @@ async function pushEnvelope(
   await redisSet(metaKey, JSON.stringify(meta), metaTtl);
   await redisExpire(versionCounterKey, metaTtl);
   await redisLpush(messagesKey, JSON.stringify(envelope));
+  await redisLtrim(messagesKey, 0, Math.max(0, maxEnvelopes - 1));
   await redisExpire(messagesKey, msgTtl);
   return meta.version;
 }
@@ -251,6 +266,7 @@ export async function pushDmEnvelope(chatId: string, envelope: ChannelEnvelope):
     () => getDmMeta(chatId),
     msgTtlSec(),
     msgTtlSec(),
+    maxDmEnvelopes(),
   );
 }
 
@@ -560,6 +576,7 @@ export async function pushRoomEnvelope(roomId: string, envelope: ChannelEnvelope
     () => getRoomMeta(roomId),
     roomInactiveTtlSec(),
     msgTtlSec(),
+    maxRoomEnvelopes(),
   );
 }
 

@@ -13,6 +13,7 @@ import {
   redisGet,
   redisGetJson,
   redisLpush,
+  redisLtrim,
   redisLrange,
   redisSet,
   parseRedisJsonValue,
@@ -209,6 +210,7 @@ export async function appendCallSignal(params: {
   const ttl = callTtlSec();
   await redisSet(callKey(params.callId), JSON.stringify(session), ttl);
   await redisLpush(signalsKey(params.callId), JSON.stringify(signal));
+  await redisLtrim(signalsKey(params.callId), 0, Math.max(0, MAX_CALL_SIGNALS - 1));
   await redisExpire(signalsKey(params.callId), ttl);
 
   if (session.status !== "ended") {

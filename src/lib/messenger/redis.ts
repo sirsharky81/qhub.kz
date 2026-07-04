@@ -134,6 +134,22 @@ export async function redisLrem(key: string, count: number, value: string): Prom
   mem.set(key, JSON.stringify(list));
 }
 
+export async function redisLtrim(key: string, start: number, stop: number): Promise<void> {
+  const redis = getMessengerRedis();
+  if (redis) {
+    await redis.ltrim(key, start, stop);
+    return;
+  }
+  const mem = memoryStore();
+  const existing = mem.get(key);
+  if (!existing) return;
+  const list = JSON.parse(existing) as string[];
+  const normalizedStart = Math.max(0, start);
+  const normalizedStop = stop < 0 ? list.length + stop : stop;
+  const endExclusive = Math.max(normalizedStart, normalizedStop + 1);
+  mem.set(key, JSON.stringify(list.slice(normalizedStart, endExclusive)));
+}
+
 export async function redisExpire(key: string, seconds: number): Promise<void> {
   const redis = getMessengerRedis();
   if (redis) {
