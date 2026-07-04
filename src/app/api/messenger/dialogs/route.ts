@@ -18,13 +18,18 @@ export async function GET() {
     const enriched = await Promise.all(
       dialogs.map(async (d) => {
         const presence = await getMessengerPresence(d.peerPhone);
-        const prefs = dialogPrefs[d.chatId] ?? { pinnedAt: d.pinnedAt ?? null, archivedAt: d.archivedAt ?? null };
+        const prefs = dialogPrefs[d.chatId] ?? {
+          pinnedAt: d.pinnedAt ?? null,
+          pinOrder: d.pinOrder ?? null,
+          archivedAt: d.archivedAt ?? null,
+        };
         return {
           ...d,
           displayName: profiles[d.peerPhone]?.displayName ?? null,
           label: displayNameForPhone(d.peerPhone, profiles),
           peerOnline: isMessengerOnline(presence),
           pinnedAt: prefs.pinnedAt,
+          pinOrder: prefs.pinOrder,
           archivedAt: prefs.archivedAt,
         };
       }),

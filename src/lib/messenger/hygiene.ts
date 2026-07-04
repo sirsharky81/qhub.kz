@@ -5,6 +5,7 @@ import {
   DEFAULT_MSG_TTL_HOURS,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
   MESSENGER_DIALOG_PREFS_TTL_SEC,
+  MESSENGER_MAX_PINNED_DIALOGS,
   MESSENGER_PRESENCE_TTL_SEC,
   MESSENGER_PUSH_TTL_SEC,
 } from "./constants";
@@ -26,6 +27,7 @@ export interface MessengerHygieneSnapshot {
     presenceTtlSec: number;
     pushSubscriptionTtlDays: number;
     dialogPrefsTtlDays: number;
+    maxPinnedDialogs: number;
   };
   warnings: string[];
 }
@@ -50,6 +52,10 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
   const callTtlSec = parsePositiveInt(process.env.MESSENGER_CALL_TTL_SEC, DEFAULT_CALL_TTL_SEC);
   const pushSubscriptionTtlDays = Math.round(MESSENGER_PUSH_TTL_SEC / (60 * 60 * 24));
   const dialogPrefsTtlDays = Math.round(MESSENGER_DIALOG_PREFS_TTL_SEC / (60 * 60 * 24));
+  const maxPinnedDialogs = parsePositiveInt(
+    process.env.MESSENGER_MAX_PINNED_DIALOGS,
+    MESSENGER_MAX_PINNED_DIALOGS,
+  );
 
   const warnings: string[] = [];
   if (messageTtlHours > 72) {
@@ -81,6 +87,9 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
   if (dialogPrefsTtlDays > 180) {
     warnings.push("TTL dialog prefs больше 180 дней: проверьте, нужен ли такой срок хранения.");
   }
+  if (maxPinnedDialogs > 20) {
+    warnings.push("Лимит закрепленных диалогов слишком высокий (>20), лучше держать 5-10.");
+  }
 
   return {
     generatedAt: Date.now(),
@@ -93,6 +102,7 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
       presenceTtlSec: MESSENGER_PRESENCE_TTL_SEC,
       pushSubscriptionTtlDays,
       dialogPrefsTtlDays,
+      maxPinnedDialogs,
     },
     warnings,
   };

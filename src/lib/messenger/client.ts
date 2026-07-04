@@ -164,19 +164,20 @@ export interface DmDialogsResponseItem {
   unreadCount: number;
   peerOnline: boolean;
   pinnedAt: number | null;
+  pinOrder: number | null;
   archivedAt: number | null;
 }
 
 export async function fetchDmDialogs(): Promise<{
   dialogs: DmDialogsResponseItem[];
-  dialogPrefs: Record<string, { pinnedAt: number | null; archivedAt: number | null }>;
+  dialogPrefs: Record<string, { pinnedAt: number | null; pinOrder: number | null; archivedAt: number | null }>;
 }> {
   const url = `/api/messenger/dialogs?ts=${Date.now()}`;
   const res = await platformFetch(url, { cache: "no-store" });
   if (!res.ok) return { dialogs: [], dialogPrefs: {} };
   const data = (await res.json()) as {
     dialogs?: DmDialogsResponseItem[];
-    dialogPrefs?: Record<string, { pinnedAt: number | null; archivedAt: number | null }>;
+    dialogPrefs?: Record<string, { pinnedAt: number | null; pinOrder: number | null; archivedAt: number | null }>;
   };
   return { dialogs: data.dialogs ?? [], dialogPrefs: data.dialogPrefs ?? {} };
 }
@@ -185,7 +186,7 @@ export async function updateDialogPrefs(input: {
   dialogId: string;
   pinned?: boolean;
   archived?: boolean;
-}): Promise<{ ok: boolean; pinnedAt?: number | null; archivedAt?: number | null }> {
+}): Promise<{ ok: boolean; error?: string; pinnedAt?: number | null; pinOrder?: number | null; archivedAt?: number | null }> {
   const res = await platformFetch("/api/messenger/dialogs/prefs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -193,13 +194,25 @@ export async function updateDialogPrefs(input: {
   });
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
-    prefs?: { pinnedAt: number | null; archivedAt: number | null };
+    error?: string;
+    prefs?: { pinnedAt: number | null; pinOrder: number | null; archivedAt: number | null };
   };
   return {
     ok: !!data.ok && res.ok,
+    error: typeof data.error === "string" ? data.error : undefined,
     pinnedAt: data.prefs?.pinnedAt,
+    pinOrder: data.prefs?.pinOrder,
     archivedAt: data.prefs?.archivedAt,
   };
+}
+
+export async function reorderPinnedDialogs(dialogIds: string[]): Promise<boolean> {
+  const res = await platformFetch("/api/messenger/dialogs/prefs", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dialogIds }),
+  });
+  return res.ok;
 }
 
 export async function markDmDialogRead(chatId: string): Promise<void> {

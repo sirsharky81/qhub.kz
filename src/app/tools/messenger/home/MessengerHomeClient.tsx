@@ -10,6 +10,7 @@ import {
   fetchAccessCheck,
   fetchDmDialogs,
   logoutMessenger,
+  reorderPinnedDialogs,
   type DmDialogsResponseItem,
   updateDialogPrefs,
 } from "@/lib/messenger/client";
@@ -23,6 +24,7 @@ import {
   ensureMessengerPushSubscription,
 } from "@/lib/messenger/push";
 import { getRoomUnread, subscribeUnreadChange, totalRoomUnread } from "@/lib/messenger/unread";
+import { MESSENGER_MAX_PINNED_DIALOGS } from "@/lib/messenger/constants";
 import type { DialogPrefs, LocalDialog } from "@/lib/messenger/types";
 import { onAppResume } from "@/lib/platform/app-resume";
 import { useMessengerUnlockOptional } from "../components/MessengerUnlockProvider";
@@ -101,6 +103,7 @@ export function MessengerHomeClient() {
   const [localTextPreviewByChat, setLocalTextPreviewByChat] = useState<Record<string, string>>({});
   const [dialogPrefsMap, setDialogPrefsMap] = useState<Record<string, DialogPrefs>>({});
   const [dialogTab, setDialogTab] = useState<DialogTab>("active");
+  const [prefsError, setPrefsError] = useState<string | null>(null);
   const [dmUnreadTotal, setDmUnreadTotal] = useState(0);
   const [roomUnreadTotal, setRoomUnreadTotal] = useState(0);
   const dialogsRef = useRef<LocalDialog[]>([]);
@@ -116,17 +119,25 @@ export function MessengerHomeClient() {
         const dm = summaryMap[dialog.id];
         return {
           pinnedAt: dm?.pinnedAt ?? prefsMap[dialog.id]?.pinnedAt ?? null,
+          pinOrder: dm?.pinOrder ?? prefsMap[dialog.id]?.pinOrder ?? null,
           archivedAt: dm?.archivedAt ?? prefsMap[dialog.id]?.archivedAt ?? null,
         };
       }
-      return prefsMap[dialog.id] ?? { pinnedAt: null, archivedAt: null };
+      return prefsMap[dialog.id] ?? { pinnedAt: null, pinOrder: null, archivedAt: null };
     };
 
     return [...list].sort((a, b) => {
-      const aPinned = prefsFor(a).pinnedAt ?? 0;
-      const bPinned = prefsFor(b).pinnedAt ?? 0;
+      const aPrefs = prefsFor(a);
+      const bPrefs = prefsFor(b);
+      const aPinned = aPrefs.pinnedAt ?? 0;
+      const bPinned = bPrefs.pinnedAt ?? 0;
       if (aPinned > 0 && bPinned === 0) return -1;
       if (bPinned > 0 && aPinned === 0) return 1;
+      if (aPinned > 0 && bPinned > 0) {
+        const aOrder = aPrefs.pinOrder ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = bPrefs.pinOrder ?? Number.MAX_SAFE_INTEGER;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+      }
       if (aPinned !== bPinned) return bPinned - aPinned;
 
       const aUnread = a.kind === "room" ? getRoomUnread(a.id) : (summaryMap[a.id]?.unreadCount ?? 0);
@@ -290,26 +301,40 @@ export function MessengerHomeClient() {
       const dm = dmSummaries[d.id];
       return {
         pinnedAt: dm?.pinnedAt ?? dialogPrefsMap[d.id]?.pinnedAt ?? null,
+        pinOrder: dm?.pinOrder ?? dialogPrefsMap[d.id]?.pinOrder ?? null,
         archivedAt: dm?.archivedAt ?? dialogPrefsMap[d.id]?.archivedAt ?? null,
       };
     }
-    return dialogPrefsMap[d.id] ?? { pinnedAt: null, archivedAt: null };
+    return dialogPrefsMap[d.id] ?? { pinnedAt: null, pinOrder: null, archivedAt: null };
   }
 
   const visibleDialogs = dialogs.filter((d) => {
     const archived = (dialogPrefsFor(d).archivedAt ?? 0) > 0;
     return dialogTab === "archived" ? archived : !archived;
   });
+  const pinnedActiveDialogs = dialogs.filter((d) => {
+    const prefs = dialogPrefsFor(d);
+    return (prefs.pinnedAt ?? 0) > 0 && (prefs.archivedAt ?? 0) <= 0;
+  });
 
   async function handleTogglePin(dialog: LocalDialog) {
+    setPrefsError(null);
     const prefs = dialogPrefsFor(dialog);
     const nextPinned = !(prefs.pinnedAt && prefs.pinnedAt > 0);
+    if (nextPinned && pinnedActiveDialogs.length >= MESSENGER_MAX_PINNED_DIALOGS) {
+      setPrefsError(`Можно закрепить не более ${MESSENGER_MAX_PINNED_DIALOGS} диалогов`);
+      return;
+    }
     const result = await updateDialogPrefs({ dialogId: dialog.id, pinned: nextPinned });
-    if (!result.ok) return;
+    if (!result.ok) {
+      setPrefsError(result.error ?? "Не удалось обновить закрепление");
+      return;
+    }
     await refreshDialogsAndUnread();
   }
 
   async function handleToggleArchive(dialog: LocalDialog) {
+    setPrefsError(null);
     const prefs = dialogPrefsFor(dialog);
     const nextArchived = !(prefs.archivedAt && prefs.archivedAt > 0);
     const result = await updateDialogPrefs({
@@ -317,7 +342,27 @@ export function MessengerHomeClient() {
       archived: nextArchived,
       pinned: nextArchived ? false : undefined,
     });
-    if (!result.ok) return;
+    if (!result.ok) {
+      setPrefsError(result.error ?? "Не удалось обновить архив");
+      return;
+    }
+    await refreshDialogsAndUnread();
+  }
+
+  async function handleMovePinned(dialog: LocalDialog, direction: "up" | "down") {
+    setPrefsError(null);
+    const ordered = [...pinnedActiveDialogs];
+    const index = ordered.findIndex((d) => d.id === dialog.id);
+    if (index < 0) return;
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= ordered.length) return;
+    const [item] = ordered.splice(index, 1);
+    ordered.splice(targetIndex, 0, item);
+    const ok = await reorderPinnedDialogs(ordered.map((d) => d.id));
+    if (!ok) {
+      setPrefsError("Не удалось изменить порядок закреплённых");
+      return;
+    }
     await refreshDialogsAndUnread();
   }
 
@@ -340,6 +385,11 @@ export function MessengerHomeClient() {
         {(dmUnreadTotal + roomUnreadTotal) > 0 && (
           <p className="text-xs text-gray-500 text-center">
             Непрочитанных: {dmUnreadTotal + roomUnreadTotal}
+          </p>
+        )}
+        {prefsError && (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {prefsError}
           </p>
         )}
         <div className="grid gap-2">
@@ -392,6 +442,7 @@ export function MessengerHomeClient() {
                 const dm = d.kind === "dm" ? dmSummaries[d.id] : undefined;
                 const prefs = dialogPrefsFor(d);
                 const pinned = (prefs.pinnedAt ?? 0) > 0;
+                const pinnedIndex = pinnedActiveDialogs.findIndex((x) => x.id === d.id);
                 const infoTs =
                   d.kind === "dm"
                     ? (dm?.latestUnreadAt ?? dm?.lastMessageAt ?? d.createdAt)
@@ -426,6 +477,28 @@ export function MessengerHomeClient() {
                         >
                           Pin
                         </button>
+                        {dialogTab === "active" && pinned && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void handleMovePinned(d, "up")}
+                              className="rounded-lg bg-gray-100 px-2 py-1 text-[11px] text-gray-600 disabled:opacity-40"
+                              disabled={pinnedIndex <= 0}
+                              title="Выше"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleMovePinned(d, "down")}
+                              className="rounded-lg bg-gray-100 px-2 py-1 text-[11px] text-gray-600 disabled:opacity-40"
+                              disabled={pinnedIndex < 0 || pinnedIndex >= pinnedActiveDialogs.length - 1}
+                              title="Ниже"
+                            >
+                              ↓
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => void handleToggleArchive(d)}

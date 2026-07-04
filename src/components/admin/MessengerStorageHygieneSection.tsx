@@ -13,6 +13,7 @@ interface MessengerHygieneSnapshot {
     presenceTtlSec: number;
     pushSubscriptionTtlDays: number;
     dialogPrefsTtlDays: number;
+    maxPinnedDialogs: number;
   };
   warnings: string[];
 }
@@ -79,6 +80,7 @@ export function MessengerStorageHygieneSection() {
             <Kv label="Presence TTL" value={`${snapshot.config.presenceTtlSec}s`} />
             <Kv label="Push subs TTL" value={`${snapshot.config.pushSubscriptionTtlDays}d`} />
             <Kv label="Dialog prefs TTL" value={`${snapshot.config.dialogPrefsTtlDays}d`} />
+            <Kv label="Max pinned dialogs" value={String(snapshot.config.maxPinnedDialogs)} />
           </div>
 
           {snapshot.warnings.length > 0 ? (

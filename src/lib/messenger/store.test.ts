@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { deriveDmChatId, normalizeKzPhone } from "./phone";
 import {
   applyDmUnreadOnMessage,
+  countPinnedDialogs,
   getDmDialogSummariesForUser,
   loadDialogPrefs,
   markDmDialogRead,
   pushDmEnvelope,
+  setPinnedDialogsOrder,
   setDialogPrefs,
   touchDmUserIndex,
 } from "./store";
@@ -184,5 +186,22 @@ describe("messenger dm unread cursor", () => {
     const prefs = await loadDialogPrefs(me);
     expect(prefs[chatId]?.archivedAt).toBe(8888);
     expect(prefs[chatId]?.pinnedAt).toBeNull();
+  });
+
+  it("reorders pinned dialogs by pinOrder", async () => {
+    const peer2 = "+77011110003";
+    const chat2 = deriveDmChatId(me, peer2);
+    await cleanupDmKeys(chat2, me, peer2);
+
+    await setDialogPrefs(me, chatId, { pinnedAt: 100, pinOrder: 2 });
+    await setDialogPrefs(me, chat2, { pinnedAt: 200, pinOrder: 1 });
+    await setPinnedDialogsOrder(me, [chatId, chat2]);
+
+    const prefs = await loadDialogPrefs(me);
+    expect(prefs[chatId]?.pinOrder).toBe(1);
+    expect(prefs[chat2]?.pinOrder).toBe(2);
+    expect(await countPinnedDialogs(me)).toBe(2);
+
+    await cleanupDmKeys(chat2, me, peer2);
   });
 });

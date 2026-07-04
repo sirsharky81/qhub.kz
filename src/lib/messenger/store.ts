@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
   MESSENGER_DIALOG_PREFS_TTL_SEC,
+  MESSENGER_MAX_PINNED_DIALOGS,
   REDIS_AUTH_PREFIX,
   REDIS_DIALOG_PREFS_PREFIX,
   REDIS_DM_PREFIX,
@@ -243,10 +244,12 @@ type DmUserIndexEntry = {
   unreadCount?: number;
   latestUnreadAt?: number | null;
   pinnedAt?: number | null;
+  pinOrder?: number | null;
   archivedAt?: number | null;
 };
 
-type UserDialogPrefsIndex = Record<string, { pinnedAt: number | null; archivedAt: number | null }>;
+type UserDialogPrefs = { pinnedAt: number | null; pinOrder: number | null; archivedAt: number | null };
+type UserDialogPrefsIndex = Record<string, UserDialogPrefs>;
 
 async function loadDmUserIndex(phone: string): Promise<Record<string, DmUserIndexEntry>> {
   return (await redisGetJson<Record<string, DmUserIndexEntry>>(dmUserIndexKey(phone))) ?? {};
@@ -261,7 +264,16 @@ function dialogPrefsKey(phone: string): string {
 }
 
 export async function loadDialogPrefs(phone: string): Promise<UserDialogPrefsIndex> {
-  return (await redisGetJson<UserDialogPrefsIndex>(dialogPrefsKey(phone))) ?? {};
+  const raw = (await redisGetJson<Record<string, Partial<UserDialogPrefs>>>(dialogPrefsKey(phone))) ?? {};
+  const normalized: UserDialogPrefsIndex = {};
+  for (const [dialogId, prefs] of Object.entries(raw)) {
+    normalized[dialogId] = {
+      pinnedAt: prefs.pinnedAt ?? null,
+      pinOrder: prefs.pinOrder ?? null,
+      archivedAt: prefs.archivedAt ?? null,
+    };
+  }
+  return normalized;
 }
 
 export async function saveDialogPrefs(phone: string, index: UserDialogPrefsIndex): Promise<void> {
@@ -271,18 +283,49 @@ export async function saveDialogPrefs(phone: string, index: UserDialogPrefsIndex
 export async function setDialogPrefs(
   phone: string,
   dialogId: string,
-  patch: { pinnedAt?: number | null; archivedAt?: number | null },
-): Promise<{ pinnedAt: number | null; archivedAt: number | null }> {
+  patch: { pinnedAt?: number | null; pinOrder?: number | null; archivedAt?: number | null },
+): Promise<UserDialogPrefs> {
   const me = normalizeKzPhone(phone);
   const existing = await loadDialogPrefs(me);
-  const prev = existing[dialogId] ?? { pinnedAt: null, archivedAt: null };
+  const prev = existing[dialogId] ?? { pinnedAt: null, pinOrder: null, archivedAt: null };
   const next = {
     pinnedAt: patch.pinnedAt !== undefined ? patch.pinnedAt : prev.pinnedAt,
+    pinOrder: patch.pinOrder !== undefined ? patch.pinOrder : prev.pinOrder,
     archivedAt: patch.archivedAt !== undefined ? patch.archivedAt : prev.archivedAt,
   };
   existing[dialogId] = next;
   await saveDialogPrefs(me, existing);
   return next;
+}
+
+export async function setPinnedDialogsOrder(phone: string, dialogIds: string[]): Promise<void> {
+  const me = normalizeKzPhone(phone);
+  const existing = await loadDialogPrefs(me);
+  const now = Date.now();
+  for (let i = 0; i < dialogIds.length; i += 1) {
+    const dialogId = dialogIds[i];
+    const prev = existing[dialogId] ?? { pinnedAt: null, pinOrder: null, archivedAt: null };
+    existing[dialogId] = {
+      pinnedAt: prev.pinnedAt ?? now,
+      pinOrder: i + 1,
+      archivedAt: prev.archivedAt ?? null,
+    };
+  }
+  await saveDialogPrefs(me, existing);
+}
+
+export async function countPinnedDialogs(phone: string): Promise<number> {
+  const prefs = await loadDialogPrefs(phone);
+  let count = 0;
+  for (const p of Object.values(prefs)) {
+    if ((p.pinnedAt ?? 0) > 0 && (p.archivedAt ?? 0) <= 0) count += 1;
+  }
+  return count;
+}
+
+export function maxPinnedDialogs(): number {
+  const n = Number(process.env.MESSENGER_MAX_PINNED_DIALOGS ?? MESSENGER_MAX_PINNED_DIALOGS);
+  return Math.max(1, Math.floor(n));
 }
 
 export async function getDmMeta(chatId: string): Promise<ChannelMeta | null> {
@@ -324,6 +367,7 @@ export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise
       unreadCount: Math.max(0, prev?.unreadCount ?? 0),
       latestUnreadAt: prev?.latestUnreadAt ?? null,
       pinnedAt: prev?.pinnedAt ?? null,
+      pinOrder: prev?.pinOrder ?? null,
       archivedAt: prev?.archivedAt ?? null,
     };
     await saveDmUserIndex(me, existing);
@@ -371,6 +415,7 @@ export async function applyDmUnreadOnMessage(params: {
         ? Math.max(prev?.latestUnreadAt ?? 0, ts)
         : (prev?.latestUnreadAt ?? null),
       pinnedAt: prev?.pinnedAt ?? null,
+      pinOrder: prev?.pinOrder ?? null,
       archivedAt: prev?.archivedAt ?? null,
     };
     await saveDmUserIndex(me, existing);
@@ -392,6 +437,7 @@ export async function markDmDialogRead(phone: string, chatId: string): Promise<v
     unreadCount: 0,
     latestUnreadAt: null,
     pinnedAt: entry.pinnedAt ?? null,
+    pinOrder: entry.pinOrder ?? null,
     archivedAt: entry.archivedAt ?? null,
   };
   await saveDmUserIndex(me, existing);
@@ -414,6 +460,7 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
     let unreadCount = entry.unreadCount;
     let latestUnreadAt = entry.latestUnreadAt;
     let pinnedAt = entry.pinnedAt ?? null;
+    let pinOrder = entry.pinOrder ?? null;
     let archivedAt = entry.archivedAt ?? null;
 
     const needsBackfill =
@@ -459,6 +506,7 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
         unreadCount,
         latestUnreadAt,
         pinnedAt,
+        pinOrder,
         archivedAt,
       };
       touchedIndex = true;
@@ -473,6 +521,7 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
       latestUnreadAt: latestUnreadAt ?? null,
       unreadCount: Math.max(0, unreadCount ?? 0),
       pinnedAt,
+      pinOrder,
       archivedAt,
     });
   }

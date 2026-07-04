@@ -105,6 +105,7 @@ export interface LocalDialog {
 
 export interface DialogPrefs {
   pinnedAt: number | null;
+  pinOrder: number | null;
   archivedAt: number | null;
 }
 
@@ -117,6 +118,7 @@ export interface DmDialogSummary {
   latestUnreadAt: number | null;
   unreadCount: number;
   pinnedAt: number | null;
+  pinOrder: number | null;
   archivedAt: number | null;
 }
 
