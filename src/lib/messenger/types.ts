@@ -107,6 +107,8 @@ export interface DmDialogSummary {
   chatId: string;
   peerPhone: string;
   lastMessageAt: number;
+  lastMessageType: MessageType | null;
+  lastMessageFromMe: boolean;
   latestUnreadAt: number | null;
   unreadCount: number;
 }

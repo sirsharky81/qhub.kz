@@ -14,6 +14,7 @@ import type {
   ChannelEnvelope,
   ChannelMeta,
   EncryptedMessagePayload,
+  MessageType,
   MessengerAuthRecord,
   MessengerProfile,
   ReceiptPayload,
@@ -220,6 +221,8 @@ type DmUserIndexEntry = {
   chatId: string;
   peerPhone: string;
   lastMessageAt: number;
+  lastMessageType?: MessageType | null;
+  lastMessageFromMe?: boolean;
   unreadCount?: number;
   latestUnreadAt?: number | null;
 };
@@ -265,6 +268,8 @@ export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise
       chatId,
       peerPhone: peer,
       lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, at),
+      lastMessageType: prev?.lastMessageType ?? null,
+      lastMessageFromMe: prev?.lastMessageFromMe ?? false,
       unreadCount: Math.max(0, prev?.unreadCount ?? 0),
       latestUnreadAt: prev?.latestUnreadAt ?? null,
     };
@@ -277,10 +282,11 @@ export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise
 export async function applyDmUnreadOnMessage(params: {
   chatId: string;
   senderPhone: string;
+  type: MessageType;
   ts: number;
   recipientViewingThisChat: boolean;
 }): Promise<void> {
-  const { chatId, senderPhone, ts, recipientViewingThisChat } = params;
+  const { chatId, senderPhone, type, ts, recipientViewingThisChat } = params;
   const parts = chatId.split(":");
   if (parts.length !== 3 || parts[0] !== "dm") return;
   const a = normalizeKzPhone(parts[1] ?? "");
@@ -292,7 +298,12 @@ export async function applyDmUnreadOnMessage(params: {
   const senderPeer = sender === a ? b : a;
   const recipientPeer = sender;
 
-  const updateOne = async (me: string, peer: string, incrementUnread: boolean) => {
+  const updateOne = async (
+    me: string,
+    peer: string,
+    incrementUnread: boolean,
+    lastMessageFromMe: boolean,
+  ) => {
     const existing = await loadDmUserIndex(me);
     const prev = existing[chatId];
     const nextUnread = Math.max(0, (prev?.unreadCount ?? 0) + (incrementUnread ? 1 : 0));
@@ -300,6 +311,8 @@ export async function applyDmUnreadOnMessage(params: {
       chatId,
       peerPhone: peer,
       lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, ts),
+      lastMessageType: type,
+      lastMessageFromMe,
       unreadCount: nextUnread,
       latestUnreadAt: incrementUnread
         ? Math.max(prev?.latestUnreadAt ?? 0, ts)
@@ -309,8 +322,8 @@ export async function applyDmUnreadOnMessage(params: {
   };
 
   await Promise.all([
-    updateOne(sender, senderPeer, false),
-    updateOne(recipient, recipientPeer, !recipientViewingThisChat),
+    updateOne(sender, senderPeer, false, true),
+    updateOne(recipient, recipientPeer, !recipientViewingThisChat, false),
   ]);
 }
 
@@ -341,6 +354,8 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
       chatId: channel,
       peerPhone: peer,
       lastMessageAt: entry.lastMessageAt ?? 0,
+      lastMessageType: entry.lastMessageType ?? null,
+      lastMessageFromMe: Boolean(entry.lastMessageFromMe),
       latestUnreadAt: entry.latestUnreadAt ?? null,
       unreadCount: Math.max(0, entry.unreadCount ?? 0),
     });

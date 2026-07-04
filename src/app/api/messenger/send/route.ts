@@ -122,6 +122,7 @@ export async function POST(request: Request) {
       await applyDmUnreadOnMessage({
         chatId: channel,
         senderPhone: phone,
+        type,
         ts: msg.ts,
         recipientViewingThisChat,
       });

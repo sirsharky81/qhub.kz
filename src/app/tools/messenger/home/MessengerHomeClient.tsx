@@ -27,6 +27,35 @@ function UnreadBadge({ count }: { count: number }) {
   );
 }
 
+function formatDialogTime(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) {
+    return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
+function dmPreview(summary: DmDialogsResponseItem | undefined): string {
+  if (!summary) return "личный чат";
+  const base =
+    summary.lastMessageType === "image"
+      ? "Фото"
+      : summary.lastMessageType === "file"
+        ? "Файл"
+        : summary.lastMessageType === "audio"
+          ? "Голосовое"
+          : summary.lastMessageType === "video"
+            ? "Видео"
+            : "Сообщение";
+  return summary.lastMessageFromMe ? `Вы: ${base}` : base;
+}
+
 export function MessengerHomeClient() {
   const router = useRouter();
   const [dialogs, setDialogs] = useState<LocalDialog[]>([]);
@@ -195,6 +224,11 @@ export function MessengerHomeClient() {
             <ul className="divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white overflow-hidden">
               {dialogs.map((d) => {
                 const unread = dialogUnread(d);
+                const dm = d.kind === "dm" ? dmSummaries[d.id] : undefined;
+                const infoTs =
+                  d.kind === "dm"
+                    ? (dm?.latestUnreadAt ?? dm?.lastMessageAt ?? d.createdAt)
+                    : d.createdAt;
                 return (
                   <li key={d.id}>
                     <Link
@@ -203,13 +237,16 @@ export function MessengerHomeClient() {
                     >
                       <span className="text-xl">{d.kind === "room" ? "👥" : "💬"}</span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{d.title}</p>
-                        <p className="text-xs text-gray-400">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm truncate ${unread > 0 ? "font-semibold text-gray-900" : "font-medium"}`}>
+                            {d.title}
+                          </p>
+                          <span className="text-[10px] text-gray-400 shrink-0">{formatDialogTime(infoTs)}</span>
+                        </div>
+                        <p className={`text-xs truncate ${unread > 0 ? "text-gray-700" : "text-gray-400"}`}>
                           {d.kind === "room"
                             ? "комната"
-                            : dmSummaries[d.id]?.peerOnline
-                              ? "личный чат · в сети"
-                              : "личный чат"}
+                            : `${dmPreview(dm)}${dm?.peerOnline ? " · в сети" : ""}`}
                         </p>
                       </div>
                       <UnreadBadge count={unread} />

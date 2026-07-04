@@ -158,6 +158,8 @@ export interface DmDialogsResponseItem {
   label: string;
   displayName: string | null;
   lastMessageAt: number;
+  lastMessageType: MessageType | null;
+  lastMessageFromMe: boolean;
   latestUnreadAt: number | null;
   unreadCount: number;
   peerOnline: boolean;
