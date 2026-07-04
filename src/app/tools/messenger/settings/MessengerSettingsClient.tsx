@@ -74,9 +74,15 @@ export function MessengerSettingsClient() {
     setPushError(null);
     try {
       if (pushEnabled) {
-        await unsubscribeMessengerPush();
+        const ok = await unsubscribeMessengerPush();
+        if (!ok) {
+          throw new Error("unsubscribe_failed");
+        }
       } else {
-        await subscribeMessengerPush();
+        const ok = await subscribeMessengerPush();
+        if (!ok) {
+          throw new Error("subscribe_failed");
+        }
       }
       refreshPushState();
     } catch (err) {
@@ -85,7 +91,7 @@ export function MessengerSettingsClient() {
           "Push не настроен в сборке Android. Добавьте google-services.json из Firebase в android/app/ и пересоберите приложение.",
         );
       } else {
-        setPushError("Не удалось включить уведомления. Попробуйте ещё раз.");
+        setPushError("Не удалось зарегистрировать push на устройстве. Попробуйте ещё раз.");
       }
       refreshPushState();
     } finally {

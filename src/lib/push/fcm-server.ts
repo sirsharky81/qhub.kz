@@ -17,7 +17,7 @@ export async function sendFcmPush(
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
 
   if (!projectId || !clientEmail || !privateKey || targets.length === 0) {
-    if (process.env.NODE_ENV !== "production" && targets.length > 0) {
+    if (targets.length > 0) {
       console.warn("[FCM] Skipping native push — Firebase credentials not configured");
     }
     return;
@@ -47,7 +47,12 @@ export async function sendFcmPush(
             url: payload.url,
             ...(payload.icon ? { icon: payload.icon } : {}),
           },
-          android: { priority: "high" },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "qhub_default",
+            },
+          },
           apns: { payload: { aps: { sound: "default" } } },
         }),
       ),
