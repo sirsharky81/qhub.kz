@@ -29,6 +29,8 @@ import type { DialogPrefs, LocalDialog } from "@/lib/messenger/types";
 import { onAppResume } from "@/lib/platform/app-resume";
 import { useMessengerUnlockOptional } from "../components/MessengerUnlockProvider";
 
+const LONG_PRESS_MS = 450;
+
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
@@ -104,9 +106,12 @@ export function MessengerHomeClient() {
   const [dialogPrefsMap, setDialogPrefsMap] = useState<Record<string, DialogPrefs>>({});
   const [dialogTab, setDialogTab] = useState<DialogTab>("active");
   const [prefsError, setPrefsError] = useState<string | null>(null);
+  const [longPressDialogId, setLongPressDialogId] = useState<string | null>(null);
   const [dmUnreadTotal, setDmUnreadTotal] = useState(0);
   const [roomUnreadTotal, setRoomUnreadTotal] = useState(0);
   const dialogsRef = useRef<LocalDialog[]>([]);
+  const longPressTimerRef = useRef<number | null>(null);
+  const suppressLinkClickRef = useRef(false);
   dialogsRef.current = dialogs;
 
   function sortDialogsByPriority(
@@ -276,6 +281,13 @@ export function MessengerHomeClient() {
     };
   }, [router]);
 
+  useEffect(
+    () => () => {
+      clearLongPressTimer();
+    },
+    [],
+  );
+
   async function handleLogout() {
     await logoutMessenger();
     router.replace("/tools/messenger/login");
@@ -316,6 +328,7 @@ export function MessengerHomeClient() {
     const prefs = dialogPrefsFor(d);
     return (prefs.pinnedAt ?? 0) > 0 && (prefs.archivedAt ?? 0) <= 0;
   });
+  const longPressDialog = longPressDialogId ? dialogs.find((d) => d.id === longPressDialogId) ?? null : null;
 
   async function handleTogglePin(dialog: LocalDialog) {
     setPrefsError(null);
@@ -364,6 +377,35 @@ export function MessengerHomeClient() {
       return;
     }
     await refreshDialogsAndUnread();
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
+
+  function startLongPress(dialog: LocalDialog) {
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      suppressLinkClickRef.current = true;
+      setLongPressDialogId(dialog.id);
+    }, LONG_PRESS_MS);
+  }
+
+  function endLongPress() {
+    clearLongPressTimer();
+  }
+
+  function closeLongPressMenu() {
+    suppressLinkClickRef.current = false;
+    setLongPressDialogId(null);
+  }
+
+  async function runFromLongPress(action: () => Promise<void>) {
+    await action();
+    closeLongPressMenu();
   }
 
   return (
@@ -416,9 +458,22 @@ export function MessengerHomeClient() {
         {dialogs.length > 0 && (
           <section>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="text-xs font-mono uppercase tracking-wider text-gray-400">
-                {dialogTab === "active" ? "Активные диалоги" : "Архив"}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs font-mono uppercase tracking-wider text-gray-400">
+                  {dialogTab === "active" ? "Активные диалоги" : "Архив"}
+                </h2>
+                {dialogTab === "active" && (
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                      pinnedActiveDialogs.length >= MESSENGER_MAX_PINNED_DIALOGS
+                        ? "border-amber-300 bg-amber-50 text-amber-700"
+                        : "border-gray-200 bg-gray-50 text-gray-500"
+                    }`}
+                  >
+                    Pin {pinnedActiveDialogs.length}/{MESSENGER_MAX_PINNED_DIALOGS}
+                  </span>
+                )}
+              </div>
               <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1 text-xs">
                 <button
                   type="button"
@@ -449,8 +504,26 @@ export function MessengerHomeClient() {
                     : d.createdAt;
                 return (
                   <li key={d.id}>
-                    <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
-                      <Link href={dialogHref(d)} className="flex min-w-0 flex-1 items-center gap-3">
+                    <div
+                      className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50"
+                      onTouchStart={() => startLongPress(d)}
+                      onTouchEnd={endLongPress}
+                      onTouchCancel={endLongPress}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setLongPressDialogId(d.id);
+                      }}
+                    >
+                      <Link
+                        href={dialogHref(d)}
+                        className="flex min-w-0 flex-1 items-center gap-3"
+                        onClick={(e) => {
+                          if (suppressLinkClickRef.current) {
+                            e.preventDefault();
+                            suppressLinkClickRef.current = false;
+                          }
+                        }}
+                      >
                         <DialogKindIcon kind={d.kind} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -519,6 +592,63 @@ export function MessengerHomeClient() {
               )}
             </ul>
           </section>
+        )}
+        {longPressDialog && (
+          <div
+            className="fixed inset-0 z-50 bg-black/30"
+            onClick={closeLongPressMenu}
+            role="button"
+            tabIndex={-1}
+            aria-label="Закрыть меню"
+          >
+            <div
+              className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white p-4 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="mb-3 text-sm font-semibold text-gray-900 truncate">{longPressDialog.title}</p>
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  onClick={() => void runFromLongPress(() => handleTogglePin(longPressDialog))}
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700"
+                >
+                  {(dialogPrefsFor(longPressDialog).pinnedAt ?? 0) > 0 ? "Открепить" : "Закрепить"}
+                </button>
+                {dialogTab === "active" && (dialogPrefsFor(longPressDialog).pinnedAt ?? 0) > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void runFromLongPress(() => handleMovePinned(longPressDialog, "up"))}
+                      className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700"
+                    >
+                      Выше
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runFromLongPress(() => handleMovePinned(longPressDialog, "down"))}
+                      className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700"
+                    >
+                      Ниже
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void runFromLongPress(() => handleToggleArchive(longPressDialog))}
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700"
+                >
+                  {dialogTab === "archived" ? "Вернуть в активные" : "В архив"}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeLongPressMenu}
+                  className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-medium text-white"
+                >
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </MessengerShell>
