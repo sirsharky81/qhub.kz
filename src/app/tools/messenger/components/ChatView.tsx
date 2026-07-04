@@ -690,6 +690,7 @@ export function ChatView({
   );
 
   const messageIds = new Set(messages.map((m) => m.id));
+  const firstUnreadIndex = messages.findIndex((m) => !m.mine && m.status !== "read");
 
   const clearChatConfirmTitle = isRoom
     ? `Удалить историю комнаты ${title} на этом устройстве? Это нельзя отменить.`
@@ -772,18 +773,34 @@ export function ChatView({
           </div>
         )}
         {messages.map((m, index) => (
-          <MessageBubble
-            key={m.id}
-            message={m}
-            onRetry={(id) => void handleRetry(id)}
-            onReply={setReplyTo}
-            onQuoteClick={scrollToMessage}
-            quoteAvailable={!m.plain?.quotedMessageId || messageIds.has(m.plain.quotedMessageId)}
-            showSender={shouldShowSender(index)}
-            senderLabel={m.fromPhone ? labelForPhone(m.fromPhone) : undefined}
-            senderColor={m.fromPhone ? senderColorClass(m.fromPhone) : undefined}
-            swipeToReply={swipeToReply}
-          />
+          <div key={m.id}>
+            {index === firstUnreadIndex && (
+              <div
+                className="flex items-center gap-2 px-3 py-1.5"
+                style={{
+                  marginLeft: "max(0.75rem, env(safe-area-inset-left))",
+                  marginRight: "max(0.75rem, env(safe-area-inset-right))",
+                }}
+              >
+                <div className="h-px flex-1 bg-sky-200/90" />
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[11px] font-medium text-sky-700">
+                  Непрочитанные сообщения
+                </span>
+                <div className="h-px flex-1 bg-sky-200/90" />
+              </div>
+            )}
+            <MessageBubble
+              message={m}
+              onRetry={(id) => void handleRetry(id)}
+              onReply={setReplyTo}
+              onQuoteClick={scrollToMessage}
+              quoteAvailable={!m.plain?.quotedMessageId || messageIds.has(m.plain.quotedMessageId)}
+              showSender={shouldShowSender(index)}
+              senderLabel={m.fromPhone ? labelForPhone(m.fromPhone) : undefined}
+              senderColor={m.fromPhone ? senderColorClass(m.fromPhone) : undefined}
+              swipeToReply={swipeToReply}
+            />
+          </div>
         ))}
         <div ref={bottomRef} className="h-1" />
       </div>
