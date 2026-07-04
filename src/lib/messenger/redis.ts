@@ -140,3 +140,16 @@ export async function redisExpire(key: string, seconds: number): Promise<void> {
     await redis.expire(key, seconds);
   }
 }
+
+export async function redisIncr(key: string): Promise<number> {
+  const redis = getMessengerRedis();
+  if (redis) {
+    const next = await redis.incr(key);
+    return typeof next === "number" ? next : Number(next);
+  }
+  const mem = memoryStore();
+  const prev = Number(mem.get(key) ?? "0");
+  const next = Number.isFinite(prev) ? prev + 1 : 1;
+  mem.set(key, String(next));
+  return next;
+}

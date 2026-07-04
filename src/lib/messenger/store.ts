@@ -24,6 +24,7 @@ import {
   parseRedisJsonValue,
   redisDel,
   redisExpire,
+  redisIncr,
   redisGet,
   redisGetJson,
   redisLpush,
@@ -157,11 +158,14 @@ async function pushEnvelope(
   msgTtl: number,
 ): Promise<number> {
   const now = Date.now();
+  const versionCounterKey = `${metaKey}:version`;
+  const nextVersion = await redisIncr(versionCounterKey);
   const existing = await getMeta();
   const meta = existing ?? { version: 0, updatedAt: now };
-  meta.version += 1;
+  meta.version = Math.max(meta.version + 1, nextVersion);
   meta.updatedAt = now;
   await redisSet(metaKey, JSON.stringify(meta), metaTtl);
+  await redisExpire(versionCounterKey, metaTtl);
   await redisLpush(messagesKey, JSON.stringify(envelope));
   await redisExpire(messagesKey, msgTtl);
   return meta.version;
