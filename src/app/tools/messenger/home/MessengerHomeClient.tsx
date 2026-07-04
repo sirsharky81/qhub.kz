@@ -209,6 +209,20 @@ export function MessengerHomeClient() {
         void refreshDialogsAndUnread();
       }
     }, 7000);
+    const onFocus = () => {
+      void refreshDialogsAndUnread();
+    };
+    const onPageShow = () => {
+      void refreshDialogsAndUnread();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void refreshDialogsAndUnread();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisibility);
     const removeResume = onAppResume(() => {
       void refreshDialogsAndUnread();
     });
@@ -216,6 +230,9 @@ export function MessengerHomeClient() {
       cancelled = true;
       unsubUnread();
       clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisibility);
       removeResume();
     };
   }, [router]);
