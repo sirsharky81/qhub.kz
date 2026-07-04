@@ -91,7 +91,7 @@ const INITIAL_DEBUG: CallDebugInfo = {
   remoteTrackMuted: true,
   hasRemoteTrack: false,
   receiverCount: 0,
-  speakerOn: true,
+  speakerOn: false,
   mediaRoute: "default",
   audioSessionState: null,
 };
@@ -102,7 +102,7 @@ const INITIAL_STATE: CallState = {
   channel: null,
   peerPhone: null,
   muted: false,
-  speakerOn: true,
+  speakerOn: false,
   durationSec: 0,
   errorMessage: null,
   endReason: null,
@@ -185,7 +185,7 @@ export class CallController {
         callId: data.session.callId,
         channel: this.channel,
         peerPhone: this.peerPhone,
-        speakerOn: !isIOSDevice(),
+        speakerOn: false,
         endReason: null,
         errorMessage: null,
       });
@@ -210,7 +210,7 @@ export class CallController {
 
   async startOutgoing(): Promise<void> {
     if (this.isInCall()) return;
-    primeCallMediaPlayback(!isIOSDevice());
+    primeCallMediaPlayback(false);
 
     const result = await initiateCall({
       channel: this.channel,
@@ -239,7 +239,7 @@ export class CallController {
       callId: result.callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
-      speakerOn: !isIOSDevice(),
+      speakerOn: false,
       endReason: null,
       errorMessage: null,
     });
@@ -271,7 +271,7 @@ export class CallController {
 
   async acceptIncoming(): Promise<void> {
     if (this.state.phase !== "incoming" || !this.state.callId) return;
-    primeCallMediaPlayback(!isIOSDevice());
+    primeCallMediaPlayback(false);
 
     this.clearRingTimeout();
     this.localAnswerSdp = null;
@@ -357,7 +357,7 @@ export class CallController {
       callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
-      speakerOn: !isIOSDevice(),
+      speakerOn: false,
       endReason: null,
       errorMessage: null,
     });

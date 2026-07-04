@@ -24,12 +24,14 @@ public class CallAudioPlugin extends Plugin {
     public void prepare(PluginCall call) {
         AudioManager am = audioManager();
         am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+        routeToEarpiece(am);
+        setProximityEnabledInternal(true);
         call.resolve();
     }
 
     @PluginMethod
     public void setSpeaker(PluginCall call) {
-        boolean enabled = call.getBoolean("enabled", true);
+        boolean enabled = call.getBoolean("enabled", false);
         AudioManager am = audioManager();
         am.setMode(AudioManager.MODE_IN_COMMUNICATION);
 
@@ -39,9 +41,7 @@ public class CallAudioPlugin extends Plugin {
                     am.setSpeakerphoneOn(true);
                 }
             } else {
-                if (!setCommunicationDevice(am, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)) {
-                    am.setSpeakerphoneOn(false);
-                }
+                routeToEarpiece(am);
             }
         } else {
             am.setSpeakerphoneOn(enabled);
@@ -114,5 +114,15 @@ public class CallAudioPlugin extends Plugin {
             }
         }
         return false;
+    }
+
+    private void routeToEarpiece(AudioManager am) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (!setCommunicationDevice(am, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)) {
+                am.setSpeakerphoneOn(false);
+            }
+        } else {
+            am.setSpeakerphoneOn(false);
+        }
     }
 }

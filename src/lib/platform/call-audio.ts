@@ -37,6 +37,7 @@ export async function prepareCallAudioOutput(): Promise<void> {
   if (!hasNativeCallAudioRouting()) return;
   try {
     await CallAudioNative.prepare();
+    await CallAudioNative.setSpeaker({ enabled: false });
   } catch {
     // Native plugin missing in older Android builds.
   }
