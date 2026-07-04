@@ -390,6 +390,13 @@ export function MessengerHomeClient() {
     clearLongPressTimer();
     longPressTimerRef.current = window.setTimeout(() => {
       suppressLinkClickRef.current = true;
+      if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+        try {
+          navigator.vibrate(10);
+        } catch {
+          // vibration is optional UX enhancement
+        }
+      }
       setLongPressDialogId(dialog.id);
     }, LONG_PRESS_MS);
   }
