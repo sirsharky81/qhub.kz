@@ -104,7 +104,7 @@ function MessengerChatInner() {
     if (phase !== "waiting" || !myPhone) return;
 
     let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let timeoutId: number | undefined;
 
     async function poll() {
       if (cancelled) return;
