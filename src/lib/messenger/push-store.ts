@@ -40,6 +40,10 @@ export async function touchMessengerPresence(phone: string): Promise<void> {
   await setMessengerPresence(phone, channel);
 }
 
+export async function setMessengerGlobalPresence(phone: string): Promise<void> {
+  await setMessengerPresence(phone, MESSENGER_GLOBAL_PRESENCE_CHANNEL);
+}
+
 export async function clearMessengerPresence(phone: string): Promise<void> {
   await redisDel(presenceKey(phone));
 }

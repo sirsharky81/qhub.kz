@@ -3,7 +3,7 @@ import { getPinStatus } from "@/lib/messenger/auth-service";
 import { getMessengerSession } from "@/lib/messenger/session";
 import { isPhoneWhitelisted } from "@/lib/messenger/store";
 import { normalizeKzPhone } from "@/lib/messenger/phone";
-import { touchMessengerPresence } from "@/lib/messenger/push-store";
+import { setMessengerGlobalPresence } from "@/lib/messenger/push-store";
 
 export async function GET() {
   const session = await getMessengerSession();
@@ -18,7 +18,7 @@ export async function GET() {
   }
 
   const pinStatus = await getPinStatus(phone);
-  await touchMessengerPresence(phone);
+  await setMessengerGlobalPresence(phone);
   return NextResponse.json({
     allowed: true,
     phone,
