@@ -12,6 +12,7 @@ interface MessengerHygieneSnapshot {
     callTtlSec: number;
     presenceTtlSec: number;
     pushSubscriptionTtlDays: number;
+    dialogPrefsTtlDays: number;
   };
   warnings: string[];
 }
@@ -77,6 +78,7 @@ export function MessengerStorageHygieneSection() {
             <Kv label="Call TTL" value={`${snapshot.config.callTtlSec}s`} />
             <Kv label="Presence TTL" value={`${snapshot.config.presenceTtlSec}s`} />
             <Kv label="Push subs TTL" value={`${snapshot.config.pushSubscriptionTtlDays}d`} />
+            <Kv label="Dialog prefs TTL" value={`${snapshot.config.dialogPrefsTtlDays}d`} />
           </div>
 
           {snapshot.warnings.length > 0 ? (

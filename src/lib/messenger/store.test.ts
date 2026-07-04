@@ -3,11 +3,13 @@ import { deriveDmChatId, normalizeKzPhone } from "./phone";
 import {
   applyDmUnreadOnMessage,
   getDmDialogSummariesForUser,
+  loadDialogPrefs,
   markDmDialogRead,
   pushDmEnvelope,
+  setDialogPrefs,
   touchDmUserIndex,
 } from "./store";
-import { REDIS_DM_PREFIX, REDIS_DM_USER_INDEX_PREFIX } from "./constants";
+import { REDIS_DIALOG_PREFS_PREFIX, REDIS_DM_PREFIX, REDIS_DM_USER_INDEX_PREFIX } from "./constants";
 import { redisDel, redisGetJson, redisSet } from "./redis";
 
 function dmIndexKey(phone: string): string {
@@ -27,6 +29,7 @@ async function cleanupDmKeys(chatId: string, ...phones: string[]): Promise<void>
     dmMessagesKey(chatId),
     dmMetaKey(chatId),
     ...phones.map((p) => dmIndexKey(p)),
+    ...phones.map((p) => `${REDIS_DIALOG_PREFS_PREFIX}${normalizeKzPhone(p)}`),
   );
 }
 
@@ -167,5 +170,19 @@ describe("messenger dm unread cursor", () => {
     expect(summaries[1]?.chatId).toBe(chatId);
 
     await cleanupDmKeys(chat2, me, peer2);
+  });
+
+  it("stores dialog pin/archive prefs per user", async () => {
+    const pinned = await setDialogPrefs(me, chatId, { pinnedAt: 7777 });
+    expect(pinned.pinnedAt).toBe(7777);
+    expect(pinned.archivedAt).toBeNull();
+
+    const archived = await setDialogPrefs(me, chatId, { archivedAt: 8888, pinnedAt: null });
+    expect(archived.pinnedAt).toBeNull();
+    expect(archived.archivedAt).toBe(8888);
+
+    const prefs = await loadDialogPrefs(me);
+    expect(prefs[chatId]?.archivedAt).toBe(8888);
+    expect(prefs[chatId]?.pinnedAt).toBeNull();
   });
 });

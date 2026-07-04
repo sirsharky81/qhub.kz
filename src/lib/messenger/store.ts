@@ -3,7 +3,9 @@ import {
   DEFAULT_MAX_DM_ENVELOPES,
   DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+  MESSENGER_DIALOG_PREFS_TTL_SEC,
   REDIS_AUTH_PREFIX,
+  REDIS_DIALOG_PREFS_PREFIX,
   REDIS_DM_PREFIX,
   REDIS_DM_USER_INDEX_PREFIX,
   REDIS_PUBKEY_PREFIX,
@@ -240,7 +242,11 @@ type DmUserIndexEntry = {
   lastMessageFromMe?: boolean;
   unreadCount?: number;
   latestUnreadAt?: number | null;
+  pinnedAt?: number | null;
+  archivedAt?: number | null;
 };
+
+type UserDialogPrefsIndex = Record<string, { pinnedAt: number | null; archivedAt: number | null }>;
 
 async function loadDmUserIndex(phone: string): Promise<Record<string, DmUserIndexEntry>> {
   return (await redisGetJson<Record<string, DmUserIndexEntry>>(dmUserIndexKey(phone))) ?? {};
@@ -248,6 +254,35 @@ async function loadDmUserIndex(phone: string): Promise<Record<string, DmUserInde
 
 async function saveDmUserIndex(phone: string, index: Record<string, DmUserIndexEntry>): Promise<void> {
   await redisSet(dmUserIndexKey(phone), JSON.stringify(index), msgTtlSec());
+}
+
+function dialogPrefsKey(phone: string): string {
+  return `${REDIS_DIALOG_PREFS_PREFIX}${normalizeKzPhone(phone)}`;
+}
+
+export async function loadDialogPrefs(phone: string): Promise<UserDialogPrefsIndex> {
+  return (await redisGetJson<UserDialogPrefsIndex>(dialogPrefsKey(phone))) ?? {};
+}
+
+export async function saveDialogPrefs(phone: string, index: UserDialogPrefsIndex): Promise<void> {
+  await redisSet(dialogPrefsKey(phone), JSON.stringify(index), MESSENGER_DIALOG_PREFS_TTL_SEC);
+}
+
+export async function setDialogPrefs(
+  phone: string,
+  dialogId: string,
+  patch: { pinnedAt?: number | null; archivedAt?: number | null },
+): Promise<{ pinnedAt: number | null; archivedAt: number | null }> {
+  const me = normalizeKzPhone(phone);
+  const existing = await loadDialogPrefs(me);
+  const prev = existing[dialogId] ?? { pinnedAt: null, archivedAt: null };
+  const next = {
+    pinnedAt: patch.pinnedAt !== undefined ? patch.pinnedAt : prev.pinnedAt,
+    archivedAt: patch.archivedAt !== undefined ? patch.archivedAt : prev.archivedAt,
+  };
+  existing[dialogId] = next;
+  await saveDialogPrefs(me, existing);
+  return next;
 }
 
 export async function getDmMeta(chatId: string): Promise<ChannelMeta | null> {
@@ -288,6 +323,8 @@ export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise
       lastMessageFromMe: prev?.lastMessageFromMe ?? false,
       unreadCount: Math.max(0, prev?.unreadCount ?? 0),
       latestUnreadAt: prev?.latestUnreadAt ?? null,
+      pinnedAt: prev?.pinnedAt ?? null,
+      archivedAt: prev?.archivedAt ?? null,
     };
     await saveDmUserIndex(me, existing);
   };
@@ -333,6 +370,8 @@ export async function applyDmUnreadOnMessage(params: {
       latestUnreadAt: incrementUnread
         ? Math.max(prev?.latestUnreadAt ?? 0, ts)
         : (prev?.latestUnreadAt ?? null),
+      pinnedAt: prev?.pinnedAt ?? null,
+      archivedAt: prev?.archivedAt ?? null,
     };
     await saveDmUserIndex(me, existing);
   };
@@ -352,6 +391,8 @@ export async function markDmDialogRead(phone: string, chatId: string): Promise<v
     ...entry,
     unreadCount: 0,
     latestUnreadAt: null,
+    pinnedAt: entry.pinnedAt ?? null,
+    archivedAt: entry.archivedAt ?? null,
   };
   await saveDmUserIndex(me, existing);
 }
@@ -372,6 +413,8 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
     let lastMessageFromMe = Boolean(entry.lastMessageFromMe);
     let unreadCount = entry.unreadCount;
     let latestUnreadAt = entry.latestUnreadAt;
+    let pinnedAt = entry.pinnedAt ?? null;
+    let archivedAt = entry.archivedAt ?? null;
 
     const needsBackfill =
       unreadCount === undefined ||
@@ -415,6 +458,8 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
         lastMessageFromMe,
         unreadCount,
         latestUnreadAt,
+        pinnedAt,
+        archivedAt,
       };
       touchedIndex = true;
     }
@@ -427,6 +472,8 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
       lastMessageFromMe,
       latestUnreadAt: latestUnreadAt ?? null,
       unreadCount: Math.max(0, unreadCount ?? 0),
+      pinnedAt,
+      archivedAt,
     });
   }
 

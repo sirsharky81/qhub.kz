@@ -163,14 +163,43 @@ export interface DmDialogsResponseItem {
   latestUnreadAt: number | null;
   unreadCount: number;
   peerOnline: boolean;
+  pinnedAt: number | null;
+  archivedAt: number | null;
 }
 
-export async function fetchDmDialogs(): Promise<DmDialogsResponseItem[]> {
+export async function fetchDmDialogs(): Promise<{
+  dialogs: DmDialogsResponseItem[];
+  dialogPrefs: Record<string, { pinnedAt: number | null; archivedAt: number | null }>;
+}> {
   const url = `/api/messenger/dialogs?ts=${Date.now()}`;
   const res = await platformFetch(url, { cache: "no-store" });
-  if (!res.ok) return [];
-  const data = (await res.json()) as { dialogs?: DmDialogsResponseItem[] };
-  return data.dialogs ?? [];
+  if (!res.ok) return { dialogs: [], dialogPrefs: {} };
+  const data = (await res.json()) as {
+    dialogs?: DmDialogsResponseItem[];
+    dialogPrefs?: Record<string, { pinnedAt: number | null; archivedAt: number | null }>;
+  };
+  return { dialogs: data.dialogs ?? [], dialogPrefs: data.dialogPrefs ?? {} };
+}
+
+export async function updateDialogPrefs(input: {
+  dialogId: string;
+  pinned?: boolean;
+  archived?: boolean;
+}): Promise<{ ok: boolean; pinnedAt?: number | null; archivedAt?: number | null }> {
+  const res = await platformFetch("/api/messenger/dialogs/prefs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    prefs?: { pinnedAt: number | null; archivedAt: number | null };
+  };
+  return {
+    ok: !!data.ok && res.ok,
+    pinnedAt: data.prefs?.pinnedAt,
+    archivedAt: data.prefs?.archivedAt,
+  };
 }
 
 export async function markDmDialogRead(chatId: string): Promise<void> {

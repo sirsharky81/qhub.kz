@@ -103,6 +103,11 @@ export interface LocalDialog {
   displayName?: string;
 }
 
+export interface DialogPrefs {
+  pinnedAt: number | null;
+  archivedAt: number | null;
+}
+
 export interface DmDialogSummary {
   chatId: string;
   peerPhone: string;
@@ -111,6 +116,8 @@ export interface DmDialogSummary {
   lastMessageFromMe: boolean;
   latestUnreadAt: number | null;
   unreadCount: number;
+  pinnedAt: number | null;
+  archivedAt: number | null;
 }
 
 export type CallSignalType = "offer" | "answer" | "ice" | "reject" | "end" | "busy";

@@ -6,6 +6,7 @@ export const REDIS_AUTH_PREFIX = "qhub:messenger:auth:";
 export const REDIS_PUBKEY_PREFIX = "qhub:messenger:pubkey:";
 export const REDIS_DM_PREFIX = "qhub:messenger:dm:";
 export const REDIS_DM_USER_INDEX_PREFIX = "qhub:messenger:dm:user:";
+export const REDIS_DIALOG_PREFS_PREFIX = "qhub:messenger:dialogs:prefs:";
 export const REDIS_ROOM_PREFIX = "qhub:messenger:room:";
 
 export const PIN_LENGTH = 4;
@@ -26,6 +27,7 @@ export const DEFAULT_MSG_TTL_HOURS = 48;
 export const DEFAULT_ROOM_INACTIVE_TTL_HOURS = 1;
 export const DEFAULT_MAX_DM_ENVELOPES = 2000;
 export const DEFAULT_MAX_ROOM_ENVELOPES = 4000;
+export const MESSENGER_DIALOG_PREFS_TTL_SEC = 60 * 60 * 24 * 120; // 120 days
 export const HEARTBEAT_STALE_MS = 60 * 1000;
 export const ROOM_INACTIVE_MS = DEFAULT_ROOM_INACTIVE_TTL_HOURS * 60 * 60 * 1000;
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_MSG_TTL_HOURS,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+  MESSENGER_DIALOG_PREFS_TTL_SEC,
   MESSENGER_PRESENCE_TTL_SEC,
   MESSENGER_PUSH_TTL_SEC,
 } from "./constants";
@@ -24,6 +25,7 @@ export interface MessengerHygieneSnapshot {
     callTtlSec: number;
     presenceTtlSec: number;
     pushSubscriptionTtlDays: number;
+    dialogPrefsTtlDays: number;
   };
   warnings: string[];
 }
@@ -47,6 +49,7 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
   );
   const callTtlSec = parsePositiveInt(process.env.MESSENGER_CALL_TTL_SEC, DEFAULT_CALL_TTL_SEC);
   const pushSubscriptionTtlDays = Math.round(MESSENGER_PUSH_TTL_SEC / (60 * 60 * 24));
+  const dialogPrefsTtlDays = Math.round(MESSENGER_DIALOG_PREFS_TTL_SEC / (60 * 60 * 24));
 
   const warnings: string[] = [];
   if (messageTtlHours > 72) {
@@ -75,6 +78,9 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
   if (MESSENGER_PUSH_TTL_SEC > 60 * 60 * 24 * 30) {
     warnings.push("TTL push-подписок больше 30 дней, это может накапливать неактивные endpoints.");
   }
+  if (dialogPrefsTtlDays > 180) {
+    warnings.push("TTL dialog prefs больше 180 дней: проверьте, нужен ли такой срок хранения.");
+  }
 
   return {
     generatedAt: Date.now(),
@@ -86,6 +92,7 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
       callTtlSec,
       presenceTtlSec: MESSENGER_PRESENCE_TTL_SEC,
       pushSubscriptionTtlDays,
+      dialogPrefsTtlDays,
     },
     warnings,
   };
