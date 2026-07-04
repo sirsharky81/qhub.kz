@@ -97,6 +97,8 @@ const INITIAL_DEBUG: CallDebugInfo = {
   speakerOn: false,
   mediaRoute: "default",
   audioSessionState: null,
+  networkPath: null,
+  networkProtocol: null,
 };
 
 const INITIAL_STATE: CallState = {
@@ -148,6 +150,7 @@ export class CallController {
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
   private setupWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   private interruptionUnsub: (() => void) | null = null;
+  private networkDebugTimer: ReturnType<typeof setInterval> | null = null;
   private transportPhase: TransportPhase = "new";
   private sessionId = "s-init";
   private journal = new CallJournal(() => ({
@@ -573,6 +576,7 @@ export class CallController {
       },
       onConnectionState: (connState) => {
         this.patchDebug({ connectionState: connState });
+        void this.refreshNetworkPathDebug();
         this.handlePeerConnected(connState === "connected");
         if (connState === "failed") {
           void this.cleanup(
@@ -583,6 +587,7 @@ export class CallController {
       },
       onIceConnectionState: (iceState) => {
         this.patchDebug({ iceConnectionState: iceState });
+        void this.refreshNetworkPathDebug();
         if (iceState === "checking") {
           this.setTransportPhase("ice_connecting");
           this.journal.record("ICE_CONNECTING");
@@ -816,6 +821,26 @@ export class CallController {
     this.patchDebug(d);
   }
 
+  private async refreshNetworkPathDebug(): Promise<void> {
+    if (!this.pc) return;
+    const d = await this.pc.getNetworkPathDebug();
+    this.patchDebug(d);
+  }
+
+  private startNetworkDebugTimer(): void {
+    this.stopNetworkDebugTimer();
+    this.networkDebugTimer = setInterval(() => {
+      void this.refreshNetworkPathDebug();
+    }, 2000);
+  }
+
+  private stopNetworkDebugTimer(): void {
+    if (this.networkDebugTimer) {
+      clearInterval(this.networkDebugTimer);
+      this.networkDebugTimer = null;
+    }
+  }
+
   private startCallAudioWatch(): void {
     if (!isIOSDevice()) return;
     this.stopCallAudioWatch();
@@ -859,6 +884,7 @@ export class CallController {
     this.clearSetupWatchdog();
     this.patch({ phase: "active" });
     this.startDurationTimer();
+    this.startNetworkDebugTimer();
     this.startCallAudioWatch();
     void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
       speakerOn: this.state.speakerOn,
@@ -870,6 +896,7 @@ export class CallController {
     getCallSounds().stop();
     prepareAudioSessionForCall();
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
+    void this.refreshNetworkPathDebug();
     // Faster post-connect retries reduce the "caller hears later" gap on weak
     // networks and iOS Safari resume quirks.
     for (const delay of [120, 320, 700, 1400]) {
@@ -1277,6 +1304,7 @@ export class CallController {
     this.stopHeartbeat();
     this.stopElapsedTimer();
     this.stopSdpKeepalive();
+    this.stopNetworkDebugTimer();
     this.clearRingTimeout();
     this.clearIceTimeout();
     this.clearSetupWatchdog();

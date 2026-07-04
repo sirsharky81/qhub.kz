@@ -57,6 +57,8 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
       {row("роль", debug.isCaller ? "звонящий" : "принимающий")}
       {phase === "active" && (
         <>
+          {row("ICE path", debug.networkPath ?? "—")}
+          {row("ICE proto", debug.networkProtocol ?? "—")}
           {row("hasRemoteTrack", debug.hasRemoteTrack)}
           {row("receivers", String(debug.receiverCount))}
           {row("speakerOn", debug.speakerOn)}
@@ -70,6 +72,8 @@ function DebugPanel({ phase, debug }: { phase: string; debug: CallDebugInfo }) {
       {(phase === "outgoing" || phase === "connecting") && (
         <>
           {row("turn", debug.turnSource ?? "—")}
+          {row("ICE path", debug.networkPath ?? "—")}
+          {row("ICE proto", debug.networkProtocol ?? "—")}
           {row("ICE", debug.iceConnectionState ?? "—")}
           {row("conn", debug.connectionState ?? "—")}
           {row("remoteDesc", debug.hasRemoteDescription)}

@@ -126,6 +126,69 @@ export class CallPeerConnection {
     };
   }
 
+  async getNetworkPathDebug(): Promise<{
+    networkPath: string | null;
+    networkProtocol: string | null;
+  }> {
+    if (!this.pc) {
+      return { networkPath: null, networkProtocol: null };
+    }
+
+    try {
+      const stats = await this.pc.getStats();
+      let selectedPair: RTCStats | null = null;
+
+      for (const report of stats.values()) {
+        if (report.type === "transport") {
+          const pairId = (report as { selectedCandidatePairId?: string }).selectedCandidatePairId;
+          if (pairId && stats.has(pairId)) {
+            selectedPair = stats.get(pairId) ?? null;
+            break;
+          }
+        }
+      }
+
+      if (!selectedPair) {
+        for (const report of stats.values()) {
+          if (report.type === "candidate-pair" && (report as { selected?: boolean }).selected) {
+            selectedPair = report;
+            break;
+          }
+        }
+      }
+
+      if (!selectedPair || selectedPair.type !== "candidate-pair") {
+        return { networkPath: null, networkProtocol: null };
+      }
+
+      const pair = selectedPair as {
+        localCandidateId?: string;
+        remoteCandidateId?: string;
+      };
+      const local =
+        pair.localCandidateId && stats.has(pair.localCandidateId)
+          ? (stats.get(pair.localCandidateId) as { candidateType?: string; protocol?: string } | undefined)
+          : undefined;
+      const remote =
+        pair.remoteCandidateId && stats.has(pair.remoteCandidateId)
+          ? (stats.get(pair.remoteCandidateId) as { candidateType?: string; protocol?: string } | undefined)
+          : undefined;
+
+      const localType = local?.candidateType ?? null;
+      const remoteType = remote?.candidateType ?? null;
+      const protocol = local?.protocol ?? remote?.protocol ?? null;
+
+      const localLabel = localType ? `local:${localType}` : "local:?";
+      const remoteLabel = remoteType ? `remote:${remoteType}` : "remote:?";
+      return {
+        networkPath: `${localLabel} -> ${remoteLabel}`,
+        networkProtocol: protocol,
+      };
+    } catch {
+      return { networkPath: null, networkProtocol: null };
+    }
+  }
+
   /** Safari often skips ontrack on the caller — attach from RTCRtpReceiver instead. */
   syncRemoteAudioFromPeer(): boolean {
     if (!this.pc) return false;

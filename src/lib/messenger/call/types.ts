@@ -56,6 +56,8 @@ export interface CallDebugInfo {
   speakerOn: boolean;
   mediaRoute: string;
   audioSessionState: string | null;
+  networkPath: string | null;
+  networkProtocol: string | null;
 }
 
 export interface CallState {
