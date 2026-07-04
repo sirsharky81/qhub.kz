@@ -137,4 +137,35 @@ describe("messenger dm unread cursor", () => {
     expect(saved?.[chatId]?.unreadCount).toBe(1);
     expect(saved?.[chatId]?.lastMessageType).toBe("file");
   });
+
+  it("sorts dialogs by unread recency first", async () => {
+    const peer2 = "+77011110003";
+    const chat2 = deriveDmChatId(me, peer2);
+    await cleanupDmKeys(chat2, me, peer2);
+
+    await touchDmUserIndex(chatId, 5000);
+    await touchDmUserIndex(chat2, 5100);
+
+    await applyDmUnreadOnMessage({
+      chatId,
+      senderPhone: peer,
+      type: "text",
+      ts: 5200,
+      recipientViewingThisChat: false,
+    });
+
+    await applyDmUnreadOnMessage({
+      chatId: chat2,
+      senderPhone: peer2,
+      type: "text",
+      ts: 5300,
+      recipientViewingThisChat: false,
+    });
+
+    const summaries = await getDmDialogSummariesForUser(me);
+    expect(summaries[0]?.chatId).toBe(chat2);
+    expect(summaries[1]?.chatId).toBe(chatId);
+
+    await cleanupDmKeys(chat2, me, peer2);
+  });
 });
