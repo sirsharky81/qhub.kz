@@ -29,7 +29,7 @@ import {
   saveHistoryMessage,
   updateHistoryDeliveryStatus,
 } from "@/lib/messenger/history-db";
-import type { ChannelEnvelope, EncryptedMessagePayload } from "@/lib/messenger/types";
+import type { ChannelEnvelope, DeliveryStatus, EncryptedMessagePayload } from "@/lib/messenger/types";
 import { generateMessageId } from "@/lib/messenger/codes";
 import { useCoarsePointer } from "@/hooks/useCoarsePointer";
 import { blobToBase64, compressImageIfNeeded } from "@/lib/messenger/files";
@@ -99,6 +99,7 @@ export function ChatView({
   const seenIds = useRef(new Set<string>());
   const sentReceipts = useRef(new Set<string>());
   const readSentRef = useRef(new Set<string>());
+  const pendingOwnReceipts = useRef(new Map<string, "delivered" | "read">());
   const messagesRef = useRef<DisplayMessage[]>([]);
   const storageKeyRef = useRef(storageKey);
   storageKeyRef.current = storageKey;
@@ -188,6 +189,10 @@ export function ChatView({
   }, [channel, isRoom]);
 
   useEffect(() => {
+    pendingOwnReceipts.current.clear();
+  }, [channel]);
+
+  useEffect(() => {
     if (isRoom && roomId) {
       clearRoomUnread(`room:${roomId}`);
     }
@@ -217,19 +222,37 @@ export function ChatView({
   const handleReceipt = useCallback(
     async (receipt: { refMessageId: string; receipt: "delivered" | "read"; from: string }) => {
       if (receipt.from === myPhone) return;
+
+      const rank = (status: "delivered" | "read") => (status === "read" ? 2 : 1);
+      const pending = pendingOwnReceipts.current.get(receipt.refMessageId);
+      if (!pending || rank(receipt.receipt) > rank(pending)) {
+        pendingOwnReceipts.current.set(receipt.refMessageId, receipt.receipt);
+        if (pendingOwnReceipts.current.size > 500) {
+          const oldestKey = pendingOwnReceipts.current.keys().next().value;
+          if (oldestKey) pendingOwnReceipts.current.delete(oldestKey);
+        }
+      }
+
+      const statusFromReceipt = (value: "delivered" | "read"): DeliveryStatus =>
+        value === "read" ? "read" : "delivered";
+
+      let didApply = false;
       setMessages((prev) => {
         const target = prev.find((m) => m.id === receipt.refMessageId && m.mine);
         if (!target) return prev;
-        const nextStatus = receipt.receipt === "read" ? "read" : "delivered";
+        const nextStatus = statusFromReceipt(receipt.receipt);
         if (target.status === "read") return prev;
         if (target.status === "delivered" && nextStatus === "delivered") return prev;
+        didApply = true;
         return prev.map((m) =>
           m.id === receipt.refMessageId ? { ...m, status: nextStatus } : m,
         );
       });
-      const target = messagesRef.current.find((m) => m.id === receipt.refMessageId && m.mine);
-      if (target && persistHistory) {
-        const nextStatus = receipt.receipt === "read" ? "read" : "delivered";
+      if (!didApply) return;
+
+      pendingOwnReceipts.current.delete(receipt.refMessageId);
+      if (persistHistory) {
+        const nextStatus = statusFromReceipt(receipt.receipt);
         await updateHistoryDeliveryStatus(receipt.refMessageId, nextStatus);
       }
     },
@@ -250,6 +273,12 @@ export function ChatView({
         const msg = envelope;
         if (seenIds.current.has(msg.id)) continue;
         if (msg.from === myPhone) {
+          const consumePendingOwnStatus = (messageId: string): DeliveryStatus => {
+            const pending = pendingOwnReceipts.current.get(messageId);
+            if (!pending) return "sent";
+            pendingOwnReceipts.current.delete(messageId);
+            return pending === "read" ? "read" : "delivered";
+          };
           const clientMessageId =
             typeof msg.clientMessageId === "string" ? msg.clientMessageId.trim() : "";
           if (clientMessageId) {
@@ -257,6 +286,7 @@ export function ChatView({
               (m) => m.id === clientMessageId && m.mine,
             );
             if (hasPendingLocal) {
+              const nextStatus = consumePendingOwnStatus(msg.id);
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === clientMessageId
@@ -265,13 +295,13 @@ export function ChatView({
                         id: msg.id,
                         ts: msg.ts,
                         fromPhone: msg.from,
-                        status: m.status === "read" ? "read" : "sent",
+                        status: m.status === "read" ? "read" : nextStatus,
                       }
                     : m,
                 ),
               );
               if (persistHistory) {
-                await rekeyHistoryMessage(clientMessageId, msg.id, "sent");
+                await rekeyHistoryMessage(clientMessageId, msg.id, nextStatus);
               }
               seenIds.current.add(clientMessageId);
               seenIds.current.add(msg.id);
@@ -281,7 +311,8 @@ export function ChatView({
           if (seenIds.current.has(msg.id)) continue;
           const ownDisplay = await decryptPayload(msg);
           if (!ownDisplay) continue;
-          const own = { ...ownDisplay, mine: true, status: "sent" as const };
+          const ownStatus = consumePendingOwnStatus(msg.id);
+          const own = { ...ownDisplay, mine: true, status: ownStatus };
           setMessages((prev) => (prev.some((m) => m.id === own.id) ? prev : [...prev, own]));
           if (persistHistory) await persistMessage(own);
           seenIds.current.add(msg.id);
@@ -510,16 +541,22 @@ export function ChatView({
         }
         seenIds.current.add(localId);
         seenIds.current.add(result.messageId);
+        const pendingReceipt = pendingOwnReceipts.current.get(result.messageId);
+        const sentStatus: DeliveryStatus =
+          pendingReceipt === "read" ? "read" : pendingReceipt === "delivered" ? "delivered" : "sent";
+        if (pendingReceipt) {
+          pendingOwnReceipts.current.delete(result.messageId);
+        }
         const sent: DisplayMessage = {
           ...optimistic,
           id: result.messageId,
-          status: "sent",
+          status: sentStatus,
         };
         setMessages((prev) =>
           prev.map((m) => (m.id === localId ? sent : m)),
         );
         if (persistHistory) {
-          await rekeyHistoryMessage(localId, result.messageId, "sent");
+          await rekeyHistoryMessage(localId, result.messageId, sentStatus);
         }
       } catch {
         setMessages((prev) =>
