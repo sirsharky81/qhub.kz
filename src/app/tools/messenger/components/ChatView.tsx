@@ -314,12 +314,27 @@ export function ChatView({
 
   useEffect(() => {
     let cancelled = false;
+    let timerId: number | undefined;
+    let inFlight = false;
+
     const intervalMs = () => {
       if (inCall) return 12000;
       return document.hidden ? 12000 : 2000;
     };
 
+    const scheduleNext = () => {
+      if (cancelled) return;
+      if (timerId !== undefined) {
+        clearTimeout(timerId);
+      }
+      timerId = window.setTimeout(() => {
+        void tick();
+      }, intervalMs());
+    };
+
     async function tick() {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       try {
         const data = await pollChannel(channel, versionRef.current, !!isRoom);
         if (cancelled) return;
@@ -347,15 +362,28 @@ export function ChatView({
         }
       } catch {
         setConnection("reconnecting");
+      } finally {
+        inFlight = false;
+        scheduleNext();
       }
     }
 
     void tick();
-    const id = window.setInterval(() => void tick(), intervalMs());
     const removeResume = onAppResume(() => void tick());
+    const onVisibility = () => {
+      if (document.hidden) {
+        scheduleNext();
+        return;
+      }
+      void tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timerId !== undefined) {
+        clearTimeout(timerId);
+      }
+      document.removeEventListener("visibilitychange", onVisibility);
       removeResume();
     };
   }, [channel, ingestEnvelopes, isRoom, onRoomEnded, inCall]);
