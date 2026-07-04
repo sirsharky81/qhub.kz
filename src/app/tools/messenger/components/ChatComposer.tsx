@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useKeyboardOpen } from "@/lib/messenger/use-visual-viewport";
 import { MAX_AUDIO_BLOB_BYTES, MAX_TEXT_LENGTH, MAX_VIDEO_BLOB_BYTES, MIN_MEDIA_DURATION_MS } from "@/lib/messenger/constants";
 import { compressVideoIfNeeded } from "@/lib/messenger/media-compress";
 import { ensureMediaPermissions, mediaPermissionErrorMessage } from "@/lib/platform/media-access";
+import { isIOSDevice } from "@/lib/platform/device";
 import {
   canRecordMedia,
   createMediaRecorderSession,
@@ -174,6 +175,24 @@ export function ChatComposer({
   // When the keyboard is open it physically covers that zone, so no extra padding
   // is needed — the inner shell div is already sized to the visible area above the keyboard.
   const bottomPadding = keyboardOpen ? "0px" : "env(safe-area-inset-bottom, 0px)";
+
+  useEffect(() => {
+    if (!keyboardOpen || !isIOSDevice()) return;
+    const vv = window.visualViewport;
+    requestAnimationFrame(() => {
+      // iOS can pan the layout viewport while focusing textarea; pin back so
+      // composer remains attached to keyboard instead of floating mid-screen.
+      window.scrollTo(0, 0);
+      document.documentElement.style.setProperty("--messenger-vv-top", "0px");
+      if (vv) {
+        document.documentElement.style.setProperty("--messenger-vvh", `${Math.round(vv.height)}px`);
+      }
+    });
+    const t = setTimeout(() => {
+      window.scrollTo(0, 0);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [keyboardOpen]);
 
   return (
     <div
