@@ -40,7 +40,7 @@ export async function fetchAccessCheck(force = false): Promise<AccessCheckResult
     return accessCache.data;
   }
   const res = await platformFetch("/api/messenger/access-check");
-  const data = (await res.json()) as AccessCheckResult;
+  const data = (await res.json().catch(() => ({}))) as AccessCheckResult;
   accessCache = { at: Date.now(), data };
   return data;
 }

@@ -75,6 +75,9 @@ export function MessengerLoginClient() {
         return;
       }
       setCheckingSession(false);
+    }).catch(() => {
+      setCheckingSession(false);
+      setError("Сервис мессенджера временно недоступен. Повторите чуть позже.");
     });
   }, [router]);
 

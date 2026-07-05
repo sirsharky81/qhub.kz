@@ -10,6 +10,8 @@ export default function MessengerEntryPage() {
   useEffect(() => {
     void fetchAccessCheck(true).then((data) => {
       router.replace(data.messengerLoggedIn ? "/tools/messenger/home" : "/tools/messenger/login");
+    }).catch(() => {
+      router.replace("/tools/messenger/login");
     });
   }, [router]);
 
