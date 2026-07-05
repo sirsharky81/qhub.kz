@@ -31,6 +31,19 @@ interface OnlineSession {
   hostSecret?: string;
 }
 
+interface RoomInactivity {
+  enabled: boolean;
+  activePlayerId: string | null;
+  deadlineAt: number | null;
+  excludedPlayerIds: string[];
+}
+
+interface OnlineRoomResponse {
+  state: HeartsState;
+  inactivity: RoomInactivity;
+  error?: string;
+}
+
 const HUMAN_ID = "human-player";
 
 export default function HeartsClient() {
@@ -41,7 +54,8 @@ export default function HeartsClient() {
   const [onlineSession, setOnlineSession] = useState<OnlineSession | null>(null);
   const [settings, setSettings] = useState<HeartsSettings>(DEFAULT_HEARTS_SETTINGS);
   const [stats, setStats] = useState<HeartsStats>(DEFAULT_HEARTS_STATS);
-  const [turnTimer, setTurnTimer] = useState(30);
+  const [inactivity, setInactivity] = useState<RoomInactivity | null>(null);
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   const engineRef = useRef<GameEngine<HeartsState, HeartsAction> | null>(null);
   const definitionRef = useRef<ReturnType<typeof createHeartsDefinition> | null>(null);
@@ -65,6 +79,7 @@ export default function HeartsClient() {
       definitionRef.current = definition;
       engineRef.current = engine;
       setOnlineSession(null);
+      setInactivity(null);
       setState(engine.getState());
       setSelectedPass([]);
       setMessage(null);
@@ -126,12 +141,13 @@ export default function HeartsClient() {
           }),
         },
       );
-      const data = (await response.json()) as { error?: string; state?: HeartsState };
+      const data = (await response.json()) as OnlineRoomResponse;
       if (!response.ok) {
         setMessage(data.error ?? "Ошибка отправки действия");
         return;
       }
-      setState((data as { state: HeartsState }).state);
+      setState(data.state);
+      setInactivity(data.inactivity ?? null);
     },
     [onlineSession],
   );
@@ -186,47 +202,20 @@ export default function HeartsClient() {
   }, [localDispatch, onlineSession, state]);
 
   useEffect(() => {
-    let prevTurnKey = `${state?.phase ?? "none"}:${state?.currentTurnId ?? "none"}`;
-    const id = window.setInterval(() => {
-      setTurnTimer((value) => {
-        const nextTurnKey = `${state?.phase ?? "none"}:${state?.currentTurnId ?? "none"}`;
-        if (nextTurnKey !== prevTurnKey) {
-          prevTurnKey = nextTurnKey;
-          return 30;
-        }
-        if (!state || state.phase !== "playing") return 30;
-        return Math.max(0, value - 1);
-      });
-    }, 1000);
+    const id = window.setInterval(() => setNowTs(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [state]);
-
-  useEffect(() => {
-    if (!state || turnTimer > 0 || state.phase !== "playing") return;
-    const humanId = onlineSession?.playerId ?? HUMAN_ID;
-    if (state.currentTurnId !== humanId) return;
-    const legal = legalCardsForPlayer(state, humanId).map((card) => ({
-      type: "play_card" as const,
-      playerId: humanId,
-      cardId: card.id,
-    }));
-    const fallback = heartsAiService.choose(settings.aiLevel, {
-      state,
-      playerId: humanId,
-      legalActions: legal,
-    });
-    if (fallback) {
-      window.setTimeout(() => dispatch(fallback), 0);
-    }
-  }, [dispatch, onlineSession?.playerId, settings.aiLevel, state, turnTimer]);
+  }, []);
 
   useEffect(() => {
     if (!onlineSession) return;
     const id = window.setInterval(() => {
       void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`)
         .then((res) => res.json())
-        .then((room: { state: HeartsState; error?: string }) => {
-          if (room?.state) setState(room.state);
+        .then((room: OnlineRoomResponse) => {
+          if (room?.state) {
+            setState(room.state);
+            setInactivity(room.inactivity ?? null);
+          }
         })
         .catch(() => {});
     }, 1500);
@@ -286,6 +275,10 @@ export default function HeartsClient() {
   }, [onlineSession?.playerId, state, stats]);
 
   const me = state?.players.find((player) => player.id === (onlineSession?.playerId ?? HUMAN_ID));
+  const onlineCountdownSec = useMemo(() => {
+    if (!inactivity?.enabled || !inactivity.deadlineAt) return null;
+    return Math.max(0, Math.ceil((inactivity.deadlineAt - nowTs) / 1000));
+  }, [inactivity, nowTs]);
   const canPlay =
     Boolean(state) &&
     state?.phase === "playing" &&
@@ -332,7 +325,7 @@ export default function HeartsClient() {
       playerId: string;
       joinToken: string;
       hostSecret?: string;
-      room: { state: HeartsState };
+      room: OnlineRoomResponse;
     };
     if (!response.ok) {
       setMessage(data.error ?? "Не удалось начать онлайн-игру");
@@ -345,6 +338,7 @@ export default function HeartsClient() {
       hostSecret: data.hostSecret,
     });
     setState(data.room.state);
+    setInactivity(data.room.inactivity ?? null);
     setMessage(`Подключено к комнате ${data.roomCode}`);
   };
 
@@ -377,7 +371,7 @@ export default function HeartsClient() {
       roomCode: string;
       playerId: string;
       joinToken: string;
-      room: { state: HeartsState };
+      room: OnlineRoomResponse;
     };
     if (!response.ok) {
       setMessage(data.error ?? "Не удалось войти в комнату");
@@ -389,6 +383,7 @@ export default function HeartsClient() {
       joinToken: data.joinToken,
     });
     setState(data.room.state);
+    setInactivity(data.room.inactivity ?? null);
     setMessage(`Вы вошли в комнату ${data.roomCode}`);
   };
 
@@ -459,9 +454,16 @@ export default function HeartsClient() {
             </p>
             {state && (
               <div className="mt-2 text-xs text-gray-500">
-                Раунд #{state.roundIndex + 1} · Фаза: {state.phase} · Ход: {state.currentTurnId} · Таймер:{" "}
-                {turnTimer}с
+                Раунд #{state.roundIndex + 1} · Фаза: {state.phase} · Ход: {state.currentTurnId}
+                {onlineSession && inactivity?.enabled && onlineCountdownSec !== null
+                  ? ` · Таймер неактивности: ${onlineCountdownSec}с`
+                  : ""}
               </div>
+            )}
+            {onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0 && (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+                Неактивные игроки автоматически заменены ботами.
+              </p>
             )}
             {message && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{message}</p>}
           </section>

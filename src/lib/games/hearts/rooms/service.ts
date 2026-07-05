@@ -9,6 +9,7 @@ import {
 } from "./store";
 import type {
   HeartsDispatchPayload,
+  HeartsInactivityState,
   HeartsRoomJoinResult,
   HeartsRoomPublic,
   HeartsRoomRecord,
@@ -16,6 +17,7 @@ import type {
 } from "./types";
 
 const MAX_PLAYERS = 4;
+const HUMAN_INACTIVITY_SEC = 180;
 
 function randomToken(size = 16): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -72,7 +74,62 @@ function toPublicRoom(room: HeartsRoomRecord): HeartsRoomPublic {
     state: room.state,
     version: room.version,
     updatedAt: room.updatedAt,
+    inactivity: room.inactivity,
   };
+}
+
+function hasHumanVsHumanSeats(seats: readonly HeartsRoomSeat[]): boolean {
+  return seats.filter((seat) => !seat.isBot && !seat.controlledByAi).length >= 2;
+}
+
+function createInactivityState(input: {
+  enabled: boolean;
+  activePlayerId: string | null;
+  now: number;
+  excludedPlayerIds?: string[];
+}): HeartsInactivityState {
+  return {
+    enabled: input.enabled,
+    activePlayerId: input.enabled ? input.activePlayerId : null,
+    deadlineAt:
+      input.enabled && input.activePlayerId ? input.now + HUMAN_INACTIVITY_SEC * 1000 : null,
+    excludedPlayerIds: input.excludedPlayerIds ?? [],
+  };
+}
+
+function syncInactivity(room: HeartsRoomRecord, now: number, reset: boolean): HeartsInactivityState {
+  if (room.status !== "playing" || room.state.phase !== "playing" || !hasHumanVsHumanSeats(room.seats)) {
+    return createInactivityState({
+      enabled: false,
+      activePlayerId: null,
+      now,
+      excludedPlayerIds: room.inactivity?.excludedPlayerIds ?? [],
+    });
+  }
+  const activeSeat = room.seats.find((seat) => seat.id === room.state.currentTurnId);
+  if (!activeSeat || activeSeat.isBot || activeSeat.controlledByAi) {
+    return {
+      ...room.inactivity,
+      enabled: true,
+      activePlayerId: null,
+      deadlineAt: null,
+      excludedPlayerIds: room.inactivity?.excludedPlayerIds ?? [],
+    };
+  }
+  if (
+    !reset &&
+    room.inactivity?.enabled &&
+    room.inactivity.activePlayerId === activeSeat.id &&
+    room.inactivity.deadlineAt
+  ) {
+    return room.inactivity;
+  }
+  return createInactivityState({
+    enabled: true,
+    activePlayerId: activeSeat.id,
+    now,
+    excludedPlayerIds: room.inactivity?.excludedPlayerIds ?? [],
+  });
 }
 
 function startRoomWithBots(room: HeartsRoomRecord): HeartsRoomRecord {
@@ -91,14 +148,18 @@ function startRoomWithBots(room: HeartsRoomRecord): HeartsRoomRecord {
     players: seats.map(toSeed),
   });
   const engine = new GameEngine(definition);
-  return {
+  const now = Date.now();
+  const next: HeartsRoomRecord = {
     ...room,
     seats,
     state: engine.getState(),
     status: "playing",
     version: room.version + 1,
-    updatedAt: Date.now(),
+    updatedAt: now,
+    inactivity: room.inactivity,
   };
+  next.inactivity = syncInactivity(next, now, true);
+  return next;
 }
 
 function createOpenRoom(hostName: string): HeartsRoomRecord {
@@ -122,6 +183,11 @@ function createOpenRoom(hostName: string): HeartsRoomRecord {
     version: 1,
     createdAt: now,
     updatedAt: now,
+    inactivity: createInactivityState({
+      enabled: false,
+      activePlayerId: null,
+      now,
+    }),
   };
 }
 
@@ -198,8 +264,9 @@ export async function joinRoomByCode(
 }
 
 export async function getRoomPublic(code: string): Promise<HeartsRoomPublic | null> {
-  const room = await getHeartsRoom(code);
+  let room = await getHeartsRoom(code);
   if (!room) return null;
+  room = await applyInactivityIfNeeded(room);
   return toPublicRoom(room);
 }
 
@@ -223,12 +290,62 @@ function aiProgress(state: HeartsState, seats: readonly HeartsRoomSeat[]): Heart
   return engine.getState();
 }
 
+async function applyInactivityIfNeeded(room: HeartsRoomRecord): Promise<HeartsRoomRecord> {
+  const now = Date.now();
+  let next = { ...room, inactivity: syncInactivity(room, now, false) };
+  if (
+    !next.inactivity.enabled ||
+    !next.inactivity.activePlayerId ||
+    !next.inactivity.deadlineAt ||
+    next.inactivity.deadlineAt > now
+  ) {
+    return next;
+  }
+
+  const seatIdx = next.seats.findIndex((seat) => seat.id === next.inactivity.activePlayerId);
+  if (seatIdx === -1) {
+    next.inactivity = syncInactivity(next, now, true);
+    await saveHeartsRoom(next);
+    return next;
+  }
+
+  const seats = [...next.seats];
+  const expiredSeat = seats[seatIdx]!;
+  if (!expiredSeat.isBot && !expiredSeat.controlledByAi) {
+    seats[seatIdx] = {
+      ...expiredSeat,
+      connected: false,
+      controlledByAi: true,
+    };
+  }
+
+  const stateAfterAi = aiProgress(next.state, seats);
+  const excluded = new Set(next.inactivity.excludedPlayerIds);
+  excluded.add(expiredSeat.id);
+  next = {
+    ...next,
+    seats,
+    state: stateAfterAi,
+    status: stateAfterAi.phase === "game_end" ? "finished" : next.status,
+    version: next.version + 1,
+    updatedAt: now,
+    inactivity: {
+      ...next.inactivity,
+      excludedPlayerIds: [...excluded],
+    },
+  };
+  next.inactivity = syncInactivity(next, now, true);
+  await saveHeartsRoom(next);
+  return next;
+}
+
 export async function dispatchAction(
   code: string,
   payload: HeartsDispatchPayload,
 ): Promise<HeartsRoomPublic> {
-  const room = await getHeartsRoom(code);
+  let room = await getHeartsRoom(code);
   if (!room) throw new Error("Комната не найдена");
+  room = await applyInactivityIfNeeded(room);
   const seat = room.seats.find(
     (item) => item.id === payload.playerId && item.joinToken === payload.joinToken,
   );
@@ -245,13 +362,17 @@ export async function dispatchAction(
   }
   let nextState = engine.getState();
   nextState = aiProgress(nextState, room.seats);
-  const nextRoom: HeartsRoomRecord = {
+  const now = Date.now();
+  let nextRoom: HeartsRoomRecord = {
     ...room,
     state: nextState,
     status: nextState.phase === "game_end" ? "finished" : room.status,
     version: room.version + 1,
-    updatedAt: Date.now(),
+    updatedAt: now,
+    inactivity: room.inactivity,
   };
+  nextRoom.inactivity = syncInactivity(nextRoom, now, true);
+  nextRoom = await applyInactivityIfNeeded(nextRoom);
   await saveHeartsRoom(nextRoom);
   return toPublicRoom(nextRoom);
 }
@@ -262,8 +383,9 @@ export async function setConnectionState(
   joinToken: string,
   connected: boolean,
 ): Promise<HeartsRoomPublic> {
-  const room = await getHeartsRoom(code);
+  let room = await getHeartsRoom(code);
   if (!room) throw new Error("Комната не найдена");
+  room = await applyInactivityIfNeeded(room);
   const idx = room.seats.findIndex(
     (seat) => seat.id === playerId && seat.joinToken === joinToken && !seat.isBot,
   );
@@ -274,11 +396,13 @@ export async function setConnectionState(
     connected,
     controlledByAi: !connected,
   };
+  const now = Date.now();
   const next: HeartsRoomRecord = {
     ...room,
     seats,
     version: room.version + 1,
-    updatedAt: Date.now(),
+    updatedAt: now,
+    inactivity: syncInactivity({ ...room, seats }, now, true),
   };
   await saveHeartsRoom(next);
   return toPublicRoom(next);

@@ -19,6 +19,14 @@ export interface HeartsRoomRecord {
   version: number;
   createdAt: number;
   updatedAt: number;
+  inactivity: HeartsInactivityState;
+}
+
+export interface HeartsInactivityState {
+  enabled: boolean;
+  activePlayerId: string | null;
+  deadlineAt: number | null;
+  excludedPlayerIds: string[];
 }
 
 export interface HeartsRoomPublic {
@@ -28,6 +36,7 @@ export interface HeartsRoomPublic {
   state: HeartsState;
   version: number;
   updatedAt: number;
+  inactivity: HeartsInactivityState;
 }
 
 export interface HeartsRoomJoinResult {
