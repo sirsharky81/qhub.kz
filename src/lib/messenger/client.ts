@@ -288,16 +288,11 @@ export async function createRoom(): Promise<{ ok: true; roomId: string; channel:
 
 export async function joinRoomApi(
   roomId: string,
-  options?: { allowCreateOnMissing?: boolean },
 ): Promise<{ ok: boolean; error?: string; channel?: string }> {
   const res = await platformFetch("/api/messenger/room/members", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      roomId,
-      action: "join",
-      ...(options?.allowCreateOnMissing ? { allowCreateOnMissing: true } : {}),
-    }),
+    body: JSON.stringify({ roomId, action: "join" }),
   });
   const data = (await res.json()) as { ok?: boolean; error?: string; channel?: string };
   if (!res.ok) return { ok: false, error: data.error ?? "Ошибка" };

@@ -8,7 +8,7 @@ import { MessengerShell } from "../../components/MessengerShell";
 import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
 import { joinRoomApi } from "@/lib/messenger/client";
 import { deriveRoomAesKeyFromCode, exportRoomKeyBase64Url, importRoomKeyBase64Url, parseRoomJoinUrl } from "@/lib/messenger/crypto";
-import { setRoomKey, getRoomKey } from "@/lib/messenger/room-keys";
+import { setRoomKey } from "@/lib/messenger/room-keys";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
 
@@ -22,7 +22,6 @@ function JoinInner() {
   const [code, setCode] = useState(searchParams.get("code") ?? "");
   const [keyInput, setKeyInput] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [myPhone, setMyPhone] = useState("");
   const [joining, setJoining] = useState(false);
 
   useEffect(() => {
@@ -45,32 +44,8 @@ function JoinInner() {
       .then((r) => r.json())
       .then((d: { phone?: string; messengerLoggedIn?: boolean }) => {
         if (!d.messengerLoggedIn) router.replace("/tools/messenger/login");
-        else setMyPhone(d.phone ?? "");
       });
   }, [router]);
-
-  useEffect(() => {
-    if (!myPhone) return;
-    const rid = code.trim().toUpperCase();
-    if (!rid || joining) return;
-    const storedKey = getRoomKey(rid);
-    if (storedKey && !keyInput.trim()) {
-      setJoining(true);
-      void joinRoomApi(rid)
-        .then((joined) => {
-          if (!joined.ok) {
-            setError(joined.error ?? "Комната не найдена");
-            setJoining(false);
-            return;
-          }
-          router.replace(roomOpenUrlWithKey(rid, storedKey));
-        })
-        .catch(() => {
-          setError("Ошибка сети при входе в комнату");
-          setJoining(false);
-        });
-    }
-  }, [myPhone, code, keyInput, joining, router]);
 
   async function handleJoin() {
     setError(null);

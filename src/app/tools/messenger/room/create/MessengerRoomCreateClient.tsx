@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { RoomInvite } from "../../components/RoomInvite";
 import { MessengerShell } from "../../components/MessengerShell";
-import { createRoom, joinRoomApi } from "@/lib/messenger/client";
+import { createRoom } from "@/lib/messenger/client";
 import {
   deriveRoomAesKeyFromCode,
   exportRoomKeyBase64Url,
@@ -40,7 +40,6 @@ export function MessengerRoomCreateClient() {
   const router = useRouter();
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomKey, setRoomKeyState] = useState<string | null>(null);
-  const [entering, setEntering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const [creating, setCreating] = useState(true);
@@ -136,37 +135,13 @@ export function MessengerRoomCreateClient() {
       <div className="px-4 pb-6">
         <button
           type="button"
-          disabled={entering}
+          disabled={false}
           onClick={() => {
-            setEntering(true);
-            setError(null);
-            void withTimeout(
-              joinRoomApi(roomId, { allowCreateOnMissing: true }),
-              ROOM_STEP_TIMEOUT_MS,
-              "Таймаут входа в комнату",
-            )
-              .then((r) => {
-                if (r.ok) {
-                  router.replace(roomOpenUrlWithKey(roomId, roomKey));
-                } else {
-                  setError(r.error ?? "Не удалось войти в комнату");
-                  setEntering(false);
-                }
-              })
-              .catch(() => {
-                setError("Ошибка сети при входе в комнату");
-                setEntering(false);
-              });
-            setTimeout(() => {
-              setEntering((prev) => {
-                if (prev) setError("Вход в комнату занял слишком долго. Попробуйте снова.");
-                return false;
-              });
-            }, ROOM_FLOW_WATCHDOG_MS);
+            router.replace(roomOpenUrlWithKey(roomId, roomKey));
           }}
           className="w-full max-w-xs mx-auto block rounded-2xl bg-sky-600 text-white py-3 text-sm font-semibold disabled:opacity-50"
         >
-          {entering ? "Вход…" : "Войти в чат"}
+          Открыть комнату
         </button>
         {error && <p className="mt-3 text-center text-sm text-red-600">{error}</p>}
       </div>

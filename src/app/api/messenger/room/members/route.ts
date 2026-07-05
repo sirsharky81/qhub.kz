@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
-import { createRoomMeta, getRoomMeta, joinRoomParticipant, leaveRoom } from "@/lib/messenger/store";
+import { getRoomMeta, joinRoomParticipant, leaveRoom } from "@/lib/messenger/store";
 import { assertMessengerRedisReady } from "@/lib/messenger/redis-health";
 
 function roomStorageUnavailable(message: string): NextResponse {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const redisReady = await assertMessengerRedisReady();
     if (!redisReady.ok) return roomStorageUnavailable(redisReady.error);
     const { phone } = await assertMessengerSession();
-    let body: { roomId?: string; action?: "join" | "leave"; allowCreateOnMissing?: boolean };
+    let body: { roomId?: string; action?: "join" | "leave" };
     try {
       body = await request.json();
     } catch {
@@ -21,7 +21,6 @@ export async function POST(request: Request) {
 
     const roomId = (body.roomId ?? "").toUpperCase();
     const action = body.action ?? "join";
-    const allowCreateOnMissing = body.allowCreateOnMissing === true;
     if (!roomId) {
       return NextResponse.json({ error: "Укажите roomId" }, { status: 400 });
     }
@@ -32,11 +31,7 @@ export async function POST(request: Request) {
     }
 
     const meta = await getRoomMeta(roomId);
-    if (!meta && allowCreateOnMissing) {
-      // Self-heal: in rare distributed/storage races room meta may be temporarily absent
-      // right after create, so restore it on first join instead of hard failing.
-      await createRoomMeta(roomId, phone);
-    } else if (!meta) {
+    if (!meta) {
       return NextResponse.json({ error: "Комната не найдена" }, { status: 404 });
     }
 
