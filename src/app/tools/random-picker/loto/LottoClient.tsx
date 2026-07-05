@@ -9,6 +9,7 @@ import {
   DEFAULT_LOTTO_SETTINGS,
   createNewGame,
   drawBarrel,
+  generateTicketsForPlayers,
   loadLottoState,
   saveLottoState,
   lottoDrawSpeechText,
@@ -25,13 +26,14 @@ import { PickerButton, PickerSection } from "../components/PickerButton";
 import { LottoParticipants } from "./LottoParticipants";
 import { LottoTicketCard } from "./LottoTicketCard";
 import { LottoJoin } from "./LottoJoin";
-import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
 import {
   createLottoRoomApi,
   deleteLottoRoomApi,
   loadParticipantSession,
-  parseJoinSearchParams,
+  parseRoomCodeSearchParam,
+  pollLottoRoomApi,
   syncLottoRoomApi,
+  type ParticipantSession,
 } from "@/lib/lotto-rooms/client";
 import type { LottoRoomPlayer } from "@/lib/lotto-rooms/types";
 
@@ -161,9 +163,13 @@ export default function LottoClient() {
   });
   const [fullscreen, setFullscreen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
+  const [hostName, setHostName] = useState("Игрок 1");
+  const [creatingRoom, setCreatingRoom] = useState(false);
+  const [hostSession, setHostSession] = useState<ParticipantSession | null>(null);
+  const [hostRoomVersion, setHostRoomVersion] = useState(0);
   const [prePanelTab, setPrePanelTab] = useState<PrePanelTab>(() => {
     if (typeof window === "undefined") return "settings";
-    if (loadParticipantSession() || parseJoinSearchParams(window.location.search)) {
+    if (loadParticipantSession() || parseRoomCodeSearchParam(window.location.search)) {
       return "join";
     }
     return "settings";
@@ -274,20 +280,9 @@ export default function LottoClient() {
       name: p.name,
       ticket: p.ticket,
       wins: p.wins,
-      joinToken: p.joinToken ?? "",
-      joinCode: p.joinCode ?? "",
       joined: p.joined ?? false,
       left: p.left ?? false,
-    }));
-  }, []);
-
-  const handlePlayersChange = useCallback((nextPlayers: LottoPlayer[]) => {
-    setGame((g) => ({
-      ...g,
-      players: nextPlayers,
-      cardsGenerated: false,
-      activeWinAlert: null,
-      network: null,
+      joinToken: "",
     }));
   }, []);
 
@@ -295,35 +290,76 @@ export default function LottoClient() {
     setGame((g) => ({ ...g, winRules: rules }));
   }, []);
 
-  const handleCardsGenerated = useCallback(
-    async (nextPlayers: LottoPlayer[]) => {
-      const g = gameRef.current;
+  const handleCreateRoom = useCallback(async () => {
+    const g = gameRef.current;
+    const name = hostName.trim() || "Игрок 1";
+    setCreatingRoom(true);
+    try {
       const data = await createLottoRoomApi({
-        players: nextPlayers,
+        hostName: name,
         settings: g.settings,
         winRules: g.winRules,
-        cardsGenerated: true,
       });
-      const merged = nextPlayers.map((p) => {
-        const rp = data.players.find((x) => x.id === p.id);
-        return {
-          ...p,
-          joinCode: rp?.joinCode,
-          joinToken: rp?.joinToken,
-          joined: false,
-          left: false,
-        };
-      });
+      const hostPlayer: LottoPlayer = {
+        id: data.playerId,
+        name: data.playerName,
+        ticket: null,
+        wins: [],
+        joined: true,
+        left: false,
+      };
       setGame((prev) => ({
         ...prev,
-        players: merged,
-        cardsGenerated: true,
+        players: [hostPlayer],
+        cardsGenerated: false,
         activeWinAlert: null,
         network: { roomCode: data.roomCode, hostSecret: data.hostSecret },
       }));
-    },
-    [],
-  );
+      setHostSession({
+        roomCode: data.roomCode,
+        playerId: data.playerId,
+        joinToken: data.joinToken,
+        playerName: data.playerName,
+      });
+      setHostName(data.playerName);
+      setHostRoomVersion(0);
+    } finally {
+      setCreatingRoom(false);
+    }
+  }, [hostName]);
+
+  const handleGenerateCards = useCallback(async () => {
+    const g = gameRef.current;
+    const net = g.network;
+    if (!net?.roomCode || !net.hostSecret) throw new Error("Сначала создайте комнату");
+    const activePlayers = g.players.filter((p) => p.joined && !p.left);
+    if (activePlayers.length < 2) {
+      throw new Error("Нужно минимум 2 подключённых участника");
+    }
+    const withTickets = generateTicketsForPlayers(activePlayers).map((p) => ({
+      ...p,
+      joined: true,
+      left: false,
+    }));
+    await syncLottoRoomApi(net.roomCode, net.hostSecret, {
+      status: "idle",
+      settings: g.settings,
+      winRules: g.winRules,
+      drawn: [],
+      remaining: [],
+      current: null,
+      countdownSec: g.settings.intervalSec,
+      cardsGenerated: true,
+      activeWinAlert: null,
+      players: toRoomPlayers(withTickets),
+    });
+    setGame((prev) => ({
+      ...prev,
+      players: withTickets,
+      cardsGenerated: true,
+      activeWinAlert: null,
+    }));
+  }, [toRoomPlayers]);
 
   useEffect(() => {
     const net = network;
@@ -374,6 +410,34 @@ export default function LottoClient() {
     players,
     toRoomPlayers,
   ]);
+
+  useEffect(() => {
+    if (!hostSession || cardsGenerated || status !== "idle") return;
+    const id = window.setInterval(() => {
+      void pollLottoRoomApi(hostSession, hostRoomVersion)
+        .then((data) => {
+          if (!data) return;
+          setHostRoomVersion(data.room.version);
+          setGame((g) => {
+            if (!g.network || g.network.roomCode !== data.room.roomCode || g.cardsGenerated) return g;
+            const roomPlayers: LottoPlayer[] = data.room.players.map((p) => ({
+              id: p.id,
+              name: p.name,
+              ticket: p.ticket,
+              wins: p.wins,
+              joined: p.joined,
+              left: p.left,
+            }));
+            return {
+              ...g,
+              players: roomPlayers,
+            };
+          });
+        })
+        .catch(() => {});
+    }, 1200);
+    return () => clearInterval(id);
+  }, [cardsGenerated, hostRoomVersion, hostSession, status]);
 
   const startGame = async () => {
     const g = gameRef.current;
@@ -450,6 +514,8 @@ export default function LottoClient() {
     if (net?.roomCode && net.hostSecret) {
       void deleteLottoRoomApi(net.roomCode, net.hostSecret);
     }
+    setHostSession(null);
+    setHostRoomVersion(0);
     setGame(createNewGame(settings));
   };
 
@@ -491,10 +557,10 @@ export default function LottoClient() {
           {!fullscreen && (
             <>
               <Link
-                href="/tools/random-picker"
+                href="/tools/games"
                 className="inline-flex text-xs text-blue-600 dark:text-blue-400 hover:underline"
               >
-                ← Генератор случайных чисел
+                ← Меню игр QHub Games
               </Link>
               <div className="space-y-1">
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">
@@ -592,15 +658,17 @@ export default function LottoClient() {
                 <LottoJoin />
               ) : (
                 <LottoParticipants
+                  hostName={hostName}
+                  onHostNameChange={setHostName}
                   players={players}
                   winRules={winRules}
                   cardsGenerated={cardsGenerated}
-                  drawn={drawn}
                   isActive={isActive}
                   roomCode={network?.roomCode ?? null}
-                  onPlayersChange={handlePlayersChange}
+                  creatingRoom={creatingRoom}
+                  onCreateRoom={handleCreateRoom}
                   onWinRulesChange={handleWinRulesChange}
-                  onCardsGenerated={handleCardsGenerated}
+                  onGenerateCards={handleGenerateCards}
                   onStartGame={startGame}
                 />
               )}

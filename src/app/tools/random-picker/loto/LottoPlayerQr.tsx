@@ -1,20 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildJoinUrl } from "@/lib/lotto-rooms/client";
+import { buildRoomJoinUrl } from "@/lib/lotto-rooms/client";
 
 interface LottoPlayerQrProps {
   roomCode: string;
-  playerId: string;
-  joinToken: string;
-  joinCode: string;
 }
 
-export function LottoPlayerQr({ roomCode, playerId, joinToken, joinCode }: LottoPlayerQrProps) {
+export function LottoPlayerQr({ roomCode }: LottoPlayerQrProps) {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const joinUrl =
     typeof window !== "undefined"
-      ? buildJoinUrl(window.location.origin, roomCode, playerId, joinToken)
+      ? buildRoomJoinUrl(window.location.origin, roomCode)
       : "";
 
   useEffect(() => {
@@ -50,11 +47,7 @@ export function LottoPlayerQr({ roomCode, playerId, joinToken, joinCode }: Lotto
           Код комнаты:{" "}
           <strong className="font-mono text-gray-900 dark:text-gray-100">{roomCode}</strong>
         </p>
-        <p>
-          Код игрока:{" "}
-          <strong className="font-mono text-gray-900 dark:text-gray-100">{joinCode}</strong>
-        </p>
-        <p className="text-gray-500 leading-snug">Отсканируйте QR или введите коды на вкладке «Присоединиться»</p>
+        <p className="text-gray-500 leading-snug">Отсканируйте QR или введите код комнаты на вкладке «Присоединиться»</p>
       </div>
     </div>
   );

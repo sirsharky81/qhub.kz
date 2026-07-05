@@ -6,9 +6,9 @@ import {
 import {
   DEFAULT_LOTTO_WIN_RULES,
   LOTTO_MAX_PLAYERS,
-  type LottoPlayer,
 } from "@/lib/random-picker/lotto-tickets";
-import { generateJoinCode, generateRoomCode, generateSecret } from "./codes";
+import type { LottoPlayer } from "@/lib/random-picker/lotto-tickets";
+import { generateRoomCode, generateSecret } from "./codes";
 import { getRoom, saveRoom, deleteRoom } from "./store";
 import type { LottoRoomPlayer, LottoRoomRecord, LottoRoomSnapshot } from "./types";
 
@@ -31,22 +31,16 @@ function playersToRoomPlayers(players: LottoPlayer[]): LottoRoomPlayer[] {
     ticket: p.ticket,
     wins: p.wins ?? [],
     joinToken: generateSecret(16),
-    joinCode: generateJoinCode(8),
     joined: false,
     left: false,
   }));
 }
 
 export async function createLottoRoom(input: {
-  players: LottoPlayer[];
+  hostName: string;
   settings?: LottoSettings;
   winRules?: LottoWinRules;
-  cardsGenerated: boolean;
 }): Promise<LottoRoomRecord> {
-  if (input.players.length > LOTTO_MAX_PLAYERS) {
-    throw new Error(`Максимум ${LOTTO_MAX_PLAYERS} участников`);
-  }
-
   let roomCode = generateRoomCode();
   for (let i = 0; i < 10; i++) {
     const existing = await getRoom(roomCode);
@@ -55,6 +49,10 @@ export async function createLottoRoom(input: {
   }
 
   const now = Date.now();
+  const hostId =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `host-${Date.now()}`;
   const room: LottoRoomRecord = {
     roomCode,
     hostSecret: generateSecret(24),
@@ -65,9 +63,16 @@ export async function createLottoRoom(input: {
     remaining: [],
     current: null,
     countdownSec: input.settings?.intervalSec ?? DEFAULT_LOTTO_SETTINGS.intervalSec,
-    cardsGenerated: input.cardsGenerated,
+    cardsGenerated: false,
     activeWinAlert: null,
-    players: playersToRoomPlayers(input.players),
+    players: playersToRoomPlayers([
+      {
+        id: hostId,
+        name: input.hostName.trim() || "Игрок 1",
+        ticket: null,
+        wins: [],
+      },
+    ]).map((p, idx) => (idx === 0 ? { ...p, joined: true } : p)),
     version: 1,
     updatedAt: now,
     createdAt: now,
@@ -114,7 +119,6 @@ export async function updateLottoRoom(
       return {
         ...p,
         joinToken: prev.joinToken,
-        joinCode: prev.joinCode,
         joined: prev.joined,
         left: prev.left,
       };
@@ -125,18 +129,26 @@ export async function updateLottoRoom(
   return next;
 }
 
-export function findPlayerByJoinCode(
-  room: LottoRoomRecord,
-  joinCode: string,
-): LottoRoomPlayer | undefined {
-  const normalized = joinCode.toUpperCase();
-  return room.players.find((p) => p.joinCode.toUpperCase() === normalized);
-}
-
 export function findPlayerByCredentials(
   room: LottoRoomRecord,
   playerId: string,
   joinToken: string,
 ): LottoRoomPlayer | undefined {
   return room.players.find((p) => p.id === playerId && p.joinToken === joinToken);
+}
+
+export function createRoomPlayer(name: string): LottoRoomPlayer {
+  const id =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `player-${Date.now()}`;
+  return {
+    id,
+    name: name.trim() || "Игрок",
+    ticket: null,
+    wins: [],
+    joinToken: generateSecret(16),
+    joined: true,
+    left: false,
+  };
 }
