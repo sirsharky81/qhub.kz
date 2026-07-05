@@ -3,7 +3,7 @@ import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import { MESSENGER_ROOM_MAX_PARTICIPANTS } from "@/lib/messenger/constants";
 import { normalizeKzPhone } from "@/lib/messenger/phone";
 import { assertMessengerRedisReady } from "@/lib/messenger/redis-health";
-import { isPhoneWhitelisted } from "@/lib/messenger/store";
+import { getAuthRecord, getProfile, isPhoneWhitelisted } from "@/lib/messenger/store";
 import {
   addRoomParticipant,
   getRoomMeta,
@@ -83,6 +83,23 @@ export async function POST(request: Request) {
       const whitelisted = await isPhoneWhitelisted(targetPhone);
       if (!whitelisted) {
         return NextResponse.json({ error: "Можно добавить только из whitelist" }, { status: 403 });
+      }
+      const auth = await getAuthRecord(targetPhone);
+      if (!auth) {
+        return NextResponse.json(
+          { error: "Пользователь не зарегистрирован в мессенджере", code: "not_messenger_user" },
+          { status: 409 },
+        );
+      }
+      const targetProfile = await getProfile(targetPhone);
+      if (targetProfile?.allowRoomAutoAdd === false) {
+        return NextResponse.json(
+          {
+            error: "У пользователя отключено автодобавление. Отправьте приглашение в личный чат.",
+            code: "auto_add_disabled",
+          },
+          { status: 409 },
+        );
       }
       if (!target && participants.length >= MESSENGER_ROOM_MAX_PARTICIPANTS) {
         return NextResponse.json(

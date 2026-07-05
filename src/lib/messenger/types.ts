@@ -34,6 +34,7 @@ export type ChannelEnvelope =
 export interface MessengerProfile {
   phone: string;
   displayName: string | null;
+  allowRoomAutoAdd?: boolean;
   updatedAt: number;
 }
 

@@ -31,6 +31,7 @@ export function MessengerSettingsClient() {
   const { setStorageKeyFromPin } = useMessengerUnlock();
   const [phone, setPhone] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [allowRoomAutoAdd, setAllowRoomAutoAdd] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [pushStatus, setPushStatus] = useState<PushSupportStatus>("unsupported");
@@ -66,6 +67,7 @@ export function MessengerSettingsClient() {
       setPhone(data.phone ?? "");
       const profile = await fetchProfile();
       setDisplayName(profile?.displayName ?? "");
+      setAllowRoomAutoAdd(profile?.allowRoomAutoAdd ?? true);
     });
   }, [router, refreshPushState]);
 
@@ -103,7 +105,7 @@ export function MessengerSettingsClient() {
     setSaving(true);
     setSaved(false);
     try {
-      const ok = await updateProfile(displayName);
+      const ok = await updateProfile({ displayName, allowRoomAutoAdd });
       if (ok) setSaved(true);
     } finally {
       setSaving(false);
@@ -247,6 +249,34 @@ export function MessengerSettingsClient() {
               PIN изменён
             </p>
           )}
+        </div>
+
+        <div className="space-y-2 rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Автодобавление в комнаты</p>
+              <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                Если включено, админ может добавить вас в комнату сразу. Если выключено — только по приглашению в личный чат.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setAllowRoomAutoAdd((v) => !v);
+                setSaved(false);
+              }}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                allowRoomAutoAdd ? "bg-sky-600" : "bg-gray-200"
+              }`}
+              aria-label={allowRoomAutoAdd ? "Отключить автодобавление" : "Включить автодобавление"}
+            >
+              <span
+                className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  allowRoomAutoAdd ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-2 rounded-2xl border border-gray-200 p-4">

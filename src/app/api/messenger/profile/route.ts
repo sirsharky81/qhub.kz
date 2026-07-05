@@ -10,6 +10,7 @@ export async function GET() {
     return NextResponse.json({
       phone,
       displayName: profile?.displayName ?? null,
+      allowRoomAutoAdd: profile?.allowRoomAutoAdd ?? true,
       updatedAt: profile?.updatedAt ?? null,
     });
   } catch (err) {
@@ -20,17 +21,23 @@ export async function GET() {
 export async function PATCH(request: Request) {
   try {
     const { phone } = await assertMessengerSession();
-    let body: { displayName?: string };
+    let body: { displayName?: string; allowRoomAutoAdd?: boolean };
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ error: "Неверный формат" }, { status: 400 });
     }
-    const raw = (body.displayName ?? "").trim();
+    const prev = await getProfile(phone);
+    const raw = (body.displayName ?? prev?.displayName ?? "").trim();
     const displayName = raw.length > 0 ? raw.slice(0, MAX_DISPLAY_NAME_LENGTH) : null;
+    const allowRoomAutoAdd =
+      typeof body.allowRoomAutoAdd === "boolean"
+        ? body.allowRoomAutoAdd
+        : (prev?.allowRoomAutoAdd ?? true);
     const profile = {
       phone,
       displayName,
+      allowRoomAutoAdd,
       updatedAt: Date.now(),
     };
     await saveProfile(profile);

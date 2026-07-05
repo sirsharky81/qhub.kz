@@ -61,6 +61,7 @@ interface Props {
   profileLabels?: Record<string, string>;
   identityAlert?: { previousShort: string | null; currentShort: string };
   onTrustIdentity?: () => void;
+  initialDraftText?: string;
 }
 
 function isMessageEnvelope(e: ChannelEnvelope): e is EncryptedMessagePayload {
@@ -81,6 +82,7 @@ export function ChatView({
   profileLabels = {},
   identityAlert,
   onTrustIdentity,
+  initialDraftText,
 }: Props) {
   const { storageKey, isUnlocked } = useMessengerUnlock();
   const callCtx = useCallOptional();
@@ -88,7 +90,7 @@ export function ChatView({
   const persistHistory = isUnlocked && storageKey !== null;
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialDraftText ?? "");
   const [replyTo, setReplyTo] = useState<DisplayMessage | null>(null);
   const swipeToReply = useCoarsePointer();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -201,6 +203,11 @@ export function ChatView({
   useEffect(() => {
     initialAnchorDoneRef.current = false;
   }, [channel]);
+
+  useEffect(() => {
+    if (!initialDraftText) return;
+    setText(initialDraftText);
+  }, [channel, initialDraftText]);
 
   useEffect(() => {
     if (isRoom || !channel.startsWith("dm:")) return;

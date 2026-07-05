@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
 import {
   fetchRoomManage,
   mutateRoomManage,
@@ -20,7 +21,9 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
   const [snapshot, setSnapshot] = useState<RoomManageSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [addPhone, setAddPhone] = useState("");
+  const [lastTargetPhone, setLastTargetPhone] = useState<string>("");
   const [busyPhone, setBusyPhone] = useState<string | null>(null);
   const [roomKey, setRoomKey] = useState<string | null>(null);
 
@@ -56,17 +59,28 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
 
   async function runAction(action: "add" | "remove" | "promote" | "demote", targetPhone: string) {
     setBusyPhone(targetPhone);
+    setLastTargetPhone(targetPhone);
     setError(null);
+    setErrorCode(null);
     try {
       const res = await mutateRoomManage({ roomId, action, targetPhone });
       if (!res.ok) {
         setError(res.error ?? "Ошибка");
+        setErrorCode(res.code ?? null);
         return;
       }
       await load();
     } finally {
       setBusyPhone(null);
     }
+  }
+
+  function openInviteDm(phone: string) {
+    if (!joinUrl) return;
+    const text = `Приглашение в комнату ${roomId}: ${joinUrl}`;
+    const href =
+      `${messengerChatUrl(phone, messengerRoomUrl(roomId))}` + `&draft=${encodeURIComponent(text)}`;
+    window.location.href = href;
   }
 
   if (!open) return null;
@@ -108,10 +122,16 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
                   Копировать ссылку
                 </button>
               </div>
+              <p className="mt-2 text-[11px] text-gray-500">
+                Если у пользователя отключено автодобавление, отправьте приглашение через личный чат.
+              </p>
             </section>
 
             <section className="rounded-xl border border-gray-200 p-3 space-y-2">
-              <p className="text-xs font-semibold text-gray-700">Добавить из whitelist</p>
+              <p className="text-xs font-semibold text-gray-700">Добавить по номеру телефона</p>
+              <p className="text-[11px] text-gray-500">
+                Нет выпадающего списка: укажите номер вручную. Добавление возможно только для active whitelist и зарегистрированных в мессенджере.
+              </p>
               <div className="flex gap-2">
                 <input
                   value={addPhone}
@@ -132,6 +152,15 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
                   Добавить
                 </button>
               </div>
+              {errorCode === "auto_add_disabled" && lastTargetPhone && (
+                <button
+                  type="button"
+                  className="rounded-lg border border-indigo-200 px-3 py-2 text-xs text-indigo-700"
+                  onClick={() => openInviteDm(lastTargetPhone)}
+                >
+                  Отправить приглашение в личный чат
+                </button>
+              )}
             </section>
 
             <section className="rounded-xl border border-gray-200 p-3">
@@ -179,6 +208,13 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
                               Удалить
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="rounded border border-indigo-200 px-2 py-1 text-[11px] text-indigo-700"
+                            onClick={() => openInviteDm(p.phone)}
+                          >
+                            Пригласить
+                          </button>
                         </div>
                       </div>
                     </div>

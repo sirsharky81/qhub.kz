@@ -214,6 +214,8 @@ function MessengerChatInner() {
 
   const peerTitle = profileLabels[peerPhone] ?? maskPhone(peerPhone);
   const deepLinkCallId = searchParams.get("call");
+  const draftTextRaw = searchParams.get("draft");
+  const draftText = draftTextRaw ?? "";
   const backHref = safeFamilyReturnTo(searchParams.get("returnTo")) ?? "/tools/messenger/home";
 
   const handleTrustIdentity = useCallback(() => {
@@ -283,6 +285,7 @@ function MessengerChatInner() {
               : undefined
           }
           onTrustIdentity={identityAlert ? () => handleTrustIdentity() : undefined}
+          initialDraftText={draftText}
         />
       </CallProvider>
     </PinUnlockGate>

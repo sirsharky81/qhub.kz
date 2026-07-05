@@ -253,17 +253,18 @@ export async function pingMessengerPresence(): Promise<void> {
 export async function fetchProfile(): Promise<{
   phone: string;
   displayName: string | null;
+  allowRoomAutoAdd: boolean;
 } | null> {
   const res = await platformFetch("/api/messenger/profile");
   if (!res.ok) return null;
-  return res.json() as Promise<{ phone: string; displayName: string | null }>;
+  return res.json() as Promise<{ phone: string; displayName: string | null; allowRoomAutoAdd: boolean }>;
 }
 
-export async function updateProfile(displayName: string): Promise<boolean> {
+export async function updateProfile(input: { displayName: string; allowRoomAutoAdd?: boolean }): Promise<boolean> {
   const res = await platformFetch("/api/messenger/profile", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ displayName }),
+    body: JSON.stringify(input),
   });
   return res.ok;
 }
@@ -332,14 +333,19 @@ export async function mutateRoomManage(input: {
   roomId: string;
   action: "add" | "remove" | "promote" | "demote";
   targetPhone: string;
-}): Promise<{ ok: boolean; error?: string; participants?: RoomManageParticipant[] }> {
+}): Promise<{ ok: boolean; error?: string; code?: string; participants?: RoomManageParticipant[] }> {
   const res = await platformFetch("/api/messenger/room/manage", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; participants?: RoomManageParticipant[] };
-  if (!res.ok || !data.ok) return { ok: false, error: data.error ?? "Ошибка" };
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    code?: string;
+    participants?: RoomManageParticipant[];
+  };
+  if (!res.ok || !data.ok) return { ok: false, error: data.error ?? "Ошибка", code: data.code };
   return { ok: true, participants: data.participants };
 }
 
