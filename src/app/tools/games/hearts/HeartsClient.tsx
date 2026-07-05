@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { GameEngine } from "@/lib/games/core/engine";
 import { heartsAiService } from "@/lib/games/hearts/ai/service";
 import { createHeartsDefinition } from "@/lib/games/hearts/rules";
@@ -70,8 +69,11 @@ function cardShortLabel(cardId: string): string {
   return `${rank}${suitSymbol}`;
 }
 
-export default function HeartsClient() {
-  const searchParams = useSearchParams();
+export default function HeartsClient({
+  initialMode = "offline",
+}: {
+  initialMode?: "offline" | "create-online" | "join-online";
+}) {
   const [state, setState] = useState<HeartsState | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [playerName, setPlayerName] = useState("Игрок 1");
@@ -467,8 +469,8 @@ export default function HeartsClient() {
   }, [roomSeats]);
   const isOnlineWaitingForStart = Boolean(onlineSession && roomStatus === "open");
   const isGameActive = Boolean(state && !isOnlineWaitingForStart);
-  const launchMode = searchParams.get("mode");
-  const initialMenuTab = launchMode === "create-online" || launchMode === "join-online" ? launchMode : "offline";
+  const initialMenuTab =
+    initialMode === "create-online" || initialMode === "join-online" ? initialMode : "offline";
   const playerNameById = useMemo(
     () =>
       Object.fromEntries((state?.players ?? []).map((player) => [player.id, player.name] as const)) as Record<
