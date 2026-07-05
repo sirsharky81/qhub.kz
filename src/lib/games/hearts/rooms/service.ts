@@ -195,7 +195,10 @@ function createOpenRoom(hostName: string): HeartsRoomRecord {
   };
 }
 
-function joinOpenRoom(room: HeartsRoomRecord, playerName: string): HeartsRoomRecord {
+function joinOpenRoom(
+  room: HeartsRoomRecord,
+  playerName: string,
+): { room: HeartsRoomRecord; seat: HeartsRoomSeat } {
   if (room.status !== "open") {
     throw new Error("Комната уже запущена");
   }
@@ -204,10 +207,13 @@ function joinOpenRoom(room: HeartsRoomRecord, playerName: string): HeartsRoomRec
   }
   const seat = createSeat({ name: playerName, isBot: false });
   return {
-    ...room,
-    seats: [...room.seats, seat],
-    version: room.version + 1,
-    updatedAt: Date.now(),
+    room: {
+      ...room,
+      seats: [...room.seats, seat],
+      version: room.version + 1,
+      updatedAt: Date.now(),
+    },
+    seat,
   };
 }
 
@@ -231,16 +237,15 @@ export async function quickMatch(playerName: string): Promise<HeartsRoomJoinResu
   const open = rooms.find((room) => room.status === "open" && room.seats.length < MAX_PLAYERS);
   if (open) {
     const joined = joinOpenRoom(open, playerName);
-    const started = startRoomWithBots(joined);
+    const started = startRoomWithBots(joined.room);
     await saveHeartsRoom(started);
-    const seat = started.seats.find((item) => item.name === playerName && !item.isBot);
-    if (!seat?.joinToken) throw new Error("Failed to create join credentials");
-    return roomJoinResult(started, seat.id, seat.joinToken, false);
+    if (!joined.seat.joinToken) throw new Error("Failed to create join credentials");
+    return roomJoinResult(started, joined.seat.id, joined.seat.joinToken, false);
   }
   const created = createOpenRoom(playerName);
   const started = startRoomWithBots(created);
   await saveHeartsRoom(started);
-  const host = started.seats.find((seat) => seat.name === playerName && !seat.isBot);
+  const host = started.seats.find((seat) => seat.id === created.hostPlayerId);
   if (!host?.joinToken) throw new Error("Failed to create host credentials");
   return roomJoinResult(started, host.id, host.joinToken, true);
 }
@@ -260,10 +265,9 @@ export async function joinRoomByCode(
   const room = await getHeartsRoom(roomCode);
   if (!room) throw new Error("Комната не найдена");
   const joined = joinOpenRoom(room, playerName);
-  await saveHeartsRoom(joined);
-  const seat = joined.seats.find((item) => item.name === playerName && !item.isBot);
-  if (!seat?.joinToken) throw new Error("Failed to create join credentials");
-  return roomJoinResult(joined, seat.id, seat.joinToken, false);
+  await saveHeartsRoom(joined.room);
+  if (!joined.seat.joinToken) throw new Error("Failed to create join credentials");
+  return roomJoinResult(joined.room, joined.seat.id, joined.seat.joinToken, false);
 }
 
 export async function getRoomPublic(code: string): Promise<HeartsRoomPublic | null> {
@@ -280,6 +284,17 @@ function aiProgress(state: HeartsState, seats: readonly HeartsRoomSeat[]): Heart
   });
   const engine = new GameEngine(definition);
   engine.replaceState(state);
+  if (engine.getState().phase === "passing") {
+    for (const seat of seats) {
+      if (!seat.controlledByAi) continue;
+      const selected = engine.getState().passSelections[seat.id] ?? [];
+      if (selected.length === 3 || engine.getState().passDirection === "none") continue;
+      const legal = definition.getLegalActions(engine.getState(), seat.id);
+      const chosen = legal.find((action) => action.type === "select_pass_cards");
+      if (!chosen) continue;
+      engine.dispatch(chosen, { actorId: seat.id, at: Date.now() });
+    }
+  }
   let guard = 0;
   while (guard < 16) {
     const currentSeat = seats.find((seat) => seat.id === engine.getState().currentTurnId);
