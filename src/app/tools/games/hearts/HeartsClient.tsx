@@ -6,7 +6,7 @@ import { GameEngine } from "@/lib/games/core/engine";
 import { heartsAiService } from "@/lib/games/hearts/ai/service";
 import { createHeartsDefinition } from "@/lib/games/hearts/rules";
 import { legalCardsForPlayer } from "@/lib/games/hearts/validators";
-import type { HeartsAction, HeartsState } from "@/lib/games/hearts/types";
+import type { HeartsAction, HeartsPlayedCard, HeartsState } from "@/lib/games/hearts/types";
 import {
   DEFAULT_HEARTS_SETTINGS,
   DEFAULT_HEARTS_STATS,
@@ -59,6 +59,16 @@ function normalizeHeartsMessage(input: string): string {
   return input;
 }
 
+function cardShortLabel(cardId: string): string {
+  const suit = cardId.slice(-1);
+  const rankRaw = cardId.slice(0, -1).toUpperCase();
+  const rank =
+    rankRaw === "11" ? "J" : rankRaw === "12" ? "Q" : rankRaw === "13" ? "K" : rankRaw === "14" ? "A" : rankRaw;
+  const suitSymbol =
+    suit === "C" ? "♣" : suit === "D" ? "♦" : suit === "S" ? "♠" : suit === "H" ? "♥" : suit;
+  return `${rank}${suitSymbol}`;
+}
+
 export default function HeartsClient() {
   const [state, setState] = useState<HeartsState | null>(null);
   const [joinCode, setJoinCode] = useState("");
@@ -73,6 +83,7 @@ export default function HeartsClient() {
   const [stats, setStats] = useState<HeartsStats>(DEFAULT_HEARTS_STATS);
   const [inactivity, setInactivity] = useState<RoomInactivity | null>(null);
   const [panelTab, setPanelTab] = useState<HeartsPanelTab>("menu");
+  const [recentTricks, setRecentTricks] = useState<Array<{ id: string; cards: HeartsPlayedCard[] }>>([]);
 
   const engineRef = useRef<GameEngine<HeartsState, HeartsAction> | null>(null);
   const definitionRef = useRef<ReturnType<typeof createHeartsDefinition> | null>(null);
@@ -102,6 +113,7 @@ export default function HeartsClient() {
       setRoomStatus(null);
       setRoomSeats(null);
       setInactivity(null);
+      setRecentTricks([]);
       setState(engine.getState());
       setSelectedPass([]);
       setMessage(null);
@@ -130,6 +142,20 @@ export default function HeartsClient() {
     void saveHeartsState(state);
   }, [state, onlineSession]);
 
+  const applyGameState = useCallback((nextState: HeartsState) => {
+    setState(nextState);
+    setRecentTricks((prev) => {
+      const roundKeyPrefix = `${nextState.gameId}:${nextState.roundIndex}:`;
+      const withinRound = prev.filter((item) => item.id.startsWith(roundKeyPrefix));
+      if (nextState.lastTrick.length === 0) return withinRound;
+      const trickId = `${roundKeyPrefix}${nextState.lastTrick
+        .map((entry) => `${entry.playerId}:${entry.card.id}`)
+        .join("|")}`;
+      if (withinRound.some((item) => item.id === trickId)) return withinRound;
+      return [{ id: trickId, cards: nextState.lastTrick }, ...withinRound].slice(0, 3);
+    });
+  }, []);
+
   const localDispatch = useCallback((action: HeartsAction) => {
     if (!engineRef.current) return;
     const result = engineRef.current.dispatch(action, {
@@ -145,8 +171,8 @@ export default function HeartsClient() {
       setMessage(normalizeHeartsMessage(result.reason ?? "Недопустимое действие"));
       return;
     }
-    setState(result.state);
-  }, []);
+    applyGameState(result.state);
+  }, [applyGameState]);
 
   const remoteDispatch = useCallback(
     async (action: HeartsAction) => {
@@ -169,13 +195,13 @@ export default function HeartsClient() {
         return;
       }
       if (!data.state) return;
-      setState(data.state);
+      applyGameState(data.state);
       setInactivity(data.inactivity ?? null);
       setRoomHostPlayerId(data.hostPlayerId ?? null);
       setRoomStatus(data.status ?? null);
       setRoomSeats(data.seats ?? null);
     },
-    [onlineSession],
+    [applyGameState, onlineSession],
   );
 
   const dispatch = useCallback(
@@ -206,6 +232,7 @@ export default function HeartsClient() {
     setRoomSeats(null);
     setInactivity(null);
     setSelectedPass([]);
+    setRecentTricks([]);
     setState(null);
     setMessage("Вы покинули онлайн-комнату.");
   }, [onlineSession]);
@@ -230,6 +257,7 @@ export default function HeartsClient() {
     setRoomSeats(null);
     setInactivity(null);
     setSelectedPass([]);
+    setRecentTricks([]);
     setState(null);
     setMessage("Онлайн-игра завершена. Комната закрыта.");
     return true;
@@ -265,6 +293,7 @@ export default function HeartsClient() {
     setRoomHostPlayerId(null);
     setInactivity(null);
     setSelectedPass([]);
+    setRecentTricks([]);
     setState(null);
     void saveHeartsState(null);
     setMessage("Партия завершена. Выберите режим для новой игры.");
@@ -324,6 +353,7 @@ export default function HeartsClient() {
             setRoomSeats(null);
             setInactivity(null);
             setSelectedPass([]);
+            setRecentTricks([]);
             setState(null);
             setMessage("Комната закрыта.");
             return null;
@@ -332,7 +362,7 @@ export default function HeartsClient() {
         })
         .then((room) => {
           if (room?.state) {
-            setState(room.state);
+            applyGameState(room.state);
             setInactivity(room.inactivity ?? null);
             setRoomHostPlayerId(room.hostPlayerId ?? null);
             setRoomStatus(room.status ?? null);
@@ -342,7 +372,7 @@ export default function HeartsClient() {
         .catch(() => {});
     }, 1500);
     return () => window.clearInterval(id);
-  }, [onlineSession]);
+  }, [applyGameState, onlineSession]);
 
   useEffect(() => {
     if (!onlineSession) return;
@@ -364,12 +394,13 @@ export default function HeartsClient() {
           setRoomSeats(null);
           setInactivity(null);
           setSelectedPass([]);
+          setRecentTricks([]);
           setState(null);
           setMessage("Комната закрыта.");
           return;
         }
         if (room?.state) {
-          setState(room.state);
+          applyGameState(room.state);
           setInactivity(room.inactivity ?? null);
           setRoomHostPlayerId(room.hostPlayerId ?? null);
           setRoomStatus(room.status ?? null);
@@ -388,7 +419,7 @@ export default function HeartsClient() {
         }),
       });
     };
-  }, [onlineSession]);
+  }, [applyGameState, onlineSession]);
 
   useEffect(() => {
     if (!state || state.phase !== "game_end" || !state.winnerId) return;
@@ -434,6 +465,14 @@ export default function HeartsClient() {
   }, [roomSeats]);
   const isOnlineWaitingForStart = Boolean(onlineSession && roomStatus === "open");
   const isGameActive = Boolean(state && !isOnlineWaitingForStart);
+  const playerNameById = useMemo(
+    () =>
+      Object.fromEntries((state?.players ?? []).map((player) => [player.id, player.name] as const)) as Record<
+        string,
+        string
+      >,
+    [state?.players],
+  );
   const canPlay =
     Boolean(state) &&
     (!onlineSession || roomStatus === "playing") &&
@@ -509,7 +548,7 @@ export default function HeartsClient() {
       joinToken: data.joinToken,
     });
     if (!data.room.state) return;
-    setState(data.room.state);
+    applyGameState(data.room.state);
     setInactivity(data.room.inactivity ?? null);
     setRoomHostPlayerId(data.room.hostPlayerId ?? null);
     setRoomStatus(data.room.status ?? null);
@@ -545,7 +584,7 @@ export default function HeartsClient() {
       joinToken: data.joinToken,
     });
     if (!data.room.state) return;
-    setState(data.room.state);
+    applyGameState(data.room.state);
     setInactivity(data.room.inactivity ?? null);
     setRoomHostPlayerId(data.room.hostPlayerId ?? null);
     setRoomStatus(data.room.status ?? null);
@@ -569,7 +608,7 @@ export default function HeartsClient() {
       return;
     }
     if (!data.state) return;
-    setState(data.state);
+    applyGameState(data.state);
     setInactivity(data.inactivity ?? null);
     setRoomHostPlayerId(data.hostPlayerId ?? null);
     setRoomStatus(data.status ?? null);
@@ -735,6 +774,30 @@ export default function HeartsClient() {
                       Завершить партию
                     </button>
                   </div>
+                </section>
+                <section className="hidden lg:block rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+                  <h3 className="text-xs uppercase tracking-wide text-gray-500">История взяток</h3>
+                  {recentTricks.length === 0 ? (
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Пока нет завершенных взяток.</p>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      {recentTricks.map((trick, index) => (
+                        <div key={trick.id} className="rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-2">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Взятка #{recentTricks.length - index}
+                          </p>
+                          <div className="mt-1 space-y-0.5">
+                            {trick.cards.map((entry) => (
+                              <p key={`${trick.id}-${entry.playerId}`} className="text-xs text-gray-700 dark:text-gray-200">
+                                {playerNameById[entry.playerId] ?? entry.playerId}:{" "}
+                                <span className="font-semibold">{cardShortLabel(entry.card.id)}</span>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               </div>
             </div>
