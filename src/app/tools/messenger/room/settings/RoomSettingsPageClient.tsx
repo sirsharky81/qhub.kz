@@ -47,14 +47,6 @@ export function RoomSettingsPageClient() {
     void load();
   }, [roomId, load, router]);
 
-  useEffect(() => {
-    if (!roomId) return;
-    const timer = window.setInterval(() => {
-      void load();
-    }, 10_000);
-    return () => window.clearInterval(timer);
-  }, [roomId, load]);
-
   async function runAction(action: "add" | "remove" | "promote" | "demote", targetPhone: string) {
     setBusyPhone(targetPhone);
     setLastTargetPhone(targetPhone);
@@ -126,7 +118,7 @@ export function RoomSettingsPageClient() {
               </p>
             </section>
 
-            <section className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+            <section className="sticky bottom-0 z-10 rounded-xl border border-gray-200 bg-white/95 backdrop-blur p-3 space-y-2">
               <p className="text-xs font-semibold text-gray-700">Добавить по номеру телефона</p>
               <p className="text-[11px] text-gray-500">
                 Без выпадающих списков: укажите номер вручную. Добавление только для active whitelist и зарегистрированных пользователей.
@@ -137,12 +129,12 @@ export function RoomSettingsPageClient() {
                   onChange={(e) => setAddPhone(e.target.value)}
                   onFocus={(e) => {
                     // iOS Safari/PWA: ensure focused input stays above keyboard.
-                    setTimeout(() => {
-                      e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" });
-                    }, 80);
+                    requestAnimationFrame(() => {
+                      e.currentTarget.scrollIntoView({ block: "nearest", behavior: "auto" });
+                    });
                   }}
                   placeholder="+7XXXXXXXXXX"
-                  className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm scroll-mb-28"
                 />
                 <button
                   type="button"
