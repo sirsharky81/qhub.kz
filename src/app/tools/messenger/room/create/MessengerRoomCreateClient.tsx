@@ -32,6 +32,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+function roomOpenUrlWithKey(roomId: string, roomKey: string): string {
+  return `${messengerRoomUrl(roomId)}#key=${encodeURIComponent(roomKey)}`;
+}
+
 export function MessengerRoomCreateClient() {
   const router = useRouter();
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -139,7 +143,7 @@ export function MessengerRoomCreateClient() {
             void withTimeout(joinRoomApi(roomId), ROOM_STEP_TIMEOUT_MS, "Таймаут входа в комнату")
               .then((r) => {
                 if (r.ok) {
-                  router.replace(messengerRoomUrl(roomId));
+                  router.replace(roomOpenUrlWithKey(roomId, roomKey));
                 } else {
                   setError(r.error ?? "Не удалось войти в комнату");
                   setEntering(false);

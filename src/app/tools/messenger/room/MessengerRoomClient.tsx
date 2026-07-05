@@ -16,7 +16,7 @@ import {
 import { importRoomKeyBase64Url } from "@/lib/messenger/crypto";
 import { cleanupRoomLocalState, upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { maskPhone } from "@/lib/messenger/phone-format";
-import { getRoomKey } from "@/lib/messenger/room-keys";
+import { getRoomKey, setRoomKey } from "@/lib/messenger/room-keys";
 
 const ROOM_STEP_TIMEOUT_MS = 10_000;
 const ROOM_FLOW_WATCHDOG_MS = 15_000;
@@ -38,6 +38,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 }
 
 function MessengerRoomInner() {
+  const getKeyFromHash = useCallback((): string | null => {
+    if (typeof window === "undefined") return null;
+    if (!window.location.hash.startsWith("#key=")) return null;
+    try {
+      const key = decodeURIComponent(window.location.hash.slice(5)).trim();
+      return key || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const clearHashFromUrl = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!window.location.hash) return;
+    try {
+      const withoutHash = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(null, "", withoutHash);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const roomId = String(searchParams.get("id") ?? "").toUpperCase();
@@ -123,7 +145,15 @@ function MessengerRoomInner() {
 
         currentStep = "Проверка ключа комнаты";
         if (!cancelled) setLoadingStep(currentStep);
-        const storedKey = getRoomKey(roomId);
+        let storedKey = getRoomKey(roomId);
+        if (!storedKey) {
+          const hashKey = getKeyFromHash();
+          if (hashKey) {
+            setRoomKey(roomId, hashKey);
+            storedKey = hashKey;
+            clearHashFromUrl();
+          }
+        }
         if (!storedKey) {
           if (!cancelled) {
             setError("Не найден ключ комнаты на этом устройстве. Нужен повторный вход по коду/QR.");
@@ -193,7 +223,7 @@ function MessengerRoomInner() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, retryKey, router]);
+  }, [roomId, retryKey, router, getKeyFromHash, clearHashFromUrl]);
 
   useEffect(() => {
     if (!loading) return;

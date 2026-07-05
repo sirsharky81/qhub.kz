@@ -30,6 +30,16 @@ export function RoomInvite({ roomId, roomKey }: Props) {
     alert("Ссылка скопирована");
   }
 
+  async function copyRoomCode() {
+    await navigator.clipboard.writeText(roomId);
+    alert("Код комнаты скопирован");
+  }
+
+  async function copyInviteLink() {
+    await navigator.clipboard.writeText(joinUrl);
+    alert("Ссылка приглашения скопирована");
+  }
+
   return (
     <div className="flex flex-col items-center gap-4 p-4">
       <p className="text-3xl font-mono font-bold tracking-widest text-gray-900">{roomId}</p>
@@ -40,13 +50,29 @@ export function RoomInvite({ roomId, roomKey }: Props) {
       <p className="text-xs text-gray-500 text-center max-w-xs">
         Ключ шифрования в QR и ссылке. Не передавайте только код комнаты без QR.
       </p>
-      <button
-        type="button"
-        onClick={handleShare}
-        className="w-full max-w-xs rounded-xl bg-gray-900 text-white py-2.5 text-sm font-semibold"
-      >
-        Поделиться
-      </button>
+      <div className="grid w-full max-w-xs gap-2">
+        <button
+          type="button"
+          onClick={copyRoomCode}
+          className="w-full rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold"
+        >
+          Скопировать код комнаты
+        </button>
+        <button
+          type="button"
+          onClick={copyInviteLink}
+          className="w-full rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold"
+        >
+          Скопировать ссылку
+        </button>
+        <button
+          type="button"
+          onClick={handleShare}
+          className="w-full rounded-xl bg-gray-900 text-white py-2.5 text-sm font-semibold"
+        >
+          Поделиться
+        </button>
+      </div>
     </div>
   );
 }

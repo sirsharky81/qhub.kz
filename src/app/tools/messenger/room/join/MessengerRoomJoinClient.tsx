@@ -12,6 +12,10 @@ import { setRoomKey, getRoomKey } from "@/lib/messenger/room-keys";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
 
+function roomOpenUrlWithKey(roomId: string, roomKey: string): string {
+  return `${messengerRoomUrl(roomId)}#key=${encodeURIComponent(roomKey)}`;
+}
+
 function JoinInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -84,7 +88,7 @@ function JoinInner() {
         roomId: rid,
         createdAt: Date.now(),
       });
-      router.replace(messengerRoomUrl(rid));
+      router.replace(roomOpenUrlWithKey(rid, keyStr));
     } catch {
       setError("Неверный ключ комнаты");
       setJoining(false);
