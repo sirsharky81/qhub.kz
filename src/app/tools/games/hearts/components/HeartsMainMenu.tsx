@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { isIOSDevice } from "@/lib/platform/device";
 
 export function HeartsMainMenu({
   onStartOffline,
@@ -40,27 +41,59 @@ export function HeartsMainMenu({
   initialTab?: "offline" | "create-online" | "join-online";
 }) {
   const [mainTab, setMainTab] = useState<"offline" | "create-online" | "join-online">(initialTab ?? "offline");
+  const focusTimersRef = useRef<number[]>([]);
+  const cleanupFocusTrackingRef = useRef<(() => void) | null>(null);
 
-  const keepInputVisible = (input: HTMLInputElement) => {
+  const clearFocusTimers = useCallback(() => {
+    focusTimersRef.current.forEach((id) => window.clearTimeout(id));
+    focusTimersRef.current = [];
+  }, []);
+
+  const clearFocusTracking = useCallback(() => {
+    cleanupFocusTrackingRef.current?.();
+    cleanupFocusTrackingRef.current = null;
+    clearFocusTimers();
+  }, [clearFocusTimers]);
+
+  useEffect(() => clearFocusTracking, [clearFocusTracking]);
+
+  const scrollInputIntoView = useCallback((input: HTMLInputElement) => {
+    if (!input.isConnected) return;
     const scrollContainer = input.closest('[data-hearts-scroll="true"]');
-    const scrollToInput = () => {
-      if (scrollContainer instanceof HTMLElement) {
-        const containerRect = scrollContainer.getBoundingClientRect();
-        const inputRect = input.getBoundingClientRect();
-        const topGap = inputRect.top - containerRect.top;
-        const desiredTop = 88;
-        scrollContainer.scrollTo({
-          top: scrollContainer.scrollTop + topGap - desiredTop,
-          behavior: "auto",
-        });
-        return;
-      }
-      input.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    if (scrollContainer instanceof HTMLElement) {
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      const topGap = inputRect.top - containerRect.top;
+      const desiredTop = 88;
+      scrollContainer.scrollTo({
+        top: scrollContainer.scrollTop + topGap - desiredTop,
+        behavior: "auto",
+      });
+      return;
+    }
+    input.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+  }, []);
+
+  const keepInputVisible = useCallback((input: HTMLInputElement) => {
+    clearFocusTracking();
+    scrollInputIntoView(input);
+    requestAnimationFrame(() => scrollInputIntoView(input));
+    focusTimersRef.current.push(
+      window.setTimeout(() => scrollInputIntoView(input), 120),
+      window.setTimeout(() => scrollInputIntoView(input), 280),
+      window.setTimeout(() => scrollInputIntoView(input), 520),
+    );
+
+    if (!isIOSDevice() || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const handleViewportShift = () => scrollInputIntoView(input);
+    vv.addEventListener("resize", handleViewportShift);
+    vv.addEventListener("scroll", handleViewportShift);
+    cleanupFocusTrackingRef.current = () => {
+      vv.removeEventListener("resize", handleViewportShift);
+      vv.removeEventListener("scroll", handleViewportShift);
     };
-    requestAnimationFrame(scrollToInput);
-    window.setTimeout(scrollToInput, 250);
-    window.setTimeout(scrollToInput, 500);
-  };
+  }, [clearFocusTracking, scrollInputIntoView]);
 
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3 md:max-w-3xl md:mx-auto md:p-2.5 md:space-y-1.5">
@@ -119,6 +152,7 @@ export function HeartsMainMenu({
               value={playerName}
               onChange={(e) => setPlayerName(e.target.value)}
               onFocus={(e) => keepInputVisible(e.currentTarget)}
+              onBlur={clearFocusTracking}
               placeholder="Ваше имя"
               className="w-full min-w-0 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm md:text-xs"
             />
@@ -195,6 +229,7 @@ export function HeartsMainMenu({
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                   onFocus={(e) => keepInputVisible(e.currentTarget)}
+                  onBlur={clearFocusTracking}
                   placeholder="Код комнаты"
                   className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm md:text-xs"
                 />
