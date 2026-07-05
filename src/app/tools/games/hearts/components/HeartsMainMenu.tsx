@@ -67,7 +67,7 @@ export function HeartsMainMenu({
         <button
           type="button"
           onClick={() => setMainTab("offline")}
-          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium ${
+          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "offline"
               ? "border-violet-600 bg-violet-600 text-white"
               : "border-gray-300 dark:border-gray-700"
@@ -78,7 +78,7 @@ export function HeartsMainMenu({
         <button
           type="button"
           onClick={() => setMainTab("create-online")}
-          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium ${
+          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "create-online"
               ? "border-violet-600 bg-violet-600 text-white"
               : "border-gray-300 dark:border-gray-700"
@@ -89,7 +89,7 @@ export function HeartsMainMenu({
         <button
           type="button"
           onClick={() => setMainTab("join-online")}
-          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium ${
+          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "join-online"
               ? "border-violet-600 bg-violet-600 text-white"
               : "border-gray-300 dark:border-gray-700"

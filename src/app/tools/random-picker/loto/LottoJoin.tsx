@@ -261,7 +261,7 @@ export function LottoJoin() {
       </PickerButton>
       <PickerButton
         onClick={() => void handleJoin()}
-        className="w-full"
+        className="w-full whitespace-normal break-words leading-tight"
         disabled={joining || !roomCodeInput.trim() || !joinCodeInput.trim()}
       >
         {joining ? "Подключение…" : "Присоединиться"}
