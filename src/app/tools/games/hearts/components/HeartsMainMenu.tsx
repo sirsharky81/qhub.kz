@@ -5,12 +5,14 @@ export function HeartsMainMenu({
   onCopyRoomCode,
   onLeaveRoom,
   onCloseRoom,
+  onStartOnlineGame,
   playerName,
   setPlayerName,
   joinCode,
   setJoinCode,
   onlineRoomCode,
   isRoomOwner,
+  onlineStatus,
 }: {
   onStartOffline: () => void;
   onCreateRoom: () => void;
@@ -18,12 +20,14 @@ export function HeartsMainMenu({
   onCopyRoomCode: () => void;
   onLeaveRoom: () => void;
   onCloseRoom: () => void;
+  onStartOnlineGame: () => void;
   playerName: string;
   setPlayerName: (value: string) => void;
   joinCode: string;
   setJoinCode: (value: string) => void;
   onlineRoomCode: string | null;
   isRoomOwner: boolean;
+  onlineStatus: "open" | "playing" | "finished" | null;
 }) {
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
@@ -52,6 +56,21 @@ export function HeartsMainMenu({
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm">
               Код комнаты: <span className="font-semibold tracking-wide">{onlineRoomCode}</span>
             </div>
+            {onlineStatus === "open" && (
+              isRoomOwner ? (
+                <button
+                  type="button"
+                  onClick={onStartOnlineGame}
+                  className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                >
+                  Начать онлайн-игру
+                </button>
+              ) : (
+                <p className="rounded-lg bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                  Ожидание игроков и начала игры создателем комнаты.
+                </p>
+              )
+            )}
             <button
               type="button"
               onClick={onCopyRoomCode}
@@ -83,21 +102,22 @@ export function HeartsMainMenu({
               onClick={onCreateRoom}
               className="w-full rounded-lg bg-gray-900 hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 text-white text-sm font-medium px-3 py-2"
             >
-              Создать онлайн-игру
+              Создать онлайн игру
             </button>
-            <div className="grid sm:grid-cols-[1fr_auto] gap-2">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-2.5 space-y-2">
+              <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Присоединиться к игре</p>
               <input
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                 placeholder="Код комнаты"
-                className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
               />
               <button
                 type="button"
                 onClick={onJoinByCode}
-                className="rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2"
               >
-                Присоединиться
+                Присоединиться к игре
               </button>
             </div>
           </div>

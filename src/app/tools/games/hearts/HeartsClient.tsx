@@ -43,9 +43,9 @@ interface OnlineRoomResponse {
   roomCode?: string;
   status?: "open" | "playing" | "finished";
   hostPlayerId?: string | null;
-  seats?: Array<{ id: string; connected: boolean; isBot: boolean; controlledByAi: boolean }>;
-  state: HeartsState;
-  inactivity: RoomInactivity;
+  seats?: Array<{ id: string; name: string; connected: boolean; isBot: boolean; controlledByAi: boolean }>;
+  state?: HeartsState;
+  inactivity?: RoomInactivity;
   error?: string;
   closed?: boolean;
 }
@@ -68,6 +68,8 @@ export default function HeartsClient() {
   const [message, setMessage] = useState<string | null>(null);
   const [onlineSession, setOnlineSession] = useState<OnlineSession | null>(null);
   const [roomHostPlayerId, setRoomHostPlayerId] = useState<string | null>(null);
+  const [roomStatus, setRoomStatus] = useState<"open" | "playing" | "finished" | null>(null);
+  const [roomSeats, setRoomSeats] = useState<OnlineRoomResponse["seats"] | null>(null);
   const [settings, setSettings] = useState<HeartsSettings>(DEFAULT_HEARTS_SETTINGS);
   const [stats, setStats] = useState<HeartsStats>(DEFAULT_HEARTS_STATS);
   const [inactivity, setInactivity] = useState<RoomInactivity | null>(null);
@@ -97,6 +99,8 @@ export default function HeartsClient() {
       engineRef.current = engine;
       setOnlineSession(null);
       setRoomHostPlayerId(null);
+      setRoomStatus(null);
+      setRoomSeats(null);
       setInactivity(null);
       setState(engine.getState());
       setSelectedPass([]);
@@ -164,9 +168,12 @@ export default function HeartsClient() {
         setMessage(normalizeHeartsMessage(data.error ?? "Ошибка отправки действия"));
         return;
       }
+      if (!data.state) return;
       setState(data.state);
       setInactivity(data.inactivity ?? null);
       setRoomHostPlayerId(data.hostPlayerId ?? null);
+      setRoomStatus(data.status ?? null);
+      setRoomSeats(data.seats ?? null);
     },
     [onlineSession],
   );
@@ -195,6 +202,8 @@ export default function HeartsClient() {
     }).catch(() => {});
     setOnlineSession(null);
     setRoomHostPlayerId(null);
+    setRoomStatus(null);
+    setRoomSeats(null);
     setInactivity(null);
     setSelectedPass([]);
     setState(null);
@@ -217,6 +226,8 @@ export default function HeartsClient() {
     }
     setOnlineSession(null);
     setRoomHostPlayerId(null);
+    setRoomStatus(null);
+    setRoomSeats(null);
     setInactivity(null);
     setSelectedPass([]);
     setState(null);
@@ -231,6 +242,8 @@ export default function HeartsClient() {
     }
     setOnlineSession(null);
     setRoomHostPlayerId(null);
+    setRoomStatus(null);
+    setRoomSeats(null);
     setInactivity(null);
     startOfflineGame();
     setMessage("Запущена новая оффлайн партия против ИИ.");
@@ -312,6 +325,8 @@ export default function HeartsClient() {
           if (!res.ok) {
             setOnlineSession(null);
             setRoomHostPlayerId(null);
+            setRoomStatus(null);
+            setRoomSeats(null);
             setInactivity(null);
             setSelectedPass([]);
             setState(null);
@@ -325,6 +340,8 @@ export default function HeartsClient() {
             setState(room.state);
             setInactivity(room.inactivity ?? null);
             setRoomHostPlayerId(room.hostPlayerId ?? null);
+            setRoomStatus(room.status ?? null);
+            setRoomSeats(room.seats ?? null);
           }
         })
         .catch(() => {});
@@ -348,6 +365,8 @@ export default function HeartsClient() {
         if (room.closed) {
           setOnlineSession(null);
           setRoomHostPlayerId(null);
+          setRoomStatus(null);
+          setRoomSeats(null);
           setInactivity(null);
           setSelectedPass([]);
           setState(null);
@@ -358,6 +377,8 @@ export default function HeartsClient() {
           setState(room.state);
           setInactivity(room.inactivity ?? null);
           setRoomHostPlayerId(room.hostPlayerId ?? null);
+          setRoomStatus(room.status ?? null);
+          setRoomSeats(room.seats ?? null);
         }
       })
       .catch(() => {});
@@ -408,16 +429,23 @@ export default function HeartsClient() {
       roomHostPlayerId &&
       onlineSession.playerId === roomHostPlayerId,
   );
+  const onlinePlayerIds = useMemo(() => {
+    if (!roomSeats) return new Set<string>();
+    return new Set(roomSeats.filter((seat) => !seat.isBot).map((seat) => seat.id));
+  }, [roomSeats]);
+  const isOnlineWaitingForStart = Boolean(onlineSession && roomStatus === "open");
   const onlineCountdownSec = useMemo(() => {
     if (!inactivity?.enabled || !inactivity.deadlineAt) return null;
     return Math.max(0, Math.ceil((inactivity.deadlineAt - nowTs) / 1000));
   }, [inactivity, nowTs]);
   const canPlay =
     Boolean(state) &&
+    (!onlineSession || roomStatus === "playing") &&
     state?.phase === "playing" &&
     state.currentTurnId === (onlineSession?.playerId ?? HUMAN_ID);
   const canSelectPass =
     Boolean(state) &&
+    (!onlineSession || roomStatus === "playing") &&
     state?.phase === "passing" &&
     state.passDirection !== "none" &&
     (state.passSelections[onlineSession?.playerId ?? HUMAN_ID] ?? []).length < 3;
@@ -477,9 +505,12 @@ export default function HeartsClient() {
       playerId: data.playerId,
       joinToken: data.joinToken,
     });
+    if (!data.room.state) return;
     setState(data.room.state);
     setInactivity(data.room.inactivity ?? null);
     setRoomHostPlayerId(data.room.hostPlayerId ?? null);
+    setRoomStatus(data.room.status ?? null);
+    setRoomSeats(data.room.seats ?? null);
     setMessage(`Комната создана: ${data.roomCode}. Поделитесь кодом с друзьями.`);
   };
 
@@ -510,10 +541,37 @@ export default function HeartsClient() {
       playerId: data.playerId,
       joinToken: data.joinToken,
     });
+    if (!data.room.state) return;
     setState(data.room.state);
     setInactivity(data.room.inactivity ?? null);
     setRoomHostPlayerId(data.room.hostPlayerId ?? null);
+    setRoomStatus(data.room.status ?? null);
+    setRoomSeats(data.room.seats ?? null);
     setMessage(`Вы вошли в комнату ${data.roomCode}`);
+  };
+
+  const startOnlineGame = async () => {
+    if (!onlineSession) return;
+    const response = await fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        playerId: onlineSession.playerId,
+        joinToken: onlineSession.joinToken,
+      }),
+    });
+    const data = (await response.json()) as OnlineRoomResponse;
+    if (!response.ok) {
+      setMessage(data.error ?? "Не удалось начать игру");
+      return;
+    }
+    if (!data.state) return;
+    setState(data.state);
+    setInactivity(data.inactivity ?? null);
+    setRoomHostPlayerId(data.hostPlayerId ?? null);
+    setRoomStatus(data.status ?? null);
+    setRoomSeats(data.seats ?? null);
+    setMessage("Онлайн-игра началась.");
   };
 
   return (
@@ -535,9 +593,11 @@ export default function HeartsClient() {
               </p>
             )}
             <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-              {state
-                ? `Раунд #${state.roundIndex + 1} · Фаза: ${state.phase} · Ход: ${state.currentTurnId}`
-                : "Партия не запущена"}
+              {isOnlineWaitingForStart
+                ? "Комната создана. Ожидание игроков и начала игры."
+                : state
+                  ? `Раунд #${state.roundIndex + 1} · Фаза: ${state.phase} · Ход: ${state.currentTurnId}`
+                  : "Партия не запущена"}
               {onlineSession && inactivity?.enabled && onlineCountdownSec !== null
                 ? ` · Неактивность: ${onlineCountdownSec}с`
                 : ""}
@@ -575,12 +635,14 @@ export default function HeartsClient() {
                 onCopyRoomCode={copyRoomCode}
                 onLeaveRoom={() => void leaveOnlineRoom()}
                 onCloseRoom={() => void closeOnlineRoom()}
+                onStartOnlineGame={() => void startOnlineGame()}
                 playerName={playerName}
                 setPlayerName={setPlayerName}
                 joinCode={joinCode}
                 setJoinCode={setJoinCode}
                 onlineRoomCode={onlineSession?.roomCode ?? null}
                 isRoomOwner={isRoomOwner}
+                onlineStatus={roomStatus}
               />
             ) : panelTab === "settings" ? (
               <div className="space-y-3">
@@ -631,9 +693,9 @@ export default function HeartsClient() {
             )}
           </PickerSection>
 
-          {state ? (
+          {state && !isOnlineWaitingForStart ? (
             <div className="space-y-4">
-              <HeartsScoreboard state={state} />
+              <HeartsScoreboard state={state} onlinePlayerIds={onlinePlayerIds} />
               <HeartsTrickView state={state} />
               <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide text-gray-500">Подсказка по ходу</p>
@@ -709,6 +771,13 @@ export default function HeartsClient() {
                 </div>
               </section>
             </div>
+          ) : isOnlineWaitingForStart ? (
+            <section className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/20 p-4">
+              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">Онлайн-комната готова</h3>
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                Ожидание игроков и начала игры создателем комнаты.
+              </p>
+            </section>
           ) : null}
         </div>
       </div>

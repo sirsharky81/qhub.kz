@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createRoom, getRoomPublic, quickMatch } from "@/lib/games/hearts/rooms/service";
+import { createRoom, getRoomPublic } from "@/lib/games/hearts/rooms/service";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -17,15 +17,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
-      mode?: "quick" | "create";
+      mode?: "create";
       playerName?: string;
     };
     const playerName = body.playerName?.trim() || "Игрок";
-    if (body.mode === "create") {
-      const result = await createRoom(playerName);
-      return NextResponse.json(result);
-    }
-    const result = await quickMatch(playerName);
+    const result = await createRoom(playerName);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to create room";

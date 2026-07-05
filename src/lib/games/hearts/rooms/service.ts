@@ -258,11 +258,10 @@ export async function joinRoomByCode(
   const room = await getHeartsRoom(roomCode);
   if (!room) throw new Error("Комната не найдена");
   const joined = joinOpenRoom(room, playerName);
-  const started = startRoomWithBots(joined);
-  await saveHeartsRoom(started);
-  const seat = started.seats.find((item) => item.name === playerName && !item.isBot);
+  await saveHeartsRoom(joined);
+  const seat = joined.seats.find((item) => item.name === playerName && !item.isBot);
   if (!seat?.joinToken) throw new Error("Failed to create join credentials");
-  return roomJoinResult(started, seat.id, seat.joinToken, false);
+  return roomJoinResult(joined, seat.id, seat.joinToken, false);
 }
 
 export async function getRoomPublic(code: string): Promise<HeartsRoomPublic | null> {
@@ -352,6 +351,9 @@ export async function dispatchAction(
     (item) => item.id === payload.playerId && item.joinToken === payload.joinToken,
   );
   if (!seat) throw new Error("Неверные учетные данные игрока");
+  if (room.status !== "playing") {
+    throw new Error("Игра еще не начата. Дождитесь старта владельцем комнаты");
+  }
   const definition = createHeartsDefinition({
     gameId: room.state.gameId,
     players: room.seats.map(toSeed),
@@ -377,6 +379,23 @@ export async function dispatchAction(
   nextRoom = await applyInactivityIfNeeded(nextRoom);
   await saveHeartsRoom(nextRoom);
   return toPublicRoom(nextRoom);
+}
+
+export async function startRoom(
+  code: string,
+  playerId: string,
+  joinToken: string,
+): Promise<HeartsRoomPublic> {
+  const room = await getHeartsRoom(code);
+  if (!room) throw new Error("Комната не найдена");
+  if (room.status !== "open") throw new Error("Игра уже запущена");
+  const hostSeat = room.seats.find((seat) => seat.id === playerId && seat.joinToken === joinToken && !seat.isBot);
+  if (!hostSeat || room.hostPlayerId !== playerId) {
+    throw new Error("Запускать игру может только создатель комнаты");
+  }
+  const started = startRoomWithBots(room);
+  await saveHeartsRoom(started);
+  return toPublicRoom(started);
 }
 
 export async function setConnectionState(

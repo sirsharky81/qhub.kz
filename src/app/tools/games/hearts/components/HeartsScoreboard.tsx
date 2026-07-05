@@ -1,6 +1,12 @@
 import type { HeartsState } from "@/lib/games/hearts/types";
 
-export function HeartsScoreboard({ state }: { state: HeartsState }) {
+export function HeartsScoreboard({
+  state,
+  onlinePlayerIds,
+}: {
+  state: HeartsState;
+  onlinePlayerIds?: Set<string>;
+}) {
   const lastRound = state.roundScores[state.roundScores.length - 1];
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
@@ -11,7 +17,14 @@ export function HeartsScoreboard({ state }: { state: HeartsState }) {
             key={player.id}
             className="flex items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5"
           >
-            <div className="text-xs text-gray-700 dark:text-gray-200">
+            <div className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-200">
+              {onlinePlayerIds?.has(player.id) && (
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500"
+                  aria-label="Онлайн игрок"
+                  title="Онлайн игрок"
+                />
+              )}
               {player.name}
               {state.winnerId === player.id ? " 🏆" : ""}
             </div>
