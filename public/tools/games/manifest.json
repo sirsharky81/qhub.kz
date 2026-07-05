@@ -1,0 +1,20 @@
+{
+  "name": "QHub Games",
+  "short_name": "Games",
+  "description": "Игровой раздел QHub: карточные и другие игры",
+  "start_url": "/tools/games",
+  "scope": "/tools/games",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#7c3aed",
+  "theme_color": "#7c3aed",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/tools/games/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

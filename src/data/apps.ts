@@ -7,6 +7,7 @@ export type AppTag =
   | "photo"
   | "food"
   | "music"
+  | "games"
   | "editor"
   | "taxes"
   | "documents"
@@ -46,6 +47,7 @@ export const TAG_LABELS: Record<AppTag, string> = {
   photo: "Фото",
   food: "Кулинария",
   music: "Музыка",
+  games: "Игры",
   editor: "Редактор",
   taxes: "Налоги",
   documents: "Документы",
@@ -163,6 +165,22 @@ export const apps: App[] = [
     authorType: "qhub",
     beta: true,
     sortOrder: 8,
+  },
+  {
+    id: "qhub-games",
+    title: "QHub Games",
+    description:
+      "Карточные и другие игры QHub. В MVP доступна игра «Червы» (Hearts).",
+    longDescription:
+      "Игровой раздел QHub с единой архитектурой карточных игр. Первый релиз включает «Червы» с офлайн и онлайн режимами, ботами и статистикой.",
+    href: "/tools/games",
+    tags: ["tools", "games"],
+    icon: "🃏",
+    color: "from-red-500/10 to-orange-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    featured: true,
+    sortOrder: 9,
   },
   {
     id: "file-converter",

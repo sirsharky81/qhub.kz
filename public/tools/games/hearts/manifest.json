@@ -1,0 +1,20 @@
+{
+  "name": "QHub Hearts",
+  "short_name": "Червы",
+  "description": "Классическая игра Червы (Hearts) в QHub Games",
+  "start_url": "/tools/games/hearts",
+  "scope": "/tools/games/hearts",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/tools/games/hearts/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
