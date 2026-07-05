@@ -137,7 +137,7 @@ function startRoomWithBots(room: HeartsRoomRecord): HeartsRoomRecord {
   while (seats.length < MAX_PLAYERS) {
     seats.push(
       createSeat({
-        name: `Bot ${seats.length + 1}`,
+        name: `Игрок ${seats.length + 1}`,
         isBot: true,
         aiLevel: seats.length > 2 ? "hard" : "medium",
       }),
@@ -169,9 +169,9 @@ function createOpenRoom(hostName: string): HeartsRoomRecord {
     gameId: `room-${createRoomCode()}`,
     players: [
       toSeed(hostSeat),
-      { id: "temp_1", name: "Temp 1", isBot: true, aiLevel: "easy" },
-      { id: "temp_2", name: "Temp 2", isBot: true, aiLevel: "easy" },
-      { id: "temp_3", name: "Temp 3", isBot: true, aiLevel: "easy" },
+      { id: "temp_1", name: "Игрок 2", isBot: true, aiLevel: "easy" },
+      { id: "temp_2", name: "Игрок 3", isBot: true, aiLevel: "easy" },
+      { id: "temp_3", name: "Игрок 4", isBot: true, aiLevel: "easy" },
     ],
   });
   return {

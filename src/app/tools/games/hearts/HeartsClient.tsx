@@ -59,6 +59,7 @@ function normalizeHeartsMessage(input: string): string {
 export default function HeartsClient() {
   const [state, setState] = useState<HeartsState | null>(null);
   const [joinCode, setJoinCode] = useState("");
+  const [playerName, setPlayerName] = useState("Игрок 1");
   const [selectedPass, setSelectedPass] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [onlineSession, setOnlineSession] = useState<OnlineSession | null>(null);
@@ -77,9 +78,9 @@ export default function HeartsClient() {
       const definition = createHeartsDefinition({
         players: [
           { id: HUMAN_ID, name: "Вы", isBot: false, aiLevel: settings.aiLevel },
-          { id: "bot-1", name: "Bot 1", isBot: true, aiLevel: "easy" },
-          { id: "bot-2", name: "Bot 2", isBot: true, aiLevel: "medium" },
-          { id: "bot-3", name: "Bot 3", isBot: true, aiLevel: "hard" },
+          { id: "bot-1", name: "Игрок 1", isBot: true, aiLevel: "easy" },
+          { id: "bot-2", name: "Игрок 2", isBot: true, aiLevel: "medium" },
+          { id: "bot-3", name: "Игрок 3", isBot: true, aiLevel: "hard" },
         ],
         config: { turnTimeSec: 30, passTimeSec: 30 },
       });
@@ -340,10 +341,11 @@ export default function HeartsClient() {
   };
 
   const doQuickOnline = async () => {
+    const normalizedName = playerName.trim() || "Игрок 1";
     const response = await fetch("/api/games/hearts/rooms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "quick", playerName: "Игрок" }),
+      body: JSON.stringify({ mode: "quick", playerName: normalizedName }),
     });
     const data = (await response.json()) as {
       error?: string;
@@ -369,10 +371,11 @@ export default function HeartsClient() {
   };
 
   const doCreateRoom = async () => {
+    const normalizedName = playerName.trim() || "Игрок 1";
     const response = await fetch("/api/games/hearts/rooms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "create", playerName: "Игрок" }),
+      body: JSON.stringify({ mode: "create", playerName: normalizedName }),
     });
     const data = (await response.json()) as { error?: string; roomCode: string };
     if (!response.ok) {
@@ -387,10 +390,11 @@ export default function HeartsClient() {
       setMessage("Введите код комнаты");
       return;
     }
+    const normalizedName = playerName.trim() || "Игрок 1";
     const response = await fetch(`/api/games/hearts/rooms/${encodeURIComponent(joinCode)}/join`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playerName: "Игрок" }),
+      body: JSON.stringify({ playerName: normalizedName }),
     });
     const data = (await response.json()) as {
       error?: string;
@@ -477,6 +481,8 @@ export default function HeartsClient() {
                 onQuickOnline={doQuickOnline}
                 onCreateRoom={doCreateRoom}
                 onJoinByCode={doJoinByCode}
+                playerName={playerName}
+                setPlayerName={setPlayerName}
                 joinCode={joinCode}
                 setJoinCode={setJoinCode}
               />

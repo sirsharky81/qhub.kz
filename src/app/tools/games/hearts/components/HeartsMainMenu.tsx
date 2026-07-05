@@ -3,6 +3,8 @@ export function HeartsMainMenu({
   onQuickOnline,
   onCreateRoom,
   onJoinByCode,
+  playerName,
+  setPlayerName,
   joinCode,
   setJoinCode,
 }: {
@@ -10,6 +12,8 @@ export function HeartsMainMenu({
   onQuickOnline: () => void;
   onCreateRoom: () => void;
   onJoinByCode: () => void;
+  playerName: string;
+  setPlayerName: (value: string) => void;
   joinCode: string;
   setJoinCode: (value: string) => void;
 }) {
@@ -45,6 +49,15 @@ export function HeartsMainMenu({
         >
           Быстрая онлайн-игра
         </button>
+      </div>
+
+      <div className="grid gap-2">
+        <input
+          value={playerName}
+          onChange={(e) => setPlayerName(e.target.value)}
+          placeholder="Ваше имя (для онлайн-игры)"
+          className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
+        />
       </div>
 
       <div className="grid sm:grid-cols-[1fr_auto] gap-2">
