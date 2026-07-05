@@ -77,6 +77,8 @@ export default function HeartsClient() {
   const engineRef = useRef<GameEngine<HeartsState, HeartsAction> | null>(null);
   const definitionRef = useRef<ReturnType<typeof createHeartsDefinition> | null>(null);
   const finishedRoundRef = useRef<string | null>(null);
+  const gameAreaRef = useRef<HTMLDivElement | null>(null);
+  const wasGameActiveRef = useRef(false);
 
   const startOfflineGame = useCallback(
     (resumeState?: HeartsState) => {
@@ -431,6 +433,7 @@ export default function HeartsClient() {
     return roomSeats.filter((seat) => !seat.isBot && seat.connected).length;
   }, [roomSeats]);
   const isOnlineWaitingForStart = Boolean(onlineSession && roomStatus === "open");
+  const isGameActive = Boolean(state && !isOnlineWaitingForStart);
   const canPlay =
     Boolean(state) &&
     (!onlineSession || roomStatus === "playing") &&
@@ -466,6 +469,13 @@ export default function HeartsClient() {
     const playerId = onlineSession?.playerId ?? HUMAN_ID;
     dispatch({ type: "play_card", playerId, cardId });
   };
+
+  useEffect(() => {
+    if (isGameActive && !wasGameActiveRef.current) {
+      gameAreaRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+    wasGameActiveRef.current = isGameActive;
+  }, [isGameActive]);
 
   const copyRoomCode = () => {
     if (!onlineSession?.roomCode) return;
@@ -570,7 +580,7 @@ export default function HeartsClient() {
   return (
     <main className="flex flex-col flex-1 min-h-0 bg-gray-50 dark:bg-gray-950">
       <div className="flex-1 overflow-y-auto" data-hearts-scroll="true">
-        <div className="mx-auto w-full max-w-2xl px-4 py-5 space-y-4">
+        <div className="mx-auto w-full max-w-6xl px-4 py-5 space-y-4">
           <Link href="/tools/games" className="inline-flex text-xs text-violet-600 dark:text-violet-400 hover:underline">
             ← QHub Games
           </Link>
@@ -657,92 +667,76 @@ export default function HeartsClient() {
           </PickerSection>
 
           {state && !isOnlineWaitingForStart ? (
-            <div className="space-y-4">
-              {(message || (onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0)) && (
-                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-1">
-                  {message && <p className="text-xs text-gray-700 dark:text-gray-300">{message}</p>}
-                  {onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0 && (
+            <div ref={gameAreaRef} className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+              <div className="space-y-3">
+                <HeartsTrickView state={state} />
+                {me && (
+                  <HeartsHand
+                    cards={me.hand}
+                    legalCardIds={legalCardIds}
+                    selectedForPass={selectedPass}
+                    canPlay={canPlay}
+                    onSelectPassCard={togglePassCard}
+                    onPlayCard={playCard}
+                  />
+                )}
+                {canSelectPass && (
+                  <button
+                    type="button"
+                    onClick={submitPass}
+                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                  >
+                    Подтвердить обмен (3 карты)
+                  </button>
+                )}
+              </div>
+              <div className="space-y-3">
+                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-500">Подсказка по ходу</p>
+                  {canPlay ? (
+                    <p className="mt-1 text-sm font-semibold text-emerald-700 dark:text-emerald-400">Ваш ход</p>
+                  ) : (
+                    <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                      Ход:{" "}
+                      <span className="font-semibold">
+                        {state.players.find((player) => player.id === state.currentTurnId)?.name ??
+                          state.currentTurnId}
+                      </span>
+                    </p>
+                  )}
+                  {canSelectPass && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">Выберите 3 карты для обмена.</p>
+                  )}
+                  {message && <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">{message}</p>}
+                </section>
+                <HeartsScoreboard state={state} onlinePlayerIds={onlinePlayerIds} />
+                {onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0 && (
+                  <section className="rounded-xl border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 p-3">
                     <p className="text-xs text-red-600 dark:text-red-400">
                       Игроки без хода более 3 минут переведены под управление бота.
                     </p>
-                  )}
+                  </section>
+                )}
+                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
+                  <h3 className="text-xs uppercase tracking-wide text-gray-500">Управление партией</h3>
+                  <div className="grid gap-2">
+                    <button
+                      type="button"
+                      onClick={() => restartOfflineGame()}
+                      className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                    >
+                      Завершить и начать заново
+                    </button>
+                    <button
+                      type="button"
+                      onClick={finishCurrentGame}
+                      className="w-full rounded-lg border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40"
+                    >
+                      Завершить партию
+                    </button>
+                  </div>
                 </section>
-              )}
-              <HeartsScoreboard state={state} onlinePlayerIds={onlinePlayerIds} />
-              <HeartsTrickView state={state} />
-              <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-1.5">
-                <p className="text-[11px] uppercase tracking-wide text-gray-500">Подсказка по ходу</p>
-                {canPlay ? (
-                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Ваш ход</p>
-                ) : (
-                  <p className="text-sm text-gray-700 dark:text-gray-300">
-                    Сейчас ход игрока:{" "}
-                    <span className="font-semibold">
-                      {state.players.find((player) => player.id === state.currentTurnId)?.name ??
-                        state.currentTurnId}
-                    </span>
-                  </p>
-                )}
-                {canSelectPass && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Выберите 3 карты для обмена и нажмите подтверждение.
-                  </p>
-                )}
-              </section>
-              <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
-                <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">Оппоненты</h3>
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {state.players
-                    .filter((player) => player.id !== (onlineSession?.playerId ?? HUMAN_ID))
-                    .map((player) => (
-                      <div
-                        key={player.id}
-                        className="shrink-0 rounded-lg border border-gray-100 dark:border-gray-700 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 whitespace-nowrap"
-                      >
-                        {player.name} · {player.hand.length} карт
-                      </div>
-                    ))}
-                </div>
-              </section>
-              {me && (
-                <HeartsHand
-                  cards={me.hand}
-                  legalCardIds={legalCardIds}
-                  selectedForPass={selectedPass}
-                  canPlay={canPlay}
-                  onSelectPassCard={togglePassCard}
-                  onPlayCard={playCard}
-                />
-              )}
-              {canSelectPass && (
-                <button
-                  type="button"
-                  onClick={submitPass}
-                  className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
-                >
-                  Подтвердить обмен (3 карты)
-                </button>
-              )}
-              <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
-                <h3 className="text-xs uppercase tracking-wide text-gray-500">Управление партией</h3>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">Опасные действия. Требуют подтверждения.</p>
-                <div className="grid gap-2">
-                  <button
-                    type="button"
-                    onClick={() => restartOfflineGame()}
-                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
-                  >
-                    Завершить и начать заново
-                  </button>
-                  <button
-                    type="button"
-                    onClick={finishCurrentGame}
-                    className="w-full rounded-lg border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40"
-                  >
-                    Завершить партию
-                  </button>
-                </div>
-              </section>
+              </div>
             </div>
           ) : isOnlineWaitingForStart ? (
             <section className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/20 p-4">

@@ -23,7 +23,7 @@ export function HeartsHand({
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
       <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ваши карты</h2>
-      <div className="mt-3 flex flex-wrap justify-center gap-2">
+      <div className="mt-3 flex flex-wrap lg:flex-nowrap lg:overflow-x-auto justify-center lg:justify-start gap-1.5">
         {cards.map((card) => {
           const legal = legalCardIds.has(card.id);
           const selected = isSelected(selectedForPass, card.id);
@@ -32,7 +32,7 @@ export function HeartsHand({
               key={card.id}
               type="button"
               onClick={() => (canPlay ? onPlayCard(card.id) : onSelectPassCard(card.id))}
-              className={`rounded-md border bg-white dark:bg-gray-900 shadow-sm transition ${
+              className={`rounded-md border bg-white dark:bg-gray-900 shadow-sm transition shrink-0 ${
                 selected
                   ? "border-amber-500 ring-2 ring-amber-300 -translate-y-1"
                   : legal && canPlay
@@ -40,7 +40,7 @@ export function HeartsHand({
                     : "border-gray-300 dark:border-gray-600"
               }`}
             >
-              <CardSvg card={card} className="w-[62px] sm:w-[76px] lg:w-[86px] aspect-[223/312]" />
+              <CardSvg card={card} className="w-[62px] sm:w-[72px] lg:w-[66px] xl:w-[72px] aspect-[223/312]" />
             </button>
           );
         })}
