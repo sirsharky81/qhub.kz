@@ -9,6 +9,7 @@ import {
   REDIS_DIALOG_PREFS_PREFIX,
   REDIS_DM_PREFIX,
   REDIS_DM_USER_INDEX_PREFIX,
+  REDIS_ROOM_USER_INDEX_PREFIX,
   REDIS_PUBKEY_PREFIX,
   REDIS_PROFILES_KEY,
   REDIS_ROOM_PREFIX,
@@ -578,6 +579,57 @@ function roomMessagesKey(roomId: string): string {
   return `${REDIS_ROOM_PREFIX}${roomId}:messages`;
 }
 
+function roomUserIndexKey(phone: string): string {
+  return `${REDIS_ROOM_USER_INDEX_PREFIX}${normalizeKzPhone(phone)}`;
+}
+
+type RoomUserIndexEntry = {
+  roomId: string;
+  title: string;
+  createdAt: number;
+};
+
+async function loadRoomUserIndex(phone: string): Promise<Record<string, RoomUserIndexEntry>> {
+  return (await redisGetJson<Record<string, RoomUserIndexEntry>>(roomUserIndexKey(phone))) ?? {};
+}
+
+async function saveRoomUserIndex(phone: string, index: Record<string, RoomUserIndexEntry>): Promise<void> {
+  await redisSet(roomUserIndexKey(phone), JSON.stringify(index), roomInactiveTtlSec());
+}
+
+async function upsertRoomUserIndex(phone: string, roomId: string, createdAt = Date.now()): Promise<void> {
+  const index = await loadRoomUserIndex(phone);
+  const key = roomId.toUpperCase();
+  const prev = index[key];
+  index[key] = {
+    roomId: key,
+    title: `Комната ${key}`,
+    createdAt: prev?.createdAt ?? createdAt,
+  };
+  await saveRoomUserIndex(phone, index);
+}
+
+async function removeRoomUserIndex(phone: string, roomId: string): Promise<void> {
+  const index = await loadRoomUserIndex(phone);
+  delete index[roomId.toUpperCase()];
+  await saveRoomUserIndex(phone, index);
+}
+
+export async function getRoomDialogsForUser(
+  phone: string,
+): Promise<Array<{ id: string; kind: "room"; title: string; roomId: string; createdAt: number }>> {
+  const index = await loadRoomUserIndex(phone);
+  return Object.values(index)
+    .map((entry) => ({
+      id: `room:${entry.roomId}`,
+      kind: "room" as const,
+      title: entry.title || `Комната ${entry.roomId}`,
+      roomId: entry.roomId,
+      createdAt: entry.createdAt,
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export async function getRoomMeta(roomId: string): Promise<RoomMeta | null> {
   return redisGetJson<RoomMeta>(roomMetaKey(roomId));
 }
@@ -597,6 +649,7 @@ export async function createRoomMeta(roomId: string, createdBy: string): Promise
   const meta: RoomMeta = { version: 0, updatedAt: now, createdAt: now, createdBy };
   await redisSet(roomMetaKey(roomId), JSON.stringify(meta), ttl);
   await saveRoomParticipants(roomId, [{ phone: createdBy, lastSeen: now, role: "owner" }]);
+  await upsertRoomUserIndex(createdBy, roomId, now);
   return meta;
 }
 
@@ -611,6 +664,7 @@ export async function joinRoomParticipant(roomId: string, phone: string): Promis
     participants.push({ phone, lastSeen: now, role: "member" });
   }
   await saveRoomParticipants(roomId, participants);
+  await upsertRoomUserIndex(phone, roomId, now);
   await redisExpire(roomMetaKey(roomId), ttl);
   return participants;
 }
@@ -651,6 +705,7 @@ export async function addRoomParticipant(
     ? participants.map((p) => (p.phone === targetPhone ? { ...p, role, lastSeen: now } : p))
     : [...participants, { phone: targetPhone, lastSeen: now, role }];
   await saveRoomParticipants(roomId, next);
+  await upsertRoomUserIndex(targetPhone, roomId, now);
   await redisExpire(roomMetaKey(roomId), roomInactiveTtlSec());
   return next;
 }
@@ -661,6 +716,7 @@ export async function removeRoomParticipant(
 ): Promise<{ deletedRoom: boolean; participants: RoomParticipant[] }> {
   const participants = await getRoomParticipants(roomId);
   const next = participants.filter((p) => p.phone !== targetPhone);
+  await removeRoomUserIndex(targetPhone, roomId);
   if (next.length === 0) {
     await deleteRoom(roomId);
     return { deletedRoom: true, participants: [] };
@@ -695,6 +751,7 @@ export async function pruneInactiveRoom(roomId: string): Promise<void> {
 }
 
 export async function leaveRoom(roomId: string, phone: string): Promise<boolean> {
+  await removeRoomUserIndex(phone, roomId);
   const participants = await getRoomParticipants(roomId).then((list) =>
     list.filter((p) => p.phone !== phone),
   );
@@ -707,6 +764,8 @@ export async function leaveRoom(roomId: string, phone: string): Promise<boolean>
 }
 
 export async function deleteRoom(roomId: string): Promise<void> {
+  const participants = await getRoomParticipants(roomId);
+  await Promise.all(participants.map((p) => removeRoomUserIndex(p.phone, roomId)));
   await redisDel(
     roomMetaKey(roomId),
     roomParticipantsKey(roomId),

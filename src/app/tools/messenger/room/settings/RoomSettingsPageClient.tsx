@@ -81,100 +81,45 @@ export function RoomSettingsPageClient() {
   return (
     <MessengerShell
       variant="app"
-      keyboardAware={false}
+      keyboardAware
       title={`Настройки комнаты ${roomId}`}
       backHref={messengerRoomUrl(roomId)}
       subtitle={<span className="text-xs text-gray-500">Отдельная страница управления комнатой</span>}
     >
-      <div
-        className="flex-1 overflow-y-auto p-4 pb-28 space-y-4 max-w-xl w-full mx-auto"
-        style={{ WebkitOverflowScrolling: "touch" }}
-      >
+      <div className="flex min-h-0 flex-1 flex-col max-w-xl w-full mx-auto">
         {loading ? (
-          <p className="text-sm text-gray-500">Загрузка…</p>
+          <p className="p-4 text-sm text-gray-500">Загрузка…</p>
         ) : (
-          <>
-            <section className="rounded-xl border border-gray-200 bg-white p-3">
-              <p className="text-xs font-semibold text-gray-700">Приглашение</p>
-              <p className="text-[11px] text-gray-500 mt-1">Код: {roomId}</p>
-              <div className="mt-2 flex gap-2 flex-wrap">
-                <button
-                  type="button"
-                  className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
-                  onClick={() => void navigator.clipboard.writeText(roomId)}
-                >
-                  Копировать код
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
-                  onClick={() => void navigator.clipboard.writeText(messengerRoomUrl(roomId))}
-                >
-                  Копировать ссылку
-                </button>
-              </div>
-              <p className="mt-2 text-[11px] text-gray-500">
-                Если у пользователя отключено автодобавление, отправьте приглашение через личный чат.
-              </p>
-            </section>
-
-            <section className="sticky bottom-0 z-10 rounded-xl border border-gray-200 bg-white/95 backdrop-blur p-3 space-y-2">
-              <p className="text-xs font-semibold text-gray-700">Добавить по номеру телефона</p>
-              <p className="text-[11px] text-gray-500">
-                Без выпадающих списков: укажите номер вручную. Добавление только для active whitelist и зарегистрированных пользователей.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  value={addPhone}
-                  onChange={(e) => setAddPhone(e.target.value)}
-                  onFocus={(e) => {
-                    // iOS Safari/PWA: ensure focused input stays above keyboard.
-                    requestAnimationFrame(() => {
-                      e.currentTarget.scrollIntoView({ block: "nearest", behavior: "auto" });
-                    });
-                  }}
-                  placeholder="+7XXXXXXXXXX"
-                  className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm scroll-mb-28"
-                />
-                <button
-                  type="button"
-                  className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white"
-                  disabled={!addPhone.trim()}
-                  onClick={() => {
-                    const phone = addPhone.trim();
-                    setAddPhone("");
-                    void runAction("add", phone);
-                  }}
-                >
-                  Добавить
-                </button>
-              </div>
-              {errorCode === "auto_add_disabled" && lastTargetPhone && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
-                  <p className="text-xs text-amber-900">
-                    Пользователь запретил автодобавление в комнаты. Можно отправить приглашение в личный чат.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-indigo-700"
-                      onClick={() => openInviteDm(lastTargetPhone)}
-                    >
-                      Пригласить
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700"
-                      onClick={cancelAddFlow}
-                    >
-                      Отменить добавление
-                    </button>
-                  </div>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <p className="text-xs font-semibold text-gray-700">Приглашение</p>
+                <p className="text-[11px] text-gray-500 mt-1">Код: {roomId}</p>
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
+                    onClick={() => void navigator.clipboard.writeText(roomId)}
+                  >
+                    Копировать код
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
+                    onClick={() => void navigator.clipboard.writeText(messengerRoomUrl(roomId))}
+                  >
+                    Копировать ссылку
+                  </button>
                 </div>
-              )}
-            </section>
+                <p className="mt-2 text-[11px] text-gray-500">
+                  Если у пользователя отключено автодобавление, отправьте приглашение через личный чат.
+                </p>
+              </section>
 
-            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
               <p className="text-xs font-semibold text-gray-700 mb-2">Участники</p>
               <div className="space-y-2">
                 {(snapshot?.participants ?? []).map((p: RoomManageParticipant) => {
@@ -251,7 +196,66 @@ export function RoomSettingsPageClient() {
                 Вернуться в комнату
               </Link>
             </div>
-          </>
+            </div>
+            <section
+              className="shrink-0 border-t border-gray-200 bg-white p-3 space-y-2"
+              style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+            >
+              <p className="text-xs font-semibold text-gray-700">Добавить по номеру телефона</p>
+              <p className="text-[11px] text-gray-500">
+                Без выпадающих списков: укажите номер вручную. Добавление только для active whitelist и зарегистрированных пользователей.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={addPhone}
+                  onChange={(e) => setAddPhone(e.target.value)}
+                  onFocus={(e) => {
+                    requestAnimationFrame(() => {
+                      e.currentTarget.scrollIntoView({ block: "center", behavior: "auto" });
+                    });
+                  }}
+                  inputMode="tel"
+                  placeholder="+7XXXXXXXXXX"
+                  className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white"
+                  disabled={!addPhone.trim()}
+                  onClick={() => {
+                    const phone = addPhone.trim();
+                    setAddPhone("");
+                    void runAction("add", phone);
+                  }}
+                >
+                  Добавить
+                </button>
+              </div>
+              {errorCode === "auto_add_disabled" && lastTargetPhone && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                  <p className="text-xs text-amber-900">
+                    Пользователь запретил автодобавление в комнаты. Можно отправить приглашение в личный чат.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-indigo-700"
+                      onClick={() => openInviteDm(lastTargetPhone)}
+                    >
+                      Пригласить
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700"
+                      onClick={cancelAddFlow}
+                    >
+                      Отменить добавление
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
         )}
       </div>
     </MessengerShell>

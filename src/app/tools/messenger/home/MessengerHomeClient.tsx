@@ -165,7 +165,7 @@ export function MessengerHomeClient() {
 
   async function refreshDialogsAndUnread(baseDialogs?: LocalDialog[]) {
     const localDialogs = baseDialogs ?? dialogsRef.current;
-    const { dialogs: serverDm, dialogPrefs } = await fetchDmDialogs();
+    const { dialogs: serverDm, roomDialogs, dialogPrefs } = await fetchDmDialogs();
     const summaryMap: Record<string, DmDialogsResponseItem> = {};
     for (const item of serverDm) summaryMap[item.chatId] = item;
 
@@ -178,6 +178,15 @@ export function MessengerHomeClient() {
         peerPhone: item.peerPhone,
         displayName: item.displayName ?? undefined,
         createdAt: item.lastMessageAt || Date.now(),
+      });
+    }
+    for (const room of roomDialogs) {
+      mergedMap.set(room.id, {
+        id: room.id,
+        kind: "room",
+        title: room.title,
+        roomId: room.roomId,
+        createdAt: room.createdAt,
       });
     }
     const merged = sortDialogsByPriority(Array.from(mergedMap.values()), summaryMap, dialogPrefs);

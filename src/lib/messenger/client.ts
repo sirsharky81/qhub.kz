@@ -168,18 +168,28 @@ export interface DmDialogsResponseItem {
   archivedAt: number | null;
 }
 
+export interface RoomDialogsResponseItem {
+  id: string;
+  kind: "room";
+  title: string;
+  roomId: string;
+  createdAt: number;
+}
+
 export async function fetchDmDialogs(): Promise<{
   dialogs: DmDialogsResponseItem[];
+  roomDialogs: RoomDialogsResponseItem[];
   dialogPrefs: Record<string, { pinnedAt: number | null; pinOrder: number | null; archivedAt: number | null }>;
 }> {
   const url = `/api/messenger/dialogs?ts=${Date.now()}`;
   const res = await platformFetch(url, { cache: "no-store" });
-  if (!res.ok) return { dialogs: [], dialogPrefs: {} };
+  if (!res.ok) return { dialogs: [], roomDialogs: [], dialogPrefs: {} };
   const data = (await res.json()) as {
     dialogs?: DmDialogsResponseItem[];
+    roomDialogs?: RoomDialogsResponseItem[];
     dialogPrefs?: Record<string, { pinnedAt: number | null; pinOrder: number | null; archivedAt: number | null }>;
   };
-  return { dialogs: data.dialogs ?? [], dialogPrefs: data.dialogPrefs ?? {} };
+  return { dialogs: data.dialogs ?? [], roomDialogs: data.roomDialogs ?? [], dialogPrefs: data.dialogPrefs ?? {} };
 }
 
 export async function updateDialogPrefs(input: {

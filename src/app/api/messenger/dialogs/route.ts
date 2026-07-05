@@ -3,6 +3,7 @@ import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
 import {
   getDmDialogSummariesForUser,
+  getRoomDialogsForUser,
   displayNameForPhone,
   loadDialogPrefs,
   loadProfiles,
@@ -15,6 +16,7 @@ export async function GET() {
     const profiles = await loadProfiles();
     const dialogPrefs = await loadDialogPrefs(phone);
     const dialogs = await getDmDialogSummariesForUser(phone);
+    const roomDialogs = await getRoomDialogsForUser(phone);
     const enriched = await Promise.all(
       dialogs.map(async (d) => {
         const presence = await getMessengerPresence(d.peerPhone);
@@ -36,7 +38,7 @@ export async function GET() {
     );
     void trackMessengerApiRequest("dialogs", 200);
     return NextResponse.json(
-      { dialogs: enriched, dialogPrefs },
+      { dialogs: enriched, roomDialogs, dialogPrefs },
       {
         headers: {
           "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",

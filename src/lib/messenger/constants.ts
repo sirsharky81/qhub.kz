@@ -6,6 +6,7 @@ export const REDIS_AUTH_PREFIX = "qhub:messenger:auth:";
 export const REDIS_PUBKEY_PREFIX = "qhub:messenger:pubkey:";
 export const REDIS_DM_PREFIX = "qhub:messenger:dm:";
 export const REDIS_DM_USER_INDEX_PREFIX = "qhub:messenger:dm:user:";
+export const REDIS_ROOM_USER_INDEX_PREFIX = "qhub:messenger:room:user:";
 export const REDIS_DIALOG_PREFS_PREFIX = "qhub:messenger:dialogs:prefs:";
 export const REDIS_ROOM_PREFIX = "qhub:messenger:room:";
 

@@ -1,7 +1,7 @@
 import { SESSION_DIALOGS_KEY } from "./constants";
 import { fetchRoomStatusLookup } from "./client";
 import { clearChatHistory } from "./history-db";
-import { getRoomKey, removeRoomKey } from "./room-keys";
+import { removeRoomKey } from "./room-keys";
 import type { LocalDialog } from "./types";
 
 function migrateDialogsFromSessionStorage(): void {
@@ -66,13 +66,6 @@ export async function syncRoomDialogs(): Promise<LocalDialog[]> {
 
   for (const dialog of rooms) {
     const roomId = dialog.roomId!.toUpperCase();
-
-    if (!getRoomKey(roomId)) {
-      removeIds.add(dialog.id);
-      await clearChatHistory(`room:${roomId}`);
-      changed = true;
-      continue;
-    }
 
     let status: Awaited<ReturnType<typeof fetchRoomStatusLookup>>;
     try {
