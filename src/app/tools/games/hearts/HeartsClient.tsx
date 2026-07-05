@@ -446,7 +446,6 @@ export default function HeartsClient() {
                 Игроки без хода более 3 минут переведены под управление бота.
               </p>
             )}
-            {message && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{message}</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -539,6 +538,26 @@ export default function HeartsClient() {
             <div className="space-y-4">
               <HeartsScoreboard state={state} />
               <HeartsTrickView state={state} />
+              <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">Подсказка по ходу</p>
+                {canPlay ? (
+                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Ваш ход</p>
+                ) : (
+                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                    Сейчас ход игрока:{" "}
+                    <span className="font-semibold">
+                      {state.players.find((player) => player.id === state.currentTurnId)?.name ??
+                        state.currentTurnId}
+                    </span>
+                  </p>
+                )}
+                {canSelectPass && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Выберите 3 карты для обмена и нажмите подтверждение.
+                  </p>
+                )}
+                {message && <p className="text-xs text-red-600 dark:text-red-400">{message}</p>}
+              </section>
               <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
                 <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">Оппоненты</h3>
                 <div className="flex flex-wrap gap-2">
