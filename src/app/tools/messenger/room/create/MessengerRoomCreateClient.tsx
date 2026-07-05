@@ -13,6 +13,24 @@ import {
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { setRoomKey } from "@/lib/messenger/room-keys";
 
+const ROOM_STEP_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export function MessengerRoomCreateClient() {
   const router = useRouter();
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -28,7 +46,11 @@ export function MessengerRoomCreateClient() {
         if (!cancelled) setError(null);
         const key = await generateRoomAesKey();
         const keyB64 = await exportRoomKeyBase64Url(key);
-        const created = await createRoom();
+        const created = await withTimeout(
+          createRoom(),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут создания комнаты",
+        );
         if (!created) {
           if (!cancelled) setError("Не удалось создать комнату. Попробуйте снова.");
           return;
@@ -90,7 +112,7 @@ export function MessengerRoomCreateClient() {
           onClick={() => {
             setEntering(true);
             setError(null);
-            void joinRoomApi(roomId)
+            void withTimeout(joinRoomApi(roomId), ROOM_STEP_TIMEOUT_MS, "Таймаут входа в комнату")
               .then((r) => {
                 if (r.ok) {
                   router.replace(messengerRoomUrl(roomId));

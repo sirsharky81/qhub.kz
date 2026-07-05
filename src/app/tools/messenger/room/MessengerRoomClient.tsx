@@ -7,6 +7,7 @@ import { ChatView } from "../components/ChatView";
 import { PinUnlockGate } from "../components/PinUnlockGate";
 import {
   fetchAccessCheck,
+  fetchProfile,
   fetchProfilesMap,
   fetchRoomStatus,
   joinRoomApi,
@@ -16,6 +17,24 @@ import { importRoomKeyBase64Url } from "@/lib/messenger/crypto";
 import { cleanupRoomLocalState, upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { getRoomKey } from "@/lib/messenger/room-keys";
+
+const ROOM_STEP_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 function MessengerRoomInner() {
   const searchParams = useSearchParams();
@@ -66,12 +85,32 @@ function MessengerRoomInner() {
           setError(null);
           setLoading(true);
         }
-        const access = await fetchAccessCheck();
+        const access = await withTimeout(
+          fetchAccessCheck(true),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут проверки сессии",
+        );
         if (!access.messengerLoggedIn) {
           router.replace("/tools/messenger/login");
           return;
         }
-        if (!cancelled) setMyPhone(access.phone ?? "");
+        let resolvedPhone = (access.phone ?? "").trim();
+        if (!resolvedPhone) {
+          const profile = await withTimeout(
+            fetchProfile(),
+            ROOM_STEP_TIMEOUT_MS,
+            "Таймаут загрузки профиля",
+          );
+          resolvedPhone = (profile?.phone ?? "").trim();
+        }
+        if (!resolvedPhone) {
+          if (!cancelled) {
+            setError("Не удалось определить номер в сессии. Войдите в мессенджер снова.");
+            setLoading(false);
+          }
+          return;
+        }
+        if (!cancelled) setMyPhone(resolvedPhone);
 
         const storedKey = getRoomKey(roomId);
         if (!storedKey) {
@@ -79,7 +118,11 @@ function MessengerRoomInner() {
           return;
         }
 
-        const status = await fetchRoomStatus(roomId);
+        const status = await withTimeout(
+          fetchRoomStatus(roomId),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут проверки комнаты",
+        );
         if (!status) {
           await cleanupRoomLocalState(roomId);
           if (!cancelled) {
@@ -90,7 +133,11 @@ function MessengerRoomInner() {
         }
 
         const key = await importRoomKeyBase64Url(storedKey);
-        const joined = await joinRoomApi(roomId);
+        const joined = await withTimeout(
+          joinRoomApi(roomId),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут входа в комнату",
+        );
         if (!joined.ok) {
           if (!cancelled) {
             setError(joined.error ?? "Не удалось войти в комнату");
