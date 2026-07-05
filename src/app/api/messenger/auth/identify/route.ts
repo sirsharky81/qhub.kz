@@ -11,62 +11,77 @@ import { maskPhone } from "@/lib/messenger/phone-format";
 import { isValidKzPhone, normalizeKzPhone } from "@/lib/messenger/phone";
 
 export async function POST(request: Request) {
-  const ip = getClientIp(request);
-  const { allowed, retryAfterSec } = await checkMessengerRateLimit(`identify:${ip}`);
-  if (!allowed) {
-    return NextResponse.json(
-      { ok: false, error: "Слишком много запросов" },
-      { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
-    );
-  }
-
-  let body: { phone?: string; captchaToken?: string };
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
-  }
+    const ip = getClientIp(request);
+    const { allowed, retryAfterSec } = await checkMessengerRateLimit(`identify:${ip}`);
+    if (!allowed) {
+      return NextResponse.json(
+        { ok: false, error: "Слишком много запросов" },
+        { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
+      );
+    }
 
-  const captcha = await assertTurnstile(
-    typeof body.captchaToken === "string" ? body.captchaToken : undefined,
-    ip,
-  );
-  if (!captcha.ok) {
-    return NextResponse.json({ ok: false, error: captcha.error }, { status: captcha.status });
-  }
-
-  const raw = typeof body.phone === "string" ? body.phone.trim() : "";
-  if (!raw || !isValidKzPhone(normalizeKzPhone(raw))) {
-    return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
-  }
-
-  const normalized = normalizeKzPhone(raw);
-  const phoneLimit = await checkMessengerIdentifyPhoneRateLimit(normalized);
-  if (!phoneLimit.allowed) {
-    return NextResponse.json(
-      { ok: false, error: "Слишком много запросов" },
-      {
-        status: 429,
-        headers: phoneLimit.retryAfterSec ? { "Retry-After": String(phoneLimit.retryAfterSec) } : undefined,
-      },
-    );
-  }
-
-  try {
-    const { phone } = await assertWhitelistedPhone(raw);
-    const pinStatus = await getPinStatus(phone);
-    return NextResponse.json({
-      ok: true,
-      phone,
-      maskedPhone: maskPhone(phone),
-      passwordSet: pinStatus.passwordSet,
-      mustChangePin: pinStatus.mustChangePin,
-      lockedUntil: pinStatus.lockedUntil,
-    });
-  } catch (err) {
-    if (err instanceof MessengerAuthError) {
+    let body: { phone?: string; captchaToken?: string };
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
     }
-    return jsonAuthError(err);
+
+    const captcha = await assertTurnstile(
+      typeof body.captchaToken === "string" ? body.captchaToken : undefined,
+      ip,
+    );
+    if (!captcha.ok) {
+      return NextResponse.json({ ok: false, error: captcha.error }, { status: captcha.status });
+    }
+
+    const raw = typeof body.phone === "string" ? body.phone.trim() : "";
+    if (!raw || !isValidKzPhone(normalizeKzPhone(raw))) {
+      return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
+    }
+
+    const normalized = normalizeKzPhone(raw);
+    const phoneLimit = await checkMessengerIdentifyPhoneRateLimit(normalized);
+    if (!phoneLimit.allowed) {
+      return NextResponse.json(
+        { ok: false, error: "Слишком много запросов" },
+        {
+          status: 429,
+          headers: phoneLimit.retryAfterSec ? { "Retry-After": String(phoneLimit.retryAfterSec) } : undefined,
+        },
+      );
+    }
+
+    try {
+      const { phone } = await assertWhitelistedPhone(raw);
+      const pinStatus = await getPinStatus(phone);
+      return NextResponse.json({
+        ok: true,
+        phone,
+        maskedPhone: maskPhone(phone),
+        passwordSet: pinStatus.passwordSet,
+        mustChangePin: pinStatus.mustChangePin,
+        lockedUntil: pinStatus.lockedUntil,
+      });
+    } catch (err) {
+      if (err instanceof MessengerAuthError) {
+        return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
+      }
+      return NextResponse.json(
+        { ok: false, error: "Сервис мессенджера временно недоступен. Попробуйте снова." },
+        { status: 503 },
+      );
+    }
+  } catch (err) {
+    const authErr = jsonAuthError(err);
+    const status = "status" in authErr ? Number(authErr.status) : 500;
+    if (status === 500) {
+      return NextResponse.json(
+        { ok: false, error: "Сервис мессенджера временно недоступен. Попробуйте снова." },
+        { status: 503 },
+      );
+    }
+    return authErr;
   }
 }
