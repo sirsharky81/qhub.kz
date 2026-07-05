@@ -40,7 +40,7 @@ export function HeartsHand({
                     : ""
               }`}
             >
-              <CardSvg card={card} className="w-16 h-auto" />
+              <CardSvg card={card} className="w-[62px] sm:w-[76px] lg:w-[86px] aspect-[223/312]" />
             </button>
           );
         })}

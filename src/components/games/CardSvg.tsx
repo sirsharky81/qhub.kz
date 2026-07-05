@@ -23,7 +23,10 @@ function rankLabel(rank: PlayingCard["rank"]): string {
 }
 
 function cardAssetPath(card: PlayingCard): string {
-  return `/tools/games/cards/${rankLabel(card.rank)}${SUIT_CODE[card.suit]}.svg`;
+  const file = `/tools/games/cards/${rankLabel(card.rank)}${SUIT_CODE[card.suit]}.svg`;
+  // Imported templates keep card art inside a large page-sized SVG canvas.
+  // svgView crops to the real card frame so cards render at proper size.
+  return `${file}#svgView(viewBox(261,370,223,312))`;
 }
 
 export function CardSvg({
@@ -41,7 +44,7 @@ export function CardSvg({
       <img
         src="/tools/games/cards/BACK.svg"
         alt="Card back"
-        className={`${className} rounded-md object-contain`}
+        className={`${className} rounded-md object-cover`}
         loading="lazy"
       />
     );
@@ -52,7 +55,7 @@ export function CardSvg({
     <img
       src={cardAssetPath(card)}
       alt={`${rankLabel(card.rank)} ${SUIT_SYMBOL[card.suit]}`}
-      className={`${className} rounded-md object-contain`}
+      className={`${className} rounded-md object-cover`}
       loading="lazy"
     />
   );
