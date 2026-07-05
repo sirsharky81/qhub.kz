@@ -43,6 +43,9 @@ import {
 } from "./redis";
 import { normalizeKzPhone, peerFromDmChannel } from "./phone";
 
+const WHITELIST_CACHE_TTL_MS = 30_000;
+let whitelistCache: { at: number; data: Record<string, WhitelistEntry> } | null = null;
+
 function msgTtlSec(): number {
   const hours = Number(process.env.MESSENGER_MSG_TTL_HOURS ?? DEFAULT_MSG_TTL_HOURS);
   return Math.max(1, hours) * 3600;
@@ -66,12 +69,18 @@ function maxRoomEnvelopes(): number {
 // --- Whitelist ---
 
 export async function loadWhitelist(): Promise<Record<string, WhitelistEntry>> {
+  if (whitelistCache && Date.now() - whitelistCache.at < WHITELIST_CACHE_TTL_MS) {
+    return whitelistCache.data;
+  }
   const data = await redisGetJson<Record<string, WhitelistEntry>>(REDIS_WHITELIST_KEY);
-  return data ?? {};
+  const next = data ?? {};
+  whitelistCache = { at: Date.now(), data: next };
+  return next;
 }
 
 export async function saveWhitelist(data: Record<string, WhitelistEntry>): Promise<void> {
   await redisSet(REDIS_WHITELIST_KEY, JSON.stringify(data));
+  whitelistCache = { at: Date.now(), data };
 }
 
 export async function getWhitelistEntry(phone: string): Promise<WhitelistEntry | null> {

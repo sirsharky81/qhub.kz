@@ -10,6 +10,9 @@ import {
 import { redisDel, redisGet, redisGetJson, redisSet } from "./redis";
 import type { MessengerPresence, MessengerPushSubscription } from "./types";
 
+const PRESENCE_WRITE_MIN_INTERVAL_MS = 12_000;
+const lastPresenceWriteByPhone = new Map<string, { at: number; channel: string }>();
+
 function pushKey(phone: string): string {
   return `${REDIS_MESSENGER_PUSH_PREFIX}${phone}`;
 }
@@ -36,8 +39,18 @@ export async function saveMessengerPushSubscriptions(
 }
 
 export async function setMessengerPresence(phone: string, channel: string): Promise<void> {
+  const now = Date.now();
+  const cached = lastPresenceWriteByPhone.get(phone);
+  if (
+    cached &&
+    cached.channel === channel &&
+    now - cached.at < PRESENCE_WRITE_MIN_INTERVAL_MS
+  ) {
+    return;
+  }
   const presence: MessengerPresence = { channel, at: Date.now() };
   await redisSet(presenceKey(phone), JSON.stringify(presence), MESSENGER_PRESENCE_TTL_SEC);
+  lastPresenceWriteByPhone.set(phone, { at: now, channel });
 }
 
 export async function touchMessengerPresence(phone: string): Promise<void> {
@@ -52,6 +65,7 @@ export async function setMessengerGlobalPresence(phone: string): Promise<void> {
 
 export async function clearMessengerPresence(phone: string): Promise<void> {
   await redisDel(presenceKey(phone));
+  lastPresenceWriteByPhone.delete(phone);
 }
 
 export async function getMessengerPresence(phone: string): Promise<MessengerPresence | null> {
