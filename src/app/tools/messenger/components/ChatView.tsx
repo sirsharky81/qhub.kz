@@ -8,6 +8,7 @@ import { ChatComposer, type MediaSendPayload } from "./ChatComposer";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { MessageBubble, type DisplayMessage } from "./MessageBubble";
 import { MessengerShell } from "./MessengerShell";
+import { IconSettings } from "@/components/PlatformIcons";
 import { useMessengerUnlock } from "./MessengerUnlockProvider";
 import { SENDER_GROUP_MS } from "@/lib/messenger/constants";
 import {
@@ -788,9 +789,11 @@ export function ChatView({
       {isRoom && roomId && (
         <Link
           href={`/tools/messenger/room/settings?id=${encodeURIComponent(roomId)}`}
-          className="rounded-full px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
+          className="flex h-10 w-10 items-center justify-center rounded-full shrink-0 transition-colors text-gray-500 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-100 touch-manipulation"
+          aria-label="Настройки комнаты"
+          title="Настройки комнаты"
         >
-          ⚙
+          <IconSettings />
         </Link>
       )}
       {isRoom && onLeaveRoom && (
