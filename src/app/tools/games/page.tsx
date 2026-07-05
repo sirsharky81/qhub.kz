@@ -11,7 +11,7 @@ export default function GamesPage() {
   return (
     <PdfToolLayout
       title="QHub Games"
-      iconSrc="/tools/games/icon.svg"
+      iconSrc="/tools/games/icon-192.png"
       shellClassName="min-h-[100dvh] flex flex-col bg-gray-50 dark:bg-gray-950"
       badge={false}
     >

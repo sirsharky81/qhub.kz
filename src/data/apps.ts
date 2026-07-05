@@ -175,7 +175,7 @@ export const apps: App[] = [
       "Игровой раздел QHub с карточными и настольными играми. Включает Cards Game и Русское лото с офлайн и онлайн режимами.",
     href: "/tools/games",
     tags: ["tools", "games"],
-    icon: "/tools/games/icon.svg",
+    icon: "/tools/games/icon-192.png",
     color: "from-red-500/10 to-orange-600/5",
     author: "QHub",
     authorType: "qhub",
