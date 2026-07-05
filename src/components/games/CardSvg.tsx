@@ -44,7 +44,7 @@ export function CardSvg({
       <img
         src="/tools/games/cards/BACK.svg"
         alt="Card back"
-        className={`${className} rounded-md object-cover`}
+        className={`${className} rounded-md object-cover drop-shadow-[0_1px_1px_rgba(0,0,0,0.18)]`}
         loading="lazy"
       />
     );
@@ -55,7 +55,7 @@ export function CardSvg({
     <img
       src={cardAssetPath(card)}
       alt={`${rankLabel(card.rank)} ${SUIT_SYMBOL[card.suit]}`}
-      className={`${className} rounded-md object-cover`}
+      className={`${className} rounded-md object-cover drop-shadow-[0_1px_1px_rgba(0,0,0,0.18)]`}
       loading="lazy"
     />
   );

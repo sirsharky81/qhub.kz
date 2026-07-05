@@ -32,12 +32,12 @@ export function HeartsHand({
               key={card.id}
               type="button"
               onClick={() => (canPlay ? onPlayCard(card.id) : onSelectPassCard(card.id))}
-              className={`rounded-lg transition ${
+              className={`rounded-md border bg-white dark:bg-gray-900 shadow-sm transition ${
                 selected
-                  ? "ring-2 ring-amber-400 -translate-y-1"
+                  ? "border-amber-500 ring-2 ring-amber-300 -translate-y-1"
                   : legal && canPlay
-                    ? "ring-2 ring-emerald-400"
-                    : ""
+                    ? "border-emerald-500 ring-1 ring-emerald-300"
+                    : "border-gray-300 dark:border-gray-600"
               }`}
             >
               <CardSvg card={card} className="w-[62px] sm:w-[76px] lg:w-[86px] aspect-[223/312]" />
