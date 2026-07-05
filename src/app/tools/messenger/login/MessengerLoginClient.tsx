@@ -68,30 +68,14 @@ export function MessengerLoginClient() {
   }
 
   useEffect(() => {
-    let cancelled = false;
-    const watchdogTimer = window.setTimeout(() => {
-      if (!cancelled) setCheckingSession(false);
-    }, 7000);
     setPhoneInput(loadLastPhone());
-    void fetchAccessCheck(true)
-      .then((data) => {
-        if (cancelled) return;
-        if (data.messengerLoggedIn && !data.mustChangePin) {
-          router.replace("/tools/messenger/home");
-          return;
-        }
-        setCheckingSession(false);
-      })
-      .catch(() => {
-        if (!cancelled) setCheckingSession(false);
-      })
-      .finally(() => {
-        clearTimeout(watchdogTimer);
-      });
-    return () => {
-      cancelled = true;
-      clearTimeout(watchdogTimer);
-    };
+    void fetchAccessCheck(true).then((data) => {
+      if (data.messengerLoggedIn && !data.mustChangePin) {
+        router.replace("/tools/messenger/home");
+        return;
+      }
+      setCheckingSession(false);
+    });
   }, [router]);
 
   async function handleIdentify(e: React.FormEvent) {

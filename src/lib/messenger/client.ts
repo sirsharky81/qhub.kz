@@ -34,26 +34,15 @@ export interface IdentifyResult {
 
 let accessCache: { at: number; data: AccessCheckResult } | null = null;
 const ACCESS_STALE_MS = 60_000;
-const ACCESS_TIMEOUT_MS = 8_000;
 
 export async function fetchAccessCheck(force = false): Promise<AccessCheckResult> {
   if (!force && accessCache && Date.now() - accessCache.at < ACCESS_STALE_MS) {
     return accessCache.data;
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ACCESS_TIMEOUT_MS);
-  try {
-    const res = await platformFetch("/api/messenger/access-check", { signal: controller.signal });
-    const data = (await res.json()) as AccessCheckResult;
-    accessCache = { at: Date.now(), data };
-    return data;
-  } catch {
-    // Never let access-check block UI forever on unstable mobile networks.
-    if (accessCache) return accessCache.data;
-    return { allowed: true, messengerLoggedIn: false };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await platformFetch("/api/messenger/access-check");
+  const data = (await res.json()) as AccessCheckResult;
+  accessCache = { at: Date.now(), data };
+  return data;
 }
 
 export function invalidateAccessCache(): void {
