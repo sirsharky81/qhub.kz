@@ -18,30 +18,41 @@ export function MessengerRoomCreateClient() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomKey, setRoomKeyState] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     async function init() {
-      const key = await generateRoomAesKey();
-      const keyB64 = await exportRoomKeyBase64Url(key);
-      const created = await createRoom();
-      if (!created || cancelled) return;
-      setRoomId(created.roomId);
-      setRoomKeyState(keyB64);
-      setRoomKey(created.roomId, keyB64);
-      upsertLocalDialog({
-        id: created.channel,
-        kind: "room",
-        title: `Комната ${created.roomId}`,
-        roomId: created.roomId,
-        createdAt: Date.now(),
-      });
+      try {
+        if (!cancelled) setError(null);
+        const key = await generateRoomAesKey();
+        const keyB64 = await exportRoomKeyBase64Url(key);
+        const created = await createRoom();
+        if (!created) {
+          if (!cancelled) setError("Не удалось создать комнату. Попробуйте снова.");
+          return;
+        }
+        if (cancelled) return;
+        setRoomId(created.roomId);
+        setRoomKeyState(keyB64);
+        setRoomKey(created.roomId, keyB64);
+        upsertLocalDialog({
+          id: created.channel,
+          kind: "room",
+          title: `Комната ${created.roomId}`,
+          roomId: created.roomId,
+          createdAt: Date.now(),
+        });
+      } catch {
+        if (!cancelled) setError("Ошибка создания комнаты. Проверьте интернет и повторите.");
+      }
     }
     void init();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retryKey]);
 
   useEffect(() => {
     void fetch("/api/messenger/access-check")
@@ -53,8 +64,18 @@ export function MessengerRoomCreateClient() {
 
   if (!roomId || !roomKey) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center text-sm text-gray-500">
-        Создание комнаты…
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-3 text-sm text-gray-500">
+        <p>Создание комнаты…</p>
+        {error && <p className="text-red-600 text-center px-4">{error}</p>}
+        {error && (
+          <button
+            type="button"
+            onClick={() => setRetryKey((v) => v + 1)}
+            className="rounded-2xl bg-sky-600 text-white px-5 py-2 text-sm font-semibold"
+          >
+            Повторить
+          </button>
+        )}
       </div>
     );
   }
@@ -68,18 +89,26 @@ export function MessengerRoomCreateClient() {
           disabled={entering}
           onClick={() => {
             setEntering(true);
-            void joinRoomApi(roomId).then((r) => {
-              if (r.ok) {
-                router.replace(messengerRoomUrl(roomId));
-              } else {
+            setError(null);
+            void joinRoomApi(roomId)
+              .then((r) => {
+                if (r.ok) {
+                  router.replace(messengerRoomUrl(roomId));
+                } else {
+                  setError(r.error ?? "Не удалось войти в комнату");
+                  setEntering(false);
+                }
+              })
+              .catch(() => {
+                setError("Ошибка сети при входе в комнату");
                 setEntering(false);
-              }
-            });
+              });
           }}
           className="w-full max-w-xs mx-auto block rounded-2xl bg-sky-600 text-white py-3 text-sm font-semibold disabled:opacity-50"
         >
           {entering ? "Вход…" : "Войти в чат"}
         </button>
+        {error && <p className="mt-3 text-center text-sm text-red-600">{error}</p>}
       </div>
     </MessengerShell>
   );

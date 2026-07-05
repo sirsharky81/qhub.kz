@@ -26,6 +26,7 @@ function MessengerRoomInner() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
+  const [retryKey, setRetryKey] = useState(0);
 
   const handleRoomEnded = useCallback(() => {
     void cleanupRoomLocalState(roomId).then(() => {
@@ -50,31 +51,44 @@ function MessengerRoomInner() {
     }
     let cancelled = false;
 
-    async function init() {
-      const access = await fetchAccessCheck();
-      if (!access.messengerLoggedIn) {
-        router.replace("/tools/messenger/login");
-        return;
-      }
-      if (!cancelled) setMyPhone(access.phone ?? "");
-
-      const storedKey = getRoomKey(roomId);
-      if (!storedKey) {
-        router.replace(`/tools/messenger/room/join?code=${encodeURIComponent(roomId)}`);
-        return;
-      }
-
-      const status = await fetchRoomStatus(roomId);
-      if (!status) {
-        await cleanupRoomLocalState(roomId);
-        if (!cancelled) {
-          setError("Комната завершена");
-          setLoading(false);
-        }
-        return;
-      }
-
+    async function loadProfilesInBackground() {
       try {
+        const profiles = await fetchProfilesMap();
+        if (!cancelled) setProfileLabels(profiles);
+      } catch {
+        // Non-blocking: чат уже открыт, профили можно догрузить позже.
+      }
+    }
+
+    async function init() {
+      try {
+        if (!cancelled) {
+          setError(null);
+          setLoading(true);
+        }
+        const access = await fetchAccessCheck();
+        if (!access.messengerLoggedIn) {
+          router.replace("/tools/messenger/login");
+          return;
+        }
+        if (!cancelled) setMyPhone(access.phone ?? "");
+
+        const storedKey = getRoomKey(roomId);
+        if (!storedKey) {
+          router.replace(`/tools/messenger/room/join?code=${encodeURIComponent(roomId)}`);
+          return;
+        }
+
+        const status = await fetchRoomStatus(roomId);
+        if (!status) {
+          await cleanupRoomLocalState(roomId);
+          if (!cancelled) {
+            setError("Комната завершена");
+            setLoading(false);
+          }
+          return;
+        }
+
         const key = await importRoomKeyBase64Url(storedKey);
         const joined = await joinRoomApi(roomId);
         if (!joined.ok) {
@@ -91,16 +105,14 @@ function MessengerRoomInner() {
           roomId,
           createdAt: Date.now(),
         });
-        const profiles = await fetchProfilesMap();
         if (!cancelled) {
-          setProfileLabels(profiles);
           setAesKey(key);
           setLoading(false);
         }
+        void loadProfilesInBackground();
       } catch {
-        await cleanupRoomLocalState(roomId);
         if (!cancelled) {
-          setError("Неверный ключ комнаты");
+          setError("Не удалось войти в комнату. Проверьте интернет и попробуйте снова.");
           setLoading(false);
         }
       }
@@ -110,18 +122,27 @@ function MessengerRoomInner() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, router]);
+  }, [roomId, router, retryKey]);
 
   if (error) {
     return (
       <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-4 p-4 text-center">
         <p className="text-sm text-gray-600">{error}</p>
-        <Link
-          href="/tools/messenger/home"
-          className="rounded-2xl bg-gray-900 text-white px-6 py-2.5 text-sm font-semibold"
-        >
-          На главную
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setRetryKey((v) => v + 1)}
+            className="rounded-2xl bg-sky-600 text-white px-6 py-2.5 text-sm font-semibold"
+          >
+            Повторить
+          </button>
+          <Link
+            href="/tools/messenger/home"
+            className="rounded-2xl bg-gray-900 text-white px-6 py-2.5 text-sm font-semibold"
+          >
+            На главную
+          </Link>
+        </div>
       </div>
     );
   }
