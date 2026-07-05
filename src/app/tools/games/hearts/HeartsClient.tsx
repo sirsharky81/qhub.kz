@@ -106,7 +106,7 @@ export default function HeartsClient() {
       if (saved && saved.phase !== "game_end") {
         startOfflineGame(saved);
       } else {
-        startOfflineGame();
+        setState(null);
       }
     });
   }, [startOfflineGame]);
@@ -175,9 +175,8 @@ export default function HeartsClient() {
     [localDispatch, onlineSession, remoteDispatch],
   );
 
-  const endAndRestartGame = useCallback(() => {
-    if (!window.confirm("Завершить текущую партию и начать новую?")) return;
-
+  const restartOfflineGame = useCallback((withConfirm = true) => {
+    if (withConfirm && !window.confirm("Завершить текущую партию и начать новую?")) return;
     if (onlineSession?.hostSecret) {
       void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`, {
         method: "DELETE",
@@ -187,8 +186,31 @@ export default function HeartsClient() {
     setOnlineSession(null);
     setInactivity(null);
     startOfflineGame();
-    setMessage("Партия завершена досрочно. Запущена новая игра.");
+    setMessage("Запущена новая оффлайн партия против ИИ.");
   }, [onlineSession, startOfflineGame]);
+
+  const finishCurrentGame = useCallback(() => {
+    if (!window.confirm("Завершить текущую партию?")) return;
+
+    if (onlineSession?.hostSecret) {
+      void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`, {
+        method: "DELETE",
+        headers: { "x-host-secret": onlineSession.hostSecret },
+      }).catch(() => {});
+    }
+    engineRef.current = null;
+    definitionRef.current = null;
+    setOnlineSession(null);
+    setInactivity(null);
+    setSelectedPass([]);
+    setState(null);
+    void saveHeartsState(null);
+    setMessage("Партия завершена. Выберите режим для новой игры.");
+  }, [onlineSession]);
+
+  const startOfflineFromMenu = useCallback(() => {
+    restartOfflineGame(Boolean(state));
+  }, [restartOfflineGame, state]);
 
   const legalCardIds = useMemo(() => {
     if (!state) return new Set<string>();
@@ -433,7 +455,7 @@ export default function HeartsClient() {
             <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
               {state
                 ? `Раунд #${state.roundIndex + 1} · Фаза: ${state.phase} · Ход: ${state.currentTurnId}`
-                : "Инициализация партии..."}
+                : "Партия не запущена"}
               {onlineSession && inactivity?.enabled && onlineCountdownSec !== null
                 ? ` · Неактивность: ${onlineCountdownSec}с`
                 : ""}
@@ -446,22 +468,11 @@ export default function HeartsClient() {
                 Игроки без хода более 3 минут переведены под управление бота.
               </p>
             )}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={endAndRestartGame}
-                className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-white/70 dark:hover:bg-gray-800"
-              >
-                Завершить и начать заново
-              </button>
-              <button
-                type="button"
-                onClick={() => startOfflineGame()}
-                className="rounded-lg bg-violet-600 hover:bg-violet-500 text-white px-3 py-1.5 text-xs font-medium"
-              >
-                Новая оффлайн партия
-              </button>
-            </div>
+            {message && (
+              <p className="mt-2 text-xs text-gray-700 dark:text-gray-300">
+                {message}
+              </p>
+            )}
           </section>
 
           <PickerSection
@@ -476,7 +487,7 @@ export default function HeartsClient() {
           >
             {panelTab === "menu" ? (
               <HeartsMainMenu
-                onQuickOffline={() => startOfflineGame()}
+                onStartOffline={startOfflineFromMenu}
                 onQuickOnline={doQuickOnline}
                 onCreateRoom={doCreateRoom}
                 onJoinByCode={doJoinByCode}
@@ -556,7 +567,6 @@ export default function HeartsClient() {
                     Выберите 3 карты для обмена и нажмите подтверждение.
                   </p>
                 )}
-                {message && <p className="text-xs text-red-600 dark:text-red-400">{message}</p>}
               </section>
               <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
                 <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">Оппоненты</h3>
@@ -583,6 +593,25 @@ export default function HeartsClient() {
                   onPlayCard={playCard}
                 />
               )}
+              <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
+                <h3 className="text-xs uppercase tracking-wide text-gray-500">Управление партией</h3>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={finishCurrentGame}
+                    className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40"
+                  >
+                    Завершить партию
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => restartOfflineGame()}
+                    className="rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                  >
+                    Завершить и начать заново
+                  </button>
+                </div>
+              </section>
               {canSelectPass && (
                 <button
                   type="button"
