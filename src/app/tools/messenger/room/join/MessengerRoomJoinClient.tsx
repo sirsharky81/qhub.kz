@@ -7,7 +7,7 @@ import Link from "next/link";
 import { MessengerShell } from "../../components/MessengerShell";
 import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
 import { joinRoomApi } from "@/lib/messenger/client";
-import { importRoomKeyBase64Url, parseRoomJoinUrl } from "@/lib/messenger/crypto";
+import { deriveRoomAesKeyFromCode, exportRoomKeyBase64Url, importRoomKeyBase64Url, parseRoomJoinUrl } from "@/lib/messenger/crypto";
 import { setRoomKey, getRoomKey } from "@/lib/messenger/room-keys";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
@@ -67,20 +67,22 @@ function JoinInner() {
       setError("Введите код комнаты");
       return;
     }
-    if (!keyStr) {
-      setError("Нужен ключ шифрования. Отсканируйте QR или вставьте ссылку целиком.");
-      return;
-    }
     setJoining(true);
     try {
-      await importRoomKeyBase64Url(keyStr);
+      let finalKey = keyStr;
+      if (finalKey) {
+        await importRoomKeyBase64Url(finalKey);
+      } else {
+        const derived = await deriveRoomAesKeyFromCode(rid);
+        finalKey = await exportRoomKeyBase64Url(derived);
+      }
       const joined = await joinRoomApi(rid);
       if (!joined.ok) {
         setError(joined.error ?? "Комната не найдена");
         setJoining(false);
         return;
       }
-      setRoomKey(rid, keyStr);
+      setRoomKey(rid, finalKey);
       upsertLocalDialog({
         id: `room:${rid}`,
         kind: "room",
@@ -88,7 +90,7 @@ function JoinInner() {
         roomId: rid,
         createdAt: Date.now(),
       });
-      router.replace(roomOpenUrlWithKey(rid, keyStr));
+      router.replace(roomOpenUrlWithKey(rid, finalKey));
     } catch {
       setError("Неверный ключ комнаты");
       setJoining(false);
@@ -102,8 +104,7 @@ function JoinInner() {
     <MessengerShell variant="app" title="Присоединиться" backHref="/tools/messenger/home">
       <div className="p-4 w-full space-y-4">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Код комнаты не содержит ключ шифрования. Попросите отправителя поделиться QR-кодом или
-          ссылкой целиком.
+          Введите код комнаты. Поле ключа можно не заполнять.
         </div>
 
         <input
@@ -116,7 +117,7 @@ function JoinInner() {
         <input
           value={keyInput}
           onChange={(e) => setKeyInput(e.target.value)}
-          placeholder="Ключ (из QR или #key=…)"
+          placeholder="Ключ (необязательно, из QR или #key=…)"
           className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-xs font-mono"
         />
 

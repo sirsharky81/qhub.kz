@@ -110,6 +110,17 @@ export async function generateRoomAesKey(): Promise<CryptoKey> {
   return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 }
 
+/** Deterministic room key from short room code (UX-first fallback: no long token needed). */
+export async function deriveRoomAesKeyFromCode(roomId: string): Promise<CryptoKey> {
+  const normalized = roomId.trim().toUpperCase();
+  const material = new TextEncoder().encode(`qhub-room:${normalized}`);
+  const digest = await crypto.subtle.digest("SHA-256", material);
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM", length: 256 }, true, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
 export async function exportRoomKeyBase64Url(key: CryptoKey): Promise<string> {
   const raw = await crypto.subtle.exportKey("raw", key);
   return toBase64Url(raw);

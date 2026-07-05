@@ -13,7 +13,7 @@ import {
   joinRoomApi,
   leaveRoomApi,
 } from "@/lib/messenger/client";
-import { importRoomKeyBase64Url } from "@/lib/messenger/crypto";
+import { deriveRoomAesKeyFromCode, exportRoomKeyBase64Url, importRoomKeyBase64Url } from "@/lib/messenger/crypto";
 import { cleanupRoomLocalState, upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { getRoomKey, setRoomKey } from "@/lib/messenger/room-keys";
@@ -155,11 +155,22 @@ function MessengerRoomInner() {
           }
         }
         if (!storedKey) {
-          if (!cancelled) {
-            setError("Не найден ключ комнаты на этом устройстве. Нужен повторный вход по коду/QR.");
-            setLoading(false);
-          }
-          return;
+          currentStep = "Восстановление ключа из кода";
+          if (!cancelled) setLoadingStep(currentStep);
+          const derived = await withTimeout(
+            deriveRoomAesKeyFromCode(roomId),
+            ROOM_STEP_TIMEOUT_MS,
+            "Таймаут восстановления ключа",
+          );
+          storedKey = await withTimeout(
+            exportRoomKeyBase64Url(derived),
+            ROOM_STEP_TIMEOUT_MS,
+            "Таймаут сериализации ключа",
+          );
+          setRoomKey(roomId, storedKey);
+        }
+        if (!storedKey) {
+          throw new Error("room key missing after recovery");
         }
 
         currentStep = "Проверка комнаты";

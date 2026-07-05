@@ -7,8 +7,8 @@ import { RoomInvite } from "../../components/RoomInvite";
 import { MessengerShell } from "../../components/MessengerShell";
 import { createRoom, joinRoomApi } from "@/lib/messenger/client";
 import {
+  deriveRoomAesKeyFromCode,
   exportRoomKeyBase64Url,
-  generateRoomAesKey,
 } from "@/lib/messenger/crypto";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { setRoomKey } from "@/lib/messenger/room-keys";
@@ -53,16 +53,6 @@ export function MessengerRoomCreateClient() {
           setError(null);
           setCreating(true);
         }
-        const key = await withTimeout(
-          generateRoomAesKey(),
-          ROOM_STEP_TIMEOUT_MS,
-          "Таймаут генерации ключа комнаты",
-        );
-        const keyB64 = await withTimeout(
-          exportRoomKeyBase64Url(key),
-          ROOM_STEP_TIMEOUT_MS,
-          "Таймаут подготовки ключа комнаты",
-        );
         const created = await withTimeout(
           createRoom(),
           ROOM_STEP_TIMEOUT_MS,
@@ -72,6 +62,16 @@ export function MessengerRoomCreateClient() {
           if (!cancelled) setError("Не удалось создать комнату. Попробуйте снова.");
           return;
         }
+        const key = await withTimeout(
+          deriveRoomAesKeyFromCode(created.roomId),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут генерации ключа комнаты",
+        );
+        const keyB64 = await withTimeout(
+          exportRoomKeyBase64Url(key),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут подготовки ключа комнаты",
+        );
         if (cancelled) return;
         setRoomId(created.roomId);
         setRoomKeyState(keyB64);

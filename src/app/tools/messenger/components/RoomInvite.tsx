@@ -48,7 +48,7 @@ export function RoomInvite({ roomId, roomKey }: Props) {
         <img src={qrDataUrl} alt={`QR комнаты ${roomId}`} className="rounded-xl border border-gray-200" />
       )}
       <p className="text-xs text-gray-500 text-center max-w-xs">
-        Ключ шифрования в QR и ссылке. Не передавайте только код комнаты без QR.
+        Для входа достаточно короткого кода комнаты. QR/ссылка — быстрый вариант передачи.
       </p>
       <div className="grid w-full max-w-xs gap-2">
         <button
