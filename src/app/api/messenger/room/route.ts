@@ -2,9 +2,18 @@ import { NextResponse } from "next/server";
 import { generateRoomCode } from "@/lib/messenger/codes";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import { createRoomMeta, getRoomMeta, getRoomParticipants } from "@/lib/messenger/store";
+import { getMessengerRedis } from "@/lib/messenger/redis";
+
+function roomStorageUnavailable(): NextResponse {
+  return NextResponse.json(
+    { error: "Хранилище комнат не настроено на сервере (Redis)." },
+    { status: 503 },
+  );
+}
 
 export async function POST() {
   try {
+    if (!getMessengerRedis()) return roomStorageUnavailable();
     const { phone } = await assertMessengerSession();
 
     let roomId = generateRoomCode();
@@ -23,6 +32,7 @@ export async function POST() {
 
 export async function GET(request: Request) {
   try {
+    if (!getMessengerRedis()) return roomStorageUnavailable();
     const { phone } = await assertMessengerSession();
     const url = new URL(request.url);
     const roomId = (url.searchParams.get("roomId") ?? "").toUpperCase();

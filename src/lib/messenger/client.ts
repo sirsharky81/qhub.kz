@@ -277,10 +277,13 @@ export async function fetchProfilesMap(): Promise<Record<string, string>> {
   return map;
 }
 
-export async function createRoom(): Promise<{ roomId: string; channel: string } | null> {
+export async function createRoom(): Promise<{ ok: true; roomId: string; channel: string } | { ok: false; error: string }> {
   const res = await platformFetch("/api/messenger/room", { method: "POST" });
-  if (!res.ok) return null;
-  return res.json() as Promise<{ roomId: string; channel: string }>;
+  const data = (await res.json().catch(() => ({}))) as { roomId?: string; channel?: string; error?: string };
+  if (!res.ok || !data.roomId || !data.channel) {
+    return { ok: false, error: data.error ?? "Не удалось создать комнату" };
+  }
+  return { ok: true, roomId: data.roomId, channel: data.channel };
 }
 
 export async function joinRoomApi(
@@ -318,14 +321,17 @@ export type RoomStatusLookup =
   | { kind: "not_found" }
   | { kind: "unauthorized" }
   | { kind: "forbidden" }
-  | { kind: "error"; status: number };
+  | { kind: "error"; status: number; error?: string };
 
 export async function fetchRoomStatusLookup(roomId: string): Promise<RoomStatusLookup> {
   const res = await platformFetch(`/api/messenger/room?roomId=${encodeURIComponent(roomId.toUpperCase())}`);
   if (res.status === 404) return { kind: "not_found" };
   if (res.status === 401) return { kind: "unauthorized" };
   if (res.status === 403) return { kind: "forbidden" };
-  if (!res.ok) return { kind: "error", status: res.status };
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { kind: "error", status: res.status, error: body.error };
+  }
   return { kind: "ok", data: (await res.json()) as RoomStatusResult };
 }
 

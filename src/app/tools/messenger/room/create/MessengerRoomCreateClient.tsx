@@ -58,8 +58,8 @@ export function MessengerRoomCreateClient() {
           ROOM_STEP_TIMEOUT_MS,
           "Таймаут создания комнаты",
         );
-        if (!created) {
-          if (!cancelled) setError("Не удалось создать комнату. Попробуйте снова.");
+        if (!created.ok) {
+          if (!cancelled) setError(created.error);
           return;
         }
         const key = await withTimeout(

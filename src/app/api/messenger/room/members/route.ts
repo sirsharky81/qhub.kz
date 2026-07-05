@@ -1,9 +1,18 @@
 import { NextResponse } from "next/server";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import { getRoomMeta, joinRoomParticipant, leaveRoom } from "@/lib/messenger/store";
+import { getMessengerRedis } from "@/lib/messenger/redis";
+
+function roomStorageUnavailable(): NextResponse {
+  return NextResponse.json(
+    { error: "Хранилище комнат не настроено на сервере (Redis)." },
+    { status: 503 },
+  );
+}
 
 export async function POST(request: Request) {
   try {
+    if (!getMessengerRedis()) return roomStorageUnavailable();
     const { phone } = await assertMessengerSession();
     let body: { roomId?: string; action?: "join" | "leave" };
     try {

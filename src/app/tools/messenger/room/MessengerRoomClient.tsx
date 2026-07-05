@@ -197,7 +197,13 @@ function MessengerRoomInner() {
         }
         if (statusLookup.kind !== "ok") {
           if (!cancelled) {
-            setError("Не удалось получить статус комнаты. Попробуйте снова.");
+            const statusError =
+              statusLookup.kind === "error"
+                ? statusLookup.error
+                : statusLookup.kind === "forbidden"
+                  ? "Доступ к комнате запрещён."
+                  : undefined;
+            setError(statusError ?? "Не удалось получить статус комнаты. Попробуйте снова.");
             setLoading(false);
           }
           return;
