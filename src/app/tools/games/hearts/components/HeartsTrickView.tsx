@@ -20,9 +20,11 @@ export function HeartsTrickView({ state }: { state: HeartsState }) {
             >
               <span className="text-[11px] text-gray-500">{player.name}</span>
               {played ? (
-                <CardSvg card={played.card} className="w-[54px] sm:w-[64px] aspect-[223/312]" />
+                <div className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 shadow-sm">
+                  <CardSvg card={played.card} className="w-[62px] sm:w-[76px] lg:w-[86px] aspect-[223/312]" />
+                </div>
               ) : (
-                <div className="w-[54px] sm:w-[64px] aspect-[223/312] rounded-md border border-dashed border-gray-300 dark:border-gray-700" />
+                <div className="w-[62px] sm:w-[76px] lg:w-[86px] aspect-[223/312] rounded-md border border-dashed border-gray-300 dark:border-gray-700 bg-white/70 dark:bg-gray-900/60" />
               )}
             </div>
           );

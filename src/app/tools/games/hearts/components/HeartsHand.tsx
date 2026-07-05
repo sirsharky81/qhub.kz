@@ -23,7 +23,7 @@ export function HeartsHand({
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
       <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ваши карты</h2>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap justify-center gap-2">
         {cards.map((card) => {
           const legal = legalCardIds.has(card.id);
           const selected = isSelected(selectedForPass, card.id);
