@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   LOTTO_INTERVAL_MAX,
   LOTTO_INTERVAL_MIN,
@@ -154,6 +155,7 @@ function LottoRules() {
 }
 
 export default function LottoClient() {
+  const searchParams = useSearchParams();
   const [game, setGame] = useState<LottoGameState>(() => {
     const stored = loadLottoState();
     if (
@@ -191,6 +193,17 @@ export default function LottoClient() {
   gameRef.current = game;
 
   const { settings, status, drawn, remaining, current, countdownSec, players, winRules, cardsGenerated, activeWinAlert, network } = game;
+  useEffect(() => {
+    const mode = searchParams.get("mode");
+    if (mode === "create-online") {
+      setPrePanelTab("participants");
+      return;
+    }
+    if (mode === "join-online") {
+      setPrePanelTab("join");
+    }
+  }, [searchParams]);
+
   const isActive = status === "playing" || status === "paused";
   const isPaused = status === "paused";
   const isPlaying = status === "playing";
