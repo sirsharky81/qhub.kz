@@ -19,6 +19,7 @@ import { maskPhone } from "@/lib/messenger/phone-format";
 import { getRoomKey } from "@/lib/messenger/room-keys";
 
 const ROOM_STEP_TIMEOUT_MS = 10_000;
+const ROOM_FLOW_WATCHDOG_MS = 15_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -132,7 +133,11 @@ function MessengerRoomInner() {
           return;
         }
 
-        const key = await importRoomKeyBase64Url(storedKey);
+        const key = await withTimeout(
+          importRoomKeyBase64Url(storedKey),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут импорта ключа комнаты",
+        );
         const joined = await withTimeout(
           joinRoomApi(roomId),
           ROOM_STEP_TIMEOUT_MS,
@@ -170,6 +175,15 @@ function MessengerRoomInner() {
       cancelled = true;
     };
   }, [roomId, router, retryKey]);
+
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => {
+      setError("Вход в комнату занял слишком долго. Проверьте интернет и нажмите «Повторить».");
+      setLoading(false);
+    }, ROOM_FLOW_WATCHDOG_MS);
+    return () => clearTimeout(timer);
+  }, [loading, retryKey]);
 
   if (error) {
     return (

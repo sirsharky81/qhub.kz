@@ -14,6 +14,7 @@ import { upsertLocalDialog } from "@/lib/messenger/dialogs";
 import { setRoomKey } from "@/lib/messenger/room-keys";
 
 const ROOM_STEP_TIMEOUT_MS = 10_000;
+const ROOM_FLOW_WATCHDOG_MS = 15_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -38,14 +39,26 @@ export function MessengerRoomCreateClient() {
   const [entering, setEntering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [creating, setCreating] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     async function init() {
       try {
-        if (!cancelled) setError(null);
-        const key = await generateRoomAesKey();
-        const keyB64 = await exportRoomKeyBase64Url(key);
+        if (!cancelled) {
+          setError(null);
+          setCreating(true);
+        }
+        const key = await withTimeout(
+          generateRoomAesKey(),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут генерации ключа комнаты",
+        );
+        const keyB64 = await withTimeout(
+          exportRoomKeyBase64Url(key),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут подготовки ключа комнаты",
+        );
         const created = await withTimeout(
           createRoom(),
           ROOM_STEP_TIMEOUT_MS,
@@ -68,6 +81,8 @@ export function MessengerRoomCreateClient() {
         });
       } catch {
         if (!cancelled) setError("Ошибка создания комнаты. Проверьте интернет и повторите.");
+      } finally {
+        if (!cancelled) setCreating(false);
       }
     }
     void init();
@@ -75,6 +90,15 @@ export function MessengerRoomCreateClient() {
       cancelled = true;
     };
   }, [retryKey]);
+
+  useEffect(() => {
+    if (!creating) return;
+    const timer = setTimeout(() => {
+      setError("Создание комнаты заняло слишком долго. Нажмите «Повторить».");
+      setCreating(false);
+    }, ROOM_FLOW_WATCHDOG_MS);
+    return () => clearTimeout(timer);
+  }, [creating, retryKey]);
 
   useEffect(() => {
     void fetch("/api/messenger/access-check")
@@ -87,7 +111,7 @@ export function MessengerRoomCreateClient() {
   if (!roomId || !roomKey) {
     return (
       <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-3 text-sm text-gray-500">
-        <p>Создание комнаты…</p>
+        <p>{creating ? "Создание комнаты…" : "Создание комнаты не завершено"}</p>
         {error && <p className="text-red-600 text-center px-4">{error}</p>}
         {error && (
           <button
@@ -125,6 +149,12 @@ export function MessengerRoomCreateClient() {
                 setError("Ошибка сети при входе в комнату");
                 setEntering(false);
               });
+            setTimeout(() => {
+              setEntering((prev) => {
+                if (prev) setError("Вход в комнату занял слишком долго. Попробуйте снова.");
+                return false;
+              });
+            }, ROOM_FLOW_WATCHDOG_MS);
           }}
           className="w-full max-w-xs mx-auto block rounded-2xl bg-sky-600 text-white py-3 text-sm font-semibold disabled:opacity-50"
         >
