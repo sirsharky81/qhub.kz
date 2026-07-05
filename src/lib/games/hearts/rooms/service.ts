@@ -159,6 +159,8 @@ function startRoomWithBots(room: HeartsRoomRecord): HeartsRoomRecord {
     updatedAt: now,
     inactivity: room.inactivity,
   };
+  next.state = aiProgress(next.state, seats);
+  next.status = next.state.phase === "game_end" ? "finished" : "playing";
   next.inactivity = syncInactivity(next, now, true);
   return next;
 }

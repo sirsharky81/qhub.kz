@@ -50,8 +50,9 @@ export function HeartsMainMenu({
         <input
           value={playerName}
           onChange={(e) => setPlayerName(e.target.value)}
+          onFocus={(e) => e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })}
           placeholder="Ваше имя"
-          className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-base sm:text-sm"
         />
         {onlineRoomCode ? (
           <div className="space-y-2">
@@ -112,8 +113,9 @@ export function HeartsMainMenu({
               <input
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                onFocus={(e) => e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })}
                 placeholder="Код комнаты"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-base sm:text-sm"
               />
               <button
                 type="button"
