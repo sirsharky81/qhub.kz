@@ -18,11 +18,12 @@ export async function DELETE(
   context: { params: Promise<{ code: string }> },
 ) {
   const { code } = await context.params;
-  const hostSecret = request.headers.get("x-host-secret");
-  if (!hostSecret) {
-    return NextResponse.json({ error: "Missing x-host-secret header" }, { status: 400 });
+  const playerId = request.headers.get("x-player-id");
+  const joinToken = request.headers.get("x-join-token");
+  if (!playerId || !joinToken) {
+    return NextResponse.json({ error: "Missing room owner credentials" }, { status: 400 });
   }
-  const closed = await closeRoom(code, hostSecret);
+  const closed = await closeRoom(code, playerId, joinToken);
   if (!closed) {
     return NextResponse.json({ error: "Room not found or forbidden" }, { status: 403 });
   }

@@ -13,6 +13,7 @@ export interface HeartsRoomSeat {
 export interface HeartsRoomRecord {
   roomCode: string;
   hostSecret: string;
+  hostPlayerId: string | null;
   status: "open" | "playing" | "finished";
   seats: HeartsRoomSeat[];
   state: HeartsState;
@@ -32,6 +33,7 @@ export interface HeartsInactivityState {
 export interface HeartsRoomPublic {
   roomCode: string;
   status: HeartsRoomRecord["status"];
+  hostPlayerId: string | null;
   seats: Omit<HeartsRoomSeat, "joinToken">[];
   state: HeartsState;
   version: number;

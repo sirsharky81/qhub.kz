@@ -63,6 +63,7 @@ function toPublicRoom(room: HeartsRoomRecord): HeartsRoomPublic {
   return {
     roomCode: room.roomCode,
     status: room.status,
+    hostPlayerId: room.hostPlayerId,
     seats: room.seats.map((seat) => ({
       id: seat.id,
       name: seat.name,
@@ -177,6 +178,7 @@ function createOpenRoom(hostName: string): HeartsRoomRecord {
   return {
     roomCode: createRoomCode(),
     hostSecret: randomToken(24),
+    hostPlayerId: hostSeat.id,
     status: "open",
     seats: [hostSeat],
     state: definition.initialState(),
@@ -382,7 +384,7 @@ export async function setConnectionState(
   playerId: string,
   joinToken: string,
   connected: boolean,
-): Promise<HeartsRoomPublic> {
+): Promise<HeartsRoomPublic | null> {
   let room = await getHeartsRoom(code);
   if (!room) throw new Error("Комната не найдена");
   room = await applyInactivityIfNeeded(room);
@@ -396,10 +398,22 @@ export async function setConnectionState(
     connected,
     controlledByAi: !connected,
   };
+  const connectedHumans = seats.filter((seat) => !seat.isBot && seat.connected);
+  if (connectedHumans.length === 0) {
+    await deleteHeartsRoom(code);
+    return null;
+  }
+  const hostStillConnected = room.hostPlayerId
+    ? seats.some((seat) => seat.id === room.hostPlayerId && !seat.isBot && seat.connected)
+    : false;
+  const nextHostPlayerId = hostStillConnected
+    ? room.hostPlayerId
+    : connectedHumans[0]?.id ?? null;
   const now = Date.now();
   const next: HeartsRoomRecord = {
     ...room,
     seats,
+    hostPlayerId: nextHostPlayerId,
     version: room.version + 1,
     updatedAt: now,
     inactivity: syncInactivity({ ...room, seats }, now, true),
@@ -408,9 +422,11 @@ export async function setConnectionState(
   return toPublicRoom(next);
 }
 
-export async function closeRoom(code: string, hostSecret: string): Promise<boolean> {
+export async function closeRoom(code: string, playerId: string, joinToken: string): Promise<boolean> {
   const room = await getHeartsRoom(code);
-  if (!room || room.hostSecret !== hostSecret) return false;
+  if (!room) return false;
+  const seat = room.seats.find((item) => item.id === playerId && item.joinToken === joinToken && !item.isBot);
+  if (!seat || seat.id !== room.hostPlayerId) return false;
   await deleteHeartsRoom(code);
   return true;
 }

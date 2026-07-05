@@ -13,6 +13,9 @@ export async function POST(
       connected: boolean;
     };
     const room = await setConnectionState(code, body.playerId, body.joinToken, body.connected);
+    if (!room) {
+      return NextResponse.json({ closed: true });
+    }
     return NextResponse.json(room);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update connection";

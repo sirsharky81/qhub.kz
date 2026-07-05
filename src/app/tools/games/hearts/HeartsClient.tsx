@@ -30,7 +30,6 @@ interface OnlineSession {
   roomCode: string;
   playerId: string;
   joinToken: string;
-  hostSecret?: string;
 }
 
 interface RoomInactivity {
@@ -41,9 +40,14 @@ interface RoomInactivity {
 }
 
 interface OnlineRoomResponse {
+  roomCode?: string;
+  status?: "open" | "playing" | "finished";
+  hostPlayerId?: string | null;
+  seats?: Array<{ id: string; connected: boolean; isBot: boolean; controlledByAi: boolean }>;
   state: HeartsState;
   inactivity: RoomInactivity;
   error?: string;
+  closed?: boolean;
 }
 
 const HUMAN_ID = "human-player";
@@ -63,6 +67,7 @@ export default function HeartsClient() {
   const [selectedPass, setSelectedPass] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [onlineSession, setOnlineSession] = useState<OnlineSession | null>(null);
+  const [roomHostPlayerId, setRoomHostPlayerId] = useState<string | null>(null);
   const [settings, setSettings] = useState<HeartsSettings>(DEFAULT_HEARTS_SETTINGS);
   const [stats, setStats] = useState<HeartsStats>(DEFAULT_HEARTS_STATS);
   const [inactivity, setInactivity] = useState<RoomInactivity | null>(null);
@@ -91,6 +96,7 @@ export default function HeartsClient() {
       definitionRef.current = definition;
       engineRef.current = engine;
       setOnlineSession(null);
+      setRoomHostPlayerId(null);
       setInactivity(null);
       setState(engine.getState());
       setSelectedPass([]);
@@ -160,6 +166,7 @@ export default function HeartsClient() {
       }
       setState(data.state);
       setInactivity(data.inactivity ?? null);
+      setRoomHostPlayerId(data.hostPlayerId ?? null);
     },
     [onlineSession],
   );
@@ -175,38 +182,80 @@ export default function HeartsClient() {
     [localDispatch, onlineSession, remoteDispatch],
   );
 
-  const restartOfflineGame = useCallback((withConfirm = true) => {
-    if (withConfirm && !window.confirm("Завершить текущую партию и начать новую?")) return;
-    if (onlineSession?.hostSecret) {
-      void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`, {
-        method: "DELETE",
-        headers: { "x-host-secret": onlineSession.hostSecret },
-      }).catch(() => {});
+  const leaveOnlineRoom = useCallback(async () => {
+    if (!onlineSession) return;
+    await fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}/connection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        playerId: onlineSession.playerId,
+        joinToken: onlineSession.joinToken,
+        connected: false,
+      }),
+    }).catch(() => {});
+    setOnlineSession(null);
+    setRoomHostPlayerId(null);
+    setInactivity(null);
+    setSelectedPass([]);
+    setState(null);
+    setMessage("Вы покинули онлайн-комнату.");
+  }, [onlineSession]);
+
+  const closeOnlineRoom = useCallback(async () => {
+    if (!onlineSession) return false;
+    const response = await fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`, {
+      method: "DELETE",
+      headers: {
+        "x-player-id": onlineSession.playerId,
+        "x-join-token": onlineSession.joinToken,
+      },
+    });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({ error: "" }))) as { error?: string };
+      setMessage(data.error ?? "Закрыть комнату может только владелец");
+      return false;
     }
     setOnlineSession(null);
+    setRoomHostPlayerId(null);
+    setInactivity(null);
+    setSelectedPass([]);
+    setState(null);
+    setMessage("Онлайн-игра завершена. Комната закрыта.");
+    return true;
+  }, [onlineSession]);
+
+  const restartOfflineGame = useCallback((withConfirm = true) => {
+    if (withConfirm && !window.confirm("Завершить текущую партию и начать новую?")) return;
+    if (onlineSession) {
+      void leaveOnlineRoom();
+    }
+    setOnlineSession(null);
+    setRoomHostPlayerId(null);
     setInactivity(null);
     startOfflineGame();
     setMessage("Запущена новая оффлайн партия против ИИ.");
-  }, [onlineSession, startOfflineGame]);
+  }, [leaveOnlineRoom, onlineSession, startOfflineGame]);
 
   const finishCurrentGame = useCallback(() => {
     if (!window.confirm("Завершить текущую партию?")) return;
-
-    if (onlineSession?.hostSecret) {
-      void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`, {
-        method: "DELETE",
-        headers: { "x-host-secret": onlineSession.hostSecret },
-      }).catch(() => {});
+    if (onlineSession) {
+      if (roomHostPlayerId === onlineSession.playerId) {
+        void closeOnlineRoom();
+      } else {
+        void leaveOnlineRoom();
+      }
+      return;
     }
     engineRef.current = null;
     definitionRef.current = null;
     setOnlineSession(null);
+    setRoomHostPlayerId(null);
     setInactivity(null);
     setSelectedPass([]);
     setState(null);
     void saveHeartsState(null);
     setMessage("Партия завершена. Выберите режим для новой игры.");
-  }, [onlineSession]);
+  }, [closeOnlineRoom, leaveOnlineRoom, onlineSession, roomHostPlayerId]);
 
   const startOfflineFromMenu = useCallback(() => {
     restartOfflineGame(Boolean(state));
@@ -259,11 +308,23 @@ export default function HeartsClient() {
     if (!onlineSession) return;
     const id = window.setInterval(() => {
       void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`)
-        .then((res) => res.json())
-        .then((room: OnlineRoomResponse) => {
+        .then(async (res) => {
+          if (!res.ok) {
+            setOnlineSession(null);
+            setRoomHostPlayerId(null);
+            setInactivity(null);
+            setSelectedPass([]);
+            setState(null);
+            setMessage("Комната закрыта.");
+            return null;
+          }
+          return (await res.json()) as OnlineRoomResponse;
+        })
+        .then((room) => {
           if (room?.state) {
             setState(room.state);
             setInactivity(room.inactivity ?? null);
+            setRoomHostPlayerId(room.hostPlayerId ?? null);
           }
         })
         .catch(() => {});
@@ -281,7 +342,25 @@ export default function HeartsClient() {
         joinToken: onlineSession.joinToken,
         connected: true,
       }),
-    });
+    })
+      .then((res) => res.json())
+      .then((room: OnlineRoomResponse) => {
+        if (room.closed) {
+          setOnlineSession(null);
+          setRoomHostPlayerId(null);
+          setInactivity(null);
+          setSelectedPass([]);
+          setState(null);
+          setMessage("Комната закрыта.");
+          return;
+        }
+        if (room?.state) {
+          setState(room.state);
+          setInactivity(room.inactivity ?? null);
+          setRoomHostPlayerId(room.hostPlayerId ?? null);
+        }
+      })
+      .catch(() => {});
     return () => {
       void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}/connection`, {
         method: "POST",
@@ -324,6 +403,11 @@ export default function HeartsClient() {
   }, [onlineSession?.playerId, state, stats]);
 
   const me = state?.players.find((player) => player.id === (onlineSession?.playerId ?? HUMAN_ID));
+  const isRoomOwner = Boolean(
+    onlineSession &&
+      roomHostPlayerId &&
+      onlineSession.playerId === roomHostPlayerId,
+  );
   const onlineCountdownSec = useMemo(() => {
     if (!inactivity?.enabled || !inactivity.deadlineAt) return null;
     return Math.max(0, Math.ceil((inactivity.deadlineAt - nowTs) / 1000));
@@ -362,34 +446,12 @@ export default function HeartsClient() {
     dispatch({ type: "play_card", playerId, cardId });
   };
 
-  const doQuickOnline = async () => {
-    const normalizedName = playerName.trim() || "Игрок 1";
-    const response = await fetch("/api/games/hearts/rooms", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "quick", playerName: normalizedName }),
-    });
-    const data = (await response.json()) as {
-      error?: string;
-      roomCode: string;
-      playerId: string;
-      joinToken: string;
-      hostSecret?: string;
-      room: OnlineRoomResponse;
-    };
-    if (!response.ok) {
-      setMessage(data.error ?? "Не удалось начать онлайн-игру");
-      return;
-    }
-    setOnlineSession({
-      roomCode: data.roomCode,
-      playerId: data.playerId,
-      joinToken: data.joinToken,
-      hostSecret: data.hostSecret,
-    });
-    setState(data.room.state);
-    setInactivity(data.room.inactivity ?? null);
-    setMessage(`Подключено к комнате ${data.roomCode}`);
+  const copyRoomCode = () => {
+    if (!onlineSession?.roomCode) return;
+    void navigator.clipboard
+      .writeText(onlineSession.roomCode)
+      .then(() => setMessage(`Код комнаты ${onlineSession.roomCode} скопирован`))
+      .catch(() => setMessage("Не удалось скопировать код"));
   };
 
   const doCreateRoom = async () => {
@@ -399,12 +461,26 @@ export default function HeartsClient() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "create", playerName: normalizedName }),
     });
-    const data = (await response.json()) as { error?: string; roomCode: string };
+    const data = (await response.json()) as {
+      error?: string;
+      roomCode: string;
+      playerId: string;
+      joinToken: string;
+      room: OnlineRoomResponse;
+    };
     if (!response.ok) {
       setMessage(data.error ?? "Не удалось создать комнату");
       return;
     }
-    setMessage(`Комната создана: ${data.roomCode}. Отправьте код друзьям.`);
+    setOnlineSession({
+      roomCode: data.roomCode,
+      playerId: data.playerId,
+      joinToken: data.joinToken,
+    });
+    setState(data.room.state);
+    setInactivity(data.room.inactivity ?? null);
+    setRoomHostPlayerId(data.room.hostPlayerId ?? null);
+    setMessage(`Комната создана: ${data.roomCode}. Поделитесь кодом с друзьями.`);
   };
 
   const doJoinByCode = async () => {
@@ -436,6 +512,7 @@ export default function HeartsClient() {
     });
     setState(data.room.state);
     setInactivity(data.room.inactivity ?? null);
+    setRoomHostPlayerId(data.room.hostPlayerId ?? null);
     setMessage(`Вы вошли в комнату ${data.roomCode}`);
   };
 
@@ -450,8 +527,13 @@ export default function HeartsClient() {
           <section className="rounded-2xl border border-violet-200/70 dark:border-violet-900/70 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 p-4">
             <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Червы (Hearts)</h1>
             <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-              {onlineSession ? `Онлайн-комната ${onlineSession.roomCode}` : "Оффлайн партия против 3 ботов"}
+              {onlineSession ? `Режим: онлайн · комната ${onlineSession.roomCode}` : "Режим: игра с ИИ"}
             </p>
+            {onlineSession && (
+              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                {isRoomOwner ? "Вы владелец комнаты" : "Вы участник комнаты"}
+              </p>
+            )}
             <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
               {state
                 ? `Раунд #${state.roundIndex + 1} · Фаза: ${state.phase} · Ход: ${state.currentTurnId}`
@@ -488,13 +570,17 @@ export default function HeartsClient() {
             {panelTab === "menu" ? (
               <HeartsMainMenu
                 onStartOffline={startOfflineFromMenu}
-                onQuickOnline={doQuickOnline}
                 onCreateRoom={doCreateRoom}
                 onJoinByCode={doJoinByCode}
+                onCopyRoomCode={copyRoomCode}
+                onLeaveRoom={() => void leaveOnlineRoom()}
+                onCloseRoom={() => void closeOnlineRoom()}
                 playerName={playerName}
                 setPlayerName={setPlayerName}
                 joinCode={joinCode}
                 setJoinCode={setJoinCode}
+                onlineRoomCode={onlineSession?.roomCode ?? null}
+                isRoomOwner={isRoomOwner}
               />
             ) : panelTab === "settings" ? (
               <div className="space-y-3">
