@@ -23,6 +23,8 @@ import { HeartsHand } from "./components/HeartsHand";
 import { HeartsMainMenu } from "./components/HeartsMainMenu";
 import { HeartsScoreboard } from "./components/HeartsScoreboard";
 import { HeartsTrickView } from "./components/HeartsTrickView";
+import { PrivacyBanner } from "@/app/tools/file-converter/components/PrivacyBanner";
+import { PickerSection } from "@/app/tools/random-picker/components/PickerButton";
 
 interface OnlineSession {
   roomCode: string;
@@ -45,6 +47,7 @@ interface OnlineRoomResponse {
 }
 
 const HUMAN_ID = "human-player";
+type HeartsPanelTab = "menu" | "rules" | "settings" | "stats";
 
 export default function HeartsClient() {
   const [state, setState] = useState<HeartsState | null>(null);
@@ -56,6 +59,7 @@ export default function HeartsClient() {
   const [stats, setStats] = useState<HeartsStats>(DEFAULT_HEARTS_STATS);
   const [inactivity, setInactivity] = useState<RoomInactivity | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
+  const [panelTab, setPanelTab] = useState<HeartsPanelTab>("menu");
 
   const engineRef = useRef<GameEngine<HeartsState, HeartsAction> | null>(null);
   const definitionRef = useRef<ReturnType<typeof createHeartsDefinition> | null>(null);
@@ -388,100 +392,120 @@ export default function HeartsClient() {
   };
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-4">
-      <div className="mb-4">
-        <Link
-          href="/tools/games"
-          className="text-xs text-violet-600 dark:text-violet-400 hover:underline"
-        >
-          ← QHub Games
-        </Link>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-        <div className="space-y-4">
-          <HeartsMainMenu
-            onQuickOffline={() => startOfflineGame()}
-            onQuickOnline={doQuickOnline}
-            onCreateRoom={doCreateRoom}
-            onJoinByCode={doJoinByCode}
-            joinCode={joinCode}
-            setJoinCode={setJoinCode}
-          />
-          <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-2">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Настройки</h3>
-            <label className="flex items-center justify-between text-xs">
-              <span>Сложность ИИ</span>
-              <select
-                value={settings.aiLevel}
-                onChange={(e) =>
-                  setSettings((prev) => ({ ...prev, aiLevel: e.target.value as HeartsSettings["aiLevel"] }))
-                }
-                className="rounded border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1"
-              >
-                <option value="easy">Легкий</option>
-                <option value="medium">Средний</option>
-                <option value="hard">Сложный</option>
-              </select>
-            </label>
-            <label className="flex items-center justify-between text-xs">
-              <span>Автосортировка</span>
-              <input
-                type="checkbox"
-                checked={settings.autoSortCards}
-                onChange={(e) => setSettings((prev) => ({ ...prev, autoSortCards: e.target.checked }))}
-              />
-            </label>
-          </section>
-          <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-1 text-xs">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Статистика</h3>
-            <p>Партии: {stats.games}</p>
-            <p>Победы: {stats.wins}</p>
-            <p>Поражения: {stats.losses}</p>
-            <p>Winrate: {stats.winRate}%</p>
-            <p>Shoot the Moon: {stats.shootTheMoonCount}</p>
-            <p>Средний штраф: {stats.averagePenalty}</p>
-            <p>Лучший результат: {stats.bestPenalty ?? "—"}</p>
-          </section>
-        </div>
+    <main className="flex flex-col flex-1 min-h-0 bg-gray-50 dark:bg-gray-950">
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-2xl px-4 py-5 space-y-4">
+          <Link href="/tools/games" className="inline-flex text-xs text-violet-600 dark:text-violet-400 hover:underline">
+            ← QHub Games
+          </Link>
 
-        <div className="space-y-4">
-          <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Червы (Hearts)</h1>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              {onlineSession
-                ? `Онлайн-комната ${onlineSession.roomCode}`
-                : "Оффлайн режим против 3 ботов"}
+          <section className="rounded-2xl border border-violet-200/70 dark:border-violet-900/70 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 p-4">
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Червы (Hearts)</h1>
+            <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+              {onlineSession ? `Онлайн-комната ${onlineSession.roomCode}` : "Оффлайн партия против 3 ботов"}
             </p>
-            {state && (
-              <div className="mt-2 text-xs text-gray-500">
-                Раунд #{state.roundIndex + 1} · Фаза: {state.phase} · Ход: {state.currentTurnId}
-                {onlineSession && inactivity?.enabled && onlineCountdownSec !== null
-                  ? ` · Таймер неактивности: ${onlineCountdownSec}с`
-                  : ""}
-              </div>
-            )}
+            <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+              {state
+                ? `Раунд #${state.roundIndex + 1} · Фаза: ${state.phase} · Ход: ${state.currentTurnId}`
+                : "Инициализация партии..."}
+              {onlineSession && inactivity?.enabled && onlineCountdownSec !== null
+                ? ` · Неактивность: ${onlineCountdownSec}с`
+                : ""}
+            </div>
+            <div className="mt-2">
+              <PrivacyBanner compact />
+            </div>
             {onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0 && (
               <p className="mt-2 text-xs text-red-600 dark:text-red-400">
-                Неактивные игроки автоматически заменены ботами.
+                Игроки без хода более 3 минут переведены под управление бота.
               </p>
             )}
             {message && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{message}</p>}
           </section>
 
+          <PickerSection
+            tabs={[
+              { id: "menu", label: "Режимы", shortLabel: "Меню" },
+              { id: "rules", label: "Правила игры", shortLabel: "Правила" },
+              { id: "settings", label: "Настройки", shortLabel: "Настр." },
+              { id: "stats", label: "Статистика", shortLabel: "Стат." },
+            ]}
+            activeTab={panelTab}
+            onTabChange={(id) => setPanelTab(id as HeartsPanelTab)}
+          >
+            {panelTab === "menu" ? (
+              <HeartsMainMenu
+                onQuickOffline={() => startOfflineGame()}
+                onQuickOnline={doQuickOnline}
+                onCreateRoom={doCreateRoom}
+                onJoinByCode={doJoinByCode}
+                joinCode={joinCode}
+                setJoinCode={setJoinCode}
+              />
+            ) : panelTab === "settings" ? (
+              <div className="space-y-3">
+                <label className="flex items-center justify-between text-xs">
+                  <span>Сложность ИИ</span>
+                  <select
+                    value={settings.aiLevel}
+                    onChange={(e) =>
+                      setSettings((prev) => ({ ...prev, aiLevel: e.target.value as HeartsSettings["aiLevel"] }))
+                    }
+                    className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1"
+                  >
+                    <option value="easy">Легкий</option>
+                    <option value="medium">Средний</option>
+                    <option value="hard">Сложный</option>
+                  </select>
+                </label>
+                <label className="flex items-center justify-between text-xs">
+                  <span>Автосортировка карт</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.autoSortCards}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, autoSortCards: e.target.checked }))}
+                  />
+                </label>
+              </div>
+            ) : panelTab === "stats" ? (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-2">Партии: {stats.games}</div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-2">Победы: {stats.wins}</div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-2">Поражения: {stats.losses}</div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-2">Winrate: {stats.winRate}%</div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-2">
+                  Shoot the Moon: {stats.shootTheMoonCount}
+                </div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-800 px-2.5 py-2">
+                  Средний штраф: {stats.averagePenalty}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                <p>• Игрок с 2♣ начинает первую взятку.</p>
+                <p>• Обязательно ходить в масть, если карта есть.</p>
+                <p>• До открытия нельзя начинать ход с ♥ (кроме случая когда на руках только штрафные карты).</p>
+                <p>• Каждая ♥ = 1 штрафное очко, Q♠ = 13.</p>
+                <p>• При сборе всех 26 очков — Shoot the Moon.</p>
+              </div>
+            )}
+          </PickerSection>
+
           {state ? (
-            <>
+            <div className="space-y-4">
               <HeartsScoreboard state={state} />
               <HeartsTrickView state={state} />
               <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+                <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">Оппоненты</h3>
                 <div className="flex flex-wrap gap-2">
                   {state.players
                     .filter((player) => player.id !== (onlineSession?.playerId ?? HUMAN_ID))
                     .map((player) => (
                       <div
                         key={player.id}
-                        className="rounded-lg border border-gray-100 dark:border-gray-700 px-2 py-1 text-xs"
+                        className="rounded-lg border border-gray-100 dark:border-gray-700 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800"
                       >
-                        {player.name} · карт: {player.hand.length}
+                        {player.name} · {player.hand.length} карт
                       </div>
                     ))}
                 </div>
@@ -500,12 +524,12 @@ export default function HeartsClient() {
                 <button
                   type="button"
                   onClick={submitPass}
-                  className="rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-4 py-2"
+                  className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-4 py-2"
                 >
                   Подтвердить обмен (3 карты)
                 </button>
               )}
-            </>
+            </div>
           ) : null}
         </div>
       </div>
