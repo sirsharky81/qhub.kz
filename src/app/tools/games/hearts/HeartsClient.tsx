@@ -706,7 +706,7 @@ export default function HeartsClient() {
           </PickerSection>
 
           {state && !isOnlineWaitingForStart ? (
-            <div ref={gameAreaRef} className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+            <div ref={gameAreaRef} className="grid gap-4 lg:grid-cols-[minmax(0,2.35fr)_minmax(220px,0.75fr)] xl:grid-cols-[minmax(0,2.5fr)_minmax(230px,0.7fr)]">
               <div className="space-y-3">
                 <HeartsTrickView state={state} />
                 {me && (
@@ -730,7 +730,7 @@ export default function HeartsClient() {
                 )}
               </div>
               <div className="space-y-3">
-                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-2.5">
                   <p className="text-[11px] uppercase tracking-wide text-gray-500">Подсказка по ходу</p>
                   {canPlay ? (
                     <p className="mt-1 text-sm font-semibold text-emerald-700 dark:text-emerald-400">Ваш ход</p>
@@ -756,7 +756,7 @@ export default function HeartsClient() {
                     </p>
                   </section>
                 )}
-                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
+                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-2.5 space-y-2">
                   <h3 className="text-xs uppercase tracking-wide text-gray-500">Управление партией</h3>
                   <div className="grid gap-2">
                     <button
@@ -775,7 +775,7 @@ export default function HeartsClient() {
                     </button>
                   </div>
                 </section>
-                <section className="hidden lg:block rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+                <section className="hidden xl:block rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-2.5">
                   <h3 className="text-xs uppercase tracking-wide text-gray-500">История взяток</h3>
                   {recentTricks.length === 0 ? (
                     <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Пока нет завершенных взяток.</p>

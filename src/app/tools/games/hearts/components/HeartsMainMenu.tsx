@@ -53,27 +53,27 @@ export function HeartsMainMenu({
   };
 
   return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
+    <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3 md:max-w-3xl md:mx-auto md:p-3 md:space-y-2">
       <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Главное меню</h2>
-      <section className="space-y-2 rounded-lg border border-violet-200/70 dark:border-violet-900/60 p-3">
+      <section className="space-y-2 rounded-lg border border-violet-200/70 dark:border-violet-900/60 p-3 md:p-2.5">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Игра с ИИ</h3>
         <button
           type="button"
           onClick={onStartOffline}
-          className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium px-3 py-2"
+          className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium px-3 py-2 md:py-1.5"
         >
           Новая игра против ИИ
         </button>
       </section>
 
-      <section className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <section className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3 md:p-2.5">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Онлайн-игра</h3>
         <input
           value={playerName}
           onChange={(e) => setPlayerName(e.target.value)}
           onFocus={(e) => keepInputVisible(e.currentTarget)}
           placeholder="Ваше имя"
-          className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-base sm:text-sm"
+          className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm"
         />
         {onlineRoomCode ? (
           <div className="space-y-2">
@@ -92,7 +92,7 @@ export function HeartsMainMenu({
                   <button
                     type="button"
                     onClick={onStartOnlineGame}
-                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 md:py-1.5 font-medium"
                   >
                     Начать онлайн-игру
                   </button>
@@ -102,14 +102,14 @@ export function HeartsMainMenu({
             <button
               type="button"
               onClick={onCopyRoomCode}
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2"
+              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2 md:py-1.5"
             >
               Скопировать код комнаты
             </button>
             <button
               type="button"
               onClick={onLeaveRoom}
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2"
+              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2 md:py-1.5"
             >
               Покинуть комнату
             </button>
@@ -117,7 +117,7 @@ export function HeartsMainMenu({
               <button
                 type="button"
                 onClick={onCloseRoom}
-                className="w-full rounded-lg border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-sm px-3 py-2"
+                className="w-full rounded-lg border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-sm px-3 py-2 md:py-1.5"
               >
                 Завершить онлайн-игру (закрыть комнату)
               </button>
@@ -128,23 +128,23 @@ export function HeartsMainMenu({
             <button
               type="button"
               onClick={onCreateRoom}
-              className="w-full rounded-lg bg-gray-900 hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 text-white text-sm font-medium px-3 py-2"
+              className="w-full rounded-lg bg-gray-900 hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 text-white text-sm font-medium px-3 py-2 md:py-1.5"
             >
               Создать онлайн игру
             </button>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-2.5 space-y-2">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-2.5 md:p-2 space-y-2">
               <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Присоединиться к игре</p>
               <input
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                 onFocus={(e) => keepInputVisible(e.currentTarget)}
                 placeholder="Код комнаты"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-base sm:text-sm"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm"
               />
               <button
                 type="button"
                 onClick={onJoinByCode}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2 md:py-1.5"
               >
                 Присоединиться к игре
               </button>
