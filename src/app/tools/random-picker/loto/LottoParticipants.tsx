@@ -94,7 +94,7 @@ export function LottoParticipants({
       {canEditPlayers && (
         <div className="space-y-2">
           <span className="text-[11px] text-gray-500 uppercase tracking-wide">Добавить игрока</span>
-          <div className="flex gap-2">
+          <div className="flex min-w-0 gap-2">
             <input
               type="text"
               value={nameInput}
@@ -103,7 +103,7 @@ export function LottoParticipants({
                 if (e.key === "Enter") addPlayer();
               }}
               placeholder="Имя игрока"
-              className="flex-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xs text-gray-900 dark:text-gray-100"
+              className="min-w-0 flex-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xs text-gray-900 dark:text-gray-100"
             />
             <PickerButton
               variant="secondary"

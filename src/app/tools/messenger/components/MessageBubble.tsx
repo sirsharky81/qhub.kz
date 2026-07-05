@@ -119,12 +119,6 @@ export function MessageBubble({
                 ? "bg-sky-600 text-white rounded-2xl rounded-br-md"
                 : "bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-bl-md"
             }`}
-            onContextMenu={(e) => {
-              if (onReply) {
-                e.preventDefault();
-                onReply(message);
-              }
-            }}
           >
             {onReply && !swipeToReply && (
               <button
@@ -165,7 +159,10 @@ export function MessageBubble({
               </button>
             )}
           {message.type === "text" && (
-            <p className="text-sm whitespace-pre-wrap break-all [overflow-wrap:anywhere] max-w-full">
+            <p
+              className="text-sm whitespace-pre-wrap break-all [overflow-wrap:anywhere] max-w-full select-text"
+              style={{ WebkitUserSelect: "text", userSelect: "text" }}
+            >
               {message.plain?.text}
             </p>
           )}

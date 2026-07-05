@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { isIOSDevice } from "@/lib/platform/device";
 
 export function HeartsMainMenu({
   onStartOffline,
   onCreateRoom,
   onJoinByCode,
   onCopyRoomCode,
+  onShareRoomCode,
   onLeaveRoom,
   onCloseRoom,
   onStartOnlineGame,
@@ -24,6 +26,7 @@ export function HeartsMainMenu({
   onCreateRoom: () => void;
   onJoinByCode: () => void;
   onCopyRoomCode: () => void;
+  onShareRoomCode: () => void;
   onLeaveRoom: () => void;
   onCloseRoom: () => void;
   onStartOnlineGame: () => void;
@@ -38,27 +41,59 @@ export function HeartsMainMenu({
   initialTab?: "offline" | "create-online" | "join-online";
 }) {
   const [mainTab, setMainTab] = useState<"offline" | "create-online" | "join-online">(initialTab ?? "offline");
+  const focusTimersRef = useRef<number[]>([]);
+  const cleanupFocusTrackingRef = useRef<(() => void) | null>(null);
 
-  const keepInputVisible = (input: HTMLInputElement) => {
+  const clearFocusTimers = useCallback(() => {
+    focusTimersRef.current.forEach((id) => window.clearTimeout(id));
+    focusTimersRef.current = [];
+  }, []);
+
+  const clearFocusTracking = useCallback(() => {
+    cleanupFocusTrackingRef.current?.();
+    cleanupFocusTrackingRef.current = null;
+    clearFocusTimers();
+  }, [clearFocusTimers]);
+
+  useEffect(() => clearFocusTracking, [clearFocusTracking]);
+
+  const scrollInputIntoView = useCallback((input: HTMLInputElement) => {
+    if (!input.isConnected) return;
     const scrollContainer = input.closest('[data-hearts-scroll="true"]');
-    const scrollToInput = () => {
-      if (scrollContainer instanceof HTMLElement) {
-        const containerRect = scrollContainer.getBoundingClientRect();
-        const inputRect = input.getBoundingClientRect();
-        const topGap = inputRect.top - containerRect.top;
-        const desiredTop = 88;
-        scrollContainer.scrollTo({
-          top: scrollContainer.scrollTop + topGap - desiredTop,
-          behavior: "auto",
-        });
-        return;
-      }
-      input.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    if (scrollContainer instanceof HTMLElement) {
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      const topGap = inputRect.top - containerRect.top;
+      const desiredTop = 88;
+      scrollContainer.scrollTo({
+        top: scrollContainer.scrollTop + topGap - desiredTop,
+        behavior: "auto",
+      });
+      return;
+    }
+    input.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+  }, []);
+
+  const keepInputVisible = useCallback((input: HTMLInputElement) => {
+    clearFocusTracking();
+    scrollInputIntoView(input);
+    requestAnimationFrame(() => scrollInputIntoView(input));
+    focusTimersRef.current.push(
+      window.setTimeout(() => scrollInputIntoView(input), 120),
+      window.setTimeout(() => scrollInputIntoView(input), 280),
+      window.setTimeout(() => scrollInputIntoView(input), 520),
+    );
+
+    if (!isIOSDevice() || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const handleViewportShift = () => scrollInputIntoView(input);
+    vv.addEventListener("resize", handleViewportShift);
+    vv.addEventListener("scroll", handleViewportShift);
+    cleanupFocusTrackingRef.current = () => {
+      vv.removeEventListener("resize", handleViewportShift);
+      vv.removeEventListener("scroll", handleViewportShift);
     };
-    requestAnimationFrame(scrollToInput);
-    window.setTimeout(scrollToInput, 250);
-    window.setTimeout(scrollToInput, 500);
-  };
+  }, [clearFocusTracking, scrollInputIntoView]);
 
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3 md:max-w-3xl md:mx-auto md:p-2.5 md:space-y-1.5">
@@ -67,7 +102,7 @@ export function HeartsMainMenu({
         <button
           type="button"
           onClick={() => setMainTab("offline")}
-          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium ${
+          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "offline"
               ? "border-violet-600 bg-violet-600 text-white"
               : "border-gray-300 dark:border-gray-700"
@@ -78,7 +113,7 @@ export function HeartsMainMenu({
         <button
           type="button"
           onClick={() => setMainTab("create-online")}
-          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium ${
+          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "create-online"
               ? "border-violet-600 bg-violet-600 text-white"
               : "border-gray-300 dark:border-gray-700"
@@ -89,7 +124,7 @@ export function HeartsMainMenu({
         <button
           type="button"
           onClick={() => setMainTab("join-online")}
-          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium ${
+          className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "join-online"
               ? "border-violet-600 bg-violet-600 text-white"
               : "border-gray-300 dark:border-gray-700"
@@ -117,8 +152,9 @@ export function HeartsMainMenu({
               value={playerName}
               onChange={(e) => setPlayerName(e.target.value)}
               onFocus={(e) => keepInputVisible(e.currentTarget)}
+              onBlur={clearFocusTracking}
               placeholder="Ваше имя"
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm md:text-xs"
+              className="w-full min-w-0 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm md:text-xs"
             />
             {onlineRoomCode ? (
               <div className="space-y-2">
@@ -147,14 +183,21 @@ export function HeartsMainMenu({
                 <button
                   type="button"
                   onClick={onCopyRoomCode}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                 >
                   Скопировать код комнаты
                 </button>
                 <button
                   type="button"
+                  onClick={onShareRoomCode}
+                  className="w-full rounded-lg border border-violet-200 dark:border-violet-900 text-violet-700 dark:text-violet-300 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
+                >
+                  Отправить код
+                </button>
+                <button
+                  type="button"
                   onClick={onLeaveRoom}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                 >
                   Покинуть комнату
                 </button>
@@ -162,7 +205,7 @@ export function HeartsMainMenu({
                   <button
                     type="button"
                     onClick={onCloseRoom}
-                    className="w-full rounded-lg border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                    className="w-full rounded-lg border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                   >
                     Завершить онлайн-игру (закрыть комнату)
                   </button>
@@ -186,13 +229,14 @@ export function HeartsMainMenu({
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                   onFocus={(e) => keepInputVisible(e.currentTarget)}
+                  onBlur={clearFocusTracking}
                   placeholder="Код комнаты"
                   className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm md:text-xs"
                 />
                 <button
                   type="button"
                   onClick={onJoinByCode}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                 >
                   Присоединиться к игре
                 </button>

@@ -147,7 +147,16 @@ function LottoRules() {
 export default function LottoClient() {
   const [game, setGame] = useState<LottoGameState>(() => {
     const stored = loadLottoState();
-    if (stored && (stored.drawn.length > 0 || stored.status !== "idle")) return stored;
+    if (
+      stored &&
+      (stored.drawn.length > 0 ||
+        stored.status !== "idle" ||
+        stored.cardsGenerated ||
+        stored.players.length > 0 ||
+        Boolean(stored.network))
+    ) {
+      return stored;
+    }
     return createNewGame(DEFAULT_LOTTO_SETTINGS);
   });
   const [fullscreen, setFullscreen] = useState(false);
