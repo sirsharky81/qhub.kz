@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { checkMessengerRateLimit } from "@/lib/rate-limit";
-import { HEARTBEAT_STALE_MS } from "@/lib/messenger/constants";
 import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
 import {
@@ -8,7 +7,6 @@ import {
   getRoomMessagesSince,
   getRoomMeta,
   pruneInactiveRoom,
-  pruneStaleRoomParticipants,
   updateRoomHeartbeat,
 } from "@/lib/messenger/store";
 import {
@@ -66,7 +64,6 @@ export async function GET(request: Request) {
     if (channel.startsWith("room:")) {
       const roomId = channel.slice(5);
       await pruneInactiveRoom(roomId);
-      await pruneStaleRoomParticipants(roomId, HEARTBEAT_STALE_MS);
       if (!(await getRoomMeta(roomId))) {
         track(410);
         return NextResponse.json({ error: "room_gone" }, { status: 410 });
