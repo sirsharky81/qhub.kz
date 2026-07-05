@@ -1,5 +1,5 @@
 export function HeartsMainMenu({
-  onQuickOffline,
+  onStartOffline,
   onQuickOnline,
   onCreateRoom,
   onJoinByCode,
@@ -8,7 +8,7 @@ export function HeartsMainMenu({
   joinCode,
   setJoinCode,
 }: {
-  onQuickOffline: () => void;
+  onStartOffline: () => void;
   onQuickOnline: () => void;
   onCreateRoom: () => void;
   onJoinByCode: () => void;
@@ -23,17 +23,17 @@ export function HeartsMainMenu({
       <div className="grid sm:grid-cols-2 gap-2">
         <button
           type="button"
-          onClick={onQuickOffline}
+          onClick={onStartOffline}
           className="rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium px-3 py-2"
         >
-          Быстрая игра
+          Новая игра против ИИ
         </button>
         <button
           type="button"
-          onClick={onQuickOffline}
+          onClick={onQuickOnline}
           className="rounded-lg bg-gray-900 hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 text-white text-sm font-medium px-3 py-2"
         >
-          Новая игра против ИИ
+          Быстрая онлайн-игра
         </button>
         <button
           type="button"
@@ -41,13 +41,6 @@ export function HeartsMainMenu({
           className="rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2"
         >
           Создать комнату
-        </button>
-        <button
-          type="button"
-          onClick={onQuickOnline}
-          className="rounded-lg border border-gray-300 dark:border-gray-700 text-sm px-3 py-2"
-        >
-          Быстрая онлайн-игра
         </button>
       </div>
 
