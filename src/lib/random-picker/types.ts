@@ -120,13 +120,6 @@ export const PICKER_MODES: ModeConfig[] = [
     description: "Случайная перестановка порядка участников",
   },
   {
-    id: "wheel",
-    emoji: "🎱",
-    title: "Русское лото",
-    description: "Замена мешка и бочек для игры в лото",
-    href: "/tools/random-picker/loto",
-  },
-  {
     id: "groups",
     emoji: "👨‍👩‍👧‍👦",
     title: "Разделить на группы",
