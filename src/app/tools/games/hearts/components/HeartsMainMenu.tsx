@@ -13,6 +13,7 @@ export function HeartsMainMenu({
   onlineRoomCode,
   isRoomOwner,
   onlineStatus,
+  onlinePlayersCount,
 }: {
   onStartOffline: () => void;
   onCreateRoom: () => void;
@@ -28,6 +29,7 @@ export function HeartsMainMenu({
   onlineRoomCode: string | null;
   isRoomOwner: boolean;
   onlineStatus: "open" | "playing" | "finished" | null;
+  onlinePlayersCount: number;
 }) {
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
@@ -57,19 +59,20 @@ export function HeartsMainMenu({
               Код комнаты: <span className="font-semibold tracking-wide">{onlineRoomCode}</span>
             </div>
             {onlineStatus === "open" && (
-              isRoomOwner ? (
-                <button
-                  type="button"
-                  onClick={onStartOnlineGame}
-                  className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
-                >
-                  Начать онлайн-игру
-                </button>
-              ) : (
+              <div className="space-y-2">
                 <p className="rounded-lg bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                  Ожидание игроков и начала игры создателем комнаты.
+                  Ожидание игроков и начала игры создателем комнаты. Игроков в комнате: {onlinePlayersCount}/4.
                 </p>
-              )
+                {isRoomOwner && (
+                  <button
+                    type="button"
+                    onClick={onStartOnlineGame}
+                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                  >
+                    Начать онлайн-игру
+                  </button>
+                )}
+              </div>
             )}
             <button
               type="button"

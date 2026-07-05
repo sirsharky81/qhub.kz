@@ -433,6 +433,10 @@ export default function HeartsClient() {
     if (!roomSeats) return new Set<string>();
     return new Set(roomSeats.filter((seat) => !seat.isBot).map((seat) => seat.id));
   }, [roomSeats]);
+  const onlinePlayersCount = useMemo(() => {
+    if (!roomSeats) return 0;
+    return roomSeats.filter((seat) => !seat.isBot && seat.connected).length;
+  }, [roomSeats]);
   const isOnlineWaitingForStart = Boolean(onlineSession && roomStatus === "open");
   const onlineCountdownSec = useMemo(() => {
     if (!inactivity?.enabled || !inactivity.deadlineAt) return null;
@@ -643,6 +647,7 @@ export default function HeartsClient() {
                 onlineRoomCode={onlineSession?.roomCode ?? null}
                 isRoomOwner={isRoomOwner}
                 onlineStatus={roomStatus}
+                onlinePlayersCount={onlinePlayersCount}
               />
             ) : panelTab === "settings" ? (
               <div className="space-y-3">
@@ -775,7 +780,7 @@ export default function HeartsClient() {
             <section className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/20 p-4">
               <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">Онлайн-комната готова</h3>
               <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                Ожидание игроков и начала игры создателем комнаты.
+                Ожидание игроков и начала игры создателем комнаты. Игроков в комнате: {onlinePlayersCount}/4.
               </p>
             </section>
           ) : null}
