@@ -44,7 +44,9 @@ const sharedConfig: NextConfig = {
         permanent: false,
       },
       {
-        source: "/tools/messenger/room/:roomId",
+        // Keep legacy room links working, but do not hijack real subroutes:
+        // /tools/messenger/room/create and /tools/messenger/room/join.
+        source: "/tools/messenger/room/:roomId((?!create$|join$).+)",
         destination: "/tools/messenger/room?id=:roomId",
         permanent: false,
       },
