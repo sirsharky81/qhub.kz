@@ -74,12 +74,16 @@ export function RoomSettingsPageClient() {
 
   return (
     <MessengerShell
-      variant="chat"
+      variant="app"
+      keyboardAware={false}
       title={`Настройки комнаты ${roomId}`}
       backHref={messengerRoomUrl(roomId)}
       subtitle={<span className="text-xs text-gray-500">Отдельная страница управления комнатой</span>}
     >
-      <div className="p-4 space-y-4 max-w-xl w-full mx-auto">
+      <div
+        className="flex-1 overflow-y-auto p-4 pb-28 space-y-4 max-w-xl w-full mx-auto"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
         {loading ? (
           <p className="text-sm text-gray-500">Загрузка…</p>
         ) : (
@@ -117,6 +121,12 @@ export function RoomSettingsPageClient() {
                 <input
                   value={addPhone}
                   onChange={(e) => setAddPhone(e.target.value)}
+                  onFocus={(e) => {
+                    // iOS Safari/PWA: ensure focused input stays above keyboard.
+                    setTimeout(() => {
+                      e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" });
+                    }, 80);
+                  }}
                   placeholder="+7XXXXXXXXXX"
                   className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
                 />
