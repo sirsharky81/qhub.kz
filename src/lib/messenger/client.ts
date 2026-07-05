@@ -308,6 +308,41 @@ export async function leaveRoomApi(roomId: string) {
   return res.json();
 }
 
+export interface RoomManageParticipant {
+  phone: string;
+  lastSeen: number;
+  role?: "owner" | "admin" | "member";
+}
+
+export interface RoomManageSnapshot {
+  roomId: string;
+  ownerPhone: string;
+  actorRole: "owner" | "admin" | "member";
+  roomMaxParticipants: number;
+  participants: RoomManageParticipant[];
+}
+
+export async function fetchRoomManage(roomId: string): Promise<RoomManageSnapshot | null> {
+  const res = await platformFetch(`/api/messenger/room/manage?roomId=${encodeURIComponent(roomId.toUpperCase())}`);
+  if (!res.ok) return null;
+  return (await res.json()) as RoomManageSnapshot;
+}
+
+export async function mutateRoomManage(input: {
+  roomId: string;
+  action: "add" | "remove" | "promote" | "demote";
+  targetPhone: string;
+}): Promise<{ ok: boolean; error?: string; participants?: RoomManageParticipant[] }> {
+  const res = await platformFetch("/api/messenger/room/manage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; participants?: RoomManageParticipant[] };
+  if (!res.ok || !data.ok) return { ok: false, error: data.error ?? "Ошибка" };
+  return { ok: true, participants: data.participants };
+}
+
 export interface RoomStatusResult {
   roomId: string;
   channel: string;

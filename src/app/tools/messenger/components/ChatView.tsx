@@ -45,6 +45,7 @@ import {
 } from "@/lib/messenger/unread";
 import { useCallOptional } from "./call/CallProvider";
 import { DmCallHeaderButton } from "./call/DmCallHeaderButton";
+import { RoomSettingsModal } from "./RoomSettingsModal";
 
 interface Props {
   channel: string;
@@ -97,6 +98,7 @@ export function ChatView({
   const [peerOnline, setPeerOnline] = useState<boolean | null>(null);
   const [peerTyping, setPeerTyping] = useState(false);
   const [participantCount, setParticipantCount] = useState<number | null>(null);
+  const [showRoomSettings, setShowRoomSettings] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -775,6 +777,15 @@ export function ChatView({
   const headerTrailing = (
     <div className="flex items-center gap-1">
       {!isRoom && callCtx && <DmCallHeaderButton peerOnline={peerOnline} />}
+      {isRoom && roomId && (
+        <button
+          type="button"
+          onClick={() => setShowRoomSettings(true)}
+          className="rounded-full px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
+        >
+          ⚙
+        </button>
+      )}
       {isRoom && onLeaveRoom && (
         <button
           type="button"
@@ -960,6 +971,14 @@ export function ChatView({
         onConfirm={() => void handleClearChat()}
         onCancel={() => setShowClearConfirm(false)}
       />
+      {isRoom && roomId && (
+        <RoomSettingsModal
+          open={showRoomSettings}
+          roomId={roomId}
+          aesKey={aesKey}
+          onClose={() => setShowRoomSettings(false)}
+        />
+      )}
     </>
   );
 }

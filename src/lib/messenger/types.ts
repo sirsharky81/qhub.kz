@@ -64,6 +64,7 @@ export interface RoomMeta extends ChannelMeta {
 export interface RoomParticipant {
   phone: string;
   lastSeen: number;
+  role?: "owner" | "admin" | "member";
 }
 
 export interface RoomState {

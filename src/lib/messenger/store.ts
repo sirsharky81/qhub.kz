@@ -587,7 +587,7 @@ export async function createRoomMeta(roomId: string, createdBy: string): Promise
   const now = Date.now();
   const meta: RoomMeta = { version: 0, updatedAt: now, createdAt: now, createdBy };
   await redisSet(roomMetaKey(roomId), JSON.stringify(meta), ttl);
-  await saveRoomParticipants(roomId, [{ phone: createdBy, lastSeen: now }]);
+  await saveRoomParticipants(roomId, [{ phone: createdBy, lastSeen: now, role: "owner" }]);
   return meta;
 }
 
@@ -597,9 +597,9 @@ export async function joinRoomParticipant(roomId: string, phone: string): Promis
   let participants = await getRoomParticipants(roomId);
   const idx = participants.findIndex((p) => p.phone === phone);
   if (idx >= 0) {
-    participants[idx] = { phone, lastSeen: now };
+    participants[idx] = { ...participants[idx], phone, lastSeen: now };
   } else {
-    participants.push({ phone, lastSeen: now });
+    participants.push({ phone, lastSeen: now, role: "member" });
   }
   await saveRoomParticipants(roomId, participants);
   await redisExpire(roomMetaKey(roomId), ttl);
@@ -614,6 +614,51 @@ export async function updateRoomHeartbeat(roomId: string, phone: string): Promis
   );
   await saveRoomParticipants(roomId, updated);
   await redisExpire(roomMetaKey(roomId), roomInactiveTtlSec());
+}
+
+export async function setRoomParticipantRole(
+  roomId: string,
+  targetPhone: string,
+  role: "admin" | "member",
+): Promise<RoomParticipant[]> {
+  const participants = await getRoomParticipants(roomId);
+  const next = participants.map((p) =>
+    p.phone === targetPhone ? { ...p, role } : p,
+  );
+  await saveRoomParticipants(roomId, next);
+  await redisExpire(roomMetaKey(roomId), roomInactiveTtlSec());
+  return next;
+}
+
+export async function addRoomParticipant(
+  roomId: string,
+  targetPhone: string,
+  role: "admin" | "member" = "member",
+): Promise<RoomParticipant[]> {
+  const participants = await getRoomParticipants(roomId);
+  const now = Date.now();
+  const exists = participants.some((p) => p.phone === targetPhone);
+  const next = exists
+    ? participants.map((p) => (p.phone === targetPhone ? { ...p, role, lastSeen: now } : p))
+    : [...participants, { phone: targetPhone, lastSeen: now, role }];
+  await saveRoomParticipants(roomId, next);
+  await redisExpire(roomMetaKey(roomId), roomInactiveTtlSec());
+  return next;
+}
+
+export async function removeRoomParticipant(
+  roomId: string,
+  targetPhone: string,
+): Promise<{ deletedRoom: boolean; participants: RoomParticipant[] }> {
+  const participants = await getRoomParticipants(roomId);
+  const next = participants.filter((p) => p.phone !== targetPhone);
+  if (next.length === 0) {
+    await deleteRoom(roomId);
+    return { deletedRoom: true, participants: [] };
+  }
+  await saveRoomParticipants(roomId, next);
+  await redisExpire(roomMetaKey(roomId), roomInactiveTtlSec());
+  return { deletedRoom: false, participants: next };
 }
 
 export async function pruneStaleRoomParticipants(
