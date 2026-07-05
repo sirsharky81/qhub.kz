@@ -46,18 +46,24 @@ export default function GamesPage() {
                     MVP
                   </span>
                 </div>
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 grid sm:grid-cols-3 gap-2">
                   <Link
-                    href="/tools/games/hearts"
+                    href="/tools/games/hearts?mode=offline"
                     className="inline-flex rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-2"
                   >
-                    Играть
+                    Новая игра против ИИ
                   </Link>
                   <Link
-                    href="/tools/games/hearts"
+                    href="/tools/games/hearts?mode=create-online"
                     className="inline-flex rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
-                    Подробнее
+                    Создать онлайн игру
+                  </Link>
+                  <Link
+                    href="/tools/games/hearts?mode=join-online"
+                    className="inline-flex rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Присоединиться к онлайн игре
                   </Link>
                 </div>
               </article>

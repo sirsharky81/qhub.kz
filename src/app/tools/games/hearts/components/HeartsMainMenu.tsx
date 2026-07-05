@@ -18,6 +18,7 @@ export function HeartsMainMenu({
   isRoomOwner,
   onlineStatus,
   onlinePlayersCount,
+  initialTab,
 }: {
   onStartOffline: () => void;
   onCreateRoom: () => void;
@@ -34,8 +35,9 @@ export function HeartsMainMenu({
   isRoomOwner: boolean;
   onlineStatus: "open" | "playing" | "finished" | null;
   onlinePlayersCount: number;
+  initialTab?: "offline" | "create-online" | "join-online";
 }) {
-  const [mainTab, setMainTab] = useState<"offline" | "create-online" | "join-online">("offline");
+  const [mainTab, setMainTab] = useState<"offline" | "create-online" | "join-online">(initialTab ?? "offline");
 
   const keepInputVisible = (input: HTMLInputElement) => {
     const scrollContainer = input.closest('[data-hearts-scroll="true"]');
