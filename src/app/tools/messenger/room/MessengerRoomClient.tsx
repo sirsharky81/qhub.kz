@@ -49,17 +49,6 @@ function MessengerRoomInner() {
   const [retryKey, setRetryKey] = useState(0);
   const [loadingStep, setLoadingStep] = useState("Проверка сессии");
 
-  const hardNavigate = useCallback(
-    (href: string) => {
-      if (typeof window !== "undefined") {
-        window.location.replace(href);
-      } else {
-        router.replace(href);
-      }
-    },
-    [router],
-  );
-
   const handleRoomEnded = useCallback(() => {
     void cleanupRoomLocalState(roomId).then(() => {
       router.replace("/tools/messenger/home");
@@ -110,7 +99,6 @@ function MessengerRoomInner() {
             setError("Сессия мессенджера неактивна. Войдите снова.");
             setLoading(false);
           }
-          hardNavigate("/tools/messenger/login");
           return;
         }
         let resolvedPhone = (access.phone ?? "").trim();
@@ -141,7 +129,6 @@ function MessengerRoomInner() {
             setError("Не найден ключ комнаты на этом устройстве. Нужен повторный вход по коду/QR.");
             setLoading(false);
           }
-          hardNavigate(`/tools/messenger/room/join?code=${encodeURIComponent(roomId)}`);
           return;
         }
 
@@ -206,7 +193,7 @@ function MessengerRoomInner() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, retryKey, hardNavigate]);
+  }, [roomId, retryKey, router]);
 
   useEffect(() => {
     if (!loading) return;
@@ -229,6 +216,21 @@ function MessengerRoomInner() {
           >
             Повторить
           </button>
+          {error.includes("ключ комнаты") ? (
+            <Link
+              href={`/tools/messenger/room/join?code=${encodeURIComponent(roomId)}`}
+              className="rounded-2xl bg-indigo-600 text-white px-6 py-2.5 text-sm font-semibold"
+            >
+              Ввести код/QR
+            </Link>
+          ) : error.includes("сессия") ? (
+            <Link
+              href="/tools/messenger/login"
+              className="rounded-2xl bg-indigo-600 text-white px-6 py-2.5 text-sm font-semibold"
+            >
+              Войти в Messenger
+            </Link>
+          ) : null}
           <Link
             href="/tools/messenger/home"
             className="rounded-2xl bg-gray-900 text-white px-6 py-2.5 text-sm font-semibold"

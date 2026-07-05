@@ -7,38 +7,64 @@ function storageKey(roomId: string): string {
 function migrateRoomKeyFromSessionStorage(roomId: string): void {
   if (typeof window === "undefined") return;
   const key = storageKey(roomId);
-  if (localStorage.getItem(key)) return;
   try {
+    if (localStorage.getItem(key)) return;
     const legacy = sessionStorage.getItem(key);
     if (legacy) {
       localStorage.setItem(key, legacy);
       sessionStorage.removeItem(key);
     }
   } catch {
-    // ignore
+    // localStorage may be restricted (iOS private/PWA edge cases). Keep session value as fallback.
   }
 }
 
 export function getRoomKey(roomId: string): string | null {
   if (typeof window === "undefined") return null;
   migrateRoomKeyFromSessionStorage(roomId);
-  return localStorage.getItem(storageKey(roomId));
+  const key = storageKey(roomId);
+  try {
+    const local = localStorage.getItem(key);
+    if (local) return local;
+  } catch {
+    // fall through to session storage
+  }
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
 export function setRoomKey(roomId: string, keyBase64Url: string): void {
   if (typeof window === "undefined") return;
   const key = storageKey(roomId);
-  localStorage.setItem(key, keyBase64Url);
   try {
-    sessionStorage.removeItem(key);
+    localStorage.setItem(key, keyBase64Url);
+    sessionStorage.setItem(key, keyBase64Url);
   } catch {
-    // ignore
+    // localStorage may fail on some mobile environments; keep key in sessionStorage at least.
+    try {
+      sessionStorage.setItem(key, keyBase64Url);
+    } catch {
+      // ignore
+    }
   }
 }
 
 export function removeRoomKey(roomId: string): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(storageKey(roomId));
+  const key = storageKey(roomId);
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
 }
 
 export function hasRoomKey(roomId: string): boolean {
