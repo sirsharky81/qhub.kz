@@ -22,7 +22,7 @@ export function LottoJoin() {
   const [session, setSession] = useState<ParticipantSession | null>(null);
   const [view, setView] = useState<LottoParticipantView | null>(null);
   const [roomCodeInput, setRoomCodeInput] = useState("");
-  const [playerNameInput, setPlayerNameInput] = useState("Игрок 1");
+  const [playerNameInput, setPlayerNameInput] = useState("Игрок 2");
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [version, setVersion] = useState(0);
@@ -227,7 +227,7 @@ export function LottoJoin() {
           type="text"
           value={playerNameInput}
           onChange={(e) => setPlayerNameInput(e.target.value)}
-          placeholder="Игрок 1"
+          placeholder="Игрок 2"
           className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
         />
       </div>

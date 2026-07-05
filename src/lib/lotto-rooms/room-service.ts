@@ -24,6 +24,29 @@ export function stripJoinTokens(room: LottoRoomSnapshot) {
   };
 }
 
+function normalizeName(value: string): string {
+  return value.trim().toLocaleLowerCase("ru-RU");
+}
+
+function ensureUniquePlayerName(desiredName: string, existingPlayers: LottoRoomPlayer[]): string {
+  const fallback = desiredName.trim() || "Игрок";
+  const occupied = new Set(
+    existingPlayers.filter((p) => !p.left).map((p) => normalizeName(p.name)),
+  );
+  if (!occupied.has(normalizeName(fallback))) return fallback;
+
+  const defaultMatch = /^игрок\s*(\d+)$/i.exec(fallback.trim());
+  if (defaultMatch) {
+    let idx = Math.max(2, Number(defaultMatch[1] ?? 2));
+    while (occupied.has(normalizeName(`Игрок ${idx}`))) idx += 1;
+    return `Игрок ${idx}`;
+  }
+
+  let suffix = 2;
+  while (occupied.has(normalizeName(`${fallback} (${suffix})`))) suffix += 1;
+  return `${fallback} (${suffix})`;
+}
+
 function playersToRoomPlayers(players: LottoPlayer[]): LottoRoomPlayer[] {
   return players.map((p) => ({
     id: p.id,
@@ -137,14 +160,14 @@ export function findPlayerByCredentials(
   return room.players.find((p) => p.id === playerId && p.joinToken === joinToken);
 }
 
-export function createRoomPlayer(name: string): LottoRoomPlayer {
+export function createRoomPlayer(name: string, existingPlayers: LottoRoomPlayer[]): LottoRoomPlayer {
   const id =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `player-${Date.now()}`;
   return {
     id,
-    name: name.trim() || "Игрок",
+    name: ensureUniquePlayerName(name, existingPlayers),
     ticket: null,
     wins: [],
     joinToken: generateSecret(16),

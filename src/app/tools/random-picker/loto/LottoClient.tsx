@@ -579,7 +579,7 @@ export default function LottoClient() {
               tabs={[
                 { id: "settings", label: "Игра" },
                 { id: "rules", label: "Правила игры", shortLabel: "Правила" },
-                { id: "participants", label: "Участники" },
+                { id: "participants", label: "Создать онлайн игру", shortLabel: "Создать" },
                 { id: "join", label: "Присоединиться", shortLabel: "Войти" },
               ]}
               activeTab={prePanelTab}

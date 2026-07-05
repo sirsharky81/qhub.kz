@@ -53,7 +53,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (room.players.length >= LOTTO_MAX_PLAYERS) {
       return Response.json({ error: `Максимум ${LOTTO_MAX_PLAYERS} участников` }, { status: 409 });
     }
-    player = createRoomPlayer(body.playerName?.trim() || `Игрок ${room.players.length + 1}`);
+    player = createRoomPlayer(body.playerName?.trim() || `Игрок ${room.players.length + 1}`, room.players);
     room.players = [...room.players, player];
   }
 
