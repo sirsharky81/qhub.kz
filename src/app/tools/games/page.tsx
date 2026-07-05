@@ -35,13 +35,16 @@ export default function GamesPage() {
             </div>
             <div className="p-3">
               <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-slate-50/70 dark:from-gray-900 dark:to-slate-900/40">
-                <div className="flex items-start gap-3">
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Cards Game</h3>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Червы (Hearts)</h3>
                     <p className="mt-1 text-xs text-gray-500 leading-relaxed">
                       Карточная игра QHub: партия на 4 игроков, офлайн против ИИ и онлайн-комнаты.
                     </p>
                   </div>
+                  <span className="text-[10px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    Cards Games
+                  </span>
                 </div>
                 <div className="mt-3 grid sm:grid-cols-3 gap-2">
                   <Link
