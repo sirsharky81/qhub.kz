@@ -570,13 +570,13 @@ export default function HeartsClient() {
               </section>
               <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
                 <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">Оппоненты</h3>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
                   {state.players
                     .filter((player) => player.id !== (onlineSession?.playerId ?? HUMAN_ID))
                     .map((player) => (
                       <div
                         key={player.id}
-                        className="rounded-lg border border-gray-100 dark:border-gray-700 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800"
+                        className="shrink-0 rounded-lg border border-gray-100 dark:border-gray-700 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 whitespace-nowrap"
                       >
                         {player.name} · {player.hand.length} карт
                       </div>
@@ -593,34 +593,35 @@ export default function HeartsClient() {
                   onPlayCard={playCard}
                 />
               )}
-              <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
-                <h3 className="text-xs uppercase tracking-wide text-gray-500">Управление партией</h3>
-                <div className="grid sm:grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={finishCurrentGame}
-                    className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40"
-                  >
-                    Завершить партию
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => restartOfflineGame()}
-                    className="rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
-                  >
-                    Завершить и начать заново
-                  </button>
-                </div>
-              </section>
               {canSelectPass && (
                 <button
                   type="button"
                   onClick={submitPass}
-                  className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-4 py-2"
+                  className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
                 >
                   Подтвердить обмен (3 карты)
                 </button>
               )}
+              <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
+                <h3 className="text-xs uppercase tracking-wide text-gray-500">Управление партией</h3>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">Опасные действия. Требуют подтверждения.</p>
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => restartOfflineGame()}
+                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                  >
+                    Завершить и начать заново
+                  </button>
+                  <button
+                    type="button"
+                    onClick={finishCurrentGame}
+                    className="w-full rounded-lg border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40"
+                  >
+                    Завершить партию
+                  </button>
+                </div>
+              </section>
             </div>
           ) : null}
         </div>
