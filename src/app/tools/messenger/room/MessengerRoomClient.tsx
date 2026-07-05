@@ -179,28 +179,9 @@ function MessengerRoomInner() {
           ROOM_STEP_TIMEOUT_MS,
           "Таймаут импорта ключа комнаты",
         );
-        currentStep = "Вход в комнату";
-        if (!cancelled) setLoadingStep(currentStep);
-        const joined = await withTimeout(
-          joinRoomApi(roomId),
-          ROOM_STEP_TIMEOUT_MS,
-          "Таймаут входа в комнату",
-        );
-        if (!joined.ok) {
-          if (joined.error?.toLowerCase().includes("не найдена")) {
-            await cleanupRoomLocalState(roomId);
-            if (!cancelled) {
-              setError("Комната завершена");
-              setLoading(false);
-            }
-            return;
-          }
-          if (!cancelled) {
-            setError(joined.error ?? "Не удалось войти в комнату");
-            setLoading(false);
-          }
-          return;
-        }
+        // Room membership is established on create/join screens; do not block room opening
+        // on an extra join request here to avoid false "room ended" regressions.
+        void joinRoomApi(roomId).catch(() => {});
         upsertLocalDialog({
           id: `room:${roomId}`,
           kind: "room",

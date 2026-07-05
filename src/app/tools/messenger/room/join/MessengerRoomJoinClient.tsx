@@ -55,7 +55,20 @@ function JoinInner() {
     if (!rid || joining) return;
     const storedKey = getRoomKey(rid);
     if (storedKey && !keyInput.trim()) {
-      router.replace(messengerRoomUrl(rid));
+      setJoining(true);
+      void joinRoomApi(rid)
+        .then((joined) => {
+          if (!joined.ok) {
+            setError(joined.error ?? "Комната не найдена");
+            setJoining(false);
+            return;
+          }
+          router.replace(roomOpenUrlWithKey(rid, storedKey));
+        })
+        .catch(() => {
+          setError("Ошибка сети при входе в комнату");
+          setJoining(false);
+        });
     }
   }, [myPhone, code, keyInput, joining, router]);
 
