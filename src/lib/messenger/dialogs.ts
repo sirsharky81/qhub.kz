@@ -1,5 +1,5 @@
 import { SESSION_DIALOGS_KEY } from "./constants";
-import { fetchRoomStatus } from "./client";
+import { fetchRoomStatusLookup } from "./client";
 import { clearChatHistory } from "./history-db";
 import { getRoomKey, removeRoomKey } from "./room-keys";
 import type { LocalDialog } from "./types";
@@ -74,16 +74,23 @@ export async function syncRoomDialogs(): Promise<LocalDialog[]> {
       continue;
     }
 
-    const status = await fetchRoomStatus(roomId);
-    if (!status) {
+    let status: Awaited<ReturnType<typeof fetchRoomStatusLookup>>;
+    try {
+      status = await fetchRoomStatusLookup(roomId);
+    } catch {
+      // transient network issues should not delete local room state
+      continue;
+    }
+    if (status.kind === "not_found") {
       removeIds.add(dialog.id);
       removeRoomKey(roomId);
       await clearChatHistory(`room:${roomId}`);
       changed = true;
       continue;
     }
+    if (status.kind !== "ok") continue;
 
-    if (!status.isMember && status.otherCount === 0) {
+    if (!status.data.isMember && status.data.otherCount === 0) {
       removeIds.add(dialog.id);
       removeRoomKey(roomId);
       await clearChatHistory(`room:${roomId}`);

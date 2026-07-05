@@ -9,7 +9,7 @@ import {
   fetchAccessCheck,
   fetchProfile,
   fetchProfilesMap,
-  fetchRoomStatus,
+  fetchRoomStatusLookup,
   joinRoomApi,
   leaveRoomApi,
 } from "@/lib/messenger/client";
@@ -175,15 +175,29 @@ function MessengerRoomInner() {
 
         currentStep = "Проверка комнаты";
         if (!cancelled) setLoadingStep(currentStep);
-        const status = await withTimeout(
-          fetchRoomStatus(roomId),
+        const statusLookup = await withTimeout(
+          fetchRoomStatusLookup(roomId),
           ROOM_STEP_TIMEOUT_MS,
           "Таймаут проверки комнаты",
         );
-        if (!status) {
+        if (statusLookup.kind === "not_found") {
           await cleanupRoomLocalState(roomId);
           if (!cancelled) {
             setError("Комната завершена");
+            setLoading(false);
+          }
+          return;
+        }
+        if (statusLookup.kind === "unauthorized") {
+          if (!cancelled) {
+            setError("Сессия истекла. Войдите в мессенджер снова.");
+            setLoading(false);
+          }
+          return;
+        }
+        if (statusLookup.kind !== "ok") {
+          if (!cancelled) {
+            setError("Не удалось получить статус комнаты. Попробуйте снова.");
             setLoading(false);
           }
           return;

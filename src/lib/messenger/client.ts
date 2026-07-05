@@ -313,11 +313,33 @@ export interface RoomStatusResult {
   otherCount: number;
 }
 
-export async function fetchRoomStatus(roomId: string): Promise<RoomStatusResult | null> {
+export type RoomStatusLookup =
+  | { kind: "ok"; data: RoomStatusResult }
+  | { kind: "not_found" }
+  | { kind: "unauthorized" }
+  | { kind: "forbidden" }
+  | { kind: "error"; status: number };
+
+export async function fetchRoomStatusLookup(roomId: string): Promise<RoomStatusLookup> {
   const res = await platformFetch(`/api/messenger/room?roomId=${encodeURIComponent(roomId.toUpperCase())}`);
-  if (res.status === 404) return null;
-  if (!res.ok) return null;
-  return res.json() as Promise<RoomStatusResult>;
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 401) return { kind: "unauthorized" };
+  if (res.status === 403) return { kind: "forbidden" };
+  if (!res.ok) return { kind: "error", status: res.status };
+  return { kind: "ok", data: (await res.json()) as RoomStatusResult };
+}
+
+export async function fetchRoomStatus(roomId: string): Promise<RoomStatusResult | null> {
+  const lookup = await fetchRoomStatusLookup(roomId);
+  if (lookup.kind === "ok") return lookup.data;
+  if (lookup.kind === "not_found") return null;
+  throw new Error(
+    lookup.kind === "unauthorized"
+      ? "room_status_unauthorized"
+      : lookup.kind === "forbidden"
+        ? "room_status_forbidden"
+        : "room_status_error",
+  );
 }
 
 export type PollChannelResult =
