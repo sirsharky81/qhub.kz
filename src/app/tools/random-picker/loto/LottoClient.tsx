@@ -39,6 +39,13 @@ import type { LottoRoomPlayer } from "@/lib/lotto-rooms/types";
 
 type PrePanelTab = "settings" | "rules" | "participants" | "join";
 
+function parseLottoMode(search: string): "create-online" | "join-online" | null {
+  const params = new URLSearchParams(search);
+  const mode = params.get("mode");
+  if (mode === "create-online" || mode === "join-online") return mode;
+  return null;
+}
+
 function clampInterval(n: number): number {
   return Math.min(LOTTO_INTERVAL_MAX, Math.max(LOTTO_INTERVAL_MIN, n));
 }
@@ -170,6 +177,9 @@ export default function LottoClient() {
   const [hostRoomVersion, setHostRoomVersion] = useState(0);
   const [prePanelTab, setPrePanelTab] = useState<PrePanelTab>(() => {
     if (typeof window === "undefined") return "settings";
+    const mode = parseLottoMode(window.location.search);
+    if (mode === "create-online") return "participants";
+    if (mode === "join-online") return "join";
     if (loadParticipantSession() || parseRoomCodeSearchParam(window.location.search)) {
       return "join";
     }

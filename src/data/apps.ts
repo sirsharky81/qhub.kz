@@ -170,12 +170,12 @@ export const apps: App[] = [
     id: "qhub-games",
     title: "QHub Games",
     description:
-      "Карточные и другие игры QHub. В MVP доступна игра «Червы» (Hearts).",
+      "Игровой раздел с карточными и настольными играми QHub.",
     longDescription:
-      "Игровой раздел QHub с единой архитектурой карточных игр. Первый релиз включает «Червы» с офлайн и онлайн режимами, ботами и статистикой.",
+      "Игровой раздел QHub с карточными и настольными играми. Включает Cards Game и Русское лото с офлайн и онлайн режимами.",
     href: "/tools/games",
     tags: ["tools", "games"],
-    icon: "🃏",
+    icon: "/tools/games/icon.svg",
     color: "from-red-500/10 to-orange-600/5",
     author: "QHub",
     authorType: "qhub",
