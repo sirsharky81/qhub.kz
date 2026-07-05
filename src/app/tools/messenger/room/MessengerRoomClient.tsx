@@ -47,6 +47,18 @@ function MessengerRoomInner() {
   const [loading, setLoading] = useState(true);
   const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
   const [retryKey, setRetryKey] = useState(0);
+  const [loadingStep, setLoadingStep] = useState("Проверка сессии");
+
+  const hardNavigate = useCallback(
+    (href: string) => {
+      if (typeof window !== "undefined") {
+        window.location.replace(href);
+      } else {
+        router.replace(href);
+      }
+    },
+    [router],
+  );
 
   const handleRoomEnded = useCallback(() => {
     void cleanupRoomLocalState(roomId).then(() => {
@@ -81,10 +93,12 @@ function MessengerRoomInner() {
     }
 
     async function init() {
+      let currentStep = "Проверка сессии";
       try {
         if (!cancelled) {
           setError(null);
           setLoading(true);
+          setLoadingStep("Проверка сессии");
         }
         const access = await withTimeout(
           fetchAccessCheck(true),
@@ -92,11 +106,17 @@ function MessengerRoomInner() {
           "Таймаут проверки сессии",
         );
         if (!access.messengerLoggedIn) {
-          router.replace("/tools/messenger/login");
+          if (!cancelled) {
+            setError("Сессия мессенджера неактивна. Войдите снова.");
+            setLoading(false);
+          }
+          hardNavigate("/tools/messenger/login");
           return;
         }
         let resolvedPhone = (access.phone ?? "").trim();
         if (!resolvedPhone) {
+          currentStep = "Загрузка профиля";
+          if (!cancelled) setLoadingStep(currentStep);
           const profile = await withTimeout(
             fetchProfile(),
             ROOM_STEP_TIMEOUT_MS,
@@ -113,12 +133,20 @@ function MessengerRoomInner() {
         }
         if (!cancelled) setMyPhone(resolvedPhone);
 
+        currentStep = "Проверка ключа комнаты";
+        if (!cancelled) setLoadingStep(currentStep);
         const storedKey = getRoomKey(roomId);
         if (!storedKey) {
-          router.replace(`/tools/messenger/room/join?code=${encodeURIComponent(roomId)}`);
+          if (!cancelled) {
+            setError("Не найден ключ комнаты на этом устройстве. Нужен повторный вход по коду/QR.");
+            setLoading(false);
+          }
+          hardNavigate(`/tools/messenger/room/join?code=${encodeURIComponent(roomId)}`);
           return;
         }
 
+        currentStep = "Проверка комнаты";
+        if (!cancelled) setLoadingStep(currentStep);
         const status = await withTimeout(
           fetchRoomStatus(roomId),
           ROOM_STEP_TIMEOUT_MS,
@@ -133,11 +161,15 @@ function MessengerRoomInner() {
           return;
         }
 
+        currentStep = "Проверка шифрования";
+        if (!cancelled) setLoadingStep(currentStep);
         const key = await withTimeout(
           importRoomKeyBase64Url(storedKey),
           ROOM_STEP_TIMEOUT_MS,
           "Таймаут импорта ключа комнаты",
         );
+        currentStep = "Вход в комнату";
+        if (!cancelled) setLoadingStep(currentStep);
         const joined = await withTimeout(
           joinRoomApi(roomId),
           ROOM_STEP_TIMEOUT_MS,
@@ -164,7 +196,7 @@ function MessengerRoomInner() {
         void loadProfilesInBackground();
       } catch {
         if (!cancelled) {
-          setError("Не удалось войти в комнату. Проверьте интернет и попробуйте снова.");
+          setError(`Не удалось войти в комнату (${currentStep}). Проверьте интернет и попробуйте снова.`);
           setLoading(false);
         }
       }
@@ -174,7 +206,7 @@ function MessengerRoomInner() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, router, retryKey]);
+  }, [roomId, retryKey, hardNavigate]);
 
   useEffect(() => {
     if (!loading) return;
@@ -210,8 +242,9 @@ function MessengerRoomInner() {
 
   if (loading || !aesKey || !myPhone) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center text-sm text-gray-500">
-        Вход в комнату…
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center text-sm text-gray-500 gap-1">
+        <div>Вход в комнату…</div>
+        <div className="text-[11px] text-gray-400">{loadingStep}</div>
       </div>
     );
   }
