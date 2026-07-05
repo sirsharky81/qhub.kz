@@ -56,6 +56,9 @@ export function HeartsMainMenu({
         />
         {onlineRoomCode ? (
           <div className="space-y-2">
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              {isRoomOwner ? "Вы владелец комнаты" : "Вы участник комнаты"}
+            </p>
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm">
               Код комнаты: <span className="font-semibold tracking-wide">{onlineRoomCode}</span>
             </div>

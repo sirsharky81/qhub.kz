@@ -23,7 +23,6 @@ import { HeartsHand } from "./components/HeartsHand";
 import { HeartsMainMenu } from "./components/HeartsMainMenu";
 import { HeartsScoreboard } from "./components/HeartsScoreboard";
 import { HeartsTrickView } from "./components/HeartsTrickView";
-import { PrivacyBanner } from "@/app/tools/file-converter/components/PrivacyBanner";
 import { PickerSection } from "@/app/tools/random-picker/components/PickerButton";
 
 interface OnlineSession {
@@ -73,7 +72,6 @@ export default function HeartsClient() {
   const [settings, setSettings] = useState<HeartsSettings>(DEFAULT_HEARTS_SETTINGS);
   const [stats, setStats] = useState<HeartsStats>(DEFAULT_HEARTS_STATS);
   const [inactivity, setInactivity] = useState<RoomInactivity | null>(null);
-  const [nowTs, setNowTs] = useState(() => Date.now());
   const [panelTab, setPanelTab] = useState<HeartsPanelTab>("menu");
 
   const engineRef = useRef<GameEngine<HeartsState, HeartsAction> | null>(null);
@@ -313,11 +311,6 @@ export default function HeartsClient() {
   }, [localDispatch, onlineSession, state]);
 
   useEffect(() => {
-    const id = window.setInterval(() => setNowTs(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  useEffect(() => {
     if (!onlineSession) return;
     const id = window.setInterval(() => {
       void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`)
@@ -438,10 +431,6 @@ export default function HeartsClient() {
     return roomSeats.filter((seat) => !seat.isBot && seat.connected).length;
   }, [roomSeats]);
   const isOnlineWaitingForStart = Boolean(onlineSession && roomStatus === "open");
-  const onlineCountdownSec = useMemo(() => {
-    if (!inactivity?.enabled || !inactivity.deadlineAt) return null;
-    return Math.max(0, Math.ceil((inactivity.deadlineAt - nowTs) / 1000));
-  }, [inactivity, nowTs]);
   const canPlay =
     Boolean(state) &&
     (!onlineSession || roomStatus === "playing") &&
@@ -588,37 +577,6 @@ export default function HeartsClient() {
 
           <section className="rounded-2xl border border-violet-200/70 dark:border-violet-900/70 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 p-4">
             <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Червы (Hearts)</h1>
-            <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-              {onlineSession ? `Режим: онлайн · комната ${onlineSession.roomCode}` : "Режим: игра с ИИ"}
-            </p>
-            {onlineSession && (
-              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                {isRoomOwner ? "Вы владелец комнаты" : "Вы участник комнаты"}
-              </p>
-            )}
-            <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-              {isOnlineWaitingForStart
-                ? "Комната создана. Ожидание игроков и начала игры."
-                : state
-                  ? `Раунд #${state.roundIndex + 1} · Фаза: ${state.phase} · Ход: ${state.currentTurnId}`
-                  : "Партия не запущена"}
-              {onlineSession && inactivity?.enabled && onlineCountdownSec !== null
-                ? ` · Неактивность: ${onlineCountdownSec}с`
-                : ""}
-            </div>
-            <div className="mt-2">
-              <PrivacyBanner compact />
-            </div>
-            {onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0 && (
-              <p className="mt-2 text-xs text-red-600 dark:text-red-400">
-                Игроки без хода более 3 минут переведены под управление бота.
-              </p>
-            )}
-            {message && (
-              <p className="mt-2 text-xs text-gray-700 dark:text-gray-300">
-                {message}
-              </p>
-            )}
           </section>
 
           <PickerSection
@@ -700,6 +658,16 @@ export default function HeartsClient() {
 
           {state && !isOnlineWaitingForStart ? (
             <div className="space-y-4">
+              {(message || (onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0)) && (
+                <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-1">
+                  {message && <p className="text-xs text-gray-700 dark:text-gray-300">{message}</p>}
+                  {onlineSession && inactivity?.enabled && inactivity.excludedPlayerIds.length > 0 && (
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      Игроки без хода более 3 минут переведены под управление бота.
+                    </p>
+                  )}
+                </section>
+              )}
               <HeartsScoreboard state={state} onlinePlayerIds={onlinePlayerIds} />
               <HeartsTrickView state={state} />
               <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-1.5">
