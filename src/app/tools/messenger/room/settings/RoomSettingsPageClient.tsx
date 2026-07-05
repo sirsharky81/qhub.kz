@@ -72,6 +72,12 @@ export function RoomSettingsPageClient() {
     window.location.href = href;
   }
 
+  function cancelAddFlow() {
+    setError(null);
+    setErrorCode(null);
+    setLastTargetPhone("");
+  }
+
   return (
     <MessengerShell
       variant="app"
@@ -144,13 +150,27 @@ export function RoomSettingsPageClient() {
                 </button>
               </div>
               {errorCode === "auto_add_disabled" && lastTargetPhone && (
-                <button
-                  type="button"
-                  className="rounded-lg border border-indigo-200 px-3 py-2 text-xs text-indigo-700"
-                  onClick={() => openInviteDm(lastTargetPhone)}
-                >
-                  Отправить приглашение в личный чат
-                </button>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                  <p className="text-xs text-amber-900">
+                    Пользователь запретил автодобавление в комнаты. Можно отправить приглашение в личный чат.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-indigo-700"
+                      onClick={() => openInviteDm(lastTargetPhone)}
+                    >
+                      Пригласить
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700"
+                      onClick={cancelAddFlow}
+                    >
+                      Отменить добавление
+                    </button>
+                  </div>
+                </div>
               )}
             </section>
 
@@ -199,13 +219,6 @@ export function RoomSettingsPageClient() {
                               Удалить
                             </button>
                           )}
-                          <button
-                            type="button"
-                            className="rounded border border-indigo-200 px-2 py-1 text-[11px] text-indigo-700"
-                            onClick={() => openInviteDm(p.phone)}
-                          >
-                            Пригласить
-                          </button>
                         </div>
                       </div>
                     </div>
