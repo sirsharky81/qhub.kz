@@ -20,6 +20,8 @@ import { getRoomKey, setRoomKey } from "@/lib/messenger/room-keys";
 
 const ROOM_STEP_TIMEOUT_MS = 10_000;
 const ROOM_FLOW_WATCHDOG_MS = 15_000;
+const ROOM_STATUS_RETRY_COUNT = 6;
+const ROOM_STATUS_RETRY_DELAY_MS = 400;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -35,6 +37,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
       },
     );
   });
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function MessengerRoomInner() {
@@ -101,6 +107,24 @@ function MessengerRoomInner() {
       } catch {
         // Non-blocking: чат уже открыт, профили можно догрузить позже.
       }
+    }
+
+    async function resolveRoomStatusWithRetry() {
+      let last: Awaited<ReturnType<typeof fetchRoomStatusLookup>> | null = null;
+      for (let attempt = 0; attempt < ROOM_STATUS_RETRY_COUNT; attempt += 1) {
+        const next = await withTimeout(
+          fetchRoomStatusLookup(roomId),
+          ROOM_STEP_TIMEOUT_MS,
+          "Таймаут проверки комнаты",
+        );
+        last = next;
+        if (next.kind !== "not_found") return next;
+        if (attempt < ROOM_STATUS_RETRY_COUNT - 1) {
+          if (!cancelled) setLoadingStep(`Ожидание комнаты (${attempt + 1}/${ROOM_STATUS_RETRY_COUNT})`);
+          await wait(ROOM_STATUS_RETRY_DELAY_MS);
+        }
+      }
+      return last ?? { kind: "not_found" as const };
     }
 
     async function init() {
@@ -175,11 +199,7 @@ function MessengerRoomInner() {
 
         currentStep = "Проверка комнаты";
         if (!cancelled) setLoadingStep(currentStep);
-        const statusLookup = await withTimeout(
-          fetchRoomStatusLookup(roomId),
-          ROOM_STEP_TIMEOUT_MS,
-          "Таймаут проверки комнаты",
-        );
+        const statusLookup = await resolveRoomStatusWithRetry();
         if (statusLookup.kind === "not_found") {
           await cleanupRoomLocalState(roomId);
           if (!cancelled) {
