@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Redis } from "@upstash/redis";
+import * as core from "@/lib/redis/commands";
+import { getRedisBackend } from "@/lib/redis/env";
 import {
   DEFAULT_ADMIN_PASSWORD,
   REDIS_HIDDEN_APPS_KEY,
@@ -14,25 +15,6 @@ interface AdminStoreData {
 }
 
 const FILE_PATH = join(process.cwd(), ".data", "admin-store.json");
-
-function cleanEnv(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function getRedis(): Redis | null {
-  const url = cleanEnv(process.env.UPSTASH_REDIS_REST_URL);
-  const token = cleanEnv(process.env.UPSTASH_REDIS_REST_TOKEN);
-  if (!url || !token) return null;
-  return new Redis({ url, token });
-}
 
 async function readFileStore(): Promise<AdminStoreData | null> {
   try {
@@ -56,11 +38,10 @@ async function defaultStore(): Promise<AdminStoreData> {
 }
 
 async function loadStore(): Promise<AdminStoreData> {
-  const redis = getRedis();
-  if (redis) {
+  if (getRedisBackend()) {
     const [hash, hiddenRaw] = await Promise.all([
-      redis.get<string>(REDIS_PASSWORD_HASH_KEY),
-      redis.get<string>(REDIS_HIDDEN_APPS_KEY),
+      core.redisGet(REDIS_PASSWORD_HASH_KEY),
+      core.redisGet(REDIS_HIDDEN_APPS_KEY),
     ]);
     if (hash) {
       let hiddenAppIds: string[] = [];
@@ -86,11 +67,10 @@ async function loadStore(): Promise<AdminStoreData> {
 }
 
 async function saveStore(data: AdminStoreData): Promise<void> {
-  const redis = getRedis();
-  if (redis) {
+  if (getRedisBackend()) {
     await Promise.all([
-      redis.set(REDIS_PASSWORD_HASH_KEY, data.passwordHash),
-      redis.set(REDIS_HIDDEN_APPS_KEY, JSON.stringify(data.hiddenAppIds)),
+      core.redisSet(REDIS_PASSWORD_HASH_KEY, data.passwordHash),
+      core.redisSet(REDIS_HIDDEN_APPS_KEY, JSON.stringify(data.hiddenAppIds)),
     ]);
     return;
   }

@@ -1,24 +1,6 @@
-import { Redis } from "@upstash/redis";
+import * as core from "@/lib/redis/commands";
+import { getRedisBackend, parseRedisJsonValue } from "@/lib/redis/commands";
 import { FORBIDDEN_KEY_PARTS } from "./constants";
-
-function cleanEnv(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-export function getFamilyRedis(): Redis | null {
-  const url = cleanEnv(process.env.UPSTASH_REDIS_REST_URL);
-  const token = cleanEnv(process.env.UPSTASH_REDIS_REST_TOKEN);
-  if (!url || !token) return null;
-  return new Redis({ url, token });
-}
 
 type MemoryEntry = { value: string; expiresAt: number | null };
 type MemoryStore = Map<string, MemoryEntry>;
@@ -38,6 +20,14 @@ function purgeExpiredMemory(): void {
   }
 }
 
+function useRedis(): boolean {
+  return getRedisBackend() !== null;
+}
+
+export function getFamilyRedis(): { kind: "configured" } | null {
+  return useRedis() ? { kind: "configured" } : null;
+}
+
 export function assertAllowedRedisKey(key: string): void {
   if (!key.startsWith("family:")) {
     throw new Error("invalid_key_prefix");
@@ -49,26 +39,11 @@ export function assertAllowedRedisKey(key: string): void {
   }
 }
 
-export function parseRedisJsonValue<T>(raw: unknown): T | null {
-  if (raw == null) return null;
-  if (typeof raw === "string") {
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      return null;
-    }
-  }
-  return raw as T;
-}
+export { parseRedisJsonValue };
 
 export async function familyRedisGet(key: string): Promise<string | null> {
   assertAllowedRedisKey(key);
-  const redis = getFamilyRedis();
-  if (redis) {
-    const raw = await redis.get(key);
-    if (raw == null) return null;
-    return typeof raw === "string" ? raw : JSON.stringify(raw);
-  }
+  if (useRedis()) return core.redisGet(key);
   purgeExpiredMemory();
   const entry = memoryStore().get(key);
   if (!entry) return null;
@@ -86,13 +61,8 @@ export async function familyRedisGetJson<T>(key: string): Promise<T | null> {
 
 export async function familyRedisSet(key: string, value: string, exSeconds?: number): Promise<void> {
   assertAllowedRedisKey(key);
-  const redis = getFamilyRedis();
-  if (redis) {
-    if (exSeconds) {
-      await redis.set(key, value, { ex: exSeconds });
-    } else {
-      await redis.set(key, value);
-    }
+  if (useRedis()) {
+    await core.redisSet(key, value, exSeconds);
     return;
   }
   memoryStore().set(key, {
@@ -103,9 +73,8 @@ export async function familyRedisSet(key: string, value: string, exSeconds?: num
 
 export async function familyRedisDel(...keys: string[]): Promise<void> {
   for (const key of keys) assertAllowedRedisKey(key);
-  const redis = getFamilyRedis();
-  if (redis) {
-    if (keys.length) await redis.del(...keys);
+  if (useRedis()) {
+    if (keys.length) await core.redisDel(...keys);
     return;
   }
   for (const k of keys) memoryStore().delete(k);

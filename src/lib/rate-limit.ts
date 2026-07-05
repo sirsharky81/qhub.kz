@@ -1,5 +1,8 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { getRedisBackend } from "@/lib/redis/env";
+import { cleanEnv } from "@/lib/redis/env";
+import { getTcpClient } from "@/lib/redis/tcp";
 
 type RateWindow = `${number} ${"s" | "m" | "h" | "d"}`;
 
@@ -22,24 +25,26 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;
 
-function cleanEnv(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
+function parseWindowMs(window: RateWindow): number {
+  const [amountRaw, unit] = window.split(" ");
+  const amount = Number(amountRaw);
+  switch (unit) {
+    case "s":
+      return amount * 1000;
+    case "m":
+      return amount * 60 * 1000;
+    case "h":
+      return amount * 60 * 60 * 1000;
+    case "d":
+      return amount * 24 * 60 * 60 * 1000;
+    default:
+      return amount * 60 * 1000;
   }
-  return trimmed;
 }
 
-function getRatelimit(prefix: string): Ratelimit | null {
+function getUpstashRatelimit(prefix: string): Ratelimit | null {
   if (!ratelimitCache) ratelimitCache = new Map();
-
-  if (ratelimitCache.has(prefix)) {
-    return ratelimitCache.get(prefix) ?? null;
-  }
+  if (ratelimitCache.has(prefix)) return ratelimitCache.get(prefix) ?? null;
 
   const url = cleanEnv(process.env.UPSTASH_REDIS_REST_URL);
   const token = cleanEnv(process.env.UPSTASH_REDIS_REST_TOKEN);
@@ -49,15 +54,44 @@ function getRatelimit(prefix: string): Ratelimit | null {
   }
 
   const config = RATE_LIMIT_CONFIGS[prefix] ?? { requests: 5, window: "15 m" as RateWindow };
-
   const limiter = new Ratelimit({
     redis: new Redis({ url, token }),
     limiter: Ratelimit.slidingWindow(config.requests, config.window),
     prefix,
   });
-
   ratelimitCache.set(prefix, limiter);
   return limiter;
+}
+
+async function checkTcpRateLimit(
+  prefix: string,
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  const client = getTcpClient();
+  if (!client) return { allowed: true };
+
+  const config = RATE_LIMIT_CONFIGS[prefix] ?? { requests: 5, window: "15 m" as RateWindow };
+  const windowMs = parseWindowMs(config.window);
+  const now = Date.now();
+  const key = `${prefix}:rl:${identifier}`;
+  const member = `${now}:${Math.random().toString(36).slice(2)}`;
+
+  const results = await client
+    .multi()
+    .zremrangebyscore(key, 0, now - windowMs)
+    .zadd(key, now, member)
+    .zcard(key)
+    .pexpire(key, windowMs)
+    .exec();
+
+  const count = Number(results?.[2]?.[1] ?? 0);
+  if (count <= config.requests) return { allowed: true };
+
+  await client.zrem(key, member);
+  const oldest = await client.zrange(key, 0, 0, "WITHSCORES");
+  const oldestScore = oldest.length >= 2 ? Number(oldest[1]) : now;
+  const retryAfterSec = Math.max(1, Math.ceil((oldestScore + windowMs - now) / 1000));
+  return { allowed: false, retryAfterSec };
 }
 
 export function getClientIp(request: Request): string {
@@ -73,13 +107,24 @@ export async function checkRateLimit(
   prefix: string,
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
-  const ratelimit = getRatelimit(prefix);
+  const backend = getRedisBackend();
+  if (!backend) return { allowed: true };
+
+  if (backend === "tcp") {
+    try {
+      return await checkTcpRateLimit(prefix, identifier);
+    } catch (err) {
+      console.error("[rate-limit] TCP check failed, allowing request:", err);
+      return { allowed: true };
+    }
+  }
+
+  const ratelimit = getUpstashRatelimit(prefix);
   if (!ratelimit) return { allowed: true };
 
   try {
     const { success, reset } = await ratelimit.limit(identifier);
     if (success) return { allowed: true };
-
     const retryAfterSec = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return { allowed: false, retryAfterSec };
   } catch (err) {
