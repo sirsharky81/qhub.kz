@@ -440,7 +440,7 @@ export function ChatView({
 
     const intervalMs = () => {
       if (inCall) return 12000;
-      return document.hidden ? 12000 : 2000;
+      return document.hidden ? 12000 : 350;
     };
 
     const scheduleNext = () => {
@@ -457,7 +457,9 @@ export function ChatView({
       if (cancelled || inFlight) return;
       inFlight = true;
       try {
-        const data = await pollChannel(channel, versionRef.current, !!isRoom);
+        const data = await pollChannel(channel, versionRef.current, !!isRoom, {
+          wait: !document.hidden && !inCall,
+        });
         if (cancelled) return;
         if (!data) {
           setConnection("offline");

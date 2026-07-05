@@ -410,12 +410,14 @@ export async function pollChannel(
   channel: string,
   since: number,
   heartbeat = false,
+  options?: { wait?: boolean },
 ): Promise<PollChannelResult | null> {
   const params = new URLSearchParams({
     channel,
     since: String(since),
   });
   if (heartbeat) params.set("heartbeat", "1");
+  if (!heartbeat && options?.wait) params.set("wait", "1");
   const res = await platformFetch(`/api/messenger/poll?${params}`);
   if (res.status === 410) {
     return { error: "room_gone" };

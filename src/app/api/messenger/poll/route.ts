@@ -17,6 +17,13 @@ import {
 } from "@/lib/messenger/push-store";
 import { peerFromDmChannel } from "@/lib/messenger/phone";
 
+const LONG_POLL_MAX_WAIT_MS = 7500;
+const LONG_POLL_CHECK_INTERVAL_MS = 2500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function GET(request: Request) {
   try {
     const track = (status: number) => void trackMessengerApiRequest("poll", status);
@@ -34,6 +41,8 @@ export async function GET(request: Request) {
     const channel = url.searchParams.get("channel") ?? "";
     const sinceVersion = Number(url.searchParams.get("since") ?? "0");
     const heartbeat = url.searchParams.get("heartbeat") === "1";
+    const wait = url.searchParams.get("wait") === "1";
+    const waitEnabled = wait && !heartbeat;
 
     if (!channel) {
       track(400);
@@ -44,7 +53,15 @@ export async function GET(request: Request) {
     await setMessengerPresence(phone, channel);
 
     if (channel.startsWith("dm:")) {
-      const { meta, messages, envelopes } = await getDmMessagesSince(channel, sinceVersion);
+      let current = await getDmMessagesSince(channel, sinceVersion);
+      if (waitEnabled && sinceVersion >= current.meta.version) {
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < LONG_POLL_MAX_WAIT_MS) {
+          await sleep(LONG_POLL_CHECK_INTERVAL_MS);
+          current = await getDmMessagesSince(channel, sinceVersion);
+          if (current.meta.version > sinceVersion) break;
+        }
+      }
       const peerPhone = peerFromDmChannel(channel, phone);
       let peerOnline = false;
       let peerTyping = false;
@@ -53,12 +70,26 @@ export async function GET(request: Request) {
         peerOnline = isMessengerOnline(presence);
         peerTyping = await isMessengerTyping(channel, peerPhone);
       }
-      if (sinceVersion >= meta.version) {
+      if (sinceVersion >= current.meta.version) {
         track(200);
-        return NextResponse.json({ channel, meta, messages: [], envelopes: [], peerOnline, peerTyping });
+        return NextResponse.json({
+          channel,
+          meta: current.meta,
+          messages: [],
+          envelopes: [],
+          peerOnline,
+          peerTyping,
+        });
       }
       track(200);
-      return NextResponse.json({ channel, meta, messages, envelopes, peerOnline, peerTyping });
+      return NextResponse.json({
+        channel,
+        meta: current.meta,
+        messages: current.messages,
+        envelopes: current.envelopes,
+        peerOnline,
+        peerTyping,
+      });
     }
 
     if (channel.startsWith("room:")) {
@@ -71,20 +102,41 @@ export async function GET(request: Request) {
       if (heartbeat) {
         await updateRoomHeartbeat(roomId, phone);
       }
-      const { meta, messages, envelopes, participants } = await getRoomMessagesSince(
-        roomId,
-        sinceVersion,
-      );
-      if (sinceVersion >= meta.version && !heartbeat) {
+      let current = await getRoomMessagesSince(roomId, sinceVersion);
+      if (waitEnabled && sinceVersion >= current.meta.version) {
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < LONG_POLL_MAX_WAIT_MS) {
+          await sleep(LONG_POLL_CHECK_INTERVAL_MS);
+          if (!(await getRoomMeta(roomId))) {
+            track(410);
+            return NextResponse.json({ error: "room_gone" }, { status: 410 });
+          }
+          current = await getRoomMessagesSince(roomId, sinceVersion);
+          if (current.meta.version > sinceVersion) break;
+        }
+      }
+      if (sinceVersion >= current.meta.version && !heartbeat) {
         track(304);
         return new NextResponse(null, { status: 304 });
       }
-      if (sinceVersion >= meta.version) {
+      if (sinceVersion >= current.meta.version) {
         track(200);
-        return NextResponse.json({ channel, meta, messages: [], envelopes: [], participants });
+        return NextResponse.json({
+          channel,
+          meta: current.meta,
+          messages: [],
+          envelopes: [],
+          participants: current.participants,
+        });
       }
       track(200);
-      return NextResponse.json({ channel, meta, messages, envelopes, participants });
+      return NextResponse.json({
+        channel,
+        meta: current.meta,
+        messages: current.messages,
+        envelopes: current.envelopes,
+        participants: current.participants,
+      });
     }
 
     track(400);
