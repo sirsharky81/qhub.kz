@@ -19,6 +19,13 @@ interface MessengerHealthSnapshot {
     rateLimitedLast5Min: number;
   };
   endpoints: MessengerEndpointHealth[];
+  guardrails: {
+    roomMaxParticipants: number;
+    maxDmEnvelopes: number;
+    maxRoomEnvelopes: number;
+    msgTtlHours: number;
+    roomInactiveTtlHours: number;
+  };
 }
 
 const REFRESH_MS = 20_000;
@@ -94,6 +101,12 @@ export function MessengerHealthSection() {
             <MetricCard label="Req / 5м" value={snapshot.totals.requestsLast5Min} />
             <MetricCard label="Ошибки / 5м" value={snapshot.totals.errorsLast5Min} />
             <MetricCard label="429 / 5м" value={snapshot.totals.rateLimitedLast5Min} />
+          </div>
+
+          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+            Guardrails: room participants ≤ {snapshot.guardrails.roomMaxParticipants}, DM envelopes ≤{" "}
+            {snapshot.guardrails.maxDmEnvelopes}, room envelopes ≤ {snapshot.guardrails.maxRoomEnvelopes}, msg TTL{" "}
+            {snapshot.guardrails.msgTtlHours}h, room inactive TTL {snapshot.guardrails.roomInactiveTtlHours}h.
           </div>
 
           <div className="overflow-x-auto">

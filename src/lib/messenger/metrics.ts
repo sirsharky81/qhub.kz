@@ -1,4 +1,11 @@
 import { redisExpire, redisGet, redisIncr } from "./redis";
+import {
+  DEFAULT_MAX_DM_ENVELOPES,
+  DEFAULT_MAX_ROOM_ENVELOPES,
+  DEFAULT_MSG_TTL_HOURS,
+  DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+  MESSENGER_ROOM_MAX_PARTICIPANTS,
+} from "./constants";
 
 const METRIC_PREFIX = "qhub:messenger:metrics";
 const BUCKET_SEC = 60;
@@ -79,6 +86,13 @@ export async function getMessengerHealthSnapshot(): Promise<{
     rateLimitedLast5Min: number;
   };
   endpoints: MessengerEndpointHealth[];
+  guardrails: {
+    roomMaxParticipants: number;
+    maxDmEnvelopes: number;
+    maxRoomEnvelopes: number;
+    msgTtlHours: number;
+    roomInactiveTtlHours: number;
+  };
 }> {
   const generatedAt = Date.now();
   const currentBucket = bucketNow(generatedAt);
@@ -112,5 +126,18 @@ export async function getMessengerHealthSnapshot(): Promise<{
     { requestsLastMinute: 0, requestsLast5Min: 0, errorsLast5Min: 0, rateLimitedLast5Min: 0 },
   );
 
-  return { generatedAt, totals, endpoints };
+  return {
+    generatedAt,
+    totals,
+    endpoints,
+    guardrails: {
+      roomMaxParticipants: MESSENGER_ROOM_MAX_PARTICIPANTS,
+      maxDmEnvelopes: Number(process.env.MESSENGER_MAX_DM_ENVELOPES ?? DEFAULT_MAX_DM_ENVELOPES),
+      maxRoomEnvelopes: Number(process.env.MESSENGER_MAX_ROOM_ENVELOPES ?? DEFAULT_MAX_ROOM_ENVELOPES),
+      msgTtlHours: Number(process.env.MESSENGER_MSG_TTL_HOURS ?? DEFAULT_MSG_TTL_HOURS),
+      roomInactiveTtlHours: Number(
+        process.env.MESSENGER_ROOM_INACTIVE_TTL_HOURS ?? DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+      ),
+    },
+  };
 }

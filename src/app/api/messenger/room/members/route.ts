@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
-import { getRoomMeta, joinRoomParticipant, leaveRoom } from "@/lib/messenger/store";
+import { getRoomMeta, getRoomParticipants, joinRoomParticipant, leaveRoom } from "@/lib/messenger/store";
 import { assertMessengerRedisReady } from "@/lib/messenger/redis-health";
+import { MESSENGER_ROOM_MAX_PARTICIPANTS } from "@/lib/messenger/constants";
 
 function roomStorageUnavailable(message: string): NextResponse {
   return NextResponse.json({ error: message }, { status: 503 });
@@ -35,12 +36,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Комната не найдена" }, { status: 404 });
     }
 
-    const participants = await joinRoomParticipant(roomId, phone);
+    const participants = await getRoomParticipants(roomId);
+    const alreadyInRoom = participants.some((p) => p.phone === phone);
+    if (!alreadyInRoom && participants.length >= MESSENGER_ROOM_MAX_PARTICIPANTS) {
+      return NextResponse.json(
+        { error: `Комната заполнена (лимит ${MESSENGER_ROOM_MAX_PARTICIPANTS} участников)` },
+        { status: 409 },
+      );
+    }
+
+    const nextParticipants = await joinRoomParticipant(roomId, phone);
     return NextResponse.json({
       ok: true,
       roomId,
       channel: `room:${roomId}`,
-      participants,
+      participants: nextParticipants,
     });
   } catch (err) {
     return jsonAuthError(err);
