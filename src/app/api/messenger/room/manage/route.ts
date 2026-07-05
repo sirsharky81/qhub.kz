@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import { MESSENGER_ROOM_MAX_PARTICIPANTS } from "@/lib/messenger/constants";
 import { normalizeKzPhone } from "@/lib/messenger/phone";
+import { getMessengerPresence, isMessengerOnline, isViewingChannel } from "@/lib/messenger/push-store";
 import { assertMessengerRedisReady } from "@/lib/messenger/redis-health";
 import { getAuthRecord, getProfile, isPhoneWhitelisted } from "@/lib/messenger/store";
 import {
@@ -37,12 +38,23 @@ export async function GET(request: Request) {
       phone === meta.createdBy ? "owner" : roleFor(phone, participants);
     const member = participants.some((p) => p.phone === phone) || phone === meta.createdBy;
     if (!member) return NextResponse.json({ error: "Доступ запрещён" }, { status: 403 });
+    const roomChannel = `room:${roomId}`;
+    const participantsWithPresence = await Promise.all(
+      participants.map(async (p) => {
+        const presence = await getMessengerPresence(p.phone);
+        return {
+          ...p,
+          online: isMessengerOnline(presence),
+          inRoomNow: isViewingChannel(presence, roomChannel),
+        };
+      }),
+    );
     return NextResponse.json({
       roomId,
       ownerPhone: meta.createdBy,
       actorRole,
       roomMaxParticipants: MESSENGER_ROOM_MAX_PARTICIPANTS,
-      participants,
+      participants: participantsWithPresence,
     });
   } catch (err) {
     return jsonAuthError(err);

@@ -47,6 +47,14 @@ export function RoomSettingsPageClient() {
     void load();
   }, [roomId, load, router]);
 
+  useEffect(() => {
+    if (!roomId) return;
+    const timer = window.setInterval(() => {
+      void load();
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [roomId, load]);
+
   async function runAction(action: "add" | "remove" | "promote" | "demote", targetPhone: string) {
     setBusyPhone(targetPhone);
     setLastTargetPhone(targetPhone);
@@ -181,12 +189,30 @@ export function RoomSettingsPageClient() {
                   const role = p.role ?? "member";
                   const isOwner = role === "owner";
                   const disabled = busyPhone === p.phone;
+                  const online = Boolean(p.online);
+                  const inRoomNow = Boolean(p.inRoomNow);
                   return (
                     <div key={p.phone} className="rounded-lg border border-gray-100 p-2">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm text-gray-900">{p.phone}</p>
                           <p className="text-[11px] text-gray-500">role: {role}</p>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                online ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
+                              }`}
+                            >
+                              {online ? "онлайн" : "офлайн"}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                inRoomNow ? "bg-sky-100 text-sky-700" : "bg-gray-100 text-gray-600"
+                              }`}
+                            >
+                              {inRoomNow ? "в комнате сейчас" : "не в комнате сейчас"}
+                            </span>
+                          </div>
                         </div>
                         <div className="flex gap-1 flex-wrap justify-end">
                           {!isOwner && role !== "admin" && (

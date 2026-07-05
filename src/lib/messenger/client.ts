@@ -313,6 +313,8 @@ export interface RoomManageParticipant {
   phone: string;
   lastSeen: number;
   role?: "owner" | "admin" | "member";
+  online?: boolean;
+  inRoomNow?: boolean;
 }
 
 export interface RoomManageSnapshot {
