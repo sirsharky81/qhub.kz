@@ -17,8 +17,8 @@ export default function GamesPage() {
     >
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-2xl px-4 py-5 space-y-4">
-          <header className="rounded-2xl border border-violet-200/70 dark:border-violet-900/70 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 p-4">
-            <p className="text-[11px] uppercase tracking-wider text-violet-700 dark:text-violet-300 font-semibold">
+          <header className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-900/80 dark:via-slate-900 dark:to-slate-950 p-4">
+            <p className="text-[11px] uppercase tracking-wider text-slate-600 dark:text-slate-300 font-semibold">
               QHub ecosystem
             </p>
             <h1 className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">Игры QHub</h1>
@@ -34,7 +34,7 @@ export default function GamesPage() {
               </h2>
             </div>
             <div className="p-3">
-              <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-violet-50/50 dark:from-gray-900 dark:to-violet-950/20">
+              <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-slate-50/70 dark:from-gray-900 dark:to-slate-900/40">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Червы (Hearts)</h3>
@@ -49,7 +49,7 @@ export default function GamesPage() {
                 <div className="mt-3 grid sm:grid-cols-3 gap-2">
                   <Link
                     href="/tools/games/hearts?mode=offline"
-                    className="inline-flex rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-2"
+                    className="inline-flex rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-2"
                   >
                     Новая игра против ИИ
                   </Link>

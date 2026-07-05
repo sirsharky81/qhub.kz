@@ -104,7 +104,7 @@ export function HeartsMainMenu({
           onClick={() => setMainTab("offline")}
           className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "offline"
-              ? "border-violet-600 bg-violet-600 text-white"
+              ? "border-slate-900 bg-slate-900 text-white"
               : "border-gray-300 dark:border-gray-700"
           }`}
         >
@@ -115,7 +115,7 @@ export function HeartsMainMenu({
           onClick={() => setMainTab("create-online")}
           className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "create-online"
-              ? "border-violet-600 bg-violet-600 text-white"
+              ? "border-slate-900 bg-slate-900 text-white"
               : "border-gray-300 dark:border-gray-700"
           }`}
         >
@@ -126,7 +126,7 @@ export function HeartsMainMenu({
           onClick={() => setMainTab("join-online")}
           className={`rounded-lg border px-2 py-1.5 md:py-1 text-xs md:text-[11px] font-medium leading-tight whitespace-normal break-words ${
             mainTab === "join-online"
-              ? "border-violet-600 bg-violet-600 text-white"
+              ? "border-slate-900 bg-slate-900 text-white"
               : "border-gray-300 dark:border-gray-700"
           }`}
         >
@@ -141,7 +141,7 @@ export function HeartsMainMenu({
             <button
               type="button"
               onClick={onStartOffline}
-              className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm md:text-xs font-medium px-3 py-2 md:py-1.5"
+              className="w-full rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm md:text-xs font-medium px-3 py-2 md:py-1.5"
             >
               Начать
             </button>
@@ -173,7 +173,7 @@ export function HeartsMainMenu({
                       <button
                         type="button"
                         onClick={onStartOnlineGame}
-                        className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm md:text-xs px-3 py-2 md:py-1.5 font-medium"
+                        className="w-full rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm md:text-xs px-3 py-2 md:py-1.5 font-medium"
                       >
                         Начать онлайн-игру
                       </button>
@@ -190,7 +190,7 @@ export function HeartsMainMenu({
                 <button
                   type="button"
                   onClick={onShareRoomCode}
-                  className="w-full rounded-lg border border-violet-200 dark:border-violet-900 text-violet-700 dark:text-violet-300 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                 >
                   Отправить код
                 </button>

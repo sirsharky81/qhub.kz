@@ -686,11 +686,11 @@ export default function HeartsClient({
     <main className="flex flex-col flex-1 min-h-0 bg-gray-50 dark:bg-gray-950">
       <div className="flex-1 overflow-y-auto" data-hearts-scroll="true">
         <div className="mx-auto w-full max-w-6xl px-4 py-5 space-y-4">
-          <Link href="/tools/games" className="inline-flex text-xs text-violet-600 dark:text-violet-400 hover:underline">
+          <Link href="/tools/games" className="inline-flex text-xs text-slate-700 dark:text-slate-300 hover:underline">
             ← QHub Games
           </Link>
 
-          <section className="rounded-2xl border border-violet-200/70 dark:border-violet-900/70 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 p-4">
+          <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-900/80 dark:via-slate-900 dark:to-slate-950 p-4">
             <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Червы (Hearts)</h1>
           </section>
 
@@ -791,7 +791,7 @@ export default function HeartsClient({
                   <button
                     type="button"
                     onClick={submitPass}
-                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                    className="w-full rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm px-3 py-2 font-medium"
                   >
                     Подтвердить обмен (3 карты)
                   </button>
@@ -830,7 +830,7 @@ export default function HeartsClient({
                     <button
                       type="button"
                       onClick={() => restartOfflineGame()}
-                      className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-2 font-medium"
+                      className="w-full rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm px-3 py-2 font-medium"
                     >
                       Завершить и начать заново
                     </button>

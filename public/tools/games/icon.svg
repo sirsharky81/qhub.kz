@@ -1,6 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="QHub Games">
-  <rect width="128" height="128" rx="24" fill="#7c3aed" />
-  <rect x="24" y="24" width="80" height="80" rx="10" fill="#ffffff" />
-  <path d="M43 84V44h19c9 0 14 5 14 12 0 5-2 9-7 11l11 17H66L57 69h-3v15H43zm11-24h8c2 0 4-1 4-4s-2-4-4-4h-8v8z" fill="#7c3aed"/>
-  <path d="M89 42c5 0 9 4 9 9 0 4-3 8-7 8-4 0-7-3-7-6 0-2 1-4 3-5-1 3 1 5 3 5 3 0 4-2 4-4 0-3-2-5-5-5-4 0-7 4-7 10 0 8 4 13 10 13v4c-8 0-14-8-14-17 0-7 4-12 11-12z" fill="#ef4444"/>
+  <defs>
+    <linearGradient id="bg" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1e293b" />
+      <stop offset="1" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="card" x1="64" y1="18" x2="64" y2="110" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" />
+      <stop offset="1" stop-color="#f1f5f9" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="24" fill="url(#bg)" />
+  <rect x="19" y="19" width="90" height="90" rx="16" fill="url(#card)" />
+  <rect x="26" y="26" width="76" height="76" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+  <path d="M42 82V46h18c8 0 13 4.5 13 11 0 4.6-2.1 8-6.5 9.9L77 82H63.4l-8-13h-2.7v13H42zm10.7-21h7.2c2.3 0 3.8-1.5 3.8-3.7s-1.5-3.7-3.8-3.7h-7.2V61z" fill="#0f172a"/>
+  <path d="M88 48a8 8 0 0 1 8 8c0 5.6-4.2 9.4-10.3 14.7L82 74l-3.7-3.3C72.2 65.4 68 61.6 68 56a8 8 0 0 1 14.1-5.2L82 51l-.1-.2A8 8 0 0 1 88 48z" fill="#ef4444" />
+  <circle cx="95" cy="95" r="8" fill="#0f172a" />
+  <text x="95" y="98.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8.5" font-weight="700" fill="#ffffff">Q</text>
 </svg>
