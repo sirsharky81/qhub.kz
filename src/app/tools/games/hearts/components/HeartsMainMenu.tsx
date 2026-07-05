@@ -7,6 +7,7 @@ export function HeartsMainMenu({
   onCreateRoom,
   onJoinByCode,
   onCopyRoomCode,
+  onShareRoomCode,
   onLeaveRoom,
   onCloseRoom,
   onStartOnlineGame,
@@ -24,6 +25,7 @@ export function HeartsMainMenu({
   onCreateRoom: () => void;
   onJoinByCode: () => void;
   onCopyRoomCode: () => void;
+  onShareRoomCode: () => void;
   onLeaveRoom: () => void;
   onCloseRoom: () => void;
   onStartOnlineGame: () => void;
@@ -118,7 +120,7 @@ export function HeartsMainMenu({
               onChange={(e) => setPlayerName(e.target.value)}
               onFocus={(e) => keepInputVisible(e.currentTarget)}
               placeholder="Ваше имя"
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm md:text-xs"
+              className="w-full min-w-0 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 md:py-1.5 text-base sm:text-sm md:text-xs"
             />
             {onlineRoomCode ? (
               <div className="space-y-2">
@@ -147,14 +149,21 @@ export function HeartsMainMenu({
                 <button
                   type="button"
                   onClick={onCopyRoomCode}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                 >
                   Скопировать код комнаты
                 </button>
                 <button
                   type="button"
+                  onClick={onShareRoomCode}
+                  className="w-full rounded-lg border border-violet-200 dark:border-violet-900 text-violet-700 dark:text-violet-300 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
+                >
+                  Отправить код
+                </button>
+                <button
+                  type="button"
                   onClick={onLeaveRoom}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                 >
                   Покинуть комнату
                 </button>
@@ -162,7 +171,7 @@ export function HeartsMainMenu({
                   <button
                     type="button"
                     onClick={onCloseRoom}
-                    className="w-full rounded-lg border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                    className="w-full rounded-lg border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                   >
                     Завершить онлайн-игру (закрыть комнату)
                   </button>
@@ -192,7 +201,7 @@ export function HeartsMainMenu({
                 <button
                   type="button"
                   onClick={onJoinByCode}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 text-sm md:text-xs px-3 py-2 md:py-1.5 leading-tight whitespace-normal break-words"
                 >
                   Присоединиться к игре
                 </button>

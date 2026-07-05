@@ -31,6 +31,10 @@ interface OnlineSession {
   joinToken: string;
 }
 
+interface PersistedHeartsOnlineSession extends OnlineSession {
+  playerName: string;
+}
+
 interface RoomInactivity {
   enabled: boolean;
   activePlayerId: string | null;
@@ -51,6 +55,7 @@ interface OnlineRoomResponse {
 
 const HUMAN_ID = "human-player";
 type HeartsPanelTab = "menu" | "rules" | "settings" | "stats";
+const HEARTS_ONLINE_SESSION_KEY = "qhub_hearts_online_session";
 
 function normalizeHeartsMessage(input: string): string {
   if (input === "Card is not legal in current trick") return "Этой картой сейчас ходить нельзя";
@@ -95,6 +100,24 @@ export default function HeartsClient({
   const gameAreaRef = useRef<HTMLDivElement | null>(null);
   const wasGameActiveRef = useRef(false);
 
+  const loadPersistedOnlineSession = useCallback((): PersistedHeartsOnlineSession | null => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(HEARTS_ONLINE_SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<PersistedHeartsOnlineSession>;
+      if (!parsed.roomCode || !parsed.playerId || !parsed.joinToken) return null;
+      return {
+        roomCode: parsed.roomCode,
+        playerId: parsed.playerId,
+        joinToken: parsed.joinToken,
+        playerName: parsed.playerName?.trim() || "Игрок 1",
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
   const startOfflineGame = useCallback(
     (resumeState?: HeartsState) => {
       const definition = createHeartsDefinition({
@@ -128,6 +151,17 @@ export default function HeartsClient({
   useEffect(() => {
     void loadHeartsSettings().then(setSettings).catch(() => {});
     void loadHeartsStats().then(setStats).catch(() => {});
+    const persistedOnline = loadPersistedOnlineSession();
+    if (persistedOnline) {
+      setPlayerName(persistedOnline.playerName);
+      setOnlineSession({
+        roomCode: persistedOnline.roomCode,
+        playerId: persistedOnline.playerId,
+        joinToken: persistedOnline.joinToken,
+      });
+      setMessage(`Восстановлено подключение к комнате ${persistedOnline.roomCode}`);
+      return;
+    }
     void loadHeartsState<HeartsState>().then((saved) => {
       if (saved && saved.phase !== "game_end") {
         startOfflineGame(saved);
@@ -135,7 +169,20 @@ export default function HeartsClient({
         setState(null);
       }
     });
-  }, [startOfflineGame]);
+  }, [loadPersistedOnlineSession, startOfflineGame]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!onlineSession) {
+      window.localStorage.removeItem(HEARTS_ONLINE_SESSION_KEY);
+      return;
+    }
+    const payload: PersistedHeartsOnlineSession = {
+      ...onlineSession,
+      playerName: playerName.trim() || "Игрок 1",
+    };
+    window.localStorage.setItem(HEARTS_ONLINE_SESSION_KEY, JSON.stringify(payload));
+  }, [onlineSession, playerName]);
 
   useEffect(() => {
     void saveHeartsSettings(settings);
@@ -530,6 +577,19 @@ export default function HeartsClient({
       .catch(() => setMessage("Не удалось скопировать код"));
   };
 
+  const shareRoomCode = useCallback(() => {
+    if (!onlineSession?.roomCode) return;
+    const text = `Код комнаты в Червы: ${onlineSession.roomCode}`;
+    if (typeof navigator.share === "function") {
+      void navigator
+        .share({ title: "Червы — код комнаты", text })
+        .then(() => setMessage("Код комнаты отправлен"))
+        .catch(() => {});
+      return;
+    }
+    copyRoomCode();
+  }, [copyRoomCode, onlineSession?.roomCode]);
+
   const doCreateRoom = useCallback(async () => {
     const normalizedName = playerName.trim() || "Игрок 1";
     const response = await fetch("/api/games/hearts/rooms", {
@@ -650,6 +710,7 @@ export default function HeartsClient({
                 onCreateRoom={doCreateRoom}
                 onJoinByCode={doJoinByCode}
                 onCopyRoomCode={copyRoomCode}
+                onShareRoomCode={shareRoomCode}
                 onLeaveRoom={() => void leaveOnlineRoom()}
                 onCloseRoom={() => void closeOnlineRoom()}
                 onStartOnlineGame={() => void startOnlineGame()}
