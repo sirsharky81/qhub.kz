@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { PdfToolLayout } from "../../_pdf-shared/PdfToolLayout";
 import LottoClient from "./LottoClient";
 
@@ -34,7 +35,15 @@ export default function LottoPage() {
       badge={false}
     >
       <div className="flex flex-col flex-1 min-h-0 relative">
-        <LottoClient />
+        <Suspense
+          fallback={
+            <div className="flex min-h-[60vh] items-center justify-center text-sm text-gray-500">
+              Загрузка…
+            </div>
+          }
+        >
+          <LottoClient />
+        </Suspense>
       </div>
     </PdfToolLayout>
   );

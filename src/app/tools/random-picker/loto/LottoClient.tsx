@@ -601,7 +601,7 @@ export default function LottoClient() {
             <>
               <Link
                 href="/tools/games"
-                className="inline-flex text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                className="inline-flex text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline-offset-2 hover:underline"
               >
                 ← Меню игр QHub Games
               </Link>
