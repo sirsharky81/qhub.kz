@@ -49,6 +49,13 @@ interface OnlineRoomResponse {
 const HUMAN_ID = "human-player";
 type HeartsPanelTab = "menu" | "rules" | "settings" | "stats";
 
+function normalizeHeartsMessage(input: string): string {
+  if (input === "Card is not legal in current trick") return "Этой картой сейчас ходить нельзя";
+  if (input === "Not this player's turn") return "Сейчас ход другого игрока";
+  if (input === "Round is not in playing phase") return "Сейчас не фаза хода";
+  return input;
+}
+
 export default function HeartsClient() {
   const [state, setState] = useState<HeartsState | null>(null);
   const [joinCode, setJoinCode] = useState("");
@@ -124,7 +131,7 @@ export default function HeartsClient() {
       at: Date.now(),
     });
     if (!result.valid) {
-      setMessage(result.reason ?? "Недопустимое действие");
+      setMessage(normalizeHeartsMessage(result.reason ?? "Недопустимое действие"));
       return;
     }
     setState(result.state);
@@ -147,7 +154,7 @@ export default function HeartsClient() {
       );
       const data = (await response.json()) as OnlineRoomResponse;
       if (!response.ok) {
-        setMessage(data.error ?? "Ошибка отправки действия");
+        setMessage(normalizeHeartsMessage(data.error ?? "Ошибка отправки действия"));
         return;
       }
       setState(data.state);
@@ -166,6 +173,21 @@ export default function HeartsClient() {
     },
     [localDispatch, onlineSession, remoteDispatch],
   );
+
+  const endAndRestartGame = useCallback(() => {
+    if (!window.confirm("Завершить текущую партию и начать новую?")) return;
+
+    if (onlineSession?.hostSecret) {
+      void fetch(`/api/games/hearts/rooms/${encodeURIComponent(onlineSession.roomCode)}`, {
+        method: "DELETE",
+        headers: { "x-host-secret": onlineSession.hostSecret },
+      }).catch(() => {});
+    }
+    setOnlineSession(null);
+    setInactivity(null);
+    startOfflineGame();
+    setMessage("Партия завершена досрочно. Запущена новая игра.");
+  }, [onlineSession, startOfflineGame]);
 
   const legalCardIds = useMemo(() => {
     if (!state) return new Set<string>();
@@ -421,6 +443,22 @@ export default function HeartsClient() {
               </p>
             )}
             {message && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{message}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={endAndRestartGame}
+                className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-white/70 dark:hover:bg-gray-800"
+              >
+                Завершить и начать заново
+              </button>
+              <button
+                type="button"
+                onClick={() => startOfflineGame()}
+                className="rounded-lg bg-violet-600 hover:bg-violet-500 text-white px-3 py-1.5 text-xs font-medium"
+              >
+                Новая оффлайн партия
+              </button>
+            </div>
           </section>
 
           <PickerSection

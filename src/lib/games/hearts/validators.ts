@@ -59,34 +59,34 @@ export function legalCardsForPlayer(state: HeartsState, playerId: string): Playi
 
 export function isActionLegal(state: HeartsState, action: HeartsAction): { ok: boolean; reason?: string } {
   if (action.type === "select_pass_cards") {
-    if (state.phase !== "passing") return { ok: false, reason: "Passing phase is over" };
+    if (state.phase !== "passing") return { ok: false, reason: "Фаза обмена карт уже завершена" };
     const player = state.players.find((p) => p.id === action.playerId);
-    if (!player) return { ok: false, reason: "Unknown player" };
+    if (!player) return { ok: false, reason: "Неизвестный игрок" };
     if (action.cardIds.length !== 3 && state.passDirection !== "none") {
-      return { ok: false, reason: "Exactly 3 cards must be selected" };
+      return { ok: false, reason: "Нужно выбрать ровно 3 карты" };
     }
     const unique = new Set(action.cardIds);
     if (unique.size !== action.cardIds.length) {
-      return { ok: false, reason: "Duplicate pass cards are not allowed" };
+      return { ok: false, reason: "Нельзя выбрать одну и ту же карту дважды" };
     }
     const handSet = new Set(player.hand.map((card) => card.id));
     const allInHand = action.cardIds.every((cardId) => handSet.has(cardId));
-    if (!allInHand) return { ok: false, reason: "Cannot pass cards not in hand" };
+    if (!allInHand) return { ok: false, reason: "Нельзя передать карту, которой нет на руках" };
     return { ok: true };
   }
 
   if (action.type === "auto_fill_pass") {
-    return { ok: state.phase === "passing", reason: "Auto fill pass can be used only in passing phase" };
+    return { ok: state.phase === "passing", reason: "Автовыбор возможен только в фазе обмена" };
   }
 
   if (action.type === "play_card") {
-    if (state.phase !== "playing") return { ok: false, reason: "Round is not in playing phase" };
-    if (state.currentTurnId !== action.playerId) return { ok: false, reason: "Not this player's turn" };
+    if (state.phase !== "playing") return { ok: false, reason: "Сейчас не фаза хода" };
+    if (state.currentTurnId !== action.playerId) return { ok: false, reason: "Сейчас ход другого игрока" };
     const legal = legalCardsForPlayer(state, action.playerId);
     const chosen = legal.find((card) => card.id === action.cardId);
-    if (!chosen) return { ok: false, reason: "Card is not legal in current trick" };
+    if (!chosen) return { ok: false, reason: "Этой картой сейчас ходить нельзя" };
     return { ok: true };
   }
 
-  return { ok: false, reason: "Unknown action" };
+  return { ok: false, reason: "Неизвестное действие" };
 }
