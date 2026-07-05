@@ -9,7 +9,6 @@ import {
   fetchAccessCheck,
   fetchProfile,
   fetchProfilesMap,
-  fetchRoomStatusLookup,
   joinRoomApi,
   leaveRoomApi,
 } from "@/lib/messenger/client";
@@ -20,8 +19,6 @@ import { getRoomKey, setRoomKey } from "@/lib/messenger/room-keys";
 
 const ROOM_STEP_TIMEOUT_MS = 10_000;
 const ROOM_FLOW_WATCHDOG_MS = 15_000;
-const ROOM_STATUS_RETRY_COUNT = 6;
-const ROOM_STATUS_RETRY_DELAY_MS = 400;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -37,10 +34,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
       },
     );
   });
-}
-
-async function wait(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function MessengerRoomInner() {
@@ -107,24 +100,6 @@ function MessengerRoomInner() {
       } catch {
         // Non-blocking: чат уже открыт, профили можно догрузить позже.
       }
-    }
-
-    async function resolveRoomStatusWithRetry() {
-      let last: Awaited<ReturnType<typeof fetchRoomStatusLookup>> | null = null;
-      for (let attempt = 0; attempt < ROOM_STATUS_RETRY_COUNT; attempt += 1) {
-        const next = await withTimeout(
-          fetchRoomStatusLookup(roomId),
-          ROOM_STEP_TIMEOUT_MS,
-          "Таймаут проверки комнаты",
-        );
-        last = next;
-        if (next.kind !== "not_found") return next;
-        if (attempt < ROOM_STATUS_RETRY_COUNT - 1) {
-          if (!cancelled) setLoadingStep(`Ожидание комнаты (${attempt + 1}/${ROOM_STATUS_RETRY_COUNT})`);
-          await wait(ROOM_STATUS_RETRY_DELAY_MS);
-        }
-      }
-      return last ?? { kind: "not_found" as const };
     }
 
     async function init() {
@@ -197,38 +172,6 @@ function MessengerRoomInner() {
           throw new Error("room key missing after recovery");
         }
 
-        currentStep = "Проверка комнаты";
-        if (!cancelled) setLoadingStep(currentStep);
-        const statusLookup = await resolveRoomStatusWithRetry();
-        if (statusLookup.kind === "not_found") {
-          await cleanupRoomLocalState(roomId);
-          if (!cancelled) {
-            setError("Комната завершена");
-            setLoading(false);
-          }
-          return;
-        }
-        if (statusLookup.kind === "unauthorized") {
-          if (!cancelled) {
-            setError("Сессия истекла. Войдите в мессенджер снова.");
-            setLoading(false);
-          }
-          return;
-        }
-        if (statusLookup.kind !== "ok") {
-          if (!cancelled) {
-            const statusError =
-              statusLookup.kind === "error"
-                ? statusLookup.error
-                : statusLookup.kind === "forbidden"
-                  ? "Доступ к комнате запрещён."
-                  : undefined;
-            setError(statusError ?? "Не удалось получить статус комнаты. Попробуйте снова.");
-            setLoading(false);
-          }
-          return;
-        }
-
         currentStep = "Проверка шифрования";
         if (!cancelled) setLoadingStep(currentStep);
         const key = await withTimeout(
@@ -244,6 +187,14 @@ function MessengerRoomInner() {
           "Таймаут входа в комнату",
         );
         if (!joined.ok) {
+          if (joined.error?.toLowerCase().includes("не найдена")) {
+            await cleanupRoomLocalState(roomId);
+            if (!cancelled) {
+              setError("Комната завершена");
+              setLoading(false);
+            }
+            return;
+          }
           if (!cancelled) {
             setError(joined.error ?? "Не удалось войти в комнату");
             setLoading(false);
