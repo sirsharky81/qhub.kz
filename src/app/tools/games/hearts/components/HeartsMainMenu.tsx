@@ -31,6 +31,27 @@ export function HeartsMainMenu({
   onlineStatus: "open" | "playing" | "finished" | null;
   onlinePlayersCount: number;
 }) {
+  const keepInputVisible = (input: HTMLInputElement) => {
+    const scrollContainer = input.closest('[data-hearts-scroll="true"]');
+    const scrollToInput = () => {
+      if (scrollContainer instanceof HTMLElement) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const inputRect = input.getBoundingClientRect();
+        const topGap = inputRect.top - containerRect.top;
+        const desiredTop = 88;
+        scrollContainer.scrollTo({
+          top: scrollContainer.scrollTop + topGap - desiredTop,
+          behavior: "auto",
+        });
+        return;
+      }
+      input.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    };
+    requestAnimationFrame(scrollToInput);
+    window.setTimeout(scrollToInput, 250);
+    window.setTimeout(scrollToInput, 500);
+  };
+
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
       <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Главное меню</h2>
@@ -50,7 +71,7 @@ export function HeartsMainMenu({
         <input
           value={playerName}
           onChange={(e) => setPlayerName(e.target.value)}
-          onFocus={(e) => e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })}
+          onFocus={(e) => keepInputVisible(e.currentTarget)}
           placeholder="Ваше имя"
           className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-base sm:text-sm"
         />
@@ -116,7 +137,7 @@ export function HeartsMainMenu({
               <input
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                onFocus={(e) => e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })}
+                onFocus={(e) => keepInputVisible(e.currentTarget)}
                 placeholder="Код комнаты"
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-base sm:text-sm"
               />

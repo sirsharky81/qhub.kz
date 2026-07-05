@@ -569,7 +569,7 @@ export default function HeartsClient() {
 
   return (
     <main className="flex flex-col flex-1 min-h-0 bg-gray-50 dark:bg-gray-950">
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" data-hearts-scroll="true">
         <div className="mx-auto w-full max-w-2xl px-4 py-5 space-y-4">
           <Link href="/tools/games" className="inline-flex text-xs text-violet-600 dark:text-violet-400 hover:underline">
             ← QHub Games
