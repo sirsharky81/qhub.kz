@@ -1,4 +1,3 @@
-import type { LottoPlayer } from "@/lib/random-picker/lotto-tickets";
 import type { LottoGameState } from "@/lib/random-picker/lotto";
 import type { LottoParticipantView, LottoRoomSnapshot } from "./types";
 
@@ -33,14 +32,15 @@ export function clearParticipantSession(): void {
 }
 
 export async function createLottoRoomApi(input: {
-  players: LottoPlayer[];
+  hostName: string;
   settings: LottoGameState["settings"];
   winRules: LottoGameState["winRules"];
-  cardsGenerated: boolean;
 }): Promise<{
   roomCode: string;
   hostSecret: string;
-  players: Array<LottoPlayer & { joinCode: string; joinToken: string }>;
+  playerId: string;
+  joinToken: string;
+  playerName: string;
 }> {
   const res = await fetch("/api/lotto/rooms", {
     method: "POST",
@@ -54,7 +54,9 @@ export async function createLottoRoomApi(input: {
   return res.json() as Promise<{
     roomCode: string;
     hostSecret: string;
-    players: Array<LottoPlayer & { joinCode: string; joinToken: string }>;
+    playerId: string;
+    joinToken: string;
+    playerName: string;
   }>;
 }
 
@@ -87,12 +89,12 @@ export async function syncLottoRoomApi(
 
 export async function joinLottoRoomApi(
   roomCode: string,
-  joinCode: string,
+  playerName: string,
 ): Promise<ParticipantSession> {
   const res = await fetch(`/api/lotto/rooms/${encodeURIComponent(roomCode)}/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ joinCode }),
+    body: JSON.stringify({ playerName }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -103,7 +105,7 @@ export async function joinLottoRoomApi(
   return data;
 }
 
-export async function joinLottoRoomByTokenApi(
+export async function reconnectLottoRoomApi(
   roomCode: string,
   playerId: string,
   joinToken: string,
@@ -154,31 +156,13 @@ export async function pollLottoRoomApi(
   return res.json() as Promise<LottoParticipantView>;
 }
 
-export function buildJoinUrl(
-  origin: string,
-  roomCode: string,
-  playerId: string,
-  joinToken: string,
-): string {
-  const params = new URLSearchParams({
-    join: "1",
-    room: roomCode,
-    player: playerId,
-    token: joinToken,
-  });
+export function buildRoomJoinUrl(origin: string, roomCode: string): string {
+  const params = new URLSearchParams({ room: roomCode });
   return `${origin}/tools/random-picker/loto?${params.toString()}`;
 }
 
-export function parseJoinSearchParams(search: string): {
-  roomCode: string;
-  playerId: string;
-  joinToken: string;
-} | null {
+export function parseRoomCodeSearchParam(search: string): string | null {
   const params = new URLSearchParams(search);
-  if (params.get("join") !== "1") return null;
   const roomCode = params.get("room")?.trim();
-  const playerId = params.get("player")?.trim();
-  const joinToken = params.get("token")?.trim();
-  if (!roomCode || !playerId || !joinToken) return null;
-  return { roomCode, playerId, joinToken };
+  return roomCode ? roomCode.toUpperCase() : null;
 }

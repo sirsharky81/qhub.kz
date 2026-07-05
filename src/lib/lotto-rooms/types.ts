@@ -12,7 +12,6 @@ export interface LottoRoomPlayer {
   ticket: LottoTicket | null;
   wins: LottoWinType[];
   joinToken: string;
-  joinCode: string;
   joined: boolean;
   left: boolean;
 }

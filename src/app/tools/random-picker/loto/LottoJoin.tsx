@@ -1,16 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { CODE_SCANNER_SIMPLE_URL } from "@/lib/code-scanner/url-utils";
 import {
   clearParticipantSession,
   joinLottoRoomApi,
-  joinLottoRoomByTokenApi,
   leaveLottoRoomApi,
   loadParticipantSession,
-  parseJoinSearchParams,
+  parseRoomCodeSearchParam,
   pollLottoRoomApi,
+  reconnectLottoRoomApi,
   type ParticipantSession,
 } from "@/lib/lotto-rooms/client";
 import type { LottoParticipantView } from "@/lib/lotto-rooms/types";
@@ -21,11 +19,10 @@ import { LottoTicketCard } from "./LottoTicketCard";
 import { getCompletedLineIndices } from "@/lib/random-picker/lotto-tickets";
 
 export function LottoJoin() {
-  const router = useRouter();
   const [session, setSession] = useState<ParticipantSession | null>(null);
   const [view, setView] = useState<LottoParticipantView | null>(null);
   const [roomCodeInput, setRoomCodeInput] = useState("");
-  const [joinCodeInput, setJoinCodeInput] = useState("");
+  const [playerNameInput, setPlayerNameInput] = useState("Игрок 1");
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [version, setVersion] = useState(0);
@@ -52,26 +49,13 @@ export function LottoJoin() {
   useEffect(() => {
     const stored = loadParticipantSession();
     if (stored) {
-      void connect(stored);
-      return;
+      void reconnectLottoRoomApi(stored.roomCode, stored.playerId, stored.joinToken)
+        .then(connect)
+        .catch(() => clearParticipantSession());
     }
-    const params = parseJoinSearchParams(window.location.search);
-    if (params) {
-      void (async () => {
-        setJoining(true);
-        try {
-          const s = await joinLottoRoomByTokenApi(
-            params.roomCode,
-            params.playerId,
-            params.joinToken,
-          );
-          await connect(s);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Не удалось присоединиться");
-        } finally {
-          setJoining(false);
-        }
-      })();
+    const roomFromUrl = parseRoomCodeSearchParam(window.location.search);
+    if (roomFromUrl) {
+      setRoomCodeInput(roomFromUrl);
     }
   }, [connect]);
 
@@ -95,12 +79,12 @@ export function LottoJoin() {
 
   const handleJoin = async () => {
     const room = roomCodeInput.trim().toUpperCase();
-    const code = joinCodeInput.trim().toUpperCase();
-    if (!room || !code) return;
+    const name = playerNameInput.trim();
+    if (!room || !name) return;
     setJoining(true);
     setError(null);
     try {
-      const s = await joinLottoRoomApi(room, code);
+      const s = await joinLottoRoomApi(room, name);
       await connect(s);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось присоединиться");
@@ -146,7 +130,10 @@ export function LottoJoin() {
         </div>
 
         {room.status === "idle" && (
-          <p className="text-xs text-gray-500">Ожидание старта — ведущий ещё не начал игру.</p>
+          <p className="text-xs text-gray-500">
+            Ожидание старта — ведущий ещё не начал игру. Игроков в комнате:{" "}
+            <strong>{room.players.filter((p) => p.joined && !p.left).length}</strong>.
+          </p>
         )}
 
         {room.status !== "idle" && (
@@ -185,18 +172,12 @@ export function LottoJoin() {
           </div>
         )}
 
-        <LottoTicketCard
-          ticket={ticket}
-          drawn={room.drawn}
-          highlightRows={highlightRows}
-        />
+        <LottoTicketCard ticket={ticket} drawn={room.drawn} highlightRows={highlightRows} />
 
         {room.drawn.length > 0 && (
           <div className="space-y-2 pt-1 border-t border-gray-100 dark:border-gray-800">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] text-gray-500 uppercase tracking-wide">
-                Выпавшие бочки
-              </span>
+              <span className="text-[11px] text-gray-500 uppercase tracking-wide">Выпавшие бочки</span>
               <span className="text-xs text-gray-600 dark:text-gray-400 tabular-nums">
                 <strong className="text-gray-800 dark:text-gray-200">{room.drawn.length}</strong> из{" "}
                 {LOTTO_POOL_MAX}
@@ -228,8 +209,7 @@ export function LottoJoin() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-        Введите код комнаты и персональный код игрока от ведущего или отсканируйте QR на его
-        устройстве.
+        Введите код комнаты и ваше имя. После входа ожидайте старта игры от создателя комнаты.
       </p>
       <div className="space-y-2">
         <label className="block text-[11px] text-gray-500 uppercase tracking-wide">Код комнаты</label>
@@ -242,27 +222,20 @@ export function LottoJoin() {
         />
       </div>
       <div className="space-y-2">
-        <label className="block text-[11px] text-gray-500 uppercase tracking-wide">Код игрока</label>
+        <label className="block text-[11px] text-gray-500 uppercase tracking-wide">Имя игрока</label>
         <input
           type="text"
-          value={joinCodeInput}
-          onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-          placeholder="XY12AB34"
-          className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-mono uppercase"
+          value={playerNameInput}
+          onChange={(e) => setPlayerNameInput(e.target.value)}
+          placeholder="Игрок 1"
+          className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
         />
       </div>
       {error && <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>}
       <PickerButton
-        variant="secondary"
-        className="w-full"
-        onClick={() => router.push(CODE_SCANNER_SIMPLE_URL)}
-      >
-        Сканировать QR
-      </PickerButton>
-      <PickerButton
         onClick={() => void handleJoin()}
         className="w-full whitespace-normal break-words leading-tight"
-        disabled={joining || !roomCodeInput.trim() || !joinCodeInput.trim()}
+        disabled={joining || !roomCodeInput.trim() || !playerNameInput.trim()}
       >
         {joining ? "Подключение…" : "Присоединиться"}
       </PickerButton>
