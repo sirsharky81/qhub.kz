@@ -1,33 +1,30 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { MessengerShell } from "../../components/MessengerShell";
 import { messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
-import {
-  fetchRoomManage,
-  mutateRoomManage,
-  type RoomManageParticipant,
-  type RoomManageSnapshot,
-} from "@/lib/messenger/client";
-import { buildRoomJoinUrl, exportRoomKeyBase64Url } from "@/lib/messenger/crypto";
+import { fetchRoomManage, mutateRoomManage, type RoomManageParticipant, type RoomManageSnapshot } from "@/lib/messenger/client";
 
-interface Props {
-  open: boolean;
-  roomId: string;
-  aesKey: CryptoKey;
-  onClose: () => void;
+function roomSettingsHref(roomId: string): string {
+  return `/tools/messenger/room/settings?id=${encodeURIComponent(roomId)}`;
 }
 
-export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
+export function RoomSettingsPageClient() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const roomId = useMemo(() => String(searchParams.get("id") ?? "").toUpperCase(), [searchParams]);
   const [snapshot, setSnapshot] = useState<RoomManageSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [addPhone, setAddPhone] = useState("");
   const [lastTargetPhone, setLastTargetPhone] = useState<string>("");
   const [busyPhone, setBusyPhone] = useState<string | null>(null);
-  const [roomKey, setRoomKey] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!roomId) return;
     setLoading(true);
     setError(null);
     try {
@@ -43,19 +40,12 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
   }, [roomId]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!roomId) {
+      router.replace("/tools/messenger/home");
+      return;
+    }
     void load();
-  }, [open, load]);
-
-  useEffect(() => {
-    if (!open) return;
-    void exportRoomKeyBase64Url(aesKey).then(setRoomKey).catch(() => setRoomKey(null));
-  }, [open, aesKey]);
-
-  const joinUrl = useMemo(() => {
-    if (!roomKey) return "";
-    return buildRoomJoinUrl(roomId, roomKey);
-  }, [roomId, roomKey]);
+  }, [roomId, load, router]);
 
   async function runAction(action: "add" | "remove" | "promote" | "demote", targetPhone: string) {
     setBusyPhone(targetPhone);
@@ -76,36 +66,28 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
   }
 
   function openInviteDm(phone: string) {
-    if (!joinUrl) return;
+    const joinUrl = messengerRoomUrl(roomId);
     const text = `Приглашение в комнату ${roomId}: ${joinUrl}`;
-    const href =
-      `${messengerChatUrl(phone, messengerRoomUrl(roomId))}` + `&draft=${encodeURIComponent(text)}`;
+    const href = `${messengerChatUrl(phone, roomSettingsHref(roomId))}&draft=${encodeURIComponent(text)}`;
     window.location.href = href;
   }
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-[250] bg-black/35" onClick={onClose} role="button" tabIndex={-1}>
-      <div
-        className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white p-4 shadow-2xl max-h-[80vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900">Настройки комнаты {roomId}</h3>
-          <button type="button" onClick={onClose} className="text-xs text-gray-500">
-            Закрыть
-          </button>
-        </div>
-
+    <MessengerShell
+      variant="chat"
+      title={`Настройки комнаты ${roomId}`}
+      backHref={messengerRoomUrl(roomId)}
+      subtitle={<span className="text-xs text-gray-500">Отдельная страница управления комнатой</span>}
+    >
+      <div className="p-4 space-y-4 max-w-xl w-full mx-auto">
         {loading ? (
           <p className="text-sm text-gray-500">Загрузка…</p>
         ) : (
-          <div className="space-y-4">
-            <section className="rounded-xl border border-gray-200 p-3">
+          <>
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
               <p className="text-xs font-semibold text-gray-700">Приглашение</p>
               <p className="text-[11px] text-gray-500 mt-1">Код: {roomId}</p>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex gap-2 flex-wrap">
                 <button
                   type="button"
                   className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
@@ -116,8 +98,7 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
                 <button
                   type="button"
                   className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
-                  onClick={() => void navigator.clipboard.writeText(joinUrl)}
-                  disabled={!joinUrl}
+                  onClick={() => void navigator.clipboard.writeText(messengerRoomUrl(roomId))}
                 >
                   Копировать ссылку
                 </button>
@@ -127,10 +108,10 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
               </p>
             </section>
 
-            <section className="rounded-xl border border-gray-200 p-3 space-y-2">
+            <section className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
               <p className="text-xs font-semibold text-gray-700">Добавить по номеру телефона</p>
               <p className="text-[11px] text-gray-500">
-                Нет выпадающего списка: укажите номер вручную. Добавление возможно только для active whitelist и зарегистрированных в мессенджере.
+                Без выпадающих списков: укажите номер вручную. Добавление только для active whitelist и зарегистрированных пользователей.
               </p>
               <div className="flex gap-2">
                 <input
@@ -163,7 +144,7 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
               )}
             </section>
 
-            <section className="rounded-xl border border-gray-200 p-3">
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
               <p className="text-xs font-semibold text-gray-700 mb-2">Участники</p>
               <div className="space-y-2">
                 {(snapshot?.participants ?? []).map((p: RoomManageParticipant) => {
@@ -177,7 +158,7 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
                           <p className="text-sm text-gray-900">{p.phone}</p>
                           <p className="text-[11px] text-gray-500">role: {role}</p>
                         </div>
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 flex-wrap justify-end">
                           {!isOwner && role !== "admin" && (
                             <button
                               type="button"
@@ -224,9 +205,14 @@ export function RoomSettingsModal({ open, roomId, aesKey, onClose }: Props) {
             </section>
 
             {error && <p className="text-xs text-red-600">{error}</p>}
-          </div>
+            <div className="pt-1">
+              <Link href={messengerRoomUrl(roomId)} className="text-sm text-gray-500 underline">
+                Вернуться в комнату
+              </Link>
+            </div>
+          </>
         )}
       </div>
-    </div>
+    </MessengerShell>
   );
 }
