@@ -165,6 +165,7 @@ export default function LottoClient() {
   const [confirmNew, setConfirmNew] = useState(false);
   const [hostName, setHostName] = useState("Игрок 1");
   const [creatingRoom, setCreatingRoom] = useState(false);
+  const [closingRoom, setClosingRoom] = useState(false);
   const [hostSession, setHostSession] = useState<ParticipantSession | null>(null);
   const [hostRoomVersion, setHostRoomVersion] = useState(0);
   const [prePanelTab, setPrePanelTab] = useState<PrePanelTab>(() => {
@@ -360,6 +361,25 @@ export default function LottoClient() {
       activeWinAlert: null,
     }));
   }, [toRoomPlayers]);
+
+  const handleCloseRoom = useCallback(async () => {
+    const g = gameRef.current;
+    const net = g.network;
+    if (!net?.roomCode || !net.hostSecret) return;
+    if (!window.confirm("Закрыть текущую онлайн-комнату?")) return;
+    setClosingRoom(true);
+    try {
+      await deleteLottoRoomApi(net.roomCode, net.hostSecret);
+      setHostSession(null);
+      setHostRoomVersion(0);
+      setGame((prev) => ({
+        ...createNewGame(prev.settings),
+        winRules: prev.winRules,
+      }));
+    } finally {
+      setClosingRoom(false);
+    }
+  }, []);
 
   useEffect(() => {
     const net = network;
@@ -666,7 +686,9 @@ export default function LottoClient() {
                   isActive={isActive}
                   roomCode={network?.roomCode ?? null}
                   creatingRoom={creatingRoom}
+                  closingRoom={closingRoom}
                   onCreateRoom={handleCreateRoom}
+                  onCloseRoom={handleCloseRoom}
                   onWinRulesChange={handleWinRulesChange}
                   onGenerateCards={handleGenerateCards}
                   onStartGame={startGame}

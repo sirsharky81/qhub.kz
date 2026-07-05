@@ -20,7 +20,9 @@ interface LottoParticipantsProps {
   isActive: boolean;
   roomCode: string | null;
   creatingRoom: boolean;
+  closingRoom: boolean;
   onCreateRoom: () => Promise<void>;
+  onCloseRoom: () => Promise<void>;
   onWinRulesChange: (rules: LottoWinRules) => void;
   onGenerateCards: () => Promise<void>;
   onStartGame?: () => void;
@@ -35,7 +37,9 @@ export function LottoParticipants({
   isActive,
   roomCode,
   creatingRoom,
+  closingRoom,
   onCreateRoom,
+  onCloseRoom,
   onWinRulesChange,
   onGenerateCards,
   onStartGame,
@@ -112,6 +116,13 @@ export function LottoParticipants({
             </PickerButton>
             <PickerButton variant="secondary" onClick={() => void handleShareRoom()}>
               Поделиться
+            </PickerButton>
+            <PickerButton
+              variant="ghost"
+              onClick={() => void onCloseRoom()}
+              disabled={closingRoom}
+            >
+              {closingRoom ? "Закрытие…" : "Закрыть комнату"}
             </PickerButton>
           </div>
 

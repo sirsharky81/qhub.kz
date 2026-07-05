@@ -23,7 +23,7 @@ export default function GamesPage() {
             </p>
             <h1 className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">Игры QHub</h1>
             <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-              Игровой раздел с карточными играми и классическим русским лото.
+              Игровой раздел с карточными и настольными играми.
             </p>
           </header>
 
@@ -61,9 +61,9 @@ export default function GamesPage() {
                   </Link>
                   <Link
                     href="/tools/games/hearts?mode=join-online"
-                    className="inline-flex rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    className="inline-flex whitespace-nowrap rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
-                    Присоединиться к онлайн игре
+                    Присоединиться к игре
                   </Link>
                 </div>
               </article>
