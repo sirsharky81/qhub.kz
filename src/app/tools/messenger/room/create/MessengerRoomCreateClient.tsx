@@ -140,7 +140,11 @@ export function MessengerRoomCreateClient() {
           onClick={() => {
             setEntering(true);
             setError(null);
-            void withTimeout(joinRoomApi(roomId), ROOM_STEP_TIMEOUT_MS, "Таймаут входа в комнату")
+            void withTimeout(
+              joinRoomApi(roomId, { allowCreateOnMissing: true }),
+              ROOM_STEP_TIMEOUT_MS,
+              "Таймаут входа в комнату",
+            )
               .then((r) => {
                 if (r.ok) {
                   router.replace(roomOpenUrlWithKey(roomId, roomKey));

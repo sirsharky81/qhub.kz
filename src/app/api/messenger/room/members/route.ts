@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const redisReady = await assertMessengerRedisReady();
     if (!redisReady.ok) return roomStorageUnavailable(redisReady.error);
     const { phone } = await assertMessengerSession();
-    let body: { roomId?: string; action?: "join" | "leave" };
+    let body: { roomId?: string; action?: "join" | "leave"; allowCreateOnMissing?: boolean };
     try {
       body = await request.json();
     } catch {
@@ -21,6 +21,7 @@ export async function POST(request: Request) {
 
     const roomId = (body.roomId ?? "").toUpperCase();
     const action = body.action ?? "join";
+    const allowCreateOnMissing = body.allowCreateOnMissing === true;
     if (!roomId) {
       return NextResponse.json({ error: "Укажите roomId" }, { status: 400 });
     }
@@ -31,10 +32,12 @@ export async function POST(request: Request) {
     }
 
     const meta = await getRoomMeta(roomId);
-    if (!meta) {
+    if (!meta && allowCreateOnMissing) {
       // Self-heal: in rare distributed/storage races room meta may be temporarily absent
       // right after create, so restore it on first join instead of hard failing.
       await createRoomMeta(roomId, phone);
+    } else if (!meta) {
+      return NextResponse.json({ error: "Комната не найдена" }, { status: 404 });
     }
 
     const participants = await joinRoomParticipant(roomId, phone);
