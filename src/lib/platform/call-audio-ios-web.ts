@@ -28,34 +28,35 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
   const outputs = devices.filter((d) => d.kind === "audiooutput");
   if (outputs.length === 0) return undefined;
 
-  const matchesSpeaker = (label: string) =>
-    /speaker|громк|built.?in.?speaker|main|громкоговор/i.test(label);
-  const matchesEarpiece = (label: string) =>
-    /receiver|earpiece|трубк|built.?in.?receiver/i.test(label);
+  const matchesSpeaker = (value: string) =>
+    /speaker|громк|built.?in.?speaker|main|громкоговор/i.test(value);
+  const matchesEarpiece = (value: string) =>
+    /receiver|earpiece|трубк|built.?in.?receiver/i.test(value);
+  const describe = (device: MediaDeviceInfo) =>
+    `${device.label ?? ""} ${device.deviceId ?? ""}`.toLowerCase();
+  const normalized = outputs.map((d) => ({ id: d.deviceId, descriptor: describe(d) }));
 
-  const normalized = outputs.map((d) => ({ id: d.deviceId, label: d.label.toLowerCase() }));
-  for (const device of outputs) {
-    const label = device.label.toLowerCase();
-    if (speaker && matchesSpeaker(label)) return device.deviceId;
-    if (!speaker && matchesEarpiece(label)) return device.deviceId;
+  for (const device of normalized) {
+    if (speaker && matchesSpeaker(device.descriptor)) return device.id;
+    if (!speaker && matchesEarpiece(device.descriptor)) return device.id;
   }
 
-  if (outputs.length >= 2) {
+  if (normalized.length >= 2) {
     const first = normalized[0];
     const last = normalized[normalized.length - 1];
-    const firstIsReceiver = first ? matchesEarpiece(first.label) : false;
-    const lastIsReceiver = last ? matchesEarpiece(last.label) : false;
+    const firstIsReceiver = first ? matchesEarpiece(first.descriptor) : false;
+    const lastIsReceiver = last ? matchesEarpiece(last.descriptor) : false;
     if (speaker) {
       if (firstIsReceiver && !lastIsReceiver) return last?.id;
-      return first?.id;
+      if (lastIsReceiver && !firstIsReceiver) return first?.id;
+      return undefined;
     }
-    if (!speaker) {
-      if (firstIsReceiver) return first.id;
-      if (lastIsReceiver) return last?.id;
-      return last?.id;
-    }
+    if (firstIsReceiver) return first.id;
+    if (lastIsReceiver) return last?.id;
+    return undefined;
   }
-  return outputs[0]?.deviceId;
+  // For single/ambiguous outputs keep legacy element-type routing as source of truth.
+  return undefined;
 }
 
 export async function applySinkIdToElement(
