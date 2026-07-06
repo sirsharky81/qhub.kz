@@ -531,7 +531,7 @@ export class CallController {
     prepareAudioSessionForCall();
     this.pc?.setSpeakerphone(speakerOn);
     this.patch({ speakerOn });
-    void setCallProximityEnabled(!speakerOn);
+    void setCallProximityEnabled(this.state.callMode === "audio" && !speakerOn);
     if (this.state.phase === "active") {
       void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
         speakerOn,
@@ -1111,7 +1111,7 @@ export class CallController {
       speakerOn: this.state.speakerOn,
       videoEnabled: this.state.videoEnabled,
     });
-    void setCallProximityEnabled(!this.state.speakerOn);
+    void setCallProximityEnabled(this.state.callMode === "audio" && !this.state.speakerOn);
     if (this.pollCallId) {
       this.startHeartbeat(this.pollCallId);
     }

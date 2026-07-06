@@ -3,7 +3,7 @@ import type { CallPollResponse, InitiateCallResponse } from "./types";
 import type { CallSignalType } from "../types";
 
 const REQUEST_TIMEOUT_MS = 8000;
-const POLL_REQUEST_TIMEOUT_MS = 2500;
+const POLL_REQUEST_TIMEOUT_MS = 2200;
 
 /**
  * iOS (especially PWA/standalone) can silently stall an in-flight fetch for a

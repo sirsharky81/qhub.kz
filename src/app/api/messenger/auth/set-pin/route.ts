@@ -35,7 +35,10 @@ export async function POST(request: Request) {
 
     const { phone } = await assertWhitelistedPhone(rawPhone);
     const session = await getMessengerSession();
-    if (!session || normalizeKzPhone(session.phone) !== normalizeKzPhone(phone)) {
+    // iOS Safari/PWA can occasionally lose the intermediate identify/login cookie
+    // on first install flow. Allow first-time PIN set for whitelisted phone even
+    // without the transient session, but still block explicit phone mismatch.
+    if (session && normalizeKzPhone(session.phone) !== normalizeKzPhone(phone)) {
       throw new MessengerAuthError("Требуется вход в мессенджер", 403);
     }
 
