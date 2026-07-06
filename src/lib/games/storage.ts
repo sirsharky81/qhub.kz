@@ -1,7 +1,7 @@
 const DB_NAME = "qhub-games";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
-type StoreName = "hearts_state" | "settings" | "stats";
+type StoreName = "hearts_state" | "spider_state" | "settings" | "stats";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -15,6 +15,7 @@ function openDb(): Promise<IDBDatabase> {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains("hearts_state")) db.createObjectStore("hearts_state");
+      if (!db.objectStoreNames.contains("spider_state")) db.createObjectStore("spider_state");
       if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings");
       if (!db.objectStoreNames.contains("stats")) db.createObjectStore("stats");
     };
@@ -104,4 +105,40 @@ export async function saveHeartsStats(stats: HeartsStats): Promise<void> {
 export async function loadHeartsStats(): Promise<HeartsStats> {
   const value = await tx<IDBValidKey>("stats", "readonly", (store) => store.get("hearts"));
   return { ...DEFAULT_HEARTS_STATS, ...(((value as unknown) as HeartsStats | undefined) ?? {}) };
+}
+
+export interface SpiderStats {
+  games: number;
+  wins: number;
+  bestMoves: number | null;
+  bestTimeSec: number | null;
+}
+
+export const DEFAULT_SPIDER_STATS: SpiderStats = {
+  games: 0,
+  wins: 0,
+  bestMoves: null,
+  bestTimeSec: null,
+};
+
+export async function saveSpiderState(state: unknown): Promise<void> {
+  await tx("spider_state", "readwrite", (store) => store.put(state, "current"));
+}
+
+export async function loadSpiderState<T>(): Promise<T | null> {
+  const value = await tx<IDBValidKey>("spider_state", "readonly", (store) => store.get("current"));
+  return (value as T | undefined) ?? null;
+}
+
+export async function clearSpiderState(): Promise<void> {
+  await tx("spider_state", "readwrite", (store) => store.delete("current"));
+}
+
+export async function saveSpiderStats(stats: SpiderStats): Promise<void> {
+  await tx("stats", "readwrite", (store) => store.put(stats, "spider"));
+}
+
+export async function loadSpiderStats(): Promise<SpiderStats> {
+  const value = await tx<IDBValidKey>("stats", "readonly", (store) => store.get("spider"));
+  return { ...DEFAULT_SPIDER_STATS, ...(((value as unknown) as SpiderStats | undefined) ?? {}) };
 }

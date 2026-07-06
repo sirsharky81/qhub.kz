@@ -33,7 +33,7 @@ export default function GamesPage() {
                 Карточные игры
               </h2>
             </div>
-            <div className="p-3">
+            <div className="p-3 space-y-3">
               <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-slate-50/70 dark:from-gray-900 dark:to-slate-900/40">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -64,6 +64,28 @@ export default function GamesPage() {
                     className="inline-flex whitespace-nowrap rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
                     Присоединиться к игре
+                  </Link>
+                </div>
+              </article>
+
+              <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-emerald-50/60 dark:from-gray-900 dark:to-emerald-950/20">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Пасьянс «Паук»</h3>
+                    <p className="mt-1 text-xs text-gray-500 leading-relaxed">
+                      Классический пасьянс на двух колодах: 1, 2 или 4 масти. Соберите 8 последовательностей K→A.
+                    </p>
+                  </div>
+                  <span className="text-[10px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    Solitaire
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <Link
+                    href="/tools/games/spider"
+                    className="inline-flex rounded-lg bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2"
+                  >
+                    Играть
                   </Link>
                 </div>
               </article>
