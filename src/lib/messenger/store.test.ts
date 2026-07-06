@@ -2,16 +2,26 @@ import { afterEach, describe, expect, it } from "vitest";
 import { deriveDmChatId, normalizeKzPhone } from "./phone";
 import {
   applyDmUnreadOnMessage,
+  applyRoomUnreadOnMessage,
   countPinnedDialogs,
   getDmDialogSummariesForUser,
+  getRoomDialogsForUser,
   loadDialogPrefs,
   markDmDialogRead,
+  markRoomDialogRead,
+  createRoomMeta,
   pushDmEnvelope,
   setPinnedDialogsOrder,
   setDialogPrefs,
   touchDmUserIndex,
 } from "./store";
-import { REDIS_DIALOG_PREFS_PREFIX, REDIS_DM_PREFIX, REDIS_DM_USER_INDEX_PREFIX } from "./constants";
+import {
+  REDIS_DIALOG_PREFS_PREFIX,
+  REDIS_DM_PREFIX,
+  REDIS_DM_USER_INDEX_PREFIX,
+  REDIS_ROOM_PREFIX,
+  REDIS_ROOM_USER_INDEX_PREFIX,
+} from "./constants";
 import { redisDel, redisGetJson, redisSet } from "./redis";
 
 function dmIndexKey(phone: string): string {
@@ -26,12 +36,25 @@ function dmMetaKey(chatId: string): string {
   return `${REDIS_DM_PREFIX}${chatId}:meta`;
 }
 
+function roomIndexKey(phone: string): string {
+  return `${REDIS_ROOM_USER_INDEX_PREFIX}${normalizeKzPhone(phone)}`;
+}
+
 async function cleanupDmKeys(chatId: string, ...phones: string[]): Promise<void> {
   await redisDel(
     dmMessagesKey(chatId),
     dmMetaKey(chatId),
     ...phones.map((p) => dmIndexKey(p)),
     ...phones.map((p) => `${REDIS_DIALOG_PREFS_PREFIX}${normalizeKzPhone(p)}`),
+  );
+}
+
+async function cleanupRoomKeys(roomId: string, ...phones: string[]): Promise<void> {
+  await redisDel(
+    `${REDIS_ROOM_PREFIX}${roomId}:messages`,
+    `${REDIS_ROOM_PREFIX}${roomId}:meta`,
+    `${REDIS_ROOM_PREFIX}${roomId}:participants`,
+    ...phones.map((p) => roomIndexKey(p)),
   );
 }
 
@@ -203,5 +226,75 @@ describe("messenger dm unread cursor", () => {
     expect(await countPinnedDialogs(me)).toBe(2);
 
     await cleanupDmKeys(chat2, me, peer2);
+  });
+});
+
+describe("messenger room unread cursor", () => {
+  const owner = "+77011110011";
+  const member = "+77011110012";
+  const roomId = "ROOMT1";
+
+  afterEach(async () => {
+    await cleanupRoomKeys(roomId, owner, member);
+  });
+
+  it("increments room unread for participants except sender", async () => {
+    await createRoomMeta(roomId, owner);
+    await applyRoomUnreadOnMessage({
+      roomId,
+      senderPhone: owner,
+      type: "text",
+      ts: 5000,
+      currentRoomVersion: 2,
+      participantPhones: [owner, member],
+      viewingPhones: new Set<string>(),
+    });
+
+    const ownerDialog = (await getRoomDialogsForUser(owner)).find((d) => d.roomId === roomId);
+    const memberDialog = (await getRoomDialogsForUser(member)).find((d) => d.roomId === roomId);
+
+    expect(ownerDialog?.unreadCount).toBe(0);
+    expect(ownerDialog?.lastReadVersion).toBe(2);
+    expect(ownerDialog?.lastMessageType).toBe("text");
+    expect(memberDialog?.unreadCount).toBe(1);
+    expect(memberDialog?.latestUnreadAt).toBe(5000);
+    expect(memberDialog?.lastMessageAt).toBe(5000);
+  });
+
+  it("does not increment unread while participant views room", async () => {
+    await createRoomMeta(roomId, owner);
+    await applyRoomUnreadOnMessage({
+      roomId,
+      senderPhone: owner,
+      type: "image",
+      ts: 6000,
+      currentRoomVersion: 3,
+      participantPhones: [owner, member],
+      viewingPhones: new Set<string>([member]),
+    });
+
+    const memberDialog = (await getRoomDialogsForUser(member)).find((d) => d.roomId === roomId);
+    expect(memberDialog?.unreadCount).toBe(0);
+    expect(memberDialog?.latestUnreadAt).toBeNull();
+    expect(memberDialog?.lastMessageType).toBe("image");
+  });
+
+  it("resets room unread with markRoomDialogRead", async () => {
+    await createRoomMeta(roomId, owner);
+    await applyRoomUnreadOnMessage({
+      roomId,
+      senderPhone: owner,
+      type: "audio",
+      ts: 7000,
+      currentRoomVersion: 4,
+      participantPhones: [owner, member],
+      viewingPhones: new Set<string>(),
+    });
+
+    await markRoomDialogRead(member, roomId);
+    const memberDialog = (await getRoomDialogsForUser(member)).find((d) => d.roomId === roomId);
+    expect(memberDialog?.unreadCount).toBe(0);
+    expect(memberDialog?.latestUnreadAt).toBeNull();
+    expect(memberDialog?.lastReadVersion).toBeGreaterThanOrEqual(0);
   });
 });

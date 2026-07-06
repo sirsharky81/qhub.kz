@@ -174,6 +174,11 @@ export interface RoomDialogsResponseItem {
   title: string;
   roomId: string;
   createdAt: number;
+  unreadCount: number;
+  latestUnreadAt: number | null;
+  lastMessageAt: number;
+  lastMessageType: MessageType | null;
+  lastReadVersion: number;
 }
 
 export async function fetchDmDialogs(): Promise<{
@@ -243,6 +248,21 @@ export async function markDmDialogRead(chatId: string): Promise<void> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chatId }),
+    });
+    if (res.ok && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(UNREAD_EVENT));
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+export async function markRoomDialogRead(roomId: string): Promise<void> {
+  try {
+    const res = await platformFetch("/api/messenger/room/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId }),
     });
     if (res.ok && typeof window !== "undefined") {
       window.dispatchEvent(new Event(UNREAD_EVENT));
