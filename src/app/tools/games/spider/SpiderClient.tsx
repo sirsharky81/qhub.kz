@@ -336,7 +336,7 @@ export default function SpiderClient() {
     <PdfToolLayout
       title="Пасьянс «Паук»"
       iconSrc="/tools/games/icon-192.png"
-      shellClassName="min-h-[100dvh] flex flex-col bg-gray-50 dark:bg-gray-950"
+      shellClassName="min-h-[100dvh] flex flex-col bg-gray-50 dark:bg-gray-950 max-sm:landscape:min-h-0 max-sm:landscape:h-[100dvh] max-sm:landscape:overflow-hidden [&>header]:max-sm:landscape:h-10 [&>header>div]:max-sm:landscape:h-10 [&>header>div]:max-sm:landscape:px-2"
       badge={false}
     >
       <SpiderAnimationLayer items={flyItems} />
@@ -355,19 +355,69 @@ export default function SpiderClient() {
         />
       )}
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[1400px] px-2 sm:px-4 py-3 space-y-3">
+      <main className="flex-1 overflow-y-auto max-sm:landscape:overflow-hidden max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:min-h-0">
+        <div className="mx-auto w-full max-w-[1400px] px-2 sm:px-4 py-3 space-y-3 max-sm:landscape:flex-1 max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:min-h-0 max-sm:landscape:py-1 max-sm:landscape:px-1.5 max-sm:landscape:space-y-1">
           {showGameBoard && state && (
-            <SpiderTopBar
-              state={state}
-              elapsed={elapsed}
-              onUndo={undo}
-              onHint={showHintAction}
-              onRestart={restartGame}
-              onOpenGameMenu={openGameMenu}
-              onRules={() => setShowRules(true)}
-              canUndo={canUndo}
-            />
+            <div className="max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:flex-1 max-sm:landscape:min-h-0 max-sm:landscape:space-y-1">
+              <SpiderTopBar
+                state={state}
+                elapsed={elapsed}
+                onUndo={undo}
+                onHint={showHintAction}
+                onRestart={restartGame}
+                onOpenGameMenu={openGameMenu}
+                onRules={() => setShowRules(true)}
+                canUndo={canUndo}
+              />
+
+              <section
+                className="rounded-2xl border p-3 sm:p-5 space-y-4 shadow-[inset_0_2px_10px_rgba(0,0,0,0.04)] max-sm:landscape:flex-1 max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:min-h-0 max-sm:landscape:p-2 max-sm:landscape:space-y-1 max-sm:landscape:rounded-xl"
+                style={{
+                  backgroundColor: SPIDER_FELT,
+                  borderColor: SPIDER_FELT_BORDER,
+                }}
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between touch-manipulation max-sm:landscape:flex-row max-sm:landscape:items-center max-sm:landscape:justify-between max-sm:landscape:gap-2 max-sm:landscape:shrink-0">
+                  <div
+                    className={`shrink-0 max-sm:landscape:scale-[0.85] max-sm:landscape:origin-left ${hint?.type === "deal_stock" ? "animate-[spiderHintPulse_1.2s_ease-in-out_infinite] rounded-xl" : ""}`}
+                  >
+                    <SpiderStock state={state} onDeal={handleDeal} dealing={dealing} />
+                  </div>
+                  <div className="min-w-0 w-full sm:w-auto sm:max-w-[55%] max-sm:landscape:w-auto max-sm:landscape:max-w-none max-sm:landscape:scale-[0.85] max-sm:landscape:origin-right">
+                    <SpiderFoundation
+                      completedRuns={state.completedRuns}
+                      completedSuits={completedSuits}
+                      pulseIndex={pulseFoundationIndex}
+                    />
+                  </div>
+                </div>
+
+                {state.phase === "stuck" && <SpiderStuckBanner onRestart={restartGame} />}
+
+                {message && (
+                  <p className="text-sm text-amber-950 bg-amber-50 rounded-xl px-4 py-2.5 border border-amber-200/80 shadow-sm max-sm:landscape:hidden">
+                    {message}
+                  </p>
+                )}
+
+                <div className="flex-1 min-h-0 min-w-0">
+                  <SpiderTableau
+                    columns={state.columns}
+                    selection={selection}
+                    legalTargets={legalTargets}
+                    hint={hint}
+                    onSelect={(fromColumn, fromIndex) =>
+                      setSelection((prev) =>
+                        prev?.fromColumn === fromColumn && prev.fromIndex === fromIndex
+                          ? null
+                          : { fromColumn, fromIndex },
+                      )
+                    }
+                    onMoveToColumn={handleMoveToColumn}
+                  />
+                </div>
+              </section>
+            </div>
           )}
 
           {(showMenu || !state) && !showVictory && (
@@ -393,56 +443,6 @@ export default function SpiderClient() {
                 }
                 stats={stats}
               />
-            </>
-          )}
-
-          {showGameBoard && state && (
-            <>
-              <section
-                className="rounded-2xl border p-3 sm:p-5 space-y-4 shadow-[inset_0_2px_10px_rgba(0,0,0,0.04)]"
-                style={{
-                  backgroundColor: SPIDER_FELT,
-                  borderColor: SPIDER_FELT_BORDER,
-                }}
-              >
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between touch-manipulation">
-                  <div
-                    className={`shrink-0 ${hint?.type === "deal_stock" ? "animate-[spiderHintPulse_1.2s_ease-in-out_infinite] rounded-xl" : ""}`}
-                  >
-                    <SpiderStock state={state} onDeal={handleDeal} dealing={dealing} />
-                  </div>
-                  <div className="min-w-0 w-full sm:w-auto sm:max-w-[55%]">
-                    <SpiderFoundation
-                      completedRuns={state.completedRuns}
-                      completedSuits={completedSuits}
-                      pulseIndex={pulseFoundationIndex}
-                    />
-                  </div>
-                </div>
-
-                {state.phase === "stuck" && <SpiderStuckBanner onRestart={restartGame} />}
-
-                {message && (
-                  <p className="text-sm text-amber-950 bg-amber-50 rounded-xl px-4 py-2.5 border border-amber-200/80 shadow-sm">
-                    {message}
-                  </p>
-                )}
-
-                <SpiderTableau
-                  columns={state.columns}
-                  selection={selection}
-                  legalTargets={legalTargets}
-                  hint={hint}
-                  onSelect={(fromColumn, fromIndex) =>
-                    setSelection((prev) =>
-                      prev?.fromColumn === fromColumn && prev.fromIndex === fromIndex
-                        ? null
-                        : { fromColumn, fromIndex },
-                    )
-                  }
-                  onMoveToColumn={handleMoveToColumn}
-                />
-              </section>
             </>
           )}
         </div>
