@@ -935,16 +935,25 @@ export function ChatView({
             />
           </div>
         ))}
-        <div ref={bottomRef} className="h-1" />
-      </div>
-
         {!isRoom && peerTyping && (
-          <div className="px-3 pb-1">
-            <div className="inline-flex items-center rounded-2xl border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
-              печатает…
+          <div
+            className="flex w-full justify-start"
+            style={{
+              paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+              paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+            }}
+          >
+            <div className="rounded-2xl rounded-bl-md border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <div className="flex items-center gap-1.5 text-gray-500" aria-label="печатает">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.2s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.1s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+              </div>
             </div>
           </div>
         )}
+        <div ref={bottomRef} className="h-1" />
+      </div>
         <ChatComposer
           text={text}
           onTextChange={setText}

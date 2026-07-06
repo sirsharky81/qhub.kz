@@ -3,6 +3,7 @@ import type { CallPollResponse, InitiateCallResponse } from "./types";
 import type { CallSignalType } from "../types";
 
 const REQUEST_TIMEOUT_MS = 8000;
+const POLL_REQUEST_TIMEOUT_MS = 2500;
 
 /**
  * iOS (especially PWA/standalone) can silently stall an in-flight fetch for a
@@ -16,6 +17,16 @@ const REQUEST_TIMEOUT_MS = 8000;
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await platformFetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchWithPollTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), POLL_REQUEST_TIMEOUT_MS);
   try {
     return await platformFetch(url, { ...init, signal: controller.signal });
   } finally {
@@ -116,9 +127,18 @@ export async function pollCallSignals(
     // Single attempt with a hard timeout — the poll loop retries every 150ms
     // anyway. fetchWithRetry here could block pollInFlight for 20+ seconds on
     // 429/timeouts, which is why callers saw "опросов: 2" over 45 seconds.
-    const res = await fetchWithTimeout(
+    let res = await fetchWithPollTimeout(
       `/api/messenger/call/poll?callId=${encodeURIComponent(callId)}&since=${sinceSeq}`,
     );
+    if (res.status === 429) {
+      const retryAfterSec = Number(res.headers.get("Retry-After") ?? "1");
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(Math.max(retryAfterSec, 1), 2) * 1000),
+      );
+      res = await fetchWithPollTimeout(
+        `/api/messenger/call/poll?callId=${encodeURIComponent(callId)}&since=${sinceSeq}`,
+      );
+    }
     if (!res.ok) return { data: null, status: res.status };
     const data = (await res.json()) as CallPollResponse;
     return { data, status: res.status };
