@@ -36,17 +36,13 @@ function SortableFavoriteCard({ app }: { app: App }) {
   };
 
   return (
-    <div ref={setNodeRef} style={style} className={`relative ${APP_CARD_HEIGHT}`}>
-      <button
-        type="button"
-        aria-label={`Перетащить карточку ${app.title}`}
-        {...attributes}
-        {...listeners}
-        onClick={(e) => e.preventDefault()}
-        className="absolute left-2 top-2 z-30 inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white/95 text-gray-500 shadow-sm hover:bg-gray-50"
-      >
-        <span className="text-sm leading-none">⋮⋮</span>
-      </button>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`relative ${APP_CARD_HEIGHT} touch-manipulation`}
+      {...attributes}
+      {...listeners}
+    >
       <AppCard app={app} showPin draggable />
     </div>
   );
