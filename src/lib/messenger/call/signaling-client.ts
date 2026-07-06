@@ -124,16 +124,17 @@ export async function pollCallSignals(
   sinceSeq: number,
 ): Promise<{ data: CallPollResponse | null; status: number }> {
   try {
-    // Single attempt with a hard timeout — the poll loop retries every 150ms
-    // anyway. fetchWithRetry here could block pollInFlight for 20+ seconds on
-    // 429/timeouts, which is why callers saw "опросов: 2" over 45 seconds.
+    // Keep poll cadence tight: avoid multi-second sleeps on 429 because the
+    // controller loop already retries rapidly. A tiny one-shot backoff is
+    // enough to smooth bursts without introducing visible phase lag.
     let res = await fetchWithPollTimeout(
       `/api/messenger/call/poll?callId=${encodeURIComponent(callId)}&since=${sinceSeq}`,
     );
     if (res.status === 429) {
-      const retryAfterSec = Number(res.headers.get("Retry-After") ?? "1");
+      const retryAfterSec = Number(res.headers.get("Retry-After") ?? "0");
+      const retryDelayMs = Math.min(Math.max(retryAfterSec * 1000, 120), 450);
       await new Promise((resolve) =>
-        setTimeout(resolve, Math.min(Math.max(retryAfterSec, 1), 2) * 1000),
+        setTimeout(resolve, retryDelayMs),
       );
       res = await fetchWithPollTimeout(
         `/api/messenger/call/poll?callId=${encodeURIComponent(callId)}&since=${sinceSeq}`,
