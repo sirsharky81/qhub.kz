@@ -3,6 +3,7 @@
 import { useMemo, useRef } from "react";
 import { SPIDER_CARD_OFFSET_RATIO } from "../constants";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
+import { useLandscapePhone } from "../hooks/useLandscapePhone";
 import { useSpiderTableauMetrics } from "../hooks/useSpiderTableauMetrics";
 import { CardSvg } from "@/components/games/CardSvg";
 import { CARD_IMG_CLASS, cardShellClass } from "./SpiderCard";
@@ -45,43 +46,66 @@ export function SpiderTableau({
   onMoveToColumn: (toColumn: number) => void;
 }) {
   const isTouch = useCoarsePointer();
+  const isLandscapePhone = useLandscapePhone();
   const hostRef = useRef<HTMLDivElement>(null);
   const maxColumnDepth = useMemo(
     () => Math.max(1, ...columns.map((column) => column.length)),
     [columns],
   );
-  const preferredOffsetRatio = isTouch ? TOUCH_OFFSET_RATIO : SPIDER_CARD_OFFSET_RATIO;
-  const metrics = useSpiderTableauMetrics(hostRef, maxColumnDepth, preferredOffsetRatio);
+  const offsetRatio = isTouch ? TOUCH_OFFSET_RATIO : SPIDER_CARD_OFFSET_RATIO;
+  const metrics = useSpiderTableauMetrics(
+    hostRef,
+    maxColumnDepth,
+    offsetRatio,
+    isLandscapePhone,
+  );
 
-  const touchHintVisible = isTouch && metrics.fitsWidth;
+  const fitsWidth = isLandscapePhone && metrics.fitsWidth;
+
+  const cardStyle = isLandscapePhone
+    ? ({
+        "--spider-card-w": `${metrics.cardW}px`,
+        "--spider-card-h": `${metrics.cardH}px`,
+        "--spider-card-offset": `${metrics.offset}px`,
+      } as React.CSSProperties)
+    : ({
+        "--spider-card-w": "clamp(58px, calc((100vw - 2.5rem) / 10 - 2px), 92px)",
+        "--spider-card-h": "calc(var(--spider-card-w) * 312 / 223)",
+        "--spider-card-offset": `calc(var(--spider-card-h) * ${offsetRatio})`,
+      } as React.CSSProperties);
 
   return (
-    <div ref={hostRef} className="h-full min-h-[120px] flex flex-col min-w-0">
-      {touchHintVisible && (
-        <p className="text-[10px] landscape:max-sm:text-[9px] text-center text-emerald-950/85 sm:hidden px-1 mb-1 leading-snug shrink-0 landscape:max-sm:hidden">
+    <div
+      ref={hostRef}
+      className={
+        isLandscapePhone ? "h-full min-h-0 flex flex-col min-w-0" : "space-y-2"
+      }
+    >
+      {isTouch && !isLandscapePhone && (
+        <p className="text-[11px] text-center text-emerald-950/85 sm:hidden px-2 leading-snug">
           {selection
-            ? "Нажмите подсвеченный столбец"
-            : "Карта → столбец назначения"}
+            ? "Нажмите подсвеченный столбец для хода"
+            : "Нажмите карту или столбец — затем столбец назначения"}
         </p>
       )}
       <div
-        className={`spider-tableau flex-1 min-h-0 w-full overflow-y-visible pb-1 pt-0.5 ${
-          metrics.fitsWidth
-            ? "overflow-x-hidden"
-            : "overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]"
-        }`}
-        style={
-          {
-            "--spider-card-w": `${metrics.cardW}px`,
-            "--spider-card-h": `${metrics.cardH}px`,
-            "--spider-card-offset": `${metrics.offset}px`,
-          } as React.CSSProperties
+        className={
+          isLandscapePhone
+            ? `spider-tableau flex-1 min-h-0 w-full overflow-y-visible pb-1 pt-0.5 ${
+                fitsWidth
+                  ? "overflow-x-hidden"
+                  : "overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]"
+              }`
+            : "spider-tableau w-full overflow-x-auto overflow-y-visible pb-2 pt-1 overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]"
         }
+        style={cardStyle}
       >
         <div
-          className={`flex justify-between gap-[2px] sm:gap-1 h-full px-0.5 ${
-            metrics.fitsWidth ? "w-full" : "min-w-full w-max"
-          }`}
+          className={
+            isLandscapePhone
+              ? `flex justify-between gap-[2px] h-full px-0.5 ${fitsWidth ? "w-full" : "min-w-full w-max"}`
+              : "flex justify-between gap-[2px] sm:gap-1 min-w-full w-max sm:w-full px-0.5"
+          }
         >
           {columns.map((column, colIndex) => {
             const isHintTarget = hint?.type === "move_stack" && hint.toColumn === colIndex;
@@ -97,15 +121,19 @@ export function SpiderTableau({
                 key={colIndex}
                 data-spider-col={colIndex}
                 className={`relative shrink-0 flex-1 rounded-lg transition-shadow duration-200 ${
-                  metrics.fitsWidth ? "min-w-0 max-w-none" : "max-w-[92px]"
+                  isLandscapePhone
+                    ? fitsWidth
+                      ? "min-w-0 max-w-none"
+                      : "max-w-[92px]"
+                    : "max-w-[92px]"
                 } ${
                   isTarget
                     ? "ring-2 ring-emerald-600/90 shadow-[0_0_0_3px_rgba(5,150,105,0.25)]"
                     : ""
                 } ${isHintTarget ? "animate-[spiderHintPulse_1.2s_ease-in-out_infinite]" : ""}`}
                 style={{
-                  width: metrics.fitsWidth ? undefined : "var(--spider-card-w)",
-                  flexBasis: metrics.fitsWidth ? 0 : undefined,
+                  width: isLandscapePhone && fitsWidth ? undefined : "var(--spider-card-w)",
+                  flexBasis: isLandscapePhone && fitsWidth ? 0 : undefined,
                   minHeight: columnHeight,
                 }}
                 onClick={() => {
@@ -135,7 +163,10 @@ export function SpiderTableau({
                   <button
                     type="button"
                     className="absolute inset-x-0 top-0 rounded-md border-2 border-dashed border-slate-500/50 bg-slate-600/10 touch-manipulation"
-                    style={{ height: "var(--spider-card-h)", minHeight: 32 }}
+                    style={{
+                      height: "var(--spider-card-h)",
+                      minHeight: isLandscapePhone ? 32 : 44,
+                    }}
                     onClick={() => {
                       if (selection && legalTargets.has(colIndex)) {
                         onMoveToColumn(colIndex);
@@ -194,7 +225,7 @@ export function SpiderTableau({
                           zIndex: cardIndex + 1,
                           minHeight:
                             isTouch && entry.faceUp
-                              ? `max(var(--spider-card-offset), ${metrics.fitsWidth ? 22 : 28}px)`
+                              ? `max(var(--spider-card-offset), ${isLandscapePhone ? 22 : 28}px)`
                               : undefined,
                         }}
                       >

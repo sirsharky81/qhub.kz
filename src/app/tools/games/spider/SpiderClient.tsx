@@ -400,7 +400,7 @@ export default function SpiderClient() {
                   </p>
                 )}
 
-                <div className="flex-1 min-h-0 min-w-0">
+                <div className="min-w-0 max-sm:landscape:flex-1 max-sm:landscape:min-h-0">
                   <SpiderTableau
                     columns={state.columns}
                     selection={selection}

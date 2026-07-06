@@ -84,10 +84,13 @@ export function useSpiderTableauMetrics(
   hostRef: RefObject<HTMLElement | null>,
   maxColumnDepth: number,
   preferredOffsetRatio: number,
+  enabled: boolean,
 ): SpiderTableauMetrics {
   const [metrics, setMetrics] = useState(emptyMetrics);
 
   useLayoutEffect(() => {
+    if (!enabled) return;
+
     const host = hostRef.current;
     if (!host) return;
 
@@ -117,7 +120,7 @@ export function useSpiderTableauMetrics(
       window.removeEventListener("resize", update);
       window.visualViewport?.removeEventListener("resize", update);
     };
-  }, [hostRef, maxColumnDepth, preferredOffsetRatio]);
+  }, [hostRef, maxColumnDepth, preferredOffsetRatio, enabled]);
 
   return metrics;
 }
