@@ -6,6 +6,7 @@ import { assertChannelParticipant, assertMessengerSession, jsonAuthError } from 
 import type { EncryptedMessagePayload, MessageType, ReceiptPayload } from "@/lib/messenger/types";
 import {
   applyDmUnreadOnMessage,
+  applyRoomUnreadOnMessage,
   pushDmEnvelope,
   pushRoomEnvelope,
   getRoomParticipants,
@@ -141,13 +142,32 @@ export async function POST(request: Request) {
       const roomId = channel.slice(5);
       version = await pushRoomEnvelope(roomId, msg);
       const participants = await getRoomParticipants(roomId);
+      const otherParticipants = participants.map((p) => p.phone).filter((p) => p !== phone);
+      const viewingPhones = new Set<string>();
+      await Promise.all(
+        otherParticipants.map(async (participantPhone) => {
+          const presence = await getMessengerPresence(participantPhone);
+          if (presence && isViewingChannel(presence, channel)) {
+            viewingPhones.add(participantPhone);
+          }
+        }),
+      );
+      await applyRoomUnreadOnMessage({
+        roomId,
+        senderPhone: phone,
+        type,
+        ts: msg.ts,
+        currentRoomVersion: version,
+        participantPhones: participants.map((p) => p.phone),
+        viewingPhones,
+      });
       try {
         await notifyRoomMessage({
           roomId,
           channel,
           fromPhone: phone,
           type,
-          recipientPhones: participants.map((p) => p.phone).filter((p) => p !== phone),
+          recipientPhones: otherParticipants,
         });
       } catch (err) {
         console.warn("[messenger/send] room push notify failed:", err);

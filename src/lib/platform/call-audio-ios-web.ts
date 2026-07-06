@@ -12,11 +12,12 @@ export function supportsIosWebSinkId(): boolean {
 }
 
 /**
- * Do not use setSinkId for call routing — on iPhone the enumerated output order is
- * inverted (index 0 = loudspeaker). The audio/video WebAudio relay is reliable.
+ * Use setSinkId when available on iOS Safari/PWA.
+ * On newer iPhones this is more reliable than element-type routing (<audio>/<video>)
+ * and avoids sticky earpiece output during video calls.
  */
 export function useIosSinkIdCallRouting(): boolean {
-  return false;
+  return supportsIosWebSinkId();
 }
 
 export async function findIosAudioOutputId(speaker: boolean): Promise<string | undefined> {
@@ -32,6 +33,7 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
   const matchesEarpiece = (label: string) =>
     /receiver|earpiece|трубк|built.?in.?receiver/i.test(label);
 
+  const normalized = outputs.map((d) => ({ id: d.deviceId, label: d.label.toLowerCase() }));
   for (const device of outputs) {
     const label = device.label.toLowerCase();
     if (speaker && matchesSpeaker(label)) return device.deviceId;
@@ -39,8 +41,19 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
   }
 
   if (outputs.length >= 2) {
-    // iOS: outputs[0] is typically Built-in Speaker, last is Built-in Receiver.
-    return speaker ? outputs[0]?.deviceId : outputs[outputs.length - 1]?.deviceId;
+    const first = normalized[0];
+    const last = normalized[normalized.length - 1];
+    const firstIsReceiver = first ? matchesEarpiece(first.label) : false;
+    const lastIsReceiver = last ? matchesEarpiece(last.label) : false;
+    if (speaker) {
+      if (firstIsReceiver && !lastIsReceiver) return last?.id;
+      return first?.id;
+    }
+    if (!speaker) {
+      if (firstIsReceiver) return first.id;
+      if (lastIsReceiver) return last?.id;
+      return last?.id;
+    }
   }
   return outputs[0]?.deviceId;
 }

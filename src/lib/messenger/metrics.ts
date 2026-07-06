@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_MSG_TTL_HOURS,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+  DEFAULT_ROOM_USER_INDEX_TTL_SEC,
   MESSENGER_ROOM_MAX_PARTICIPANTS,
 } from "./constants";
 
@@ -16,6 +17,7 @@ export const MESSENGER_METRIC_ENDPOINTS = [
   "dialogs",
   "send",
   "dialogs_read",
+  "room_read",
 ] as const;
 
 export type MessengerMetricEndpoint = (typeof MESSENGER_METRIC_ENDPOINTS)[number];
@@ -92,6 +94,7 @@ export async function getMessengerHealthSnapshot(): Promise<{
     maxRoomEnvelopes: number;
     msgTtlHours: number;
     roomInactiveTtlHours: number;
+    roomUserIndexTtlSec: number;
   };
 }> {
   const generatedAt = Date.now();
@@ -137,6 +140,9 @@ export async function getMessengerHealthSnapshot(): Promise<{
       msgTtlHours: Number(process.env.MESSENGER_MSG_TTL_HOURS ?? DEFAULT_MSG_TTL_HOURS),
       roomInactiveTtlHours: Number(
         process.env.MESSENGER_ROOM_INACTIVE_TTL_HOURS ?? DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+      ),
+      roomUserIndexTtlSec: Number(
+        process.env.MESSENGER_ROOM_USER_INDEX_TTL_SEC ?? DEFAULT_ROOM_USER_INDEX_TTL_SEC,
       ),
     },
   };

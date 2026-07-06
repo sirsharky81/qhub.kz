@@ -12,6 +12,7 @@ import {
   logoutMessenger,
   reorderPinnedDialogs,
   type DmDialogsResponseItem,
+  type RoomDialogsResponseItem,
   updateDialogPrefs,
 } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
@@ -23,7 +24,12 @@ import { refreshAppBadge } from "@/lib/messenger/app-badge";
 import {
   ensureMessengerPushSubscription,
 } from "@/lib/messenger/push";
-import { getRoomUnread, subscribeUnreadChange, totalRoomUnread } from "@/lib/messenger/unread";
+import {
+  resolveRoomUnread,
+  subscribeUnreadChange,
+  syncRoomUnreadCache,
+  totalRoomUnreadFromServer,
+} from "@/lib/messenger/unread";
 import { MESSENGER_MAX_PINNED_DIALOGS } from "@/lib/messenger/constants";
 import type { DialogPrefs, LocalDialog } from "@/lib/messenger/types";
 import { onAppResume } from "@/lib/platform/app-resume";
@@ -102,6 +108,7 @@ export function MessengerHomeClient() {
   const [dialogs, setDialogs] = useState<LocalDialog[]>([]);
   const [phone, setPhone] = useState("");
   const [dmSummaries, setDmSummaries] = useState<Record<string, DmDialogsResponseItem>>({});
+  const [roomSummaries, setRoomSummaries] = useState<Record<string, RoomDialogsResponseItem>>({});
   const [localTextPreviewByChat, setLocalTextPreviewByChat] = useState<Record<string, string>>({});
   const [dialogPrefsMap, setDialogPrefsMap] = useState<Record<string, DialogPrefs>>({});
   const [dialogTab, setDialogTab] = useState<DialogTab>("active");
@@ -117,6 +124,7 @@ export function MessengerHomeClient() {
   function sortDialogsByPriority(
     list: LocalDialog[],
     summaryMap: Record<string, DmDialogsResponseItem>,
+    roomSummaryMap: Record<string, RoomDialogsResponseItem>,
     prefsMap: Record<string, DialogPrefs>,
   ): LocalDialog[] {
     const prefsFor = (dialog: LocalDialog): DialogPrefs => {
@@ -145,17 +153,27 @@ export function MessengerHomeClient() {
       }
       if (aPinned !== bPinned) return bPinned - aPinned;
 
-      const aUnread = a.kind === "room" ? getRoomUnread(a.id) : (summaryMap[a.id]?.unreadCount ?? 0);
-      const bUnread = b.kind === "room" ? getRoomUnread(b.id) : (summaryMap[b.id]?.unreadCount ?? 0);
+      const aUnread =
+        a.kind === "room"
+          ? resolveRoomUnread(roomSummaryMap[a.id]?.unreadCount, a.id)
+          : (summaryMap[a.id]?.unreadCount ?? 0);
+      const bUnread =
+        b.kind === "room"
+          ? resolveRoomUnread(roomSummaryMap[b.id]?.unreadCount, b.id)
+          : (summaryMap[b.id]?.unreadCount ?? 0);
 
       const aTs =
         a.kind === "dm"
           ? (summaryMap[a.id]?.latestUnreadAt ?? summaryMap[a.id]?.lastMessageAt ?? a.createdAt)
-          : a.createdAt;
+          : (roomSummaryMap[a.id]?.latestUnreadAt ??
+             roomSummaryMap[a.id]?.lastMessageAt ??
+             a.createdAt);
       const bTs =
         b.kind === "dm"
           ? (summaryMap[b.id]?.latestUnreadAt ?? summaryMap[b.id]?.lastMessageAt ?? b.createdAt)
-          : b.createdAt;
+          : (roomSummaryMap[b.id]?.latestUnreadAt ??
+             roomSummaryMap[b.id]?.lastMessageAt ??
+             b.createdAt);
 
       if (aUnread > 0 && bUnread === 0) return -1;
       if (bUnread > 0 && aUnread === 0) return 1;
@@ -167,7 +185,10 @@ export function MessengerHomeClient() {
     const localDialogs = baseDialogs ?? dialogsRef.current;
     const { dialogs: serverDm, roomDialogs, dialogPrefs } = await fetchDmDialogs();
     const summaryMap: Record<string, DmDialogsResponseItem> = {};
+    const roomSummaryMap: Record<string, RoomDialogsResponseItem> = {};
     for (const item of serverDm) summaryMap[item.chatId] = item;
+    for (const room of roomDialogs) roomSummaryMap[room.id] = room;
+    syncRoomUnreadCache(roomDialogs);
 
     const mergedMap = new Map(localDialogs.map((d) => [d.id, d]));
     for (const item of serverDm) {
@@ -189,17 +210,23 @@ export function MessengerHomeClient() {
         createdAt: room.createdAt,
       });
     }
-    const merged = sortDialogsByPriority(Array.from(mergedMap.values()), summaryMap, dialogPrefs);
+    const merged = sortDialogsByPriority(
+      Array.from(mergedMap.values()),
+      summaryMap,
+      roomSummaryMap,
+      dialogPrefs,
+    );
     setDialogs(merged);
     saveLocalDialogs(merged);
 
     setDmSummaries(summaryMap);
+    setRoomSummaries(roomSummaryMap);
     setDialogPrefsMap(dialogPrefs);
     const dmUnread = serverDm.reduce((sum, d) => sum + d.unreadCount, 0);
     setDmUnreadTotal(dmUnread);
-    const roomUnread = totalRoomUnread();
+    const roomUnread = totalRoomUnreadFromServer(roomDialogs);
     setRoomUnreadTotal(roomUnread);
-    void refreshAppBadge(dmUnread);
+    void refreshAppBadge(dmUnread, roomUnread);
   }
 
   useEffect(() => {
@@ -313,7 +340,7 @@ export function MessengerHomeClient() {
   }
 
   function dialogUnread(d: LocalDialog): number {
-    if (d.kind === "room") return getRoomUnread(d.id);
+    if (d.kind === "room") return resolveRoomUnread(roomSummaries[d.id]?.unreadCount, d.id);
     return dmSummaries[d.id]?.unreadCount ?? 0;
   }
 
@@ -517,7 +544,9 @@ export function MessengerHomeClient() {
                 const infoTs =
                   d.kind === "dm"
                     ? (dm?.latestUnreadAt ?? dm?.lastMessageAt ?? d.createdAt)
-                    : d.createdAt;
+                    : (roomSummaries[d.id]?.latestUnreadAt ??
+                       roomSummaries[d.id]?.lastMessageAt ??
+                       d.createdAt);
                 return (
                   <li key={d.id}>
                     <div

@@ -14,6 +14,7 @@ import { SENDER_GROUP_MS } from "@/lib/messenger/constants";
 import {
   ackMessage,
   markDmDialogRead,
+  markRoomDialogRead,
   isReceiptEnvelope,
   pollChannel,
   sendTypingStatus,
@@ -42,7 +43,6 @@ import { scrollChatListToBottom, isChatListNearBottom } from "@/lib/messenger/us
 import { onAppResume } from "@/lib/platform/app-resume";
 import {
   clearRoomUnread,
-  incrementRoomUnread,
   setActiveChatChannel,
 } from "@/lib/messenger/unread";
 import { useCallOptional } from "./call/CallProvider";
@@ -210,7 +210,21 @@ export function ChatView({
   }, [channel, initialDraftText]);
 
   useEffect(() => {
-    if (isRoom || !channel.startsWith("dm:")) return;
+    if (isRoom && roomId) {
+      const markRead = () => {
+        if (document.visibilityState !== "visible") return;
+        void markRoomDialogRead(roomId);
+      };
+      markRead();
+      const onVisible = () => markRead();
+      document.addEventListener("visibilitychange", onVisible);
+      const removeResume = onAppResume(() => markRead());
+      return () => {
+        document.removeEventListener("visibilitychange", onVisible);
+        removeResume();
+      };
+    }
+    if (!channel.startsWith("dm:")) return;
     const markRead = () => {
       if (document.visibilityState !== "visible") return;
       void markDmDialogRead(channel);
@@ -223,7 +237,7 @@ export function ChatView({
       document.removeEventListener("visibilitychange", onVisible);
       removeResume();
     };
-  }, [channel, isRoom]);
+  }, [channel, isRoom, roomId]);
 
   useEffect(() => {
     if (!isRoom) setPeerOnline(null);
@@ -414,9 +428,6 @@ export function ChatView({
         seenIds.current.add(msg.id);
         setMessages((prev) => [...prev, display]);
         if (persistHistory) await persistMessage(display);
-        if (isRoom && roomId) {
-          incrementRoomUnread(`room:${roomId}`, channel);
-        }
         void refreshAppBadge();
 
         const deliveredKey = `delivered:${msg.id}`;
@@ -431,7 +442,7 @@ export function ChatView({
         void ackMessage(channel, msg.id);
       }
     },
-    [channel, decryptPayload, handleReceipt, isRoom, myPhone, persistHistory, persistMessage, roomId],
+    [channel, decryptPayload, handleReceipt, myPhone, persistHistory, persistMessage],
   );
 
   useEffect(() => {
@@ -763,9 +774,6 @@ export function ChatView({
       {!isRoom && peerOnline !== null && (
         <ConnectionStatus status={peerOnline ? "online" : "offline"} variant="peer" />
       )}
-      {!isRoom && peerTyping && (
-        <span className="text-xs text-sky-600 font-medium">печатает…</span>
-      )}
       {connection !== "online" && (
         <ConnectionStatus status={connection} variant="connection" />
       )}
@@ -927,9 +935,25 @@ export function ChatView({
             />
           </div>
         ))}
+        {!isRoom && peerTyping && (
+          <div
+            className="flex w-full justify-start"
+            style={{
+              paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+              paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+            }}
+          >
+            <div className="rounded-2xl rounded-bl-md border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <div className="flex items-center gap-1.5 text-gray-500" aria-label="печатает">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.2s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.1s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} className="h-1" />
       </div>
-
         <ChatComposer
           text={text}
           onTextChange={setText}

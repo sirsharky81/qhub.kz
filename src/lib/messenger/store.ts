@@ -3,6 +3,7 @@ import {
   DEFAULT_MAX_DM_ENVELOPES,
   DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+  DEFAULT_ROOM_USER_INDEX_TTL_SEC,
   MESSENGER_DIALOG_PREFS_TTL_SEC,
   MESSENGER_MAX_PINNED_DIALOGS,
   REDIS_AUTH_PREFIX,
@@ -55,6 +56,11 @@ function msgTtlSec(): number {
 function roomInactiveTtlSec(): number {
   const hours = Number(process.env.MESSENGER_ROOM_INACTIVE_TTL_HOURS ?? DEFAULT_ROOM_INACTIVE_TTL_HOURS);
   return Math.max(1, hours) * 3600;
+}
+
+function roomUserIndexTtlSec(): number {
+  const ttl = Number(process.env.MESSENGER_ROOM_USER_INDEX_TTL_SEC ?? DEFAULT_ROOM_USER_INDEX_TTL_SEC);
+  return Math.max(roomInactiveTtlSec(), Math.floor(ttl));
 }
 
 function maxDmEnvelopes(): number {
@@ -469,9 +475,9 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
     let lastMessageFromMe = Boolean(entry.lastMessageFromMe);
     let unreadCount = entry.unreadCount;
     let latestUnreadAt = entry.latestUnreadAt;
-    let pinnedAt = entry.pinnedAt ?? null;
-    let pinOrder = entry.pinOrder ?? null;
-    let archivedAt = entry.archivedAt ?? null;
+    const pinnedAt = entry.pinnedAt ?? null;
+    const pinOrder = entry.pinOrder ?? null;
+    const archivedAt = entry.archivedAt ?? null;
 
     const needsBackfill =
       unreadCount === undefined ||
@@ -587,6 +593,12 @@ type RoomUserIndexEntry = {
   roomId: string;
   title: string;
   createdAt: number;
+  unreadCount?: number;
+  latestUnreadAt?: number | null;
+  lastMessageAt?: number;
+  lastMessageType?: MessageType | null;
+  lastReadVersion?: number;
+  lastReadAt?: number | null;
 };
 
 async function loadRoomUserIndex(phone: string): Promise<Record<string, RoomUserIndexEntry>> {
@@ -594,7 +606,7 @@ async function loadRoomUserIndex(phone: string): Promise<Record<string, RoomUser
 }
 
 async function saveRoomUserIndex(phone: string, index: Record<string, RoomUserIndexEntry>): Promise<void> {
-  await redisSet(roomUserIndexKey(phone), JSON.stringify(index), roomInactiveTtlSec());
+  await redisSet(roomUserIndexKey(phone), JSON.stringify(index), roomUserIndexTtlSec());
 }
 
 async function upsertRoomUserIndex(phone: string, roomId: string, createdAt = Date.now()): Promise<void> {
@@ -603,8 +615,14 @@ async function upsertRoomUserIndex(phone: string, roomId: string, createdAt = Da
   const prev = index[key];
   index[key] = {
     roomId: key,
-    title: `Комната ${key}`,
+    title: prev?.title || `Комната ${key}`,
     createdAt: prev?.createdAt ?? createdAt,
+    unreadCount: Math.max(0, prev?.unreadCount ?? 0),
+    latestUnreadAt: prev?.latestUnreadAt ?? null,
+    lastMessageAt: prev?.lastMessageAt ?? 0,
+    lastMessageType: prev?.lastMessageType ?? null,
+    lastReadVersion: prev?.lastReadVersion ?? 0,
+    lastReadAt: prev?.lastReadAt ?? null,
   };
   await saveRoomUserIndex(phone, index);
 }
@@ -617,7 +635,20 @@ async function removeRoomUserIndex(phone: string, roomId: string): Promise<void>
 
 export async function getRoomDialogsForUser(
   phone: string,
-): Promise<Array<{ id: string; kind: "room"; title: string; roomId: string; createdAt: number }>> {
+): Promise<
+  Array<{
+    id: string;
+    kind: "room";
+    title: string;
+    roomId: string;
+    createdAt: number;
+    unreadCount: number;
+    latestUnreadAt: number | null;
+    lastMessageAt: number;
+    lastMessageType: MessageType | null;
+    lastReadVersion: number;
+  }>
+> {
   const index = await loadRoomUserIndex(phone);
   return Object.values(index)
     .map((entry) => ({
@@ -626,8 +657,75 @@ export async function getRoomDialogsForUser(
       title: entry.title || `Комната ${entry.roomId}`,
       roomId: entry.roomId,
       createdAt: entry.createdAt,
+      unreadCount: Math.max(0, entry.unreadCount ?? 0),
+      latestUnreadAt: entry.latestUnreadAt ?? null,
+      lastMessageAt: entry.lastMessageAt ?? 0,
+      lastMessageType: entry.lastMessageType ?? null,
+      lastReadVersion: Math.max(0, entry.lastReadVersion ?? 0),
     }))
-    .sort((a, b) => b.createdAt - a.createdAt);
+    .sort((a, b) => {
+      const aPriority = a.latestUnreadAt ?? a.lastMessageAt ?? a.createdAt;
+      const bPriority = b.latestUnreadAt ?? b.lastMessageAt ?? b.createdAt;
+      return bPriority - aPriority;
+    });
+}
+
+export async function applyRoomUnreadOnMessage(params: {
+  roomId: string;
+  senderPhone: string;
+  type: MessageType;
+  ts: number;
+  currentRoomVersion: number;
+  participantPhones: string[];
+  viewingPhones: Set<string>;
+}): Promise<void> {
+  const { roomId, senderPhone, type, ts, currentRoomVersion, participantPhones, viewingPhones } = params;
+  const roomKey = roomId.toUpperCase();
+  const sender = normalizeKzPhone(senderPhone);
+  const updates = participantPhones.map(async (rawPhone) => {
+    const me = normalizeKzPhone(rawPhone);
+    if (!me) return;
+    const index = await loadRoomUserIndex(me);
+    const prev = index[roomKey];
+    const isSender = me === sender;
+    const incrementUnread = !isSender && !viewingPhones.has(me);
+    const nextUnread = Math.max(0, (prev?.unreadCount ?? 0) + (incrementUnread ? 1 : 0));
+    index[roomKey] = {
+      roomId: roomKey,
+      title: prev?.title || `Комната ${roomKey}`,
+      createdAt: prev?.createdAt ?? ts,
+      unreadCount: nextUnread,
+      latestUnreadAt: incrementUnread ? Math.max(prev?.latestUnreadAt ?? 0, ts) : (prev?.latestUnreadAt ?? null),
+      lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, ts),
+      lastMessageType: type,
+      lastReadVersion: isSender
+        ? Math.max(prev?.lastReadVersion ?? 0, currentRoomVersion)
+        : (prev?.lastReadVersion ?? 0),
+      lastReadAt: isSender ? Math.max(prev?.lastReadAt ?? 0, ts) : (prev?.lastReadAt ?? null),
+    };
+    await saveRoomUserIndex(me, index);
+  });
+  await Promise.all(updates);
+}
+
+export async function markRoomDialogRead(phone: string, roomId: string): Promise<void> {
+  const me = normalizeKzPhone(phone);
+  const roomKey = roomId.toUpperCase();
+  const index = await loadRoomUserIndex(me);
+  const prev = index[roomKey];
+  const meta = await getRoomMeta(roomKey);
+  index[roomKey] = {
+    roomId: roomKey,
+    title: prev?.title || `Комната ${roomKey}`,
+    createdAt: prev?.createdAt ?? Date.now(),
+    unreadCount: 0,
+    latestUnreadAt: null,
+    lastMessageAt: prev?.lastMessageAt ?? 0,
+    lastMessageType: prev?.lastMessageType ?? null,
+    lastReadVersion: Math.max(prev?.lastReadVersion ?? 0, meta?.version ?? 0),
+    lastReadAt: Date.now(),
+  };
+  await saveRoomUserIndex(me, index);
 }
 
 export async function getRoomMeta(roomId: string): Promise<RoomMeta | null> {
@@ -656,7 +754,7 @@ export async function createRoomMeta(roomId: string, createdBy: string): Promise
 export async function joinRoomParticipant(roomId: string, phone: string): Promise<RoomParticipant[]> {
   const ttl = roomInactiveTtlSec();
   const now = Date.now();
-  let participants = await getRoomParticipants(roomId);
+  const participants = await getRoomParticipants(roomId);
   const idx = participants.findIndex((p) => p.phone === phone);
   if (idx >= 0) {
     participants[idx] = { ...participants[idx], phone, lastSeen: now };

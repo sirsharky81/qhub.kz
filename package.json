@@ -57,6 +57,7 @@
     "firebase-admin": "^14.1.0",
     "heic2any": "^0.0.4",
     "html-to-image": "^1.11.13",
+    "ioredis": "^5.11.1",
     "jsbarcode": "^3.12.3",
     "jsqr": "^1.4.0",
     "jszip": "^3.10.1",

@@ -208,7 +208,7 @@ async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
 async function mountSinkRelayOutput(
   stream: MediaStream,
   speakerOn: boolean,
-): Promise<HTMLAudioElement> {
+): Promise<HTMLAudioElement | null> {
   destroyEarpieceElement();
   destroySpeakerElement();
 
@@ -221,8 +221,8 @@ async function mountSinkRelayOutput(
   }
 
   relayEl.srcObject = routed;
-  await applySinkIdToElement(relayEl, speakerOn);
-  return relayEl;
+  const routedOk = await applySinkIdToElement(relayEl, speakerOn);
+  return routedOk ? relayEl : null;
 }
 
 async function mountLegacyRelayOutput(
@@ -259,7 +259,8 @@ export async function attachCallMediaStream(
   kickAudioSessionAfterCapture();
 
   if (useIosSinkIdCallRouting()) {
-    return mountSinkRelayOutput(stream, speakerOn);
+    const sinkEl = await mountSinkRelayOutput(stream, speakerOn);
+    if (sinkEl) return sinkEl;
   }
 
   return mountLegacyRelayOutput(stream, speakerOn);
@@ -307,10 +308,15 @@ export async function switchCallSpeakerRoute(
   if (useIosSinkIdCallRouting()) {
     if (!relayEl) {
       if (!stream) return null;
-      return mountSinkRelayOutput(stream, speakerOn);
+      const sinkEl = await mountSinkRelayOutput(stream, speakerOn);
+      if (sinkEl) return sinkEl;
+      return mountLegacyRelayOutput(stream, speakerOn);
     }
-    await applySinkIdToElement(relayEl, speakerOn);
-    return relayEl;
+    const routedOk = await applySinkIdToElement(relayEl, speakerOn);
+    if (routedOk) return relayEl;
+    const fallbackStream = stream ?? relayStream;
+    if (!fallbackStream) return null;
+    return mountLegacyRelayOutput(fallbackStream, speakerOn);
   }
 
   const routed = relayStream ?? (stream && !speakerOn ? await ensureRelayGraph(stream) : null);

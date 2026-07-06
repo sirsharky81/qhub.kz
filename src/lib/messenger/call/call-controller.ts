@@ -1220,6 +1220,7 @@ export class CallController {
         return;
       }
 
+      this.syncProgressFromSession(data.session);
       this.syncSdpFromSession(data.session);
     } catch (err) {
       console.error("[call] poll tick failed:", err);
@@ -1360,6 +1361,24 @@ export class CallController {
     if (session.status !== "ended" || this.state.phase === "ended") return;
     const reason = this.mapRemoteEndReason(session.endReason);
     void this.cleanup(reason, this.messageForRemoteEnd(session.endReason) ?? undefined);
+  }
+
+  /**
+   * Keep caller/callee status text convergent with the server session.
+   * This removes a visible lag where one iPhone already accepted and sees media,
+   * while the other still shows "Звоним...".
+   */
+  private syncProgressFromSession(session: CallPollResponse["session"]): void {
+    if (this.state.phase === "ended" || this.state.phase === "active") return;
+    const hasRemoteAnswer = Boolean(session.answerSdp);
+    const sessionConnecting = session.status === "connecting";
+    if ((sessionConnecting || hasRemoteAnswer) && this.state.phase === "outgoing") {
+      this.patch({ phase: "connecting" });
+      return;
+    }
+    if (sessionConnecting && this.state.phase === "incoming") {
+      this.patch({ phase: "connecting" });
+    }
   }
 
   private startSetupWatchdog(): void {

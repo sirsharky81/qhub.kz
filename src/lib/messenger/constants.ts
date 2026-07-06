@@ -26,6 +26,7 @@ export const MIN_MEDIA_DURATION_MS = 500;
 
 export const DEFAULT_MSG_TTL_HOURS = 48;
 export const DEFAULT_ROOM_INACTIVE_TTL_HOURS = 1;
+export const DEFAULT_ROOM_USER_INDEX_TTL_SEC = DEFAULT_MSG_TTL_HOURS * 60 * 60;
 export const DEFAULT_MAX_DM_ENVELOPES = 2000;
 export const DEFAULT_MAX_ROOM_ENVELOPES = 4000;
 export const MESSENGER_ROOM_MAX_PARTICIPANTS = 50;
@@ -63,7 +64,7 @@ export const DEFAULT_CALL_ICE_TIMEOUT_SEC = 45;
 export const DEFAULT_CALL_MAX_SETUP_SEC = 90;
 export const MAX_CALL_SIGNALS = 200;
 export const CALL_POLL_INTERVAL_MS = 250;
-export const CALL_CONNECT_POLL_INTERVAL_MS = 150;
+export const CALL_CONNECT_POLL_INTERVAL_MS = 250;
 /** Slower poll while waiting for incoming call (home screen / chat idle). */
 export const CALL_DISCOVERY_POLL_INTERVAL_MS = 400;
 export const CALL_HEARTBEAT_INTERVAL_MS = 30_000;

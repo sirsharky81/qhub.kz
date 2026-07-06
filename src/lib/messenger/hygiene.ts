@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_MSG_TTL_HOURS,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
+  DEFAULT_ROOM_USER_INDEX_TTL_SEC,
   MESSENGER_DIALOG_PREFS_TTL_SEC,
   MESSENGER_MAX_PINNED_DIALOGS,
   MESSENGER_PRESENCE_TTL_SEC,
@@ -21,6 +22,7 @@ export interface MessengerHygieneSnapshot {
   config: {
     messageTtlHours: number;
     roomInactiveTtlHours: number;
+    roomUserIndexTtlSec: number;
     maxDmEnvelopes: number;
     maxRoomEnvelopes: number;
     callTtlSec: number;
@@ -49,6 +51,10 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
     process.env.MESSENGER_MAX_ROOM_ENVELOPES,
     DEFAULT_MAX_ROOM_ENVELOPES,
   );
+  const roomUserIndexTtlSec = parsePositiveInt(
+    process.env.MESSENGER_ROOM_USER_INDEX_TTL_SEC,
+    DEFAULT_ROOM_USER_INDEX_TTL_SEC,
+  );
   const callTtlSec = parsePositiveInt(process.env.MESSENGER_CALL_TTL_SEC, DEFAULT_CALL_TTL_SEC);
   const pushSubscriptionTtlDays = Math.round(MESSENGER_PUSH_TTL_SEC / (60 * 60 * 24));
   const dialogPrefsTtlDays = Math.round(MESSENGER_DIALOG_PREFS_TTL_SEC / (60 * 60 * 24));
@@ -66,6 +72,11 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
   if (roomInactiveTtlHours > 6) {
     warnings.push(
       `MESSENGER_ROOM_INACTIVE_TTL_HOURS=${roomInactiveTtlHours}h: можно сократить до 1-6ч.`,
+    );
+  }
+  if (roomUserIndexTtlSec < roomInactiveTtlHours * 3600) {
+    warnings.push(
+      "MESSENGER_ROOM_USER_INDEX_TTL_SEC меньше TTL комнаты: unread может теряться раньше комнаты.",
     );
   }
   if (maxDmEnvelopes > 4000) {
@@ -96,6 +107,7 @@ export function getMessengerHygieneSnapshot(): MessengerHygieneSnapshot {
     config: {
       messageTtlHours,
       roomInactiveTtlHours,
+      roomUserIndexTtlSec,
       maxDmEnvelopes,
       maxRoomEnvelopes,
       callTtlSec,
