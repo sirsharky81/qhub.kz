@@ -774,9 +774,6 @@ export function ChatView({
       {!isRoom && peerOnline !== null && (
         <ConnectionStatus status={peerOnline ? "online" : "offline"} variant="peer" />
       )}
-      {!isRoom && peerTyping && (
-        <span className="text-xs text-sky-600 font-medium">печатает…</span>
-      )}
       {connection !== "online" && (
         <ConnectionStatus status={connection} variant="connection" />
       )}
@@ -941,6 +938,13 @@ export function ChatView({
         <div ref={bottomRef} className="h-1" />
       </div>
 
+        {!isRoom && peerTyping && (
+          <div className="px-3 pb-1">
+            <div className="inline-flex items-center rounded-2xl border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
+              печатает…
+            </div>
+          </div>
+        )}
         <ChatComposer
           text={text}
           onTextChange={setText}

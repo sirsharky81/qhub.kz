@@ -12,11 +12,12 @@ export function supportsIosWebSinkId(): boolean {
 }
 
 /**
- * Do not use setSinkId for call routing — on iPhone the enumerated output order is
- * inverted (index 0 = loudspeaker). The audio/video WebAudio relay is reliable.
+ * Use setSinkId when available on iOS Safari/PWA.
+ * On newer iPhones this is more reliable than element-type routing (<audio>/<video>)
+ * and avoids sticky earpiece output during video calls.
  */
 export function useIosSinkIdCallRouting(): boolean {
-  return false;
+  return supportsIosWebSinkId();
 }
 
 export async function findIosAudioOutputId(speaker: boolean): Promise<string | undefined> {
