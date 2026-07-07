@@ -71,6 +71,33 @@ export async function getActiveCallForChannel(channel: string): Promise<CallSess
   return session;
 }
 
+const STALE_RINGING_MS = 90_000;
+const STALE_CONNECTING_MS = 120_000;
+
+function isStaleActiveCall(session: CallSession): boolean {
+  const age = Date.now() - session.createdAt;
+  if (session.status === "ringing") return age > STALE_RINGING_MS;
+  if (session.status === "connecting") return age > STALE_CONNECTING_MS;
+  return false;
+}
+
+/** End abandoned calls so the channel is not stuck on "busy". */
+export async function clearStaleActiveCall(
+  channel: string,
+  endedBy: string,
+): Promise<boolean> {
+  const existing = await getActiveCallForChannel(channel);
+  if (!existing || !isStaleActiveCall(existing)) return false;
+  if (!isParticipant(existing, endedBy)) return false;
+  try {
+    await endCallSession(existing.callId, endedBy, "timeout");
+    return true;
+  } catch {
+    await redisDel(dmActiveKey(channel));
+    return true;
+  }
+}
+
 function isParticipant(session: CallSession, phone: string): boolean {
   return session.caller === phone || session.callee === phone;
 }
@@ -81,14 +108,32 @@ export async function createCallSession(params: {
   callee: string;
   media?: "audio" | "video";
 }): Promise<CallSession> {
-  const existing = await getActiveCallForChannel(params.channel);
+  const caller = normalizeKzPhone(params.caller);
+  const callee = normalizeKzPhone(params.callee);
+
+  let existing = await getActiveCallForChannel(params.channel);
+  if (existing && existing.status !== "ended") {
+    if (existing.caller === caller) {
+      try {
+        await endCallSession(existing.callId, caller, "superseded");
+      } catch {
+        await redisDel(dmActiveKey(params.channel));
+      }
+      existing = null;
+    } else if (isStaleActiveCall(existing) && isParticipant(existing, caller)) {
+      try {
+        await endCallSession(existing.callId, caller, "timeout");
+      } catch {
+        await redisDel(dmActiveKey(params.channel));
+      }
+      existing = null;
+    }
+  }
   if (existing && existing.status !== "ended") {
     throw new CallStoreError("busy", 409);
   }
 
   const callId = generateMessageId();
-  const caller = normalizeKzPhone(params.caller);
-  const callee = normalizeKzPhone(params.callee);
   const session: CallSession = {
     callId,
     channel: params.channel,

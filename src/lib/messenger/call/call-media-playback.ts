@@ -208,7 +208,19 @@ async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
 async function mountSinkRelayOutput(
   stream: MediaStream,
   speakerOn: boolean,
-): Promise<HTMLAudioElement | null> {
+): Promise<HTMLMediaElement | null> {
+  if (speakerOn) {
+    const hasVideo = stream.getVideoTracks().some((t) => t.readyState === "live");
+    if (hasVideo) {
+      destroyRelayGraph();
+      destroyEarpieceElement();
+      const el = createSpeakerElement();
+      el.srcObject = stream;
+      const routedOk = await applySinkIdToElement(el, true);
+      return routedOk ? el : el;
+    }
+  }
+
   destroyEarpieceElement();
   destroySpeakerElement();
 
@@ -222,7 +234,9 @@ async function mountSinkRelayOutput(
 
   relayEl.srcObject = routed;
   const routedOk = await applySinkIdToElement(relayEl, speakerOn);
-  return routedOk ? relayEl : null;
+  if (routedOk) return relayEl;
+  if (!speakerOn) return relayEl;
+  return null;
 }
 
 async function mountLegacyRelayOutput(
@@ -314,6 +328,7 @@ export async function switchCallSpeakerRoute(
     }
     const routedOk = await applySinkIdToElement(relayEl, speakerOn);
     if (routedOk) return relayEl;
+    destroyRelayGraph();
     const fallbackStream = stream ?? relayStream;
     if (!fallbackStream) return null;
     return mountLegacyRelayOutput(fallbackStream, speakerOn);

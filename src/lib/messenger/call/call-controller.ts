@@ -16,6 +16,7 @@ import {
   DEFAULT_CALL_RING_TIMEOUT_SEC,
 } from "../constants";
 import { normalizeKzPhone } from "../phone";
+import { refreshIosAudioOutputEnumeration } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
 import { watchCallAudioInterruptions } from "./call-audio-interruption";
@@ -166,6 +167,10 @@ export class CallController {
   private realtimeUnsub: (() => void) | null = null;
   private realtimeModeUnsub: (() => void) | null = null;
   private applyPollDataInFlight = false;
+  private pendingPollMerge: CallPollResponse | null = null;
+  private cleanupInFlight = false;
+  private endedOnServer = new Set<string>();
+  private pendingRemoteAnswer: string | null = null;
   private catchUpPollTimers: ReturnType<typeof setTimeout>[] = [];
   private iceOutBatch: IceCandidatePayload[] = [];
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -322,9 +327,19 @@ export class CallController {
       media: callMode,
     });
 
-    if (!result.ok || !result.callId) {
+    let initiate = result;
+    if (!initiate.ok && initiate.error === "busy" && initiate.callId) {
+      await endCallApi(initiate.callId, "supersede");
+      initiate = await initiateCall({
+        channel: this.channel,
+        peerPhone: this.peerPhone,
+        media: callMode,
+      });
+    }
+
+    if (!initiate.ok || !initiate.callId) {
       const msg =
-        result.error === "busy"
+        initiate.error === "busy"
           ? "Собеседник занят"
           : "Не удалось начать звонок";
       this.patch({ phase: "ended", errorMessage: msg, endReason: "busy" });
@@ -337,13 +352,14 @@ export class CallController {
     this.lastSession = null;
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
+    this.pendingRemoteAnswer = null;
     this.callStartedAt = Date.now();
     const videoEnabled = callMode === "video";
     const speakerOn = defaultSpeakerForMode(callMode);
     this.patch({
-      debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: result.callId },
+      debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: initiate.callId },
       phase: "outgoing",
-      callId: result.callId,
+      callId: initiate.callId,
       channel: this.channel,
       peerPhone: this.peerPhone,
       callMode,
@@ -360,7 +376,7 @@ export class CallController {
     this.journal.record("INITIATE", "outgoing");
 
     // Start signaling immediately — don't wait for getUserMedia / ICE config.
-    this.adoptCallId(result.callId);
+    this.adoptCallId(initiate.callId);
     this.startRingTimeout();
     this.startSetupWatchdog();
     this.startElapsedTimer();
@@ -378,7 +394,7 @@ export class CallController {
       this.journal.record("OFFER_SENT");
 
       void this.sendSignalReliable({
-        callId: result.callId,
+        callId: initiate.callId,
         type: "offer",
         payload: offerSdp,
       });
@@ -463,7 +479,8 @@ export class CallController {
     // so the remote peer lost the friendly "Собеседник завершил звонок"
     // message — endCallReliable alone covers both.
     await this.endCallReliable(callId, "hangup");
-    await this.cleanup("hangup");
+    this.endedOnServer.add(callId);
+    await this.cleanup("hangup", undefined, { skipServerEnd: true });
   }
 
   setMuted(muted: boolean): void {
@@ -635,8 +652,27 @@ export class CallController {
     this.pollTimer = setInterval(() => void this.pollOnce(), this.pollIntervalMs());
   }
 
+  private mergePollResponses(
+    current: CallPollResponse | null,
+    incoming: CallPollResponse,
+  ): CallPollResponse {
+    if (!current) return incoming;
+    const signalsBySeq = new Map<number, CallPollResponse["signals"][number]>();
+    for (const signal of current.signals) signalsBySeq.set(signal.seq, signal);
+    for (const signal of incoming.signals) signalsBySeq.set(signal.seq, signal);
+    const signals = [...signalsBySeq.values()].sort((a, b) => a.seq - b.seq);
+    const session =
+      incoming.session.version >= current.session.version
+        ? incoming.session
+        : current.session;
+    return { signals, session };
+  }
+
   private async applyPollDataSafe(data: CallPollResponse): Promise<void> {
-    if (this.applyPollDataInFlight) return;
+    if (this.applyPollDataInFlight) {
+      this.pendingPollMerge = this.mergePollResponses(this.pendingPollMerge, data);
+      return;
+    }
     this.applyPollDataInFlight = true;
     try {
       await withTimeout(this.applyPollData(data), 5000, "apply_poll_data");
@@ -645,6 +681,11 @@ export class CallController {
       this.patchDebug({ lastError: describeError(err) });
     } finally {
       this.applyPollDataInFlight = false;
+      if (this.pendingPollMerge) {
+        const pending = this.pendingPollMerge;
+        this.pendingPollMerge = null;
+        void this.applyPollDataSafe(pending);
+      }
     }
   }
 
@@ -766,6 +807,7 @@ export class CallController {
       this.patch({ videoEnabled: false });
     }
     kickAudioSessionAfterCapture();
+    void refreshIosAudioOutputEnumeration();
     this.patchPlaybackDebug();
     this.emitMedia();
   }
@@ -840,6 +882,11 @@ export class CallController {
     });
     this.patchPlaybackDebug();
     this.emitMedia();
+
+    const pendingAnswer = this.pendingRemoteAnswer ?? this.lastSession?.answerSdp ?? null;
+    if (this.isCaller && pendingAnswer && this.pc && !this.pc.hasRemoteDescription()) {
+      void this.applyRemoteAnswer(pendingAnswer);
+    }
   }
 
   private async sendSignalReliable(params: {
@@ -886,7 +933,17 @@ export class CallController {
   }
 
   private async applyRemoteAnswer(payload: string): Promise<void> {
-    if (!this.pc || this.pc.hasRemoteDescription() || this.sdpApplyInFlight) return;
+    if (this.pc?.hasRemoteDescription() || this.sdpApplyInFlight) return;
+    if (!this.pc) {
+      this.pendingRemoteAnswer = payload;
+      this.clearRingTimeout();
+      getCallSounds().stop();
+      if (this.state.phase === "outgoing") {
+        this.patch({ phase: "connecting" });
+      }
+      return;
+    }
+    this.pendingRemoteAnswer = null;
     this.sdpApplyInFlight = true;
     try {
       this.isCaller = true;
@@ -1427,13 +1484,16 @@ export class CallController {
    * while the other still shows "Звоним...".
    */
   private syncProgressFromSession(session: CallPollResponse["session"]): void {
-    if (this.state.phase === "ended" || this.state.phase === "active") return;
+    if (this.state.phase === "ended") return;
     const hasRemoteAnswer = Boolean(session.answerSdp);
     const sessionConnecting = session.status === "connecting";
     if ((sessionConnecting || hasRemoteAnswer) && this.state.phase === "outgoing") {
       this.clearRingTimeout();
       getCallSounds().stop();
       this.patch({ phase: "connecting" });
+      if (hasRemoteAnswer && !this.pc?.hasRemoteDescription()) {
+        void this.applyRemoteAnswer(session.answerSdp!);
+      }
       return;
     }
     if (sessionConnecting && this.state.phase === "incoming") {
@@ -1610,12 +1670,19 @@ export class CallController {
   private async cleanup(
     endReason: CallEndReason,
     errorMessage?: string,
+    options?: { skipServerEnd?: boolean },
   ): Promise<void> {
+    if (this.cleanupInFlight) return;
+    this.cleanupInFlight = true;
     this.journal.record("CLEANUP_START", endReason ?? "null");
+
     const callId = this.state.callId;
-    if (callId) {
-      await this.endCallReliable(callId, endReason ?? "error");
-    }
+    const phase: CallPhase = "ended";
+    this.patch({
+      phase,
+      endReason,
+      errorMessage: errorMessage ?? null,
+    });
 
     this.stopPolling();
     this.stopHeartbeat();
@@ -1636,9 +1703,16 @@ export class CallController {
     }
     this.iceOutBatch = [];
 
+    if (callId && !options?.skipServerEnd && !this.endedOnServer.has(callId)) {
+      await this.endCallReliable(callId, endReason ?? "error");
+      this.endedOnServer.add(callId);
+    }
+
     this.lastSession = null;
     this.localOfferSdp = null;
     this.localAnswerSdp = null;
+    this.pendingRemoteAnswer = null;
+    this.pendingPollMerge = null;
     this.resendInFlight = false;
     this.sdpApplyInFlight = false;
     this.videoRecoveryInFlight = false;
@@ -1659,13 +1733,8 @@ export class CallController {
     restoreAudioSessionAfterCall();
     void releaseCallAudioOutput();
 
-    const phase: CallPhase = "ended";
-    this.patch({
-      phase,
-      endReason,
-      errorMessage: errorMessage ?? null,
-    });
     this.journal.record("CLEANUP_COMPLETE");
+    this.cleanupInFlight = false;
 
     if (endReason !== null) {
       this.scheduleReset();
@@ -1680,6 +1749,9 @@ export class CallController {
     this.sinceSeq = 0;
     this.isCaller = false;
     this.lastSession = null;
+    this.pendingRemoteAnswer = null;
+    this.pendingPollMerge = null;
+    this.cleanupInFlight = false;
     this.pendingRemoteIce = [];
     this.videoRecoveryInFlight = false;
     this.transportPhase = "new";

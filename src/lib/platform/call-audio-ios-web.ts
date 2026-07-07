@@ -41,6 +41,12 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
     if (!speaker && matchesEarpiece(device.descriptor)) return device.id;
   }
 
+  const hasReadableLabels = outputs.some((d) => Boolean(d.label?.trim()));
+  if (!hasReadableLabels && outputs.length >= 2) {
+    // iOS often exposes receiver + speaker without labels until after getUserMedia.
+    return speaker ? outputs[outputs.length - 1]!.deviceId : outputs[0]!.deviceId;
+  }
+
   if (normalized.length >= 2) {
     const first = normalized[0];
     const last = normalized[normalized.length - 1];
@@ -49,13 +55,12 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
     if (speaker) {
       if (firstIsReceiver && !lastIsReceiver) return last?.id;
       if (lastIsReceiver && !firstIsReceiver) return first?.id;
-      return undefined;
+      return last?.id;
     }
     if (firstIsReceiver) return first.id;
     if (lastIsReceiver) return last?.id;
-    return undefined;
+    return first?.id;
   }
-  // For single/ambiguous outputs keep legacy element-type routing as source of truth.
   return undefined;
 }
 
@@ -72,5 +77,15 @@ export async function applySinkIdToElement(
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Re-enumerate outputs after capture unlocks device labels on iOS. */
+export async function refreshIosAudioOutputEnumeration(): Promise<void> {
+  if (!supportsIosWebSinkId()) return;
+  try {
+    await navigator.mediaDevices?.enumerateDevices();
+  } catch {
+    // Best-effort.
   }
 }

@@ -133,6 +133,16 @@ export function MessengerCallBootstrap() {
   }, []);
 
   useEffect(() => {
+    const onPageHide = () => {
+      const controller = getCallController();
+      if (!controller.isInCall()) return;
+      void controller.hangup();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
+  useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ action?: string; url?: string; callId?: string }>).detail;
       if (!detail?.action) return;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { checkMessengerRateLimit } from "@/lib/rate-limit";
 import {
   CallStoreError,
+  clearStaleActiveCall,
   createCallSession,
   getActiveCallForChannel,
 } from "@/lib/messenger/call-store";
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
     }
 
     try {
+      await clearStaleActiveCall(channel, phone);
       const session = await createCallSession({
         channel,
         caller: phone,

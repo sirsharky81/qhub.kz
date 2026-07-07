@@ -8,8 +8,6 @@ import {
   purgeOrphanedCallMediaElements,
   rebuildCallMediaStream,
   releaseCallMediaPlayback,
-  switchCallSpeakerRoute,
-  useIosWebAudioRelay,
 } from "./call-media-playback";
 import type { RTCIceServer } from "./types";
 
@@ -39,6 +37,7 @@ export class CallPeerConnection {
   private pc: RTCPeerConnection | null = null;
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
+  private playbackStream: MediaStream | null = null;
   private remoteMedia: HTMLMediaElement | null = null;
   private remoteAudioTrack: MediaStreamTrack | null = null;
   private speakerOn = false;
@@ -71,15 +70,19 @@ export class CallPeerConnection {
       });
     };
     this.pc.ontrack = (ev) => {
-      const stream = ev.streams[0] ?? this.remoteStream ?? new MediaStream();
-      if (!stream.getTracks().some((t) => t.id === ev.track.id)) {
-        stream.addTrack(ev.track);
+      if (!this.playbackStream) {
+        this.playbackStream = new MediaStream();
       }
-      this.remoteStream = stream;
+      if (!this.playbackStream.getTracks().some((t) => t.id === ev.track.id)) {
+        this.playbackStream.addTrack(ev.track);
+      }
+      this.remoteStream = this.playbackStream;
+
       if (ev.track.kind === "audio") {
-        this.bindRemoteAudioTrack(ev.track, stream);
+        this.bindRemoteAudioTrack(ev.track, this.playbackStream);
       } else {
         this.onRemoteTrack?.();
+        void this.refreshSpeakerPlaybackStream();
       }
     };
     this.pc.onconnectionstatechange = () => {
@@ -249,6 +252,20 @@ export class CallPeerConnection {
     this.remoteSyncTimers = [];
   }
 
+  private getPlaybackStream(): MediaStream | null {
+    return this.playbackStream ?? this.remoteStream;
+  }
+
+  private async refreshSpeakerPlaybackStream(): Promise<void> {
+    const stream = this.getPlaybackStream();
+    if (!stream || !this.remoteMedia || this.remoteMedia.tagName !== "VIDEO" || !this.speakerOn) {
+      return;
+    }
+    this.remoteMedia.srcObject = stream;
+    await this.applySpeakerRoute();
+    void this.playRemoteAudio();
+  }
+
   private bindRemoteAudioTrack(track: MediaStreamTrack, stream: MediaStream): void {
     if (this.remoteAudioTrack && this.remoteAudioTrack !== track) {
       this.remoteAudioTrack.onunmute = null;
@@ -277,9 +294,10 @@ export class CallPeerConnection {
   }
 
   private async mountRemoteMediaAsync(): Promise<void> {
-    if (!this.remoteStream) return;
+    const stream = this.getPlaybackStream();
+    if (!stream) return;
 
-    this.remoteMedia = await attachCallMediaStream(this.remoteStream, this.speakerOn);
+    this.remoteMedia = await attachCallMediaStream(stream, this.speakerOn);
     await this.applySpeakerRoute();
     void this.playRemoteAudio();
   }
@@ -324,23 +342,21 @@ export class CallPeerConnection {
     prepareAudioSessionForCall();
     if (!changed) return;
 
-    if (useIosWebAudioRelay()) {
-      void this.switchIosSpeakerRoute();
+    const stream = this.getPlaybackStream();
+    if (!stream) return;
+
+    if (isIOSDevice()) {
+      void (async () => {
+        this.remoteMedia = await rebuildCallMediaStream(stream, this.speakerOn);
+        if (await playCallMedia(this.remoteMedia)) {
+          await this.applySpeakerRoute();
+        }
+      })();
       return;
     }
 
-    if (!this.remoteStream) return;
+    void setCallSpeakerEnabled(this.speakerOn);
     this.mountRemoteMedia();
-  }
-
-  private async switchIosSpeakerRoute(): Promise<void> {
-    if (!this.remoteStream) return;
-    const el = await switchCallSpeakerRoute(this.remoteStream, this.speakerOn);
-    if (!el) return;
-    this.remoteMedia = el;
-    if (await playCallMedia(el)) {
-      await this.applySpeakerRoute();
-    }
   }
 
   reassertLocalCapture(muted: boolean): void {
@@ -351,12 +367,14 @@ export class CallPeerConnection {
 
   /** Rebuild playback after iOS audio-session interruption (push sounds, banners). */
   async recoverRemoteAudioAfterInterruption(): Promise<void> {
-    if (!isIOSDevice() || !this.remoteStream) return;
+    const stream = this.getPlaybackStream();
+    if (!isIOSDevice() || !stream) return;
 
     this.syncRemoteAudioFromPeer();
-    if (!this.remoteStream) return;
+    const refreshed = this.getPlaybackStream();
+    if (!refreshed) return;
 
-    this.remoteMedia = await rebuildCallMediaStream(this.remoteStream, this.speakerOn);
+    this.remoteMedia = await rebuildCallMediaStream(refreshed, this.speakerOn);
 
     const delays = [0, 250, 600, 1200];
     for (const delay of delays) {
@@ -419,7 +437,7 @@ export class CallPeerConnection {
   }
 
   getRemoteStream(): MediaStream | null {
-    return this.remoteStream;
+    return this.playbackStream ?? this.remoteStream;
   }
 
   async createOffer(options?: { receiveVideo?: boolean }): Promise<string> {
