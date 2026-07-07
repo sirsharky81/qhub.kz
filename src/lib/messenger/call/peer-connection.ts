@@ -38,6 +38,7 @@ export class CallPeerConnection {
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
   private playbackStream: MediaStream | null = null;
+  private callMode: "audio" | "video" = "audio";
   private remoteMedia: HTMLMediaElement | null = null;
   private remoteAudioTrack: MediaStreamTrack | null = null;
   private speakerOn = false;
@@ -48,6 +49,23 @@ export class CallPeerConnection {
   private remoteDescriptionSet = false;
   private pendingRemoteCandidates: RTCIceCandidateInit[] = [];
   private remoteSyncTimers: ReturnType<typeof setTimeout>[] = [];
+
+  setCallMode(mode: "audio" | "video"): void {
+    this.callMode = mode;
+  }
+
+  private preferVideoElementPlayback(): boolean {
+    const stream = this.getPlaybackStream();
+    if (!stream) return this.callMode === "video";
+    return (
+      this.callMode === "video" ||
+      stream.getVideoTracks().some((t) => t.readyState === "live")
+    );
+  }
+
+  private playbackAttachOptions(): { preferVideoElement?: boolean } {
+    return { preferVideoElement: this.preferVideoElementPlayback() };
+  }
 
   async init(iceServers: RTCIceServer[]): Promise<void> {
     this.pc = new RTCPeerConnection({
@@ -82,7 +100,7 @@ export class CallPeerConnection {
         this.bindRemoteAudioTrack(ev.track, this.playbackStream);
       } else {
         this.onRemoteTrack?.();
-        void this.refreshSpeakerPlaybackStream();
+        void this.remountPlaybackIfNeeded();
       }
     };
     this.pc.onconnectionstatechange = () => {
@@ -256,14 +274,27 @@ export class CallPeerConnection {
     return this.playbackStream ?? this.remoteStream;
   }
 
-  private async refreshSpeakerPlaybackStream(): Promise<void> {
+  private async remountPlaybackIfNeeded(): Promise<void> {
     const stream = this.getPlaybackStream();
-    if (!stream || !this.remoteMedia || this.remoteMedia.tagName !== "VIDEO" || !this.speakerOn) {
+    if (!stream) return;
+
+    const wantsVideoEl = this.preferVideoElementPlayback();
+    const usingVideoEl = this.remoteMedia?.tagName === "VIDEO";
+
+    if (wantsVideoEl && !usingVideoEl) {
+      this.remoteMedia = await attachCallMediaStream(
+        stream,
+        this.speakerOn,
+        this.playbackAttachOptions(),
+      );
+      void this.playRemoteAudio();
       return;
     }
-    this.remoteMedia.srcObject = stream;
-    await this.applySpeakerRoute();
-    void this.playRemoteAudio();
+
+    if (wantsVideoEl && usingVideoEl && this.remoteMedia) {
+      this.remoteMedia.srcObject = stream;
+      void this.playRemoteAudio();
+    }
   }
 
   private bindRemoteAudioTrack(track: MediaStreamTrack, stream: MediaStream): void {
@@ -285,6 +316,7 @@ export class CallPeerConnection {
     };
 
     this.mountRemoteMedia();
+    void this.remountPlaybackIfNeeded();
     this.onRemoteTrack?.();
   }
 
@@ -297,7 +329,11 @@ export class CallPeerConnection {
     const stream = this.getPlaybackStream();
     if (!stream) return;
 
-    this.remoteMedia = await attachCallMediaStream(stream, this.speakerOn);
+    this.remoteMedia = await attachCallMediaStream(
+      stream,
+      this.speakerOn,
+      this.playbackAttachOptions(),
+    );
     await this.applySpeakerRoute();
     void this.playRemoteAudio();
   }
@@ -347,7 +383,11 @@ export class CallPeerConnection {
 
     if (isIOSDevice()) {
       void (async () => {
-        this.remoteMedia = await rebuildCallMediaStream(stream, this.speakerOn);
+        this.remoteMedia = await rebuildCallMediaStream(
+          stream,
+          this.speakerOn,
+          this.playbackAttachOptions(),
+        );
         if (await playCallMedia(this.remoteMedia)) {
           await this.applySpeakerRoute();
         }
@@ -374,7 +414,11 @@ export class CallPeerConnection {
     const refreshed = this.getPlaybackStream();
     if (!refreshed) return;
 
-    this.remoteMedia = await rebuildCallMediaStream(refreshed, this.speakerOn);
+    this.remoteMedia = await rebuildCallMediaStream(
+      refreshed,
+      this.speakerOn,
+      this.playbackAttachOptions(),
+    );
 
     const delays = [0, 250, 600, 1200];
     for (const delay of delays) {

@@ -66,6 +66,14 @@ function defaultSpeakerForMode(mode: "audio" | "video"): boolean {
   return mode === "video";
 }
 
+function mediaAccessErrorMessage(err: unknown): string {
+  const text = describeError(err).toLowerCase();
+  if (text.includes("permission") || text.includes("notallowed") || text.includes("denied")) {
+    return "Разрешите доступ к микрофону и камере в настройках браузера или приложения.";
+  }
+  return "Не удалось получить доступ к микрофону";
+}
+
 /** Race a promise against a hard deadline so a stuck browser API (e.g. a
  * getUserMedia permission prompt that never gets answered) can't freeze the
  * whole call setup chain forever. */
@@ -171,6 +179,7 @@ export class CallController {
   private cleanupInFlight = false;
   private endedOnServer = new Set<string>();
   private pendingRemoteAnswer: string | null = null;
+  private localMediaPromise: Promise<void> | null = null;
   private catchUpPollTimers: ReturnType<typeof setTimeout>[] = [];
   private iceOutBatch: IceCandidatePayload[] = [];
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -319,7 +328,18 @@ export class CallController {
       return;
     }
     const callMode: "audio" | "video" = options?.video === true ? "video" : "audio";
-    primeCallMediaPlayback(defaultSpeakerForMode(callMode));
+    const speakerOn = defaultSpeakerForMode(callMode);
+
+    try {
+      await (this.localMediaPromise ??
+        this.acquireLocalMedia({ video: callMode === "video", speakerOn }));
+    } catch (err) {
+      this.patchDebug({ lastError: describeError(err) });
+      await this.cleanup("error", mediaAccessErrorMessage(err));
+      return;
+    } finally {
+      this.localMediaPromise = null;
+    }
 
     const result = await initiateCall({
       channel: this.channel,
@@ -338,6 +358,11 @@ export class CallController {
     }
 
     if (!initiate.ok || !initiate.callId) {
+      if (this.localStream) {
+        for (const t of this.localStream.getTracks()) t.stop();
+        this.localStream = null;
+        this.emitMedia();
+      }
       const msg =
         initiate.error === "busy"
           ? "Собеседник занят"
@@ -355,7 +380,6 @@ export class CallController {
     this.pendingRemoteAnswer = null;
     this.callStartedAt = Date.now();
     const videoEnabled = callMode === "video";
-    const speakerOn = defaultSpeakerForMode(callMode);
     this.patch({
       debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: initiate.callId },
       phase: "outgoing",
@@ -383,7 +407,6 @@ export class CallController {
     this.startSdpKeepalive();
 
     try {
-      await this.ensureLocalMedia();
       await this.setupPeerConnection();
       const offerSdp = await this.pc!.createOffer({
         receiveVideo: this.state.callMode === "video",
@@ -400,8 +423,27 @@ export class CallController {
       });
     } catch (err) {
       this.patchDebug({ lastError: describeError(err) });
-      await this.cleanup("error", "Не удалось получить доступ к микрофону");
+      await this.cleanup("error", "Не удалось установить соединение");
     }
+  }
+
+  /**
+   * Start mic/camera capture during the user-gesture turn (before any await in
+   * startOutgoing/acceptIncoming). Call synchronously from click handlers.
+   */
+  beginLocalMediaCapture(options: { video?: boolean; speakerOn?: boolean }): Promise<void> {
+    if (this.localMediaPromise) return this.localMediaPromise;
+    const video = options.video === true;
+    const callMode: "audio" | "video" = video ? "video" : "audio";
+    const speakerOn = options.speakerOn ?? defaultSpeakerForMode(callMode);
+    this.patch({
+      callMode,
+      videoEnabled: video,
+      speakerOn,
+    });
+    prepareAudioSessionForCall();
+    this.localMediaPromise = this.acquireLocalMedia({ video, speakerOn });
+    return this.localMediaPromise;
   }
 
   async acceptIncoming(): Promise<void> {
@@ -415,16 +457,19 @@ export class CallController {
     this.patch({ phase: "connecting" });
 
     try {
-      // Always reconcile with the server's active call for this DM channel.
-      // Deep links and push notifications often carry a stale callId while a
-      // newer call (with the offer) is already active — callee would poll the
-      // wrong session forever and never see session.offer.
+      await (this.localMediaPromise ??
+        this.acquireLocalMedia({ video: true, speakerOn: false }));
+      this.localMediaPromise = null;
+
+      // Reconcile with the server's active call for this DM channel.
       const serverSession = await this.refreshCallFromServer();
       const offerHasVideo = hasVideoInSdp(serverSession?.offerSdp);
       const mode: "audio" | "video" =
         serverSession?.media === "video" || offerHasVideo ? "video" : "audio";
       const speakerOn = defaultSpeakerForMode(mode);
-      primeCallMediaPlayback(speakerOn);
+      if (mode === "video") {
+        primeCallMediaPlayback(true);
+      }
       this.patch({
         callMode: mode,
         videoEnabled: mode === "video" ? this.state.videoEnabled || offerHasVideo : false,
@@ -436,7 +481,6 @@ export class CallController {
       });
       this.startVideoHealthWatch();
 
-      await this.ensureLocalMedia();
       await this.setupPeerConnection();
       await this.ensureSdpApplied();
 
@@ -448,7 +492,7 @@ export class CallController {
       if (this.state.callId) {
         await sendCallSignal({ callId: this.state.callId, type: "reject" });
       }
-      await this.cleanup("error", "Не удалось получить доступ к микрофону");
+      await this.cleanup("error", mediaAccessErrorMessage(err));
     }
   }
 
@@ -761,55 +805,74 @@ export class CallController {
     return null;
   }
 
-  private async ensureLocalMedia(): Promise<void> {
-    resetCallMediaForNewCall();
+  private async acquireLocalMedia(options: {
+    video: boolean;
+    speakerOn: boolean;
+  }): Promise<void> {
     prepareAudioSessionForCall();
-    await prepareCallAudioOutput({ speakerOn: this.state.speakerOn });
-    const needVideo = this.state.callMode === "video" && this.state.videoEnabled;
-    await withTimeout(
-      ensureMediaPermissions({ audio: true, video: needVideo }),
-      15000,
-      "media_permissions",
-    );
+    const needVideo = options.video;
+    const audioConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    const videoConstraints = needVideo
+      ? {
+          width: { ideal: 640, max: 1280 },
+          height: { ideal: 360, max: 720 },
+          frameRate: { ideal: 15, max: 24 },
+        }
+      : false;
+
+    // getUserMedia must be the first await after the user gesture on iOS.
     try {
       this.localStream = await withTimeout(
         navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video: needVideo
-            ? {
-                width: { ideal: 640, max: 1280 },
-                height: { ideal: 360, max: 720 },
-                frameRate: { ideal: 15, max: 24 },
-              }
-            : false,
+          audio: audioConstraints,
+          video: videoConstraints,
         }),
         15000,
         "get_user_media",
       );
-    } catch {
-      // Graceful fallback to audio-only if camera is unavailable/denied.
-      this.localStream = await withTimeout(
-        navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video: false,
-        }),
+    } catch (firstErr) {
+      await withTimeout(
+        ensureMediaPermissions({ audio: true, video: needVideo }),
         15000,
-        "get_user_media_audio_only",
+        "media_permissions",
       );
-      this.patch({ videoEnabled: false });
+      try {
+        this.localStream = await withTimeout(
+          navigator.mediaDevices.getUserMedia({
+            audio: audioConstraints,
+            video: videoConstraints,
+          }),
+          15000,
+          "get_user_media_retry",
+        );
+      } catch {
+        if (!needVideo) throw firstErr;
+        this.localStream = await withTimeout(
+          navigator.mediaDevices.getUserMedia({
+            audio: audioConstraints,
+            video: false,
+          }),
+          15000,
+          "get_user_media_audio_only",
+        );
+        this.patch({ videoEnabled: false, callMode: "audio" });
+      }
     }
+
+    await prepareCallAudioOutput({ speakerOn: options.speakerOn });
     kickAudioSessionAfterCapture();
     void refreshIosAudioOutputEnumeration();
     this.patchPlaybackDebug();
     this.emitMedia();
+  }
+
+  private async ensureLocalMedia(): Promise<void> {
+    const needVideo = this.state.callMode === "video" && this.state.videoEnabled;
+    await this.acquireLocalMedia({ video: needVideo, speakerOn: this.state.speakerOn });
   }
 
   private async setupPeerConnection(): Promise<void> {
@@ -819,6 +882,7 @@ export class CallController {
     const { iceServers, turnSource } = await fetchIceServers();
     this.patchDebug({ turnSource, isCaller: this.isCaller });
     this.pc = new CallPeerConnection();
+    this.pc.setCallMode(this.state.callMode);
     await this.pc.init(iceServers);
     if (isIOSDevice()) {
       this.startCallAudioWatch();
@@ -1723,6 +1787,7 @@ export class CallController {
     this.setTransportPhase("closed");
     releaseCallMediaPlayback();
     purgeOrphanedCallMediaElements();
+    resetCallMediaForNewCall();
     releaseCallMediaSession();
 
     if (this.localStream) {
@@ -1751,6 +1816,7 @@ export class CallController {
     this.lastSession = null;
     this.pendingRemoteAnswer = null;
     this.pendingPollMerge = null;
+    this.localMediaPromise = null;
     this.cleanupInFlight = false;
     this.pendingRemoteIce = [];
     this.videoRecoveryInFlight = false;

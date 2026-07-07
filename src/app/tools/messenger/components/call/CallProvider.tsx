@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { prepareAudioSessionForCall } from "@/lib/audio-session";
 import { getCallController } from "@/lib/messenger/call/call-controller";
 import { primeCallMediaPlayback } from "@/lib/messenger/call/call-media-playback";
 import type { CallState } from "@/lib/messenger/call/types";
@@ -99,16 +100,22 @@ export function CallProvider({
 
   const startAudioCall = useCallback(() => {
     primeCallMediaPlayback(false);
+    prepareAudioSessionForCall();
+    controllerRef.current.beginLocalMediaCapture({ video: false, speakerOn: false });
     void controllerRef.current.startOutgoing({ video: false });
   }, []);
 
   const startVideoCall = useCallback(() => {
     primeCallMediaPlayback(true);
+    prepareAudioSessionForCall();
+    controllerRef.current.beginLocalMediaCapture({ video: true, speakerOn: true });
     void controllerRef.current.startOutgoing({ video: true });
   }, []);
 
   const acceptCall = useCallback(() => {
-    primeCallMediaPlayback(true);
+    primeCallMediaPlayback(false);
+    prepareAudioSessionForCall();
+    controllerRef.current.beginLocalMediaCapture({ video: true, speakerOn: false });
     void controllerRef.current.acceptIncoming();
   }, []);
 

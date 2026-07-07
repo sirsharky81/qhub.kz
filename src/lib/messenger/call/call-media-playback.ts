@@ -263,6 +263,7 @@ async function mountLegacyRelayOutput(
 export async function attachCallMediaStream(
   stream: MediaStream,
   speakerOn: boolean,
+  options?: { preferVideoElement?: boolean },
 ): Promise<HTMLMediaElement> {
   if (!isIOSDevice()) {
     const el = ensureDefaultElement();
@@ -271,6 +272,20 @@ export async function attachCallMediaStream(
   }
 
   kickAudioSessionAfterCapture();
+
+  const hasLiveVideo = stream.getVideoTracks().some((t) => t.readyState === "live");
+  const useDirectVideo = options?.preferVideoElement === true || hasLiveVideo;
+
+  if (useDirectVideo) {
+    destroyRelayGraph();
+    destroyEarpieceElement();
+    const el = createSpeakerElement();
+    el.srcObject = stream;
+    if (useIosSinkIdCallRouting()) {
+      await applySinkIdToElement(el, speakerOn);
+    }
+    return el;
+  }
 
   if (useIosSinkIdCallRouting()) {
     const sinkEl = await mountSinkRelayOutput(stream, speakerOn);
@@ -284,6 +299,7 @@ export async function attachCallMediaStream(
 export async function rebuildCallMediaStream(
   stream: MediaStream,
   speakerOn: boolean,
+  options?: { preferVideoElement?: boolean },
 ): Promise<HTMLMediaElement> {
   if (!isIOSDevice()) {
     const el = ensureDefaultElement();
@@ -301,7 +317,7 @@ export async function rebuildCallMediaStream(
   kickAudioSessionAfterCapture();
   prepareAudioSessionForCall();
 
-  return attachCallMediaStream(stream, speakerOn);
+  return attachCallMediaStream(stream, speakerOn, options);
 }
 
 /** Reset leftover media elements/unlock flags before a new call. */
