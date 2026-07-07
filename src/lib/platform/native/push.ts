@@ -99,6 +99,53 @@ async function handleFamilyLocateFromPush(data: Record<string, unknown> | undefi
   return handleFamilyLocatePush({ action, requestId });
 }
 
+function readCachedNativeToken(context: NotificationContext): string | null {
+  const own = localStorage.getItem(nativePushTokenKey(context));
+  if (own) return own;
+  // One FCM token per app install — messenger may have registered first.
+  if (context === "family") {
+    return localStorage.getItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY);
+  }
+  return null;
+}
+
+async function syncCachedNativePushToken(
+  context: NotificationContext,
+  session?: FamilySession,
+): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+
+  const token = readCachedNativeToken(context);
+  if (!token) return false;
+
+  localStorage.setItem(nativePushTokenKey(context), token);
+
+  const endpoint =
+    context === "family" ? "/api/family/push/subscribe" : "/api/messenger/push/subscribe";
+  const platform = getNativePlatform() === "ios" ? "ios" : "android";
+
+  const headers: Record<string, string> | undefined =
+    context === "family" && session
+      ? {
+          "X-Family-Member-Id": session.memberId,
+          "X-Family-Access-Token": session.accessToken,
+        }
+      : undefined;
+
+  return postNativeSubscription(
+    endpoint,
+    {
+      subscription: {
+        endpoint: token,
+        keys: { p256dh: "native", auth: "native" },
+        platform,
+        nativeToken: token,
+      },
+    },
+    headers,
+  );
+}
+
 function attachRegistrationListeners(
   context: NotificationContext,
   session: FamilySession | undefined,
@@ -175,6 +222,12 @@ export async function registerNativePush(
     void (async () => {
       try {
         await ensureAndroidPushChannel();
+        const synced = await syncCachedNativePushToken(context, session);
+        if (synced) {
+          removeRegistrationWaiter(context, finish);
+          finish(true);
+          return;
+        }
         await PushNotifications.register();
       } catch (err) {
         PlatformLogger.error(

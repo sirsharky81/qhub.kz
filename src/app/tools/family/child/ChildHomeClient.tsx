@@ -145,7 +145,11 @@ export function ChildHomeClient() {
 
   useEffect(() => {
     if (view !== "paired" || !session) return;
-    void PlatformNotifications.subscribe("family", session);
+    void (async () => {
+      const perm = await PlatformNotifications.requestPermission();
+      if (perm !== "granted") return;
+      await PlatformNotifications.subscribe("family", session);
+    })();
   }, [view, session]);
 
   useEffect(() => {

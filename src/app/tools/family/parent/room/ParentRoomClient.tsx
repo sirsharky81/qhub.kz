@@ -308,7 +308,12 @@ function ParentRoomInner() {
           sos={sos}
           selectedId={selectedChildId}
           onSelect={handleSelectChild}
-          onRequestLocation={(memberId) => void handleRequestLocation(memberId, "silent")}
+          onRequestLocation={(memberId) => {
+            const child = children.find((c) => c.memberId === memberId);
+            const loc = locations.find((l) => l.memberId === memberId);
+            const presence = getParticipantPresence(child?.shareLocationWithParents !== false, loc);
+            void handleRequestLocation(memberId, presence === "offline" ? "notify" : "silent");
+          }}
           requestLocationLoadingId={requestLocationLoadingId}
           onRemove={isOwner ? handleRemoveParticipant : undefined}
           onClearSos={handleClearSos}
