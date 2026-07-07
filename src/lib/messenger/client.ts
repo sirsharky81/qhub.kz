@@ -282,12 +282,25 @@ export async function pingMessengerPresence(): Promise<void> {
   const realtime = getMessengerRealtimeClient();
   if (!realtime.shouldUsePollingFallback()) {
     realtime.sendPresence(MESSENGER_GLOBAL_PRESENCE_CHANNEL);
-    return;
   }
   try {
     await platformFetch("/api/messenger/presence", { method: "POST" });
   } catch {
     // best-effort heartbeat
+  }
+}
+
+/** Refresh "viewing this chat" for push suppression (HTTP + WS). */
+export async function touchChatPresence(channel: string): Promise<void> {
+  const realtime = getMessengerRealtimeClient();
+  if (!realtime.shouldUsePollingFallback()) {
+    realtime.sendPresence(channel);
+  }
+  try {
+    const params = new URLSearchParams({ channel, since: "0", heartbeat: "1" });
+    await platformFetch(`/api/messenger/poll?${params}`);
+  } catch {
+    // best-effort
   }
 }
 

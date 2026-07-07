@@ -15,7 +15,7 @@ import {
   publishTypingEvent,
 } from "./realtime/publish";
 
-const PRESENCE_WRITE_MIN_INTERVAL_MS = 12_000;
+const PRESENCE_WRITE_MIN_INTERVAL_MS = 5000;
 const lastPresenceWriteByPhone = new Map<string, { at: number; channel: string }>();
 
 function pushKey(phone: string): string {

@@ -263,7 +263,6 @@ async function mountLegacyRelayOutput(
 export async function attachCallMediaStream(
   stream: MediaStream,
   speakerOn: boolean,
-  options?: { preferVideoElement?: boolean },
 ): Promise<HTMLMediaElement> {
   if (!isIOSDevice()) {
     const el = ensureDefaultElement();
@@ -274,7 +273,8 @@ export async function attachCallMediaStream(
   kickAudioSessionAfterCapture();
 
   const hasLiveVideo = stream.getVideoTracks().some((t) => t.readyState === "live");
-  const useDirectVideo = options?.preferVideoElement === true || hasLiveVideo;
+  // Direct WebRTC on <video> only when loudspeaker + live video track (iOS quirk).
+  const useDirectVideo = hasLiveVideo && speakerOn;
 
   if (useDirectVideo) {
     destroyRelayGraph();
@@ -299,7 +299,6 @@ export async function attachCallMediaStream(
 export async function rebuildCallMediaStream(
   stream: MediaStream,
   speakerOn: boolean,
-  options?: { preferVideoElement?: boolean },
 ): Promise<HTMLMediaElement> {
   if (!isIOSDevice()) {
     const el = ensureDefaultElement();
@@ -317,7 +316,7 @@ export async function rebuildCallMediaStream(
   kickAudioSessionAfterCapture();
   prepareAudioSessionForCall();
 
-  return attachCallMediaStream(stream, speakerOn, options);
+  return attachCallMediaStream(stream, speakerOn);
 }
 
 /** Reset leftover media elements/unlock flags before a new call. */

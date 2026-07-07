@@ -54,19 +54,6 @@ export class CallPeerConnection {
     this.callMode = mode;
   }
 
-  private preferVideoElementPlayback(): boolean {
-    const stream = this.getPlaybackStream();
-    if (!stream) return this.callMode === "video";
-    return (
-      this.callMode === "video" ||
-      stream.getVideoTracks().some((t) => t.readyState === "live")
-    );
-  }
-
-  private playbackAttachOptions(): { preferVideoElement?: boolean } {
-    return { preferVideoElement: this.preferVideoElementPlayback() };
-  }
-
   async init(iceServers: RTCIceServer[]): Promise<void> {
     this.pc = new RTCPeerConnection({
       iceServers,
@@ -278,15 +265,12 @@ export class CallPeerConnection {
     const stream = this.getPlaybackStream();
     if (!stream) return;
 
-    const wantsVideoEl = this.preferVideoElementPlayback();
+    const hasLiveVideo = stream.getVideoTracks().some((t) => t.readyState === "live");
+    const wantsVideoEl = hasLiveVideo && this.speakerOn;
     const usingVideoEl = this.remoteMedia?.tagName === "VIDEO";
 
     if (wantsVideoEl && !usingVideoEl) {
-      this.remoteMedia = await attachCallMediaStream(
-        stream,
-        this.speakerOn,
-        this.playbackAttachOptions(),
-      );
+      this.remoteMedia = await attachCallMediaStream(stream, this.speakerOn);
       void this.playRemoteAudio();
       return;
     }
@@ -329,11 +313,7 @@ export class CallPeerConnection {
     const stream = this.getPlaybackStream();
     if (!stream) return;
 
-    this.remoteMedia = await attachCallMediaStream(
-      stream,
-      this.speakerOn,
-      this.playbackAttachOptions(),
-    );
+    this.remoteMedia = await attachCallMediaStream(stream, this.speakerOn);
     await this.applySpeakerRoute();
     void this.playRemoteAudio();
   }
@@ -383,11 +363,7 @@ export class CallPeerConnection {
 
     if (isIOSDevice()) {
       void (async () => {
-        this.remoteMedia = await rebuildCallMediaStream(
-          stream,
-          this.speakerOn,
-          this.playbackAttachOptions(),
-        );
+        this.remoteMedia = await rebuildCallMediaStream(stream, this.speakerOn);
         if (await playCallMedia(this.remoteMedia)) {
           await this.applySpeakerRoute();
         }
@@ -414,11 +390,7 @@ export class CallPeerConnection {
     const refreshed = this.getPlaybackStream();
     if (!refreshed) return;
 
-    this.remoteMedia = await rebuildCallMediaStream(
-      refreshed,
-      this.speakerOn,
-      this.playbackAttachOptions(),
-    );
+    this.remoteMedia = await rebuildCallMediaStream(refreshed, this.speakerOn);
 
     const delays = [0, 250, 600, 1200];
     for (const delay of delays) {

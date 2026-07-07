@@ -329,25 +329,57 @@ export class CallController {
     }
     const callMode: "audio" | "video" = options?.video === true ? "video" : "audio";
     const speakerOn = defaultSpeakerForMode(callMode);
+    const videoEnabled = callMode === "video";
 
+    this.isCaller = true;
+    this.sinceSeq = 0;
+    this.lastSession = null;
+    this.localOfferSdp = null;
+    this.localAnswerSdp = null;
+    this.pendingRemoteAnswer = null;
+    this.callStartedAt = Date.now();
+    this.patch({
+      debug: { ...INITIAL_DEBUG, isCaller: true },
+      phase: "outgoing",
+      callId: null,
+      channel: this.channel,
+      peerPhone: this.peerPhone,
+      callMode,
+      videoEnabled,
+      speakerOn,
+      endReason: null,
+      errorMessage: null,
+    });
+    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
+      speakerOn,
+      videoEnabled,
+    });
+    this.startVideoHealthWatch();
+    this.startElapsedTimer();
+    this.journal.record("INITIATE", "outgoing");
+
+    const mediaTask = (this.localMediaPromise ??
+      this.acquireLocalMedia({ video: callMode === "video", speakerOn })).finally(() => {
+      this.localMediaPromise = null;
+    });
+
+    let initiate: Awaited<ReturnType<typeof initiateCall>>;
     try {
-      await (this.localMediaPromise ??
-        this.acquireLocalMedia({ video: callMode === "video", speakerOn }));
+      const [, initiateResult] = await Promise.all([
+        mediaTask,
+        initiateCall({
+          channel: this.channel,
+          peerPhone: this.peerPhone,
+          media: callMode,
+        }),
+      ]);
+      initiate = initiateResult;
     } catch (err) {
       this.patchDebug({ lastError: describeError(err) });
       await this.cleanup("error", mediaAccessErrorMessage(err));
       return;
-    } finally {
-      this.localMediaPromise = null;
     }
 
-    const result = await initiateCall({
-      channel: this.channel,
-      peerPhone: this.peerPhone,
-      media: callMode,
-    });
-
-    let initiate = result;
     if (!initiate.ok && initiate.error === "busy" && initiate.callId) {
       await endCallApi(initiate.callId, "supersede");
       initiate = await initiateCall({
@@ -372,38 +404,14 @@ export class CallController {
       return;
     }
 
-    this.isCaller = true;
-    this.sinceSeq = 0;
-    this.lastSession = null;
-    this.localOfferSdp = null;
-    this.localAnswerSdp = null;
-    this.pendingRemoteAnswer = null;
-    this.callStartedAt = Date.now();
-    const videoEnabled = callMode === "video";
     this.patch({
-      debug: { ...INITIAL_DEBUG, isCaller: true, activeCallId: initiate.callId },
-      phase: "outgoing",
       callId: initiate.callId,
-      channel: this.channel,
-      peerPhone: this.peerPhone,
-      callMode,
-      videoEnabled,
-      speakerOn,
-      endReason: null,
-      errorMessage: null,
+      debug: { ...this.state.debug, activeCallId: initiate.callId },
     });
-    void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
-      speakerOn,
-      videoEnabled,
-    });
-    this.startVideoHealthWatch();
-    this.journal.record("INITIATE", "outgoing");
 
-    // Start signaling immediately — don't wait for getUserMedia / ICE config.
     this.adoptCallId(initiate.callId);
     this.startRingTimeout();
     this.startSetupWatchdog();
-    this.startElapsedTimer();
     this.startSdpKeepalive();
 
     try {

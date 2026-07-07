@@ -16,10 +16,12 @@ import {
   markDmDialogRead,
   markRoomDialogRead,
   isReceiptEnvelope,
+  pingMessengerPresence,
   pollChannel,
   sendTypingStatus,
   sendEncryptedMessage,
   sendReceipt,
+  touchChatPresence,
 } from "@/lib/messenger/client";
 import {
   decryptMessage,
@@ -519,10 +521,12 @@ export function ChatView({
     }
 
     const pingPresence = () => {
-      if (cancelled || document.hidden) return;
-      if (!realtime.shouldUsePollingFallback()) {
-        realtime.sendPresence(channel);
+      if (cancelled) return;
+      if (document.hidden) {
+        void pingMessengerPresence();
+        return;
       }
+      void touchChatPresence(channel);
     };
 
     realtime.subscribeChannels([channel]);
@@ -561,11 +565,12 @@ export function ChatView({
 
     void tick();
     pingPresence();
-    presenceTimer = window.setInterval(pingPresence, 20_000);
+    presenceTimer = window.setInterval(pingPresence, 8000);
 
     const removeResume = onAppResume(() => void tick());
     const onVisibility = () => {
       if (document.hidden) {
+        void pingMessengerPresence();
         scheduleNext();
         return;
       }
