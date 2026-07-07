@@ -5,7 +5,10 @@ export const BIND_TTL_SEC = 60 * 15;
 export const SOS_TTL_SEC = 60 * 60 * 24 * 30;
 export const PUSH_TTL_SEC = 60 * 60 * 24 * 30;
 export const LOC_REQUEST_TTL_SEC = 300;
-export const LOC_REQUEST_COOLDOWN_SEC = 60;
+export const LOC_REQUEST_NOTIFY_COOLDOWN_SEC = 45;
+export const LOC_REQUEST_SILENT_COOLDOWN_SEC = 10;
+/** @deprecated use LOC_REQUEST_NOTIFY_COOLDOWN_SEC */
+export const LOC_REQUEST_COOLDOWN_SEC = LOC_REQUEST_NOTIFY_COOLDOWN_SEC;
 
 export const REDIS_ROOM_PREFIX = "family:room:";
 export const REDIS_MEMBER_PREFIX = "family:member:";
@@ -16,6 +19,7 @@ export const REDIS_SOS_PREFIX = "family:sos:";
 export const REDIS_PUSH_PREFIX = "family:push:";
 export const REDIS_LOC_REQ_PREFIX = "family:loc-req:";
 export const FAMILY_NATIVE_PUSH_TOKEN_KEY = "qhub_family_native_push_token";
+export const CHILD_SHARE_WITH_PARENTS_KEY = "qhub_family_child_share_with_parents";
 
 export const PAIR_TTL_SEC = 60 * 15;
 

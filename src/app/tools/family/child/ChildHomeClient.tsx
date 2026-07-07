@@ -19,10 +19,7 @@ import {
 } from "@/lib/family/client";
 import { startGeoWatch } from "@/lib/family/geo";
 import { submitChildLocation } from "@/lib/family/child-location";
-import { handleFamilyLocatePush } from "@/lib/family/location-request-handler";
 import { childMapMemberUrl } from "@/lib/family/map-urls";
-import { PlatformLocation } from "@/lib/platform/location";
-import { PlatformNotifications } from "@/lib/platform/notifications";
 import { isNativePlatform } from "@/lib/platform/runtime";
 import { messengerChatUrl } from "@/lib/app-routes";
 import {
@@ -33,6 +30,7 @@ import {
   loadChildSession,
   saveChildPairingSession,
   saveChildSession,
+  saveChildShareWithParents,
 } from "@/lib/family/session";
 import type { ChildPairingSession, FamilyPollSnapshot, FamilySession } from "@/lib/family/types";
 
@@ -139,67 +137,20 @@ export function ChildHomeClient() {
   const selfMember = snapshot?.members.find((m) => m.memberId === session?.memberId);
   useEffect(() => {
     if (selfMember) {
-      setShareWithParents(selfMember.shareLocationWithParents !== false);
+      const enabled = selfMember.shareLocationWithParents !== false;
+      setShareWithParents(enabled);
+      saveChildShareWithParents(enabled);
     }
   }, [selfMember?.shareLocationWithParents]);
 
   useEffect(() => {
-    if (view !== "paired" || !session) return;
-    void (async () => {
-      const perm = await PlatformNotifications.requestPermission();
-      if (perm !== "granted") return;
-      await PlatformNotifications.subscribe("family", session);
-    })();
-  }, [view, session]);
-
-  useEffect(() => {
-    if (view !== "paired" || typeof window === "undefined") return;
-    if (!("serviceWorker" in navigator)) return;
-
-    const onMessage = (event: MessageEvent) => {
-      const data = event.data as { type?: string; action?: string; requestId?: string } | null;
-      if (!data || data.type !== "qhub:family-locate") return;
-      void handleFamilyLocatePush({ action: data.action, requestId: data.requestId });
-    };
-
-    navigator.serviceWorker.addEventListener("message", onMessage);
-    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
-  }, [view]);
-
-  useEffect(() => {
-    if (view !== "paired" || !isNativePlatform() || typeof window === "undefined") return;
-
-    const onNativeLocate = (event: Event) => {
-      const detail = (event as CustomEvent<{ action?: string; requestId?: string }>).detail;
-      void handleFamilyLocatePush(detail ?? {});
-    };
-
-    window.addEventListener("qhub-family-locate-native", onNativeLocate);
-    return () => window.removeEventListener("qhub-family-locate-native", onNativeLocate);
-  }, [view]);
-
-  useEffect(() => {
-    if (view !== "paired" || !shareWithParents) return;
+    if (view !== "paired" || !shareWithParents || isNativePlatform()) return;
 
     const onLocation = (pos: { lat: number; lng: number; accuracy: number }) => {
       void submitChildLocation(pos)
         .then(() => setGeoError(null))
         .catch((e) => setGeoError(e instanceof Error ? e.message : "Ошибка GPS"));
     };
-
-    if (isNativePlatform()) {
-      let cancelled = false;
-      void PlatformLocation.startBackgroundTracking({
-        onLocation,
-        onError: (err) => {
-          if (!cancelled) setGeoError(err.message);
-        },
-      });
-      return () => {
-        cancelled = true;
-        void PlatformLocation.stopBackgroundTracking();
-      };
-    }
 
     return startGeoWatch(onLocation);
   }, [view, shareWithParents]);
@@ -211,6 +162,7 @@ export function ChildHomeClient() {
     try {
       await setShareLocationApi(s, enabled, "parents");
       setShareWithParents(enabled);
+      saveChildShareWithParents(enabled);
       await pollRoom();
     } finally {
       setShareLoading(false);

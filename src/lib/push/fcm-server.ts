@@ -55,7 +55,11 @@ export async function sendFcmPush(
           return messaging.send({
             token: target.token,
             data,
-            android: { priority: "high" },
+            android: {
+              priority: "high",
+              ttl: 30_000,
+              collapseKey: "family-locate",
+            },
           });
         }
 

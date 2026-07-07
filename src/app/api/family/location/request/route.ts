@@ -33,6 +33,7 @@ export async function POST(request: Request) {
     const { allowed, retryAfterSec } = await checkFamilyLocationRequestRateLimit(
       member.memberId,
       targetMemberId,
+      mode,
     );
     if (!allowed) {
       return Response.json(

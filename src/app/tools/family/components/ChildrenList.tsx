@@ -18,6 +18,7 @@ interface Props {
   onClearSos?: (memberId: string) => void;
   onRequestLocation?: (memberId: string) => void;
   requestLocationLoadingId?: string | null;
+  requestCooldownSecFor?: (memberId: string) => number;
   mapHrefFor?: (memberId: string) => string | null;
   messageHrefFor?: (memberId: string) => string | null;
 }
@@ -32,6 +33,7 @@ export function ChildrenList({
   onClearSos,
   onRequestLocation,
   requestLocationLoadingId,
+  requestCooldownSecFor,
   mapHrefFor,
   messageHrefFor,
 }: Props) {
@@ -59,6 +61,8 @@ export function ChildrenList({
           const sharesLocation = child.shareLocationWithParents !== false;
           const presence = getParticipantPresence(sharesLocation, loc);
           const isRequestLoading = requestLocationLoadingId === child.memberId;
+          const cooldownSec = requestCooldownSecFor?.(child.memberId) ?? 0;
+          const requestDisabled = isRequestLoading || cooldownSec > 0;
           return (
             <li key={child.memberId}>
               <div
@@ -100,15 +104,17 @@ export function ChildrenList({
                 <div className="px-3 pb-1.5">
                   <button
                     type="button"
-                    disabled={isRequestLoading}
+                    disabled={requestDisabled}
                     onClick={() => onRequestLocation(child.memberId)}
                     className="text-xs text-sky-700 underline disabled:opacity-50"
                   >
                     {isRequestLoading
                       ? "Запрос отправлен…"
-                      : presence === "offline"
-                        ? "Запросить геопозицию"
-                        : "Обновить геопозицию"}
+                      : cooldownSec > 0
+                        ? `Повтор через ${cooldownSec} сек`
+                        : presence === "offline"
+                          ? "Запросить геопозицию"
+                          : "Обновить геопозицию"}
                   </button>
                 </div>
               ) : null}

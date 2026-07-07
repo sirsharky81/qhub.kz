@@ -9,7 +9,7 @@ import { ChildrenList } from "../../components/ChildrenList";
 import { ParentsList } from "../../components/ParentsList";
 import { ShareLocationPanel } from "../../components/ShareLocationPanel";
 import { SosPhoneSettings } from "../../components/SosPhoneSettings";
-import { POLL_HIDDEN_MS, POLL_VISIBLE_MS } from "@/lib/family/constants";
+import { POLL_HIDDEN_MS, POLL_VISIBLE_MS, LOC_REQUEST_SILENT_COOLDOWN_SEC, LOC_REQUEST_NOTIFY_COOLDOWN_SEC } from "@/lib/family/constants";
 import {
   clearSosApi,
   deleteFamilyRoomApi,
@@ -43,6 +43,8 @@ function ParentRoomInner() {
   const [showSettings, setShowSettings] = useState(false);
   const [locationRequestMessage, setLocationRequestMessage] = useState<string | null>(null);
   const [requestLocationLoadingId, setRequestLocationLoadingId] = useState<string | null>(null);
+  const [requestCooldownUntil, setRequestCooldownUntil] = useState<Record<string, number>>({});
+  const [, setCooldownTick] = useState(0);
   const versionRef = useRef(0);
   const lastSosRef = useRef<Record<string, number>>({});
 
@@ -115,6 +117,18 @@ function ParentRoomInner() {
     };
   }, [session, poll]);
 
+  useEffect(() => {
+    const hasActive = Object.values(requestCooldownUntil).some((until) => until > Date.now());
+    if (!hasActive) return;
+    const id = setInterval(() => setCooldownTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [requestCooldownUntil]);
+
+  function getRequestCooldownSec(memberId: string): number {
+    const until = requestCooldownUntil[memberId] ?? 0;
+    return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+  }
+
   const selfParent = snapshot?.parents.find((p) => p.memberId === session?.memberId);
   useEffect(() => {
     if (selfParent) {
@@ -158,20 +172,41 @@ function ParentRoomInner() {
   async function handleRequestLocation(memberId: string, mode: "silent" | "notify") {
     const s = loadParentSession();
     if (!s) return;
+    if (getRequestCooldownSec(memberId) > 0) return;
+
     setRequestLocationLoadingId(memberId);
     setLocationRequestMessage(null);
     try {
       const result = await requestChildLocationApi(s, memberId, mode);
       if (!result.ok) {
-        setLocationRequestMessage(result.error);
+        const retrySec =
+          result.retryAfterSec ??
+          (mode === "silent" ? LOC_REQUEST_SILENT_COOLDOWN_SEC : LOC_REQUEST_NOTIFY_COOLDOWN_SEC);
+        if (result.retryAfterSec || result.error.includes("Подождите")) {
+          setRequestCooldownUntil((prev) => ({
+            ...prev,
+            [memberId]: Date.now() + retrySec * 1000,
+          }));
+          setLocationRequestMessage(`Повтор через ${retrySec} сек`);
+        } else {
+          setLocationRequestMessage(result.error);
+        }
         return;
       }
       if (!result.hasSubscriptions) {
-        setLocationRequestMessage("У участника нет push-подписки — попросите открыть приложение");
+        setLocationRequestMessage("У участника нет push-подписки — попросите открыть QHub");
         return;
       }
+      const cooldownSec =
+        mode === "silent" ? LOC_REQUEST_SILENT_COOLDOWN_SEC : LOC_REQUEST_NOTIFY_COOLDOWN_SEC;
+      setRequestCooldownUntil((prev) => ({
+        ...prev,
+        [memberId]: Date.now() + cooldownSec * 1000,
+      }));
       setLocationRequestMessage(
-        mode === "silent" ? "Тихий запрос отправлен" : "Запрос «Ты где?» отправлен",
+        mode === "silent"
+          ? `Тихий запрос отправлен (повтор через ${cooldownSec} сек)`
+          : `Запрос «Ты где?» отправлен (повтор через ${cooldownSec} сек)`,
       );
     } finally {
       setRequestLocationLoadingId(null);
@@ -315,6 +350,7 @@ function ParentRoomInner() {
             void handleRequestLocation(memberId, presence === "offline" ? "notify" : "silent");
           }}
           requestLocationLoadingId={requestLocationLoadingId}
+          requestCooldownSecFor={(memberId) => getRequestCooldownSec(memberId)}
           onRemove={isOwner ? handleRemoveParticipant : undefined}
           onClearSos={handleClearSos}
           mapHrefFor={(memberId) =>
