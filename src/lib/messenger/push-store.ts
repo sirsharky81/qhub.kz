@@ -9,6 +9,11 @@ import {
 } from "./constants";
 import { redisDel, redisGet, redisGetJson, redisSet } from "./redis";
 import type { MessengerPresence, MessengerPushSubscription } from "./types";
+import {
+  channelParticipants,
+  publishPeerOnlineEvent,
+  publishTypingEvent,
+} from "./realtime/publish";
 
 const PRESENCE_WRITE_MIN_INTERVAL_MS = 12_000;
 const lastPresenceWriteByPhone = new Map<string, { at: number; channel: string }>();
@@ -51,6 +56,16 @@ export async function setMessengerPresence(phone: string, channel: string): Prom
   const presence: MessengerPresence = { channel, at: Date.now() };
   await redisSet(presenceKey(phone), JSON.stringify(presence), MESSENGER_PRESENCE_TTL_SEC);
   lastPresenceWriteByPhone.set(phone, { at: now, channel });
+  void channelParticipants(channel)
+    .then((peers) =>
+      publishPeerOnlineEvent({
+        phone,
+        online: true,
+        activeChannel: channel,
+        notifyPhones: peers,
+      }),
+    )
+    .catch(() => {});
 }
 
 export async function touchMessengerPresence(phone: string): Promise<void> {
@@ -89,9 +104,10 @@ export async function setMessengerTyping(
 ): Promise<void> {
   if (active) {
     await redisSet(typingKey(channel, phone), "1", MESSENGER_TYPING_TTL_SEC);
-    return;
+  } else {
+    await redisDel(typingKey(channel, phone));
   }
-  await redisDel(typingKey(channel, phone));
+  void publishTypingEvent({ channel, peerPhone: phone, active, excludePhone: phone }).catch(() => {});
 }
 
 export async function isMessengerTyping(channel: string, phone: string): Promise<boolean> {

@@ -33,6 +33,7 @@ import {
 import { MESSENGER_MAX_PINNED_DIALOGS } from "@/lib/messenger/constants";
 import type { DialogPrefs, LocalDialog } from "@/lib/messenger/types";
 import { onAppResume } from "@/lib/platform/app-resume";
+import { getMessengerRealtimeClient } from "@/lib/messenger/realtime/client";
 import { useMessengerUnlockOptional } from "../components/MessengerUnlockProvider";
 
 const LONG_PRESS_MS = 450;
@@ -284,11 +285,26 @@ export function MessengerHomeClient() {
     const unsubUnread = subscribeUnreadChange(() => {
       void refreshDialogsAndUnread();
     });
-    const timer = window.setInterval(() => {
+    const realtime = getMessengerRealtimeClient();
+    const unsubRealtime = realtime.subscribe((event) => {
+      if (event.type === "dialog_update") {
+        void refreshDialogsAndUnread();
+      }
+    });
+    const pollMs = () => (realtime.shouldUsePollingFallback() ? 7000 : 30_000);
+    let timer = window.setInterval(() => {
       if (document.visibilityState === "visible") {
         void refreshDialogsAndUnread();
       }
-    }, 7000);
+    }, pollMs());
+    const unsubMode = realtime.onModeChange(() => {
+      clearInterval(timer);
+      timer = window.setInterval(() => {
+        if (document.visibilityState === "visible") {
+          void refreshDialogsAndUnread();
+        }
+      }, pollMs());
+    });
     const onFocus = () => {
       void refreshDialogsAndUnread();
     };
@@ -309,6 +325,8 @@ export function MessengerHomeClient() {
     return () => {
       cancelled = true;
       unsubUnread();
+      unsubRealtime();
+      unsubMode();
       clearInterval(timer);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("pageshow", onPageShow);

@@ -44,6 +44,7 @@ import {
   redisSet,
 } from "./redis";
 import { normalizeKzPhone, peerFromDmChannel } from "./phone";
+import { publishEnvelopesEvent } from "./realtime/publish";
 
 const WHITELIST_CACHE_TTL_MS = 30_000;
 let whitelistCache: { at: number; data: Record<string, WhitelistEntry> } | null = null;
@@ -353,7 +354,7 @@ export async function pushDmMessage(chatId: string, msg: EncryptedMessagePayload
 }
 
 export async function pushDmEnvelope(chatId: string, envelope: ChannelEnvelope): Promise<number> {
-  return pushEnvelope(
+  const version = await pushEnvelope(
     dmMessagesKey(chatId),
     dmMetaKey(chatId),
     envelope,
@@ -362,6 +363,13 @@ export async function pushDmEnvelope(chatId: string, envelope: ChannelEnvelope):
     msgTtlSec(),
     maxDmEnvelopes(),
   );
+  void publishEnvelopesEvent({
+    channel: chatId,
+    version,
+    envelopes: [envelope],
+    excludePhone: "from" in envelope ? envelope.from : undefined,
+  }).catch(() => {});
+  return version;
 }
 
 export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise<void> {
@@ -876,7 +884,7 @@ export async function pushRoomMessage(roomId: string, msg: EncryptedMessagePaylo
 }
 
 export async function pushRoomEnvelope(roomId: string, envelope: ChannelEnvelope): Promise<number> {
-  return pushEnvelope(
+  const version = await pushEnvelope(
     roomMessagesKey(roomId),
     roomMetaKey(roomId),
     envelope,
@@ -885,6 +893,13 @@ export async function pushRoomEnvelope(roomId: string, envelope: ChannelEnvelope
     msgTtlSec(),
     maxRoomEnvelopes(),
   );
+  void publishEnvelopesEvent({
+    channel: `room:${roomId.toUpperCase()}`,
+    version,
+    envelopes: [envelope],
+    excludePhone: "from" in envelope ? envelope.from : undefined,
+  }).catch(() => {});
+  return version;
 }
 
 export async function getRoomMessagesSince(

@@ -221,6 +221,17 @@ export async function redisMget(...keys: string[]): Promise<(string | null)[]> {
   return keys.map(() => null);
 }
 
+export async function redisPublish(channel: string, message: string): Promise<void> {
+  const backend = getRedisBackend();
+  if (backend === "tcp") {
+    const client = getTcpClient();
+    if (!client) return;
+    await client.publish(channel, message);
+    return;
+  }
+  // Upstash REST does not support pub/sub subscriptions — skip silently.
+}
+
 export async function redisPing(): Promise<boolean> {
   const backend = getRedisBackend();
   if (backend === "tcp") {

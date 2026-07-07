@@ -40,6 +40,7 @@ import {
   sendCallSignal,
   sendCallSignalDetailed,
 } from "./signaling-client";
+import { getMessengerRealtimeClient } from "../realtime/client";
 import { CallJournal } from "./call-journal";
 import { checkCallInvariants } from "./call-invariants";
 import { isCallObservabilityEnabled } from "./call-observability";
@@ -162,6 +163,8 @@ export class CallController {
   private pendingRemoteIce: string[] = [];
   private destroyed = false;
   private pollCallId: string | null = null;
+  private realtimeUnsub: (() => void) | null = null;
+  private realtimeModeUnsub: (() => void) | null = null;
   private iceOutBatch: IceCandidatePayload[] = [];
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
   private setupWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
@@ -621,9 +624,38 @@ export class CallController {
   }
 
   private restartPollingInterval(): void {
-    if (!this.pollTimer || !this.pollCallId) return;
-    clearInterval(this.pollTimer);
-    this.pollTimer = setInterval(() => void this.pollOnce(), this.pollIntervalMs());
+    if (!this.pollCallId) return;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
+    const interval = getMessengerRealtimeClient().shouldUsePollingFallback()
+      ? this.pollIntervalMs()
+      : 10_000;
+    this.pollTimer = setInterval(() => void this.pollOnce(), interval);
+  }
+
+  private async applyPollData(data: CallPollResponse): Promise<void> {
+    for (const signal of data.signals) {
+      this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
+      await this.handleSignal(signal.type, signal.from, signal.payload);
+    }
+
+    void this.pc?.flushPendingRemoteCandidates();
+    this.lastSession = data.session;
+    this.patchDebug({
+      pollCount: this.state.debug.pollCount + 1,
+      hasSessionOffer: Boolean(data.session.offerSdp),
+      hasSessionAnswer: Boolean(data.session.answerSdp),
+      elapsedSec: Math.floor((Date.now() - this.callStartedAt) / 1000),
+    });
+
+    if (data.session.status === "ended" && this.state.phase !== "ended") {
+      this.syncFromSession(data.session);
+      return;
+    }
+
+    this.syncProgressFromSession(data.session);
+    this.syncSdpFromSession(data.session);
   }
 
   private applySessionSnapshot(session: CallPollResponse["session"]): void {
@@ -1199,29 +1231,7 @@ export class CallController {
         }
         return;
       }
-      const data = result.data;
-
-      for (const signal of data.signals) {
-        this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
-        await this.handleSignal(signal.type, signal.from, signal.payload);
-      }
-
-      void this.pc?.flushPendingRemoteCandidates();
-      this.lastSession = data.session;
-      this.patchDebug({
-        pollCount: this.state.debug.pollCount + 1,
-        hasSessionOffer: Boolean(data.session.offerSdp),
-        hasSessionAnswer: Boolean(data.session.answerSdp),
-        elapsedSec: Math.floor((Date.now() - this.callStartedAt) / 1000),
-      });
-
-      if (data.session.status === "ended" && this.state.phase !== "ended") {
-        this.syncFromSession(data.session);
-        return;
-      }
-
-      this.syncProgressFromSession(data.session);
-      this.syncSdpFromSession(data.session);
+      await this.applyPollData(result.data);
     } catch (err) {
       console.error("[call] poll tick failed:", err);
       this.patchDebug({ lastError: describeError(err) });
@@ -1268,8 +1278,25 @@ export class CallController {
     this.stopPolling();
     this.pollCallId = callId;
     this.patchDebug({ activeCallId: callId });
+
+    const realtime = getMessengerRealtimeClient();
+    const channels = [`call:${callId}`];
+    if (this.channel) channels.push(this.channel);
+    realtime.subscribeChannels(channels);
+
+    this.realtimeUnsub = realtime.subscribe((event) => {
+      if (event.type !== "call_signal" || event.callId !== callId) return;
+      void this.applyPollData({
+        signals: event.signals,
+        session: event.session,
+      });
+    });
+    this.realtimeModeUnsub = realtime.onModeChange(() => {
+      this.restartPollingInterval();
+    });
+
     void this.pollOnce();
-    this.pollTimer = setInterval(() => void this.pollOnce(), this.pollIntervalMs());
+    this.restartPollingInterval();
   }
 
   private async pollNow(): Promise<void> {
@@ -1495,9 +1522,21 @@ export class CallController {
   }
 
   private stopPolling(): void {
+    const prevCallId = this.pollCallId;
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.realtimeUnsub) {
+      this.realtimeUnsub();
+      this.realtimeUnsub = null;
+    }
+    if (this.realtimeModeUnsub) {
+      this.realtimeModeUnsub();
+      this.realtimeModeUnsub = null;
+    }
+    if (prevCallId) {
+      getMessengerRealtimeClient().unsubscribeChannels([`call:${prevCallId}`]);
     }
     this.pollCallId = null;
     this.pollInFlight = false;

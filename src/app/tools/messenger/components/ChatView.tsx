@@ -47,6 +47,8 @@ import {
 } from "@/lib/messenger/unread";
 import { useCallOptional } from "./call/CallProvider";
 import { DmCallHeaderButton } from "./call/DmCallHeaderButton";
+import { getMessengerRealtimeClient } from "@/lib/messenger/realtime/client";
+import { normalizeKzPhone, peerFromDmChannel } from "@/lib/messenger/phone";
 
 interface Props {
   channel: string;
@@ -449,10 +451,40 @@ export function ChatView({
     let cancelled = false;
     let timerId: number | undefined;
     let inFlight = false;
+    let presenceTimer: number | undefined;
+    const realtime = getMessengerRealtimeClient();
 
     const intervalMs = () => {
+      if (realtime.shouldUsePollingFallback()) {
+        if (inCall) return 12000;
+        return document.hidden ? 12000 : 350;
+      }
       if (inCall) return 12000;
-      return document.hidden ? 12000 : 350;
+      return document.hidden ? 12000 : 8000;
+    };
+
+    const applyPollResult = async (data: NonNullable<Awaited<ReturnType<typeof pollChannel>>>) => {
+      if ("error" in data) {
+        if (data.error === "room_gone") onRoomEnded?.();
+        return;
+      }
+      setConnection("online");
+      if (!isRoom && typeof data.peerOnline === "boolean") {
+        setPeerOnline(data.peerOnline);
+      }
+      if (!isRoom && typeof data.peerTyping === "boolean") {
+        setPeerTyping(data.peerTyping);
+      }
+      if (data.meta.version > versionRef.current) {
+        versionRef.current = data.meta.version;
+      }
+      if (data.participants) {
+        setParticipantCount(data.participants.length);
+      }
+      const envelopes = data.envelopes ?? data.messages;
+      if (envelopes.length) {
+        await ingestEnvelopes(envelopes);
+      }
     };
 
     const scheduleNext = () => {
@@ -470,34 +502,14 @@ export function ChatView({
       inFlight = true;
       try {
         const data = await pollChannel(channel, versionRef.current, !!isRoom, {
-          wait: !document.hidden && !inCall,
+          wait: realtime.shouldUsePollingFallback() && !document.hidden && !inCall,
         });
         if (cancelled) return;
         if (!data) {
           setConnection("offline");
           return;
         }
-        if ("error" in data) {
-          if (data.error === "room_gone") onRoomEnded?.();
-          return;
-        }
-        setConnection("online");
-        if (!isRoom && typeof data.peerOnline === "boolean") {
-          setPeerOnline(data.peerOnline);
-        }
-        if (!isRoom && typeof data.peerTyping === "boolean") {
-          setPeerTyping(data.peerTyping);
-        }
-        if (data.meta.version > versionRef.current) {
-          versionRef.current = data.meta.version;
-        }
-        if (data.participants) {
-          setParticipantCount(data.participants.length);
-        }
-        const envelopes = data.envelopes ?? data.messages;
-        if (envelopes.length) {
-          await ingestEnvelopes(envelopes);
-        }
+        await applyPollResult(data);
       } catch {
         setConnection("reconnecting");
       } finally {
@@ -506,13 +518,58 @@ export function ChatView({
       }
     }
 
+    const pingPresence = () => {
+      if (cancelled || document.hidden) return;
+      if (!realtime.shouldUsePollingFallback()) {
+        realtime.sendPresence(channel);
+      }
+    };
+
+    realtime.subscribeChannels([channel]);
+    const unsubEvents = realtime.subscribe((event) => {
+      if (cancelled) return;
+      if (event.type === "envelopes" && event.channel === channel) {
+        void (async () => {
+          setConnection("online");
+          if (event.version > versionRef.current) {
+            versionRef.current = event.version;
+          }
+          if (event.envelopes.length) {
+            await ingestEnvelopes(event.envelopes);
+          }
+        })();
+        return;
+      }
+      if (event.type === "typing" && event.channel === channel && !isRoom) {
+        setPeerTyping(event.active);
+        return;
+      }
+      if (event.type === "peer_online" && !isRoom) {
+        const peer = peerFromDmChannel(channel, myPhone);
+        if (peer && normalizeKzPhone(event.phone) === normalizeKzPhone(peer)) {
+          setPeerOnline(event.online);
+        }
+      }
+    });
+    const unsubMode = realtime.onModeChange((mode) => {
+      if (mode === "websocket") {
+        pingPresence();
+        void tick();
+      }
+      scheduleNext();
+    });
+
     void tick();
+    pingPresence();
+    presenceTimer = window.setInterval(pingPresence, 20_000);
+
     const removeResume = onAppResume(() => void tick());
     const onVisibility = () => {
       if (document.hidden) {
         scheduleNext();
         return;
       }
+      pingPresence();
       void tick();
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -521,10 +578,16 @@ export function ChatView({
       if (timerId !== undefined) {
         clearTimeout(timerId);
       }
+      if (presenceTimer !== undefined) {
+        clearInterval(presenceTimer);
+      }
+      unsubEvents();
+      unsubMode();
+      realtime.unsubscribeChannels([channel]);
       document.removeEventListener("visibilitychange", onVisibility);
       removeResume();
     };
-  }, [channel, ingestEnvelopes, isRoom, onRoomEnded, inCall]);
+  }, [channel, ingestEnvelopes, isRoom, onRoomEnded, inCall, myPhone]);
 
   useEffect(() => {
     const el = listRef.current;

@@ -13,6 +13,7 @@ import {
   touchDmUserIndex,
 } from "@/lib/messenger/store";
 import { notifyDmMessage, notifyRoomMessage, sanitizePushPreview } from "@/lib/messenger/push-notify";
+import { publishDialogUpdateEvent } from "@/lib/messenger/realtime/publish";
 import { getMessengerPresence, isViewingChannel } from "@/lib/messenger/push-store";
 import { peerFromDmChannel } from "@/lib/messenger/phone";
 import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
@@ -141,6 +142,10 @@ export async function POST(request: Request) {
       } catch (err) {
         console.warn("[messenger/send] dm push notify failed:", err);
       }
+      if (peerPhone) {
+        void publishDialogUpdateEvent(peerPhone).catch(() => {});
+      }
+      void publishDialogUpdateEvent(phone).catch(() => {});
     } else if (channel.startsWith("room:")) {
       const roomId = channel.slice(5);
       version = await pushRoomEnvelope(roomId, msg);
@@ -175,6 +180,9 @@ export async function POST(request: Request) {
         });
       } catch (err) {
         console.warn("[messenger/send] room push notify failed:", err);
+      }
+      for (const participantPhone of participants.map((p) => p.phone)) {
+        void publishDialogUpdateEvent(participantPhone).catch(() => {});
       }
     } else {
       return respond({ error: "Неизвестный канал" }, 400);

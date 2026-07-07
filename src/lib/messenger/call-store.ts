@@ -8,6 +8,10 @@ import {
 } from "./constants";
 import { normalizeKzPhone } from "./phone";
 import {
+  publishCallSignalEvent,
+  publishIncomingCallEvent,
+} from "./realtime/publish";
+import {
   redisDel,
   redisExpire,
   redisGet,
@@ -105,6 +109,13 @@ export async function createCallSession(params: {
     JSON.stringify({ callId, channel: params.channel, caller }),
     ttl,
   );
+  void publishIncomingCallEvent({
+    callId,
+    channel: params.channel,
+    callerPhone: caller,
+    calleePhone: callee,
+    media: session.media ?? "audio",
+  }).catch(() => {});
   return session;
 }
 
@@ -218,6 +229,8 @@ export async function appendCallSignal(params: {
   if (session.status !== "ended") {
     await touchCallKeys(params.callId, session.channel);
   }
+
+  void publishCallSignalEvent({ session, signals: [signal] }).catch(() => {});
 
   return { session, signal };
 }

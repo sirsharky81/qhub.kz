@@ -6,12 +6,13 @@ import type {
 } from "./types";
 import { platformFetch } from "@/lib/platform/api-client";
 import { PlatformOfflineQueue } from "@/lib/platform/offlineQueue";
-import { UNREAD_EVENT } from "./constants";
+import { MESSENGER_GLOBAL_PRESENCE_CHANNEL, UNREAD_EVENT } from "./constants";
 import {
   clearMessengerSessionToken,
   primeMessengerSessionTokenCache,
   saveMessengerSessionToken,
 } from "./session-token";
+import { getMessengerRealtimeClient } from "./realtime/client";
 
 export interface AccessCheckResult {
   allowed: boolean;
@@ -231,6 +232,11 @@ export async function reorderPinnedDialogs(dialogIds: string[]): Promise<boolean
 }
 
 export async function sendTypingStatus(channel: string, active: boolean): Promise<void> {
+  const realtime = getMessengerRealtimeClient();
+  if (!realtime.shouldUsePollingFallback()) {
+    realtime.sendTyping(channel, active);
+    return;
+  }
   try {
     await platformFetch("/api/messenger/typing", {
       method: "POST",
@@ -273,6 +279,11 @@ export async function markRoomDialogRead(roomId: string): Promise<void> {
 }
 
 export async function pingMessengerPresence(): Promise<void> {
+  const realtime = getMessengerRealtimeClient();
+  if (!realtime.shouldUsePollingFallback()) {
+    realtime.sendPresence(MESSENGER_GLOBAL_PRESENCE_CHANNEL);
+    return;
+  }
   try {
     await platformFetch("/api/messenger/presence", { method: "POST" });
   } catch {

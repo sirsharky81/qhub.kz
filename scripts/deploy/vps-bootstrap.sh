@@ -35,6 +35,18 @@ server {
     listen 80;
     server_name vps.qhub.kz qhub.kz www.qhub.kz;
 
+    location /ws/messenger {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -57,5 +69,6 @@ systemctl reload nginx
 echo "Bootstrap done. Next:"
 echo "1) Create $APP_DIR/.env.production with REDIS_URL and Vercel env vars"
 echo "2) pm2 start npm --name qhub -- start"
+echo "2b) pm2 start npm --name qhub-ws -- run start:ws"
 echo "3) pm2 save && pm2 startup"
 echo "4) certbot --nginx -d vps.qhub.kz (after DNS A record)"
