@@ -32,12 +32,13 @@ export function usesWebIosElementRouting(): boolean {
   return isIOSDevice();
 }
 
-export async function prepareCallAudioOutput(): Promise<void> {
+export async function prepareCallAudioOutput(options?: { speakerOn?: boolean }): Promise<void> {
   prepareAudioSessionForCall();
   if (!hasNativeCallAudioRouting()) return;
+  const speakerOn = options?.speakerOn ?? false;
   try {
     await CallAudioNative.prepare();
-    await CallAudioNative.setSpeaker({ enabled: false });
+    await CallAudioNative.setSpeaker({ enabled: speakerOn });
   } catch {
     // Native plugin missing in older Android builds.
   }

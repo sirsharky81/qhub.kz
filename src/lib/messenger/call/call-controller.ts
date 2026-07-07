@@ -165,6 +165,8 @@ export class CallController {
   private pollCallId: string | null = null;
   private realtimeUnsub: (() => void) | null = null;
   private realtimeModeUnsub: (() => void) | null = null;
+  private applyPollDataInFlight = false;
+  private catchUpPollTimers: ReturnType<typeof setTimeout>[] = [];
   private iceOutBatch: IceCandidatePayload[] = [];
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
   private setupWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
@@ -311,9 +313,9 @@ export class CallController {
       this.recordIgnored("INITIATE");
       return;
     }
-    primeCallMediaPlayback(false);
-
     const callMode: "audio" | "video" = options?.video === true ? "video" : "audio";
+    primeCallMediaPlayback(defaultSpeakerForMode(callMode));
+
     const result = await initiateCall({
       channel: this.channel,
       peerPhone: this.peerPhone,
@@ -391,7 +393,6 @@ export class CallController {
       this.recordIgnored("ACCEPT");
       return;
     }
-    primeCallMediaPlayback(false);
 
     this.clearRingTimeout();
     this.localAnswerSdp = null;
@@ -407,6 +408,7 @@ export class CallController {
       const mode: "audio" | "video" =
         serverSession?.media === "video" || offerHasVideo ? "video" : "audio";
       const speakerOn = defaultSpeakerForMode(mode);
+      primeCallMediaPlayback(speakerOn);
       this.patch({
         callMode: mode,
         videoEnabled: mode === "video" ? this.state.videoEnabled || offerHasVideo : false,
@@ -628,10 +630,22 @@ export class CallController {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
     }
-    const interval = getMessengerRealtimeClient().shouldUsePollingFallback()
-      ? this.pollIntervalMs()
-      : 10_000;
-    this.pollTimer = setInterval(() => void this.pollOnce(), interval);
+    // Keep aggressive poll during call setup — WS is additive, not a replacement.
+    // Slowing to 10s caused up to ~19s phase desync when a WS answer was missed.
+    this.pollTimer = setInterval(() => void this.pollOnce(), this.pollIntervalMs());
+  }
+
+  private async applyPollDataSafe(data: CallPollResponse): Promise<void> {
+    if (this.applyPollDataInFlight) return;
+    this.applyPollDataInFlight = true;
+    try {
+      await withTimeout(this.applyPollData(data), 5000, "apply_poll_data");
+    } catch (err) {
+      console.error("[call] applyPollData failed:", err);
+      this.patchDebug({ lastError: describeError(err) });
+    } finally {
+      this.applyPollDataInFlight = false;
+    }
   }
 
   private async applyPollData(data: CallPollResponse): Promise<void> {
@@ -709,7 +723,7 @@ export class CallController {
   private async ensureLocalMedia(): Promise<void> {
     resetCallMediaForNewCall();
     prepareAudioSessionForCall();
-    await prepareCallAudioOutput();
+    await prepareCallAudioOutput({ speakerOn: this.state.speakerOn });
     const needVideo = this.state.callMode === "video" && this.state.videoEnabled;
     await withTimeout(
       ensureMediaPermissions({ audio: true, video: needVideo }),
@@ -1213,9 +1227,10 @@ export class CallController {
     // a generous grace period so the call can still recover.
     if (this.pollInFlight) {
       const stuckMs = Date.now() - this.pollStartedAt;
-      if (stuckMs < 10000) return;
+      if (stuckMs < 3500) return;
       console.error(`[call] poll tick stuck for ${stuckMs}ms — forcing reset`);
       this.patchDebug({ lastError: `poll завис на ${Math.round(stuckMs / 1000)}с, перезапуск` });
+      this.pollInFlight = false;
     }
     this.pollInFlight = true;
     this.pollStartedAt = Date.now();
@@ -1231,7 +1246,7 @@ export class CallController {
         }
         return;
       }
-      await this.applyPollData(result.data);
+      await this.applyPollDataSafe(result.data);
     } catch (err) {
       console.error("[call] poll tick failed:", err);
       this.patchDebug({ lastError: describeError(err) });
@@ -1286,17 +1301,33 @@ export class CallController {
 
     this.realtimeUnsub = realtime.subscribe((event) => {
       if (event.type !== "call_signal" || event.callId !== callId) return;
-      void this.applyPollData({
+      void this.applyPollDataSafe({
         signals: event.signals,
         session: event.session,
       });
     });
     this.realtimeModeUnsub = realtime.onModeChange(() => {
       this.restartPollingInterval();
+      void this.pollOnce();
     });
 
-    void this.pollOnce();
+    this.scheduleCatchUpPolls();
     this.restartPollingInterval();
+  }
+
+  private scheduleCatchUpPolls(): void {
+    for (const timer of this.catchUpPollTimers) {
+      clearTimeout(timer);
+    }
+    this.catchUpPollTimers = [];
+    void this.pollOnce();
+    for (const delay of [250, 750]) {
+      this.catchUpPollTimers.push(
+        setTimeout(() => {
+          void this.pollOnce();
+        }, delay),
+      );
+    }
   }
 
   private async pollNow(): Promise<void> {
@@ -1400,6 +1431,8 @@ export class CallController {
     const hasRemoteAnswer = Boolean(session.answerSdp);
     const sessionConnecting = session.status === "connecting";
     if ((sessionConnecting || hasRemoteAnswer) && this.state.phase === "outgoing") {
+      this.clearRingTimeout();
+      getCallSounds().stop();
       this.patch({ phase: "connecting" });
       return;
     }
@@ -1538,6 +1571,10 @@ export class CallController {
     if (prevCallId) {
       getMessengerRealtimeClient().unsubscribeChannels([`call:${prevCallId}`]);
     }
+    for (const timer of this.catchUpPollTimers) {
+      clearTimeout(timer);
+    }
+    this.catchUpPollTimers = [];
     this.pollCallId = null;
     this.pollInFlight = false;
   }

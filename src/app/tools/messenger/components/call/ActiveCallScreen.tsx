@@ -196,8 +196,13 @@ export function ActiveCallScreen({
 
   useEffect(() => {
     if (!remoteVideoEl) return;
-    remoteVideoEl.srcObject = hasRemoteVideo ? remoteStream : null;
-  }, [hasRemoteVideo, remoteStream, remoteVideoEl]);
+    if (!hasRemoteVideo || !remoteVideoTrack) {
+      remoteVideoEl.srcObject = null;
+      return;
+    }
+    // Video-only stream: keeps audio routing on call-media-playback elements (iOS).
+    remoteVideoEl.srcObject = new MediaStream([remoteVideoTrack]);
+  }, [hasRemoteVideo, remoteVideoTrack, remoteVideoEl]);
 
   useEffect(() => {
     if (!iosEarpiece) setEarpieceBlank(false);

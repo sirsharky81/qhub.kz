@@ -103,12 +103,12 @@ export function CallProvider({
   }, []);
 
   const startVideoCall = useCallback(() => {
-    primeCallMediaPlayback(false);
+    primeCallMediaPlayback(true);
     void controllerRef.current.startOutgoing({ video: true });
   }, []);
 
   const acceptCall = useCallback(() => {
-    primeCallMediaPlayback(false);
+    primeCallMediaPlayback(true);
     void controllerRef.current.acceptIncoming();
   }, []);
 
