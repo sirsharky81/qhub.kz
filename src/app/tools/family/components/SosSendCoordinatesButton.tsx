@@ -58,9 +58,9 @@ export function SosSendCoordinatesButton({ session, onSent }: Props) {
         type="button"
         disabled={loading}
         onClick={() => void handleSend()}
-        className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-600 px-3 py-2.5 text-xs font-semibold text-white active:bg-red-700 disabled:opacity-60 touch-manipulation"
+        className="flex w-full min-h-[44px] items-center justify-center rounded-lg border border-red-300 bg-red-600 px-2.5 py-2 text-[11px] font-semibold leading-tight text-white active:bg-red-700 disabled:opacity-60 touch-manipulation"
       >
-        {loading ? "Отправка…" : "SOS — отправить координаты родителю"}
+        {loading ? "Отправка…" : "SOS — отправить координаты"}
       </button>
       {message ? <p className="text-[11px] text-green-700 text-center">{message}</p> : null}
       {error ? <p className="text-[11px] text-red-600 text-center">{error}</p> : null}

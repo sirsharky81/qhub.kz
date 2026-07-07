@@ -12,7 +12,7 @@ export default function Home() {
       <Navbar />
 
       {/* ── HERO ─────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden pt-32 pb-24 px-4 sm:px-6 flex flex-col items-center text-center bg-white bg-dot-grid">
+      <section className="relative overflow-hidden pt-24 pb-16 sm:pt-32 sm:pb-24 px-4 sm:px-6 flex flex-col items-center text-center bg-white bg-dot-grid">
         {/* Subtle top gradient fade */}
         <div
           aria-hidden

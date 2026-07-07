@@ -6,29 +6,33 @@ import L from "leaflet";
 import { useEffect } from "react";
 import type { FamilyLocation, FamilyMemberPublic, FamilySosState } from "@/lib/family/types";
 
-function pinDivIcon(fill: string, opts?: { selected?: boolean; sos?: boolean }): L.DivIcon {
-  const w = opts?.selected ? 36 : 32;
-  const h = opts?.selected ? 47 : 42;
-  const glow = opts?.selected
-    ? "filter:drop-shadow(0 0 6px rgba(37,99,235,0.55));"
-    : opts?.sos
-      ? "filter:drop-shadow(0 0 6px rgba(239,68,68,0.55));"
-      : "filter:drop-shadow(0 2px 4px rgba(0,0,0,0.28));";
-  return L.divIcon({
-    className: "",
-    html: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 32 42" style="${glow}" aria-hidden="true">
-      <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 26 16 26s16-14 16-26C32 7.2 24.8 0 16 0z" fill="${fill}" stroke="#fff" stroke-width="2"/>
-      <circle cx="16" cy="15" r="5.5" fill="#fff" fill-opacity="0.95"/>
-    </svg>`,
-    iconSize: [w, h],
-    iconAnchor: [w / 2, h],
-    popupAnchor: [0, -h + 10],
-  });
-}
+const LEAFLET_MARKER_BASE = {
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconSize: [25, 41] as [number, number],
+  iconAnchor: [12, 41] as [number, number],
+  popupAnchor: [1, -34] as [number, number],
+  shadowSize: [41, 41] as [number, number],
+};
 
-const trackedPinIcon = pinDivIcon("#2563eb");
-const trackedSelectedPinIcon = pinDivIcon("#2563eb", { selected: true });
-const trackedSosPinIcon = pinDivIcon("#ef4444", { sos: true });
+const trackedPinIcon = L.icon(LEAFLET_MARKER_BASE);
+
+const trackedSelectedPinIcon = L.icon({
+  ...LEAFLET_MARKER_BASE,
+  iconUrl: LEAFLET_MARKER_BASE.iconRetinaUrl,
+  iconSize: [30, 49],
+  iconAnchor: [15, 49],
+  popupAnchor: [1, -40],
+});
+
+const trackedSosPinIcon = L.divIcon({
+  className: "",
+  html: `<img src="${LEAFLET_MARKER_BASE.iconUrl}" alt="" width="25" height="41" style="display:block;filter:hue-rotate(145deg) saturate(2.4) brightness(0.92);" />`,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+});
 
 const parentIcon = L.divIcon({
   className: "",

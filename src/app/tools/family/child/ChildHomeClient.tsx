@@ -273,8 +273,8 @@ export function ChildHomeClient() {
 
   return (
     <FamilyShell title={session?.roomName ?? "Семья"} subtitle="Участник" backHref="/tools/family">
-      <div className="flex flex-col min-h-full pb-6">
-        <div className="p-3 space-y-2">
+      <div className="flex flex-col min-h-0 pb-3">
+        <div className="p-3 space-y-1.5">
           {geoError && <p className="text-[11px] text-red-600">{geoError}</p>}
           <div className="rounded-lg overflow-hidden border border-gray-200 h-36">
             {mapLocations.length > 0 ? (
@@ -331,7 +331,7 @@ export function ChildHomeClient() {
           />
         </div>
 
-        <div className="mx-3 mt-1 space-y-2 rounded-lg border border-gray-200 bg-gray-50/80 p-2.5 pb-3">
+        <div className="mx-3 mt-0.5 space-y-1.5 rounded-lg border border-gray-200 bg-gray-50/80 p-2 pb-2">
           {session ? (
             <SosSendCoordinatesButton session={session} onSent={() => void pollRoom()} />
           ) : null}
