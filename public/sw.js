@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v13";
+const CACHE_NAME = "qhub-v14";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
@@ -174,28 +174,40 @@ self.addEventListener("push", (event) => {
   );
 });
 
+async function openNotificationUrl(rawUrl, action, requestId) {
+  const path = rawUrl || "/tools/family";
+  const targetUrl = new URL(path, self.location.origin).href;
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+
+  for (const client of clients) {
+    if (action === "family:locate") {
+      client.postMessage({
+        type: "qhub:family-locate",
+        action,
+        requestId,
+      });
+    }
+  }
+
+  for (const client of clients) {
+    if (!client.url.startsWith(self.location.origin)) continue;
+    if ("focus" in client) {
+      await client.focus();
+    }
+    if ("navigate" in client) {
+      return client.navigate(targetUrl);
+    }
+  }
+
+  if (self.clients.openWindow) {
+    return self.clients.openWindow(targetUrl);
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || "/";
+  const url = event.notification.data?.url;
   const action = event.notification.data?.action;
   const requestId = event.notification.data?.requestId;
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      for (const client of clients) {
-        if (action === "family:locate") {
-          client.postMessage({
-            type: "qhub:family-locate",
-            action,
-            requestId,
-          });
-        }
-        if (client.url.includes(url) && "focus" in client) {
-          return client.focus();
-        }
-      }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(url);
-      }
-    }),
-  );
+  event.waitUntil(openNotificationUrl(url, action, requestId));
 });

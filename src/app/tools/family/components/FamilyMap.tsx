@@ -6,29 +6,29 @@ import L from "leaflet";
 import { useEffect } from "react";
 import type { FamilyLocation, FamilyMemberPublic, FamilySosState } from "@/lib/family/types";
 
-const defaultIcon = L.icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
+function pinDivIcon(fill: string, opts?: { selected?: boolean; sos?: boolean }): L.DivIcon {
+  const w = opts?.selected ? 36 : 32;
+  const h = opts?.selected ? 47 : 42;
+  const glow = opts?.selected
+    ? "filter:drop-shadow(0 0 6px rgba(37,99,235,0.55));"
+    : opts?.sos
+      ? "filter:drop-shadow(0 0 6px rgba(239,68,68,0.55));"
+      : "filter:drop-shadow(0 2px 4px rgba(0,0,0,0.28));";
+  return L.divIcon({
+    className: "",
+    html: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 32 42" style="${glow}" aria-hidden="true">
+      <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 26 16 26s16-14 16-26C32 7.2 24.8 0 16 0z" fill="${fill}" stroke="#fff" stroke-width="2"/>
+      <circle cx="16" cy="15" r="5.5" fill="#fff" fill-opacity="0.95"/>
+    </svg>`,
+    iconSize: [w, h],
+    iconAnchor: [w / 2, h],
+    popupAnchor: [0, -h + 10],
+  });
+}
 
-const selectedIcon = L.divIcon({
-  className: "",
-  html: `<div style="width:32px;height:32px;border-radius:50%;background:#2563eb;border:3px solid white;box-shadow:0 0 0 6px rgba(37,99,235,0.35);"></div>`,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-});
-
-const sosIcon = L.divIcon({
-  className: "",
-  html: `<div style="width:28px;height:28px;border-radius:50%;background:#ef4444;border:3px solid white;box-shadow:0 0 0 6px rgba(239,68,68,0.35);"></div>`,
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-});
+const trackedPinIcon = pinDivIcon("#2563eb");
+const trackedSelectedPinIcon = pinDivIcon("#2563eb", { selected: true });
+const trackedSosPinIcon = pinDivIcon("#ef4444", { sos: true });
 
 const parentIcon = L.divIcon({
   className: "",
@@ -85,10 +85,10 @@ function markerIcon(
   selectedMemberId: string | undefined,
   parentIds: Set<string>,
 ) {
-  if (sosIds.has(memberId)) return sosIcon;
-  if (selectedMemberId === memberId) return selectedIcon;
   if (parentIds.has(memberId)) return parentIcon;
-  return defaultIcon;
+  if (sosIds.has(memberId)) return trackedSosPinIcon;
+  if (selectedMemberId === memberId) return trackedSelectedPinIcon;
+  return trackedPinIcon;
 }
 
 export function FamilyMap({
