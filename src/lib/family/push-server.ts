@@ -61,14 +61,14 @@ export async function sendWebPush(
 
 export async function sendFamilyPush(
   subscriptions: FamilyPushSubscription[],
-  payload: { title: string; body: string; url: string },
+  payload: { title: string; body: string; url: string; action?: WebPushPayload["action"] },
 ): Promise<void> {
   const { dispatchPushNotifications } = await import("@/lib/push/dispatch");
   await dispatchPushNotifications(subscriptions, {
     ...payload,
     icon: "/tools/family/icon-192.png",
     badge: "/icon-192.png",
-    action: "default",
+    action: payload.action ?? "default",
   });
 }
 

@@ -204,7 +204,7 @@ export async function leaveFamilyApi(session: FamilySession): Promise<void> {
 
 export async function postSosApi(
   session: FamilySession,
-  input: { lat: number; lng: number },
+  input: { lat: number; lng: number; accuracy?: number; battery?: number | null },
 ): Promise<void> {
   const res = await platformFetch("/api/family/sos", {
     method: "POST",

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FamilyShell } from "../components/FamilyShell";
 import { ChildPairQr } from "../components/ChildPairQr";
 import { EmergencyCallButton } from "../components/EmergencyCallButton";
+import { SosSendCoordinatesButton } from "../components/SosSendCoordinatesButton";
 import { ChildShareLocationToggle } from "../components/ChildShareLocationToggle";
 import { MiniMap } from "../components/MiniMap";
 import { ParentsList } from "../components/ParentsList";
@@ -331,6 +332,9 @@ export function ChildHomeClient() {
         </div>
 
         <div className="mx-3 mt-1 space-y-2 rounded-lg border border-gray-200 bg-gray-50/80 p-2.5 pb-3">
+          {session ? (
+            <SosSendCoordinatesButton session={session} onSent={() => void pollRoom()} />
+          ) : null}
           <EmergencyCallButton phone={sosPhone} />
           <button
             type="button"

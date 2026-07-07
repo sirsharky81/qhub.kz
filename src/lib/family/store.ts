@@ -480,10 +480,20 @@ export async function updateLocation(
 
 export async function activateSos(
   memberId: string,
-  input: { lat: number; lng: number },
+  input: { lat: number; lng: number; accuracy?: number; battery?: number | null },
 ): Promise<FamilySosState> {
   const member = await getMember(memberId);
   if (!member || member.role !== "tracked" || !member.roomId) throw new Error("not_tracked");
+
+  const location: FamilyLocation = {
+    memberId,
+    lat: input.lat,
+    lng: input.lng,
+    accuracy: input.accuracy ?? 0,
+    battery: input.battery ?? null,
+    updatedAt: Date.now(),
+  };
+  await familyRedisSet(locKey(memberId), JSON.stringify(location), LOC_TTL_SEC);
 
   const sos: FamilySosState = {
     memberId,
