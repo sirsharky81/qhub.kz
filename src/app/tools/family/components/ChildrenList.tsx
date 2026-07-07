@@ -2,6 +2,7 @@
 
 import type { FamilyLocation, FamilyMemberPublic, FamilySosState } from "@/lib/family/types";
 import { MEMBER_TYPE_LABELS, normalizeMemberType } from "@/lib/family/member-types";
+import { getParticipantPresence } from "@/lib/family/participant-status";
 import { BatteryBadge } from "./BatteryBadge";
 import { MessageMemberLink } from "./MessageMemberLink";
 import { ParticipantStatusBadge } from "./ParticipantStatusBadge";
@@ -15,6 +16,8 @@ interface Props {
   onSelect: (memberId: string) => void;
   onRemove?: (memberId: string) => void;
   onClearSos?: (memberId: string) => void;
+  onRequestLocation?: (memberId: string) => void;
+  requestLocationLoadingId?: string | null;
   mapHrefFor?: (memberId: string) => string | null;
   messageHrefFor?: (memberId: string) => string | null;
 }
@@ -27,6 +30,8 @@ export function ChildrenList({
   onSelect,
   onRemove,
   onClearSos,
+  onRequestLocation,
+  requestLocationLoadingId,
   mapHrefFor,
   messageHrefFor,
 }: Props) {
@@ -52,6 +57,8 @@ export function ChildrenList({
           const mapHref = mapHrefFor?.(child.memberId) ?? null;
           const messageHref = messageHrefFor?.(child.memberId) ?? null;
           const sharesLocation = child.shareLocationWithParents !== false;
+          const presence = getParticipantPresence(sharesLocation, loc);
+          const isRequestLoading = requestLocationLoadingId === child.memberId;
           return (
             <li key={child.memberId}>
               <div
@@ -89,6 +96,22 @@ export function ChildrenList({
                 {messageHref && <MessageMemberLink href={messageHref} />}
                 {mapHref && <ShowOnMapLink href={mapHref} />}
               </div>
+              {sharesLocation && onRequestLocation ? (
+                <div className="px-3 pb-1.5">
+                  <button
+                    type="button"
+                    disabled={isRequestLoading}
+                    onClick={() => onRequestLocation(child.memberId)}
+                    className="text-xs text-sky-700 underline disabled:opacity-50"
+                  >
+                    {isRequestLoading
+                      ? "Запрос отправлен…"
+                      : presence === "offline"
+                        ? "Запросить геопозицию"
+                        : "Обновить геопозицию"}
+                  </button>
+                </div>
+              ) : null}
               {(onClearSos && sosState?.active) || onRemove ? (
                 <div className="px-3 pb-1.5 flex gap-3">
                   {sosState?.active && onClearSos && (

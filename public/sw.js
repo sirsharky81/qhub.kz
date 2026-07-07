@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v12";
+const CACHE_NAME = "qhub-v13";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
@@ -132,6 +132,9 @@ self.addEventListener("push", (event) => {
     url: "/",
     icon: "/icon-192.png",
     badge: "/icon-192.png",
+    action: "default",
+    silent: false,
+    requestId: "",
   };
   try {
     if (event.data) {
@@ -141,12 +144,32 @@ self.addEventListener("push", (event) => {
     /* use defaults */
   }
 
+  if (data.action === "family:locate" && data.silent) {
+    event.waitUntil(
+      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+        if (clients.length === 0) return;
+        for (const client of clients) {
+          client.postMessage({
+            type: "qhub:family-locate",
+            action: data.action,
+            requestId: data.requestId || undefined,
+          });
+        }
+      }),
+    );
+    return;
+  }
+
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
       icon: data.icon || "/icon-192.png",
       badge: data.badge || "/icon-192.png",
-      data: { url: data.url },
+      data: {
+        url: data.url,
+        action: data.action,
+        requestId: data.requestId || undefined,
+      },
     }),
   );
 });
@@ -154,9 +177,18 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = event.notification.data?.url || "/";
+  const action = event.notification.data?.action;
+  const requestId = event.notification.data?.requestId;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
+        if (action === "family:locate") {
+          client.postMessage({
+            type: "qhub:family-locate",
+            action,
+            requestId,
+          });
+        }
         if (client.url.includes(url) && "focus" in client) {
           return client.focus();
         }

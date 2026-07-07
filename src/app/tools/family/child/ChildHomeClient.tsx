@@ -17,11 +17,13 @@ import {
   setShareLocationApi,
   buildChildPairQrUrl,
 } from "@/lib/family/client";
-import { submitChildLocation } from "@/lib/family/child-location";
 import { startGeoWatch } from "@/lib/family/geo";
-import { PlatformLocation } from "@/lib/platform/location";
-import { isNativePlatform } from "@/lib/platform/runtime";
+import { submitChildLocation } from "@/lib/family/child-location";
+import { handleFamilyLocatePush } from "@/lib/family/location-request-handler";
 import { childMapMemberUrl } from "@/lib/family/map-urls";
+import { PlatformLocation } from "@/lib/platform/location";
+import { PlatformNotifications } from "@/lib/platform/notifications";
+import { isNativePlatform } from "@/lib/platform/runtime";
 import { messengerChatUrl } from "@/lib/app-routes";
 import {
   clearAllFamilyLocalData,
@@ -140,6 +142,37 @@ export function ChildHomeClient() {
       setShareWithParents(selfMember.shareLocationWithParents !== false);
     }
   }, [selfMember?.shareLocationWithParents]);
+
+  useEffect(() => {
+    if (view !== "paired" || !session) return;
+    void PlatformNotifications.subscribe("family", session);
+  }, [view, session]);
+
+  useEffect(() => {
+    if (view !== "paired" || typeof window === "undefined") return;
+    if (!("serviceWorker" in navigator)) return;
+
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; action?: string; requestId?: string } | null;
+      if (!data || data.type !== "qhub:family-locate") return;
+      void handleFamilyLocatePush({ action: data.action, requestId: data.requestId });
+    };
+
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== "paired" || !isNativePlatform() || typeof window === "undefined") return;
+
+    const onNativeLocate = (event: Event) => {
+      const detail = (event as CustomEvent<{ action?: string; requestId?: string }>).detail;
+      void handleFamilyLocatePush(detail ?? {});
+    };
+
+    window.addEventListener("qhub-family-locate-native", onNativeLocate);
+    return () => window.removeEventListener("qhub-family-locate-native", onNativeLocate);
+  }, [view]);
 
   useEffect(() => {
     if (view !== "paired" || !shareWithParents) return;

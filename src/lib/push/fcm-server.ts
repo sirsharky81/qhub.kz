@@ -7,6 +7,15 @@ interface FcmTarget {
   platform: "ios" | "android";
 }
 
+function buildFcmData(payload: WebPushPayload): Record<string, string> {
+  return {
+    url: payload.url,
+    action: payload.action ?? "default",
+    ...(payload.requestId ? { requestId: payload.requestId } : {}),
+    ...(payload.icon ? { icon: payload.icon } : {}),
+  };
+}
+
 /** Firebase Cloud Messaging — requires FIREBASE_* env vars (see .env.example). */
 export async function sendFcmPush(
   targets: FcmTarget[],
@@ -35,18 +44,28 @@ export async function sendFcmPush(
     }
 
     const messaging = getMessaging();
+    const data = buildFcmData(payload);
+
     await Promise.allSettled(
-      targets.map((target) =>
-        messaging.send({
+      targets.map((target) => {
+        const silentAndroid =
+          payload.silent === true && payload.action === "family:locate" && target.platform === "android";
+
+        if (silentAndroid) {
+          return messaging.send({
+            token: target.token,
+            data,
+            android: { priority: "high" },
+          });
+        }
+
+        return messaging.send({
           token: target.token,
           notification: {
             title: payload.title,
             body: payload.body,
           },
-          data: {
-            url: payload.url,
-            ...(payload.icon ? { icon: payload.icon } : {}),
-          },
+          data,
           android: {
             priority: "high",
             notification: {
@@ -54,8 +73,8 @@ export async function sendFcmPush(
             },
           },
           apns: { payload: { aps: { sound: "default" } } },
-        }),
-      ),
+        });
+      }),
     );
   } catch (err) {
     console.error("[FCM] send failed:", err);

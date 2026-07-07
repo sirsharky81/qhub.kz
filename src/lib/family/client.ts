@@ -314,3 +314,8 @@ export function buildChildPairQrUrl(pairToken: string): string {
 export function parseParentScanUrl(url: string): { token: string | null; truncated: boolean } {
   return parseParentScanPayload(url);
 }
+
+export {
+  requestChildLocationApi,
+  type RequestChildLocationResult,
+} from "./location-request-api";

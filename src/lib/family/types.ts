@@ -85,6 +85,16 @@ export interface FamilyPushSubscription {
   nativeToken?: string;
 }
 
+export type FamilyLocationRequestMode = "silent" | "notify";
+
+export interface FamilyLocationRequest {
+  requestId: string;
+  targetMemberId: string;
+  requestedBy: string;
+  requestedAt: number;
+  mode: FamilyLocationRequestMode;
+}
+
 export interface FamilyMemberPublic {
   memberId: string;
   role: FamilyMemberRole;

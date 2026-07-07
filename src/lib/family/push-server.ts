@@ -1,5 +1,5 @@
 import webpush from "web-push";
-import type { FamilyPushSubscription } from "./types";
+import type { FamilyLocationRequestMode, FamilyPushSubscription } from "./types";
 
 export interface WebPushSubscription {
   endpoint: string;
@@ -12,7 +12,15 @@ export interface WebPushPayload {
   url: string;
   icon?: string;
   badge?: string;
+  action?: "family:locate" | "family:sos" | "default";
+  silent?: boolean;
+  requestId?: string;
 }
+
+const LOCATE_PUSH_TITLE = "Ты где?";
+const LOCATE_PUSH_BODY =
+  "Срочно позвони или зайди в приложение QHub, чтобы отправить геопозицию.";
+const CHILD_APP_URL = "/tools/family/child";
 
 function getVapidKeys(): { publicKey: string; privateKey: string; subject: string } | null {
   const publicKey = process.env.VAPID_PUBLIC_KEY?.trim();
@@ -40,14 +48,14 @@ export async function sendWebPush(
     subscriptions
       .filter((sub) => sub.keys.p256dh !== "native")
       .map((sub) =>
-      webpush.sendNotification(
-        {
-          endpoint: sub.endpoint,
-          keys: sub.keys,
-        },
-        data,
+        webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: sub.keys,
+          },
+          data,
+        ),
       ),
-    ),
   );
 }
 
@@ -58,6 +66,26 @@ export async function sendFamilyPush(
   const { dispatchPushNotifications } = await import("@/lib/push/dispatch");
   await dispatchPushNotifications(subscriptions, {
     ...payload,
+    icon: "/tools/family/icon-192.png",
+    badge: "/icon-192.png",
+    action: "default",
+  });
+}
+
+export async function sendFamilyLocationRequestPush(
+  subscriptions: FamilyPushSubscription[],
+  input: { mode: FamilyLocationRequestMode; requestId: string; parentName: string },
+): Promise<number> {
+  if (subscriptions.length === 0) return 0;
+
+  const { dispatchFamilyLocationRequestPush } = await import("@/lib/push/dispatch");
+  return dispatchFamilyLocationRequestPush(subscriptions, {
+    mode: input.mode,
+    requestId: input.requestId,
+    parentName: input.parentName,
+    title: LOCATE_PUSH_TITLE,
+    body: LOCATE_PUSH_BODY,
+    url: CHILD_APP_URL,
     icon: "/tools/family/icon-192.png",
     badge: "/icon-192.png",
   });

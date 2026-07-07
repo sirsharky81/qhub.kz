@@ -6,9 +6,6 @@ import type { FamilyPushSubscription } from "@/lib/family/types";
 export async function POST(request: Request) {
   try {
     const member = await assertFamilyMember(request);
-    if (member.role === "tracked") {
-      return Response.json({ error: "Только для наблюдателей" }, { status: 403 });
-    }
 
     const { allowed, retryAfterSec } = await checkFamilyRateLimit(`push:${member.memberId}`);
     if (!allowed) {

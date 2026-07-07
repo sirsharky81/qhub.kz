@@ -17,11 +17,13 @@ import {
   pollFamilyRoomApi,
   postLocationApi,
   removeMemberApi,
+  requestChildLocationApi,
   setShareLocationApi,
 } from "@/lib/family/client";
 import { cacheMemberCoords } from "@/lib/family/coords-db";
 import { startGeoWatch } from "@/lib/family/geo";
 import { sendSosToMessengerRoom } from "@/lib/family/messenger-sos";
+import { getParticipantPresence } from "@/lib/family/participant-status";
 import { subscribeFamilyPush } from "@/lib/family/push";
 import { clearParentSession, clearAllFamilyLocalData, loadParentSession } from "@/lib/family/session";
 import { messengerChatUrl, parentMapMemberUrl, parentMapUrl, parentRoomUrl } from "@/lib/app-routes";
@@ -39,6 +41,8 @@ function ParentRoomInner() {
   const [shareWithParents, setShareWithParents] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [locationRequestMessage, setLocationRequestMessage] = useState<string | null>(null);
+  const [requestLocationLoadingId, setRequestLocationLoadingId] = useState<string | null>(null);
   const versionRef = useRef(0);
   const lastSosRef = useRef<Record<string, number>>({});
 
@@ -151,6 +155,40 @@ function ParentRoomInner() {
     ),
   );
 
+  async function handleRequestLocation(memberId: string, mode: "silent" | "notify") {
+    const s = loadParentSession();
+    if (!s) return;
+    setRequestLocationLoadingId(memberId);
+    setLocationRequestMessage(null);
+    try {
+      const result = await requestChildLocationApi(s, memberId, mode);
+      if (!result.ok) {
+        setLocationRequestMessage(result.error);
+        return;
+      }
+      if (!result.hasSubscriptions) {
+        setLocationRequestMessage("У участника нет push-подписки — попросите открыть приложение");
+        return;
+      }
+      setLocationRequestMessage(
+        mode === "silent" ? "Тихий запрос отправлен" : "Запрос «Ты где?» отправлен",
+      );
+    } finally {
+      setRequestLocationLoadingId(null);
+    }
+  }
+
+  function handleSelectChild(memberId: string) {
+    setSelectedChildId(memberId);
+    const child = children.find((c) => c.memberId === memberId);
+    if (!child || !session) return;
+    const loc = locations.find((l) => l.memberId === memberId);
+    const presence = getParticipantPresence(child.shareLocationWithParents !== false, loc);
+    if (presence === "offline") {
+      void handleRequestLocation(memberId, "notify");
+    }
+  }
+
   async function handleShareToggle(target: "children" | "parents", enabled: boolean) {
     const s = loadParentSession();
     if (!s) return;
@@ -260,12 +298,18 @@ function ParentRoomInner() {
           </div>
         </div>
 
+        {locationRequestMessage ? (
+          <p className="px-3 pb-2 text-[11px] text-gray-600">{locationRequestMessage}</p>
+        ) : null}
+
         <ChildrenList
           children={children}
           locations={locations}
           sos={sos}
           selectedId={selectedChildId}
-          onSelect={setSelectedChildId}
+          onSelect={handleSelectChild}
+          onRequestLocation={(memberId) => void handleRequestLocation(memberId, "silent")}
+          requestLocationLoadingId={requestLocationLoadingId}
           onRemove={isOwner ? handleRemoveParticipant : undefined}
           onClearSos={handleClearSos}
           mapHrefFor={(memberId) =>

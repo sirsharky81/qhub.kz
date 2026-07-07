@@ -1,11 +1,13 @@
 import {
   BIND_TTL_SEC,
+  LOC_REQUEST_TTL_SEC,
   LOC_TTL_SEC,
   MEMBER_TTL_SEC,
   PAIR_TTL_SEC,
   PUSH_TTL_SEC,
   REDIS_BIND_PREFIX,
   REDIS_LOC_PREFIX,
+  REDIS_LOC_REQ_PREFIX,
   REDIS_MEMBER_PREFIX,
   REDIS_PAIR_PREFIX,
   REDIS_PUSH_PREFIX,
@@ -19,6 +21,8 @@ import { normalizeMemberType, type FamilyMemberType } from "./member-types";
 import type {
   FamilyBindToken,
   FamilyLocation,
+  FamilyLocationRequest,
+  FamilyLocationRequestMode,
   FamilyMember,
   FamilyMemberPublic,
   FamilyPairingRecord,
@@ -57,6 +61,10 @@ function sosKey(memberId: string): string {
 
 function pushKey(memberId: string): string {
   return `${REDIS_PUSH_PREFIX}${memberId}`;
+}
+
+function locReqKey(memberId: string): string {
+  return `${REDIS_LOC_REQ_PREFIX}${memberId}`;
 }
 
 async function saveRoom(room: FamilyRoom): Promise<void> {
@@ -569,6 +577,29 @@ export async function getObserverPushTargets(roomId: string): Promise<FamilyPush
     all.push(...subs);
   }
   return all;
+}
+
+export async function saveLocationRequest(
+  targetMemberId: string,
+  input: {
+    requestId: string;
+    requestedBy: string;
+    mode: FamilyLocationRequestMode;
+  },
+): Promise<FamilyLocationRequest> {
+  const request: FamilyLocationRequest = {
+    requestId: input.requestId,
+    targetMemberId,
+    requestedBy: input.requestedBy,
+    requestedAt: Date.now(),
+    mode: input.mode,
+  };
+  await familyRedisSet(locReqKey(targetMemberId), JSON.stringify(request), LOC_REQUEST_TTL_SEC);
+  return request;
+}
+
+export async function getLocationRequest(memberId: string): Promise<FamilyLocationRequest | null> {
+  return familyRedisGetJson<FamilyLocationRequest>(locReqKey(memberId));
 }
 
 export async function buildPollSnapshot(

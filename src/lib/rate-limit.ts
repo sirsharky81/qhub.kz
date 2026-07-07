@@ -21,6 +21,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:messenger-call-poll": { requests: 900, window: "1 m" },
   "qhub:messenger-identify-phone": { requests: 10, window: "15 m" },
   "qhub:family": { requests: 120, window: "1 m" },
+  "qhub:family-loc-req": { requests: 1, window: "60 s" },
 };
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;
@@ -185,4 +186,11 @@ export async function checkFamilyRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:family", identifier);
+}
+
+export async function checkFamilyLocationRequestRateLimit(
+  parentMemberId: string,
+  targetMemberId: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:family-loc-req", `${parentMemberId}:${targetMemberId}`);
 }

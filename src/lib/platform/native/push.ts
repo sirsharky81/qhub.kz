@@ -1,4 +1,5 @@
 import type { FamilySession } from "@/lib/family/types";
+import { FAMILY_NATIVE_PUSH_TOKEN_KEY } from "@/lib/family/constants";
 import type { NotificationContext } from "../notifications";
 import { MESSENGER_NATIVE_PUSH_TOKEN_KEY } from "@/lib/messenger/constants";
 import { isNativePlatform, getNativePlatform } from "../runtime";
@@ -31,6 +32,10 @@ function resolveRegistrationWaiters(context: NotificationContext, ok: boolean): 
   if (!waiters) return;
   pendingRegistrations.delete(context);
   for (const resolve of waiters) resolve(ok);
+}
+
+function nativePushTokenKey(context: NotificationContext): string {
+  return context === "messenger" ? MESSENGER_NATIVE_PUSH_TOKEN_KEY : FAMILY_NATIVE_PUSH_TOKEN_KEY;
 }
 
 async function postNativeSubscription(
@@ -69,9 +74,29 @@ async function ensureAndroidPushChannel(): Promise<void> {
       sound: "default",
       vibration: true,
     });
+    await PushNotifications.createChannel({
+      id: "qhub_silent",
+      name: "QHub — фоновые",
+      description: "Тихие служебные уведомления QHub",
+      importance: 2,
+      visibility: 1,
+      vibration: false,
+    });
   } catch {
     // Older plugin versions may not expose createChannel.
   }
+}
+
+function readPushData(data: Record<string, unknown> | undefined): Record<string, unknown> {
+  return data ?? {};
+}
+
+async function handleFamilyLocateFromPush(data: Record<string, unknown> | undefined): Promise<boolean> {
+  const action = typeof data?.action === "string" ? data.action : "";
+  if (action !== "family:locate") return false;
+  const { handleFamilyLocatePush } = await import("@/lib/family/location-request-handler");
+  const requestId = typeof data?.requestId === "string" ? data.requestId : undefined;
+  return handleFamilyLocatePush({ action, requestId });
 }
 
 function attachRegistrationListeners(
@@ -83,8 +108,8 @@ function attachRegistrationListeners(
 
   void import("@capacitor/push-notifications").then(({ PushNotifications }) => {
     void PushNotifications.addListener("registration", (token) => {
-      if (typeof window !== "undefined" && context === "messenger") {
-        localStorage.setItem(MESSENGER_NATIVE_PUSH_TOKEN_KEY, token.value);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(nativePushTokenKey(context), token.value);
       }
 
       const endpoint =
@@ -170,10 +195,7 @@ export async function registerNativePush(
 export async function unregisterNativePush(context: NotificationContext): Promise<void> {
   if (!isNativePlatform()) return;
 
-  const tokenKey =
-    context === "messenger"
-      ? MESSENGER_NATIVE_PUSH_TOKEN_KEY
-      : "qhub_family_native_push_token";
+  const tokenKey = nativePushTokenKey(context);
   const token = localStorage.getItem(tokenKey);
 
   const apiEndpoint =
@@ -208,29 +230,35 @@ export async function unregisterNativePush(context: NotificationContext): Promis
   }
 }
 
+function navigateFromPushData(data: Record<string, unknown> | undefined): void {
+  const url = typeof data?.url === "string" ? data.url.trim() : "";
+  if (!url || typeof window === "undefined") return;
+  try {
+    const target = new URL(url, window.location.origin);
+    const current = window.location.pathname + window.location.search;
+    if (target.pathname + target.search === current) return;
+    window.location.href = target.pathname + target.search + target.hash;
+  } catch {
+    window.location.href = url;
+  }
+}
+
 export async function initNativePushListeners(): Promise<void> {
   if (!isNativePlatform()) return;
   const { PushNotifications } = await import("@capacitor/push-notifications");
 
-  function navigateFromPushData(data: Record<string, unknown> | undefined): void {
-    const url = typeof data?.url === "string" ? data.url.trim() : "";
-    if (!url || typeof window === "undefined") return;
-    try {
-      const target = new URL(url, window.location.origin);
-      const current = window.location.pathname + window.location.search;
-      if (target.pathname + target.search === current) return;
-      window.location.href = target.pathname + target.search + target.hash;
-    } catch {
-      window.location.href = url;
-    }
-  }
-
   await PushNotifications.addListener("pushNotificationReceived", (notification) => {
     PlatformLogger.info("Push received in foreground", notification);
-    navigateFromPushData(notification.data as Record<string, unknown> | undefined);
+    const data = readPushData(notification.data as Record<string, unknown> | undefined);
+    void handleFamilyLocateFromPush(data).then((handled) => {
+      if (!handled) navigateFromPushData(data);
+    });
   });
 
   await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-    navigateFromPushData(action.notification.data as Record<string, unknown> | undefined);
+    const data = readPushData(action.notification.data as Record<string, unknown> | undefined);
+    void handleFamilyLocateFromPush(data).finally(() => {
+      navigateFromPushData(data);
+    });
   });
 }
