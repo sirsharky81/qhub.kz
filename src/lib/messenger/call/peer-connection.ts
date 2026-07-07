@@ -301,6 +301,9 @@ export class CallPeerConnection {
 
     this.mountRemoteMedia();
     void this.remountPlaybackIfNeeded();
+    // #region agent log
+    fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H4',location:'peer-connection.ts:bindRemoteAudioTrack',message:'Remote audio track bound',data:{trackMuted:track.muted,trackReadyState:track.readyState,audioTracks:stream.getAudioTracks().length,videoTracks:stream.getVideoTracks().length,speakerOn:this.speakerOn,callMode:this.callMode},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     this.onRemoteTrack?.();
   }
 
@@ -338,6 +341,9 @@ export class CallPeerConnection {
 
     if (await playCallMedia(this.remoteMedia)) {
       await this.applySpeakerRoute();
+      // #region agent log
+      fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H5',location:'peer-connection.ts:playRemoteAudio',message:'Remote media play succeeded',data:{mediaTag:this.remoteMedia.tagName,speakerOn:this.speakerOn,hasRemoteStream:Boolean(this.remoteStream),hasPlaybackStream:Boolean(this.playbackStream)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return;
     }
 
@@ -346,6 +352,9 @@ export class CallPeerConnection {
         await new Promise((resolve) => setTimeout(resolve, delay));
         if (await playCallMedia(this.remoteMedia!)) {
           await this.applySpeakerRoute();
+          // #region agent log
+          fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H5',location:'peer-connection.ts:playRemoteAudio',message:'Remote media play recovered after retry',data:{mediaTag:this.remoteMedia?.tagName??null,retryDelay:delay,speakerOn:this.speakerOn},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
           return;
         }
       }

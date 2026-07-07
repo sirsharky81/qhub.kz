@@ -275,6 +275,9 @@ export async function attachCallMediaStream(
   const hasLiveVideo = stream.getVideoTracks().some((t) => t.readyState === "live");
   // Direct WebRTC on <video> only when loudspeaker + live video track (iOS quirk).
   const useDirectVideo = hasLiveVideo && speakerOn;
+  // #region agent log
+  fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H4',location:'call-media-playback.ts:attachCallMediaStream',message:'Selected iOS media route',data:{speakerOn,hasLiveVideo,useDirectVideo,audioTracks:stream.getAudioTracks().length,videoTracks:stream.getVideoTracks().length,sinkRouting:useIosSinkIdCallRouting()},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (useDirectVideo) {
     destroyRelayGraph();

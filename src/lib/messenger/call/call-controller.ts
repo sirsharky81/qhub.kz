@@ -357,6 +357,9 @@ export class CallController {
     this.startVideoHealthWatch();
     this.startElapsedTimer();
     this.journal.record("INITIATE", "outgoing");
+    // #region agent log
+    fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H1',location:'call-controller.ts:startOutgoing',message:'Outgoing phase entered before media/initiate',data:{callMode,speakerOn,videoEnabled,phase:this.state.phase,hasLocalMediaPromise:Boolean(this.localMediaPromise)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     const mediaTask = (this.localMediaPromise ??
       this.acquireLocalMedia({ video: callMode === "video", speakerOn })).finally(() => {
@@ -842,7 +845,13 @@ export class CallController {
         15000,
         "get_user_media",
       );
+      // #region agent log
+      fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H2',location:'call-controller.ts:acquireLocalMedia',message:'getUserMedia primary success',data:{needVideo,hasLocalStream:Boolean(this.localStream),audioTracks:this.localStream?.getAudioTracks().length??0,videoTracks:this.localStream?.getVideoTracks().length??0},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     } catch (firstErr) {
+      // #region agent log
+      fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H2',location:'call-controller.ts:acquireLocalMedia',message:'getUserMedia primary failed',data:{needVideo,error:describeError(firstErr)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       await withTimeout(
         ensureMediaPermissions({ audio: true, video: needVideo }),
         15000,
@@ -889,6 +898,9 @@ export class CallController {
     this.journal.record("CREATE_PC");
     const { iceServers, turnSource } = await fetchIceServers();
     this.patchDebug({ turnSource, isCaller: this.isCaller });
+    // #region agent log
+    fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H3',location:'call-controller.ts:setupPeerConnection',message:'ICE config resolved',data:{turnSource,hasLocalStream:Boolean(this.localStream),callMode:this.state.callMode,speakerOn:this.state.speakerOn},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     this.pc = new CallPeerConnection();
     this.pc.setCallMode(this.state.callMode);
     await this.pc.init(iceServers);
@@ -1293,6 +1305,9 @@ export class CallController {
     getCallSounds().stop();
     prepareAudioSessionForCall();
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
+    // #region agent log
+    fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H4',location:'call-controller.ts:handlePeerConnected',message:'Call transitioned to active',data:{phase:this.state.phase,callMode:this.state.callMode,speakerOn:this.state.speakerOn,debug:this.pc?.getPlaybackDebug()??null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     void this.refreshNetworkPathDebug();
     // Faster post-connect retries reduce the "caller hears later" gap on weak
     // networks and iOS Safari resume quirks.

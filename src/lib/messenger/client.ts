@@ -299,7 +299,13 @@ export async function touchChatPresence(channel: string): Promise<void> {
   try {
     const params = new URLSearchParams({ channel, since: "0", heartbeat: "1" });
     await platformFetch(`/api/messenger/poll?${params}`);
+    // #region agent log
+    fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H6',location:'client.ts:touchChatPresence',message:'Chat presence refresh succeeded',data:{channelKind:channel.startsWith('dm:')?'dm':'room',wsFallback:realtime.shouldUsePollingFallback()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   } catch {
+    // #region agent log
+    fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H6',location:'client.ts:touchChatPresence',message:'Chat presence refresh failed',data:{channelKind:channel.startsWith('dm:')?'dm':'room',wsFallback:realtime.shouldUsePollingFallback()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     // best-effort
   }
 }
