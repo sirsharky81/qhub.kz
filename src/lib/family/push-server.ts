@@ -12,9 +12,11 @@ export interface WebPushPayload {
   url: string;
   icon?: string;
   badge?: string;
-  action?: "family:locate" | "family:sos" | "default";
+  action?: "default" | "family:locate" | "family:sos" | "messenger:message" | "messenger:call";
   silent?: boolean;
   requestId?: string;
+  callId?: string;
+  callMedia?: "audio" | "video";
 }
 
 const LOCATE_PUSH_TITLE = "Ты где?";

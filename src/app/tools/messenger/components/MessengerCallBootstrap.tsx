@@ -7,6 +7,20 @@ import { getCallController } from "@/lib/messenger/call/call-controller";
 import { primeCallSounds } from "@/lib/messenger/call/call-sounds";
 import { pollIncomingCall } from "@/lib/messenger/call/signaling-client";
 import { normalizeKzPhone } from "@/lib/messenger/phone";
+import { platformFetch } from "@/lib/platform/api-client";
+
+async function declineCallFromNotification(callId: string): Promise<void> {
+  if (!callId) return;
+  try {
+    await platformFetch("/api/messenger/call/end", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callId, reason: "reject" }),
+    });
+  } catch {
+    /* ignore */
+  }
+}
 
 function MessengerGlobalCallWatcher() {
   const router = useRouter();
@@ -59,6 +73,8 @@ function MessengerGlobalCallWatcher() {
 }
 
 export function MessengerCallBootstrap() {
+  const router = useRouter();
+
   useEffect(() => {
     const prime = () => primeCallSounds();
     document.addEventListener("touchstart", prime, { once: true, passive: true });
@@ -68,6 +84,25 @@ export function MessengerCallBootstrap() {
       document.removeEventListener("click", prime);
     };
   }, []);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ action?: string; url?: string; callId?: string }>).detail;
+      if (!detail?.action) return;
+
+      if (detail.action === "call_decline") {
+        void declineCallFromNotification(detail.callId ?? "");
+        return;
+      }
+
+      if ((detail.action === "call_accept" || detail.action === "open") && detail.url) {
+        router.push(detail.url);
+      }
+    };
+
+    window.addEventListener("qhub-messenger-push-native", handler);
+    return () => window.removeEventListener("qhub-messenger-push-native", handler);
+  }, [router]);
 
   return (
     <Suspense fallback={null}>

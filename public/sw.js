@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v14";
+const CACHE_NAME = "qhub-v15";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
@@ -160,19 +160,48 @@ self.addEventListener("push", (event) => {
     return;
   }
 
+  const notificationData = {
+    url: data.url,
+    action: data.action,
+    requestId: data.requestId || undefined,
+    callId: data.callId || undefined,
+    callMedia: data.callMedia || undefined,
+  };
+
+  const notificationOptions = {
+    body: data.body,
+    icon: data.icon || "/icon-192.png",
+    badge: data.badge || "/icon-192.png",
+    data: notificationData,
+  };
+
+  if (data.action === "messenger:call" && data.callId) {
+    notificationOptions.tag = `call-${data.callId}`;
+    notificationOptions.requireInteraction = true;
+    notificationOptions.actions = [
+      { action: "call-accept", title: "Принять" },
+      { action: "call-decline", title: "Отклонить" },
+    ];
+  }
+
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: data.icon || "/icon-192.png",
-      badge: data.badge || "/icon-192.png",
-      data: {
-        url: data.url,
-        action: data.action,
-        requestId: data.requestId || undefined,
-      },
-    }),
+    self.registration.showNotification(data.title, notificationOptions),
   );
 });
+
+async function declineIncomingCall(callId) {
+  if (!callId) return;
+  try {
+    await fetch("/api/messenger/call/end", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callId, reason: "reject" }),
+    });
+  } catch {
+    /* ignore */
+  }
+}
 
 async function openNotificationUrl(rawUrl, action, requestId) {
   const path = rawUrl || "/tools/family";
@@ -206,8 +235,21 @@ async function openNotificationUrl(rawUrl, action, requestId) {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url;
-  const action = event.notification.data?.action;
-  const requestId = event.notification.data?.requestId;
+  const data = event.notification.data ?? {};
+  const url = data.url;
+  const action = data.action;
+  const requestId = data.requestId;
+  const callId = data.callId;
+
+  if (event.action === "call-decline") {
+    event.waitUntil(declineIncomingCall(callId));
+    return;
+  }
+
+  if (event.action === "call-accept" || action === "messenger:call") {
+    event.waitUntil(openNotificationUrl(url, action, requestId));
+    return;
+  }
+
   event.waitUntil(openNotificationUrl(url, action, requestId));
 });

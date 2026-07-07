@@ -655,6 +655,10 @@ export function ChatView({
 
       try {
         const { ciphertext, iv } = await encryptMessage(aesKey, fullPlain);
+        const pushPreview = truncateQuote(
+          messagePreview({ ...fullPlain, type, mime: fullPlain.mime }),
+          120,
+        );
         const result = await sendEncryptedMessage({
           channel,
           clientMessageId: localId,
@@ -663,6 +667,7 @@ export function ChatView({
           iv,
           mime: fullPlain.mime,
           filename: fullPlain.filename,
+          pushPreview,
         });
         if (!result) throw new Error("send failed");
         if (result.version > 0) {

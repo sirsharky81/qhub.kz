@@ -11,6 +11,9 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     private boolean pendingFamilyLocate;
     private String pendingLocateRequestId;
+    private String pendingMessengerAction;
+    private String pendingMessengerUrl;
+    private String pendingCallId;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -18,6 +21,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(QHubAppPlugin.class);
         super.onCreate(savedInstanceState);
         captureFamilyLocateIntent(getIntent());
+        captureMessengerIntent(getIntent());
     }
 
     @Override
@@ -25,7 +29,9 @@ public class MainActivity extends BridgeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         captureFamilyLocateIntent(intent);
+        captureMessengerIntent(intent);
         deliverPendingFamilyLocateIntent();
+        deliverPendingMessengerIntent();
     }
 
     @Override
@@ -41,6 +47,7 @@ public class MainActivity extends BridgeActivity {
             }
         }
         deliverPendingFamilyLocateIntent();
+        deliverPendingMessengerIntent();
     }
 
     private void captureFamilyLocateIntent(Intent intent) {
@@ -55,6 +62,28 @@ public class MainActivity extends BridgeActivity {
         pendingLocateRequestId = intent.getStringExtra("request_id");
         intent.removeExtra("fcm_action");
         intent.removeExtra("request_id");
+    }
+
+    private void captureMessengerIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String action = intent.getStringExtra("messenger_action");
+        if (action == null || action.isEmpty()) {
+            String url = intent.getStringExtra("messenger_url");
+            if (url != null && !url.isEmpty()) {
+                pendingMessengerAction = "open";
+                pendingMessengerUrl = url;
+                intent.removeExtra("messenger_url");
+            }
+            return;
+        }
+        pendingMessengerAction = action;
+        pendingMessengerUrl = intent.getStringExtra("messenger_url");
+        pendingCallId = intent.getStringExtra("call_id");
+        intent.removeExtra("messenger_action");
+        intent.removeExtra("messenger_url");
+        intent.removeExtra("call_id");
     }
 
     private void deliverPendingFamilyLocateIntent() {
@@ -82,6 +111,38 @@ public class MainActivity extends BridgeActivity {
             "window.dispatchEvent(new CustomEvent('qhub-family-locate-native', { detail: { action: 'family:locate', requestId: "
                 + safeRequestId
                 + " } }));";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
+    private void deliverPendingMessengerIntent() {
+        if (pendingMessengerAction == null || pendingMessengerAction.isEmpty()) {
+            return;
+        }
+
+        Bridge bridge = getBridge();
+        if (bridge == null) {
+            return;
+        }
+        WebView webView = bridge.getWebView();
+        if (webView == null) {
+            return;
+        }
+
+        String action = pendingMessengerAction;
+        String url = pendingMessengerUrl == null ? "" : pendingMessengerUrl.replace("'", "");
+        String callId = pendingCallId == null ? "" : pendingCallId.replace("'", "");
+        pendingMessengerAction = null;
+        pendingMessengerUrl = null;
+        pendingCallId = null;
+
+        String js =
+            "window.dispatchEvent(new CustomEvent('qhub-messenger-push-native', { detail: { action: '"
+                + action
+                + "', url: '"
+                + url
+                + "', callId: '"
+                + callId
+                + "' } }));";
         webView.post(() -> webView.evaluateJavascript(js, null));
     }
 }

@@ -55,6 +55,7 @@ export async function POST(request: Request) {
           callId: session.callId,
           callerPhone: phone,
           calleePhone: peer,
+          media,
         });
       } catch (err) {
         console.warn("[call] incoming push dispatch failed:", err);

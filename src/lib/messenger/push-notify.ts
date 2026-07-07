@@ -1,5 +1,6 @@
 import { dispatchPushNotifications } from "@/lib/push/dispatch";
 import { messengerChatCallUrl, messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
+import { MAX_PUSH_PREVIEW_LENGTH } from "./constants";
 import { displayNameForPhone, getProfile, loadProfiles } from "./store";
 import type { MessageType } from "./types";
 import {
@@ -12,12 +13,21 @@ import { normalizeKzPhone } from "./phone";
 const MESSENGER_ICON = "/tools/messenger/icon-192.png";
 const ACTIVE_VIEW_SUPPRESS_PUSH_MS = 7000;
 
-function messagePreview(type: MessageType): string {
+function messagePreview(type: MessageType, previewText?: string): string {
+  const trimmed = previewText?.replace(/\s+/g, " ").trim();
+  if (trimmed) return trimmed.slice(0, MAX_PUSH_PREVIEW_LENGTH);
   if (type === "image") return "Фото";
   if (type === "audio") return "Голосовое сообщение";
   if (type === "video") return "Видео";
   if (type === "file") return "Файл";
   return "Сообщение";
+}
+
+export function sanitizePushPreview(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, MAX_PUSH_PREVIEW_LENGTH);
 }
 
 function peersFromDmChannel(channel: string): string[] {
@@ -39,7 +49,7 @@ async function senderLabel(fromPhone: string): Promise<string> {
 async function pushToPhone(
   recipientPhone: string,
   channel: string,
-  payload: { title: string; body: string; url: string },
+  payload: { title: string; body: string; url: string; action?: "messenger:message" | "messenger:call" },
 ): Promise<void> {
   const presence = await getMessengerPresence(recipientPhone);
   // Presence can stay stale for a short period after app background on mobile.
@@ -59,6 +69,7 @@ async function pushToPhone(
     ...payload,
     icon: MESSENGER_ICON,
     badge: MESSENGER_ICON,
+    action: payload.action ?? "messenger:message",
   });
 }
 
@@ -66,19 +77,21 @@ export async function notifyDmMessage(params: {
   channel: string;
   fromPhone: string;
   type: MessageType;
+  pushPreview?: string;
 }): Promise<void> {
   const peers = peersFromDmChannel(params.channel);
   const recipient = peers.find((p) => p !== normalizeKzPhone(params.fromPhone));
   if (!recipient) return;
 
   const label = await senderLabel(params.fromPhone);
-  const preview = messagePreview(params.type);
+  const preview = messagePreview(params.type, params.pushPreview);
   const chatUrl = messengerChatUrl(params.fromPhone);
 
   await pushToPhone(recipient, params.channel, {
     title: label,
     body: preview,
     url: chatUrl,
+    action: "messenger:message",
   });
 }
 
@@ -88,9 +101,10 @@ export async function notifyRoomMessage(params: {
   fromPhone: string;
   type: MessageType;
   recipientPhones: string[];
+  pushPreview?: string;
 }): Promise<void> {
   const label = await senderLabel(params.fromPhone);
-  const preview = messagePreview(params.type);
+  const preview = messagePreview(params.type, params.pushPreview);
   const url = messengerRoomUrl(params.roomId);
 
   await Promise.allSettled(
@@ -99,6 +113,7 @@ export async function notifyRoomMessage(params: {
         title: label,
         body: preview,
         url,
+        action: "messenger:message",
       }),
     ),
   );
@@ -109,9 +124,12 @@ export async function notifyIncomingCall(params: {
   callId: string;
   callerPhone: string;
   calleePhone: string;
+  media: "audio" | "video";
 }): Promise<void> {
   const label = await senderLabel(params.callerPhone);
   const chatUrl = messengerChatCallUrl(params.callerPhone, params.callId);
+  const body =
+    params.media === "video" ? "Входящий видеозвонок" : "Входящий аудиозвонок";
 
   const presence = await getMessengerPresence(params.calleePhone);
   if (isViewingChannel(presence, params.channel)) return;
@@ -121,9 +139,12 @@ export async function notifyIncomingCall(params: {
 
   await dispatchPushNotifications(subs, {
     title: label,
-    body: "Входящий звонок",
+    body,
     url: chatUrl,
     icon: MESSENGER_ICON,
     badge: MESSENGER_ICON,
+    action: "messenger:call",
+    callId: params.callId,
+    callMedia: params.media,
   });
 }

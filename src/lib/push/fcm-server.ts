@@ -9,10 +9,14 @@ interface FcmTarget {
 
 function buildFcmData(payload: WebPushPayload): Record<string, string> {
   return {
+    title: payload.title,
+    body: payload.body,
     url: payload.url,
     action: payload.action ?? "default",
     ...(payload.requestId ? { requestId: payload.requestId } : {}),
     ...(payload.icon ? { icon: payload.icon } : {}),
+    ...(payload.callId ? { callId: payload.callId } : {}),
+    ...(payload.callMedia ? { callMedia: payload.callMedia } : {}),
   };
 }
 
@@ -59,6 +63,28 @@ export async function sendFcmPush(
               priority: "high",
               ttl: 30_000,
               collapseKey: "family-locate",
+            },
+          });
+        }
+
+        const customAndroidNotification =
+          target.platform === "android" &&
+          (payload.action === "messenger:call" ||
+            payload.action === "messenger:message" ||
+            payload.action === "family:sos" ||
+            payload.action === "default");
+
+        if (customAndroidNotification) {
+          return messaging.send({
+            token: target.token,
+            data,
+            android: {
+              priority: "high",
+              ttl: payload.action === "messenger:call" ? 45_000 : 86_400_000,
+              collapseKey:
+                payload.action === "messenger:call" && payload.callId
+                  ? `call-${payload.callId}`
+                  : payload.action ?? "qhub-default",
             },
           });
         }

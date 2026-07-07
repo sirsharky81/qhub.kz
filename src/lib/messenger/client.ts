@@ -485,6 +485,7 @@ export async function sendEncryptedMessage(input: {
   iv: string;
   mime?: string;
   filename?: string;
+  pushPreview?: string;
 }): Promise<{ messageId: string; version: number; queued: boolean } | null> {
   const res = await platformFetch("/api/messenger/send", {
     method: "POST",

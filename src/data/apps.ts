@@ -301,7 +301,6 @@ export const apps: App[] = [
     color: "from-sky-500/10 to-sky-600/5",
     author: "QHub",
     authorType: "qhub",
-    beta: true,
     sortOrder: 50,
   },
   {
@@ -316,7 +315,6 @@ export const apps: App[] = [
     color: "from-rose-500/10 to-rose-600/5",
     author: "QHub",
     authorType: "qhub",
-    beta: true,
     sortOrder: 51,
   },
   {

@@ -12,7 +12,7 @@ import {
   getRoomParticipants,
   touchDmUserIndex,
 } from "@/lib/messenger/store";
-import { notifyDmMessage, notifyRoomMessage } from "@/lib/messenger/push-notify";
+import { notifyDmMessage, notifyRoomMessage, sanitizePushPreview } from "@/lib/messenger/push-notify";
 import { getMessengerPresence, isViewingChannel } from "@/lib/messenger/push-store";
 import { peerFromDmChannel } from "@/lib/messenger/phone";
 import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
@@ -49,6 +49,7 @@ export async function POST(request: Request) {
       filename?: string;
       refMessageId?: string;
       receipt?: "delivered" | "read";
+      pushPreview?: string;
     };
     try {
       body = await request.json();
@@ -119,6 +120,8 @@ export async function POST(request: Request) {
       filename: body.filename,
     };
 
+    const pushPreview = sanitizePushPreview(body.pushPreview);
+
     let version: number;
     if (channel.startsWith("dm:")) {
       version = await pushDmEnvelope(channel, msg);
@@ -134,7 +137,7 @@ export async function POST(request: Request) {
         recipientViewingThisChat,
       });
       try {
-        await notifyDmMessage({ channel, fromPhone: phone, type });
+        await notifyDmMessage({ channel, fromPhone: phone, type, pushPreview });
       } catch (err) {
         console.warn("[messenger/send] dm push notify failed:", err);
       }
@@ -168,6 +171,7 @@ export async function POST(request: Request) {
           fromPhone: phone,
           type,
           recipientPhones: otherParticipants,
+          pushPreview,
         });
       } catch (err) {
         console.warn("[messenger/send] room push notify failed:", err);
