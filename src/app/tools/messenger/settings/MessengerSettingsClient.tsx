@@ -201,7 +201,14 @@ export function MessengerSettingsClient() {
       title="Настройки"
       backHref="/tools/messenger/home"
     >
-      <div className="p-4 space-y-6 max-w-md w-full mx-auto">
+      <div className="flex min-h-0 flex-1 flex-col max-w-md w-full mx-auto">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4 space-y-6"
+          style={{
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))",
+          }}
+        >
         <div className="flex flex-col items-center gap-3">
           <MessengerAvatar
             src={avatarUrl}
@@ -447,6 +454,7 @@ export function MessengerSettingsClient() {
         <Link href="/tools/messenger/home" className="block text-center text-sm text-gray-500 underline">
           На главную
         </Link>
+        </div>
       </div>
     </MessengerShell>
   );
