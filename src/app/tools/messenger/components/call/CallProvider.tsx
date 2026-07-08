@@ -49,6 +49,7 @@ interface Props {
   peerPhone: string;
   channel: string;
   peerTitle: string;
+  peerAvatarUrl?: string | null;
   deepLinkCallId?: string | null;
   children: ReactNode;
 }
@@ -58,6 +59,7 @@ export function CallProvider({
   peerPhone,
   channel,
   peerTitle,
+  peerAvatarUrl,
   deepLinkCallId,
   children,
 }: Props) {
@@ -100,7 +102,6 @@ export function CallProvider({
 
   const startAudioCall = useCallback(() => {
     primeCallMediaPlayback(false);
-    prepareAudioSessionForCall();
     controllerRef.current.beginLocalMediaCapture({ video: false, speakerOn: false });
     void controllerRef.current.startOutgoing({ video: false });
   }, []);
@@ -113,11 +114,17 @@ export function CallProvider({
   }, []);
 
   const acceptCall = useCallback(() => {
-    primeCallMediaPlayback(false);
-    prepareAudioSessionForCall();
-    controllerRef.current.beginLocalMediaCapture({ video: true, speakerOn: false });
+    const video = state.callMode === "video";
+    primeCallMediaPlayback(video);
+    if (video) {
+      prepareAudioSessionForCall();
+    }
+    controllerRef.current.beginLocalMediaCapture({
+      video,
+      speakerOn: video,
+    });
     void controllerRef.current.acceptIncoming();
-  }, []);
+  }, [state.callMode]);
 
   const rejectCall = useCallback(() => {
     void controllerRef.current.rejectIncoming();
@@ -170,6 +177,7 @@ export function CallProvider({
       {showIncoming && (
         <IncomingCallOverlay
           peerTitle={peerTitle}
+          peerAvatarUrl={peerAvatarUrl}
           onAccept={acceptCall}
           onDecline={rejectCall}
         />
@@ -177,6 +185,7 @@ export function CallProvider({
       {showCallScreen && (
         <ActiveCallScreen
           peerTitle={peerTitle}
+          peerAvatarUrl={peerAvatarUrl}
           phase={state.phase}
           callMode={state.callMode}
           durationSec={state.durationSec}

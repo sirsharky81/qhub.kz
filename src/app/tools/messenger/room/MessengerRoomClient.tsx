@@ -9,6 +9,7 @@ import {
   fetchAccessCheck,
   fetchProfile,
   fetchProfilesMap,
+  fetchRoomManage,
   joinRoomApi,
   leaveRoomApi,
 } from "@/lib/messenger/client";
@@ -67,6 +68,8 @@ function MessengerRoomInner() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
+  const [roomTitle, setRoomTitle] = useState(`Комната ${roomId}`);
+  const [roomAvatarUrl, setRoomAvatarUrl] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const [loadingStep, setLoadingStep] = useState("Проверка сессии");
 
@@ -95,8 +98,25 @@ function MessengerRoomInner() {
 
     async function loadProfilesInBackground() {
       try {
-        const profiles = await fetchProfilesMap();
-        if (!cancelled) setProfileLabels(profiles);
+        const [profiles, manage] = await Promise.all([
+          fetchProfilesMap(),
+          fetchRoomManage(roomId),
+        ]);
+        if (cancelled) return;
+        setProfileLabels(profiles);
+        if (manage) {
+          const title = manage.name?.trim() || `Комната ${roomId}`;
+          setRoomTitle(title);
+          setRoomAvatarUrl(manage.avatarUrl ?? null);
+          upsertLocalDialog({
+            id: `room:${roomId}`,
+            kind: "room",
+            title,
+            roomId,
+            avatarUrl: manage.avatarUrl ?? null,
+            createdAt: Date.now(),
+          });
+        }
       } catch {
         // Non-blocking: чат уже открыт, профили можно догрузить позже.
       }
@@ -268,17 +288,18 @@ function MessengerRoomInner() {
     <PinUnlockGate
       phone={myPhone}
       maskedPhone={maskPhone(myPhone)}
-      title={`Комната ${roomId}`}
+      title={roomTitle}
       backHref="/tools/messenger/home"
     >
       <ChatView
         channel={`room:${roomId}`}
-        title={`Комната ${roomId}`}
+        title={roomTitle}
         backHref="/tools/messenger/home"
         myPhone={myPhone}
         aesKey={aesKey}
         isRoom
         roomId={roomId}
+        avatarUrl={roomAvatarUrl}
         onLeaveRoom={handleLeaveRoom}
         onRoomEnded={handleRoomEnded}
         profileLabels={profileLabels}

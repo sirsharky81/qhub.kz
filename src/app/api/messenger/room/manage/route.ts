@@ -53,6 +53,8 @@ export async function GET(request: Request) {
       roomId,
       ownerPhone: meta.createdBy,
       actorRole,
+      name: meta.name ?? null,
+      avatarUrl: meta.avatarUrl ?? null,
       roomMaxParticipants: MESSENGER_ROOM_MAX_PARTICIPANTS,
       participants: participantsWithPresence,
     });

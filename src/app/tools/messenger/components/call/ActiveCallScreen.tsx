@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { getCallController } from "@/lib/messenger/call/call-controller";
 import type { CallDebugInfo } from "@/lib/messenger/call/types";
 import { isIOSDevice } from "@/lib/platform/device";
+import { MessengerAvatar } from "../MessengerAvatar";
 import { CallStatusText } from "./CallStatusText";
 import {
   CameraIcon,
@@ -11,7 +12,6 @@ import {
   MicIcon,
   MicOffIcon,
   PhoneDownIcon,
-  PhoneIcon,
   SpeakerIcon,
   SpeakerOffIcon,
 } from "./CallControlIcons";
@@ -22,13 +22,9 @@ function formatDuration(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function peerInitial(title: string): string | null {
-  const letter = title.trim().match(/[\p{L}]/u)?.[0];
-  return letter ? letter.toUpperCase() : null;
-}
-
 interface Props {
   peerTitle: string;
+  peerAvatarUrl?: string | null;
   phase: string;
   callMode: "audio" | "video";
   durationSec: number;
@@ -156,6 +152,7 @@ function ControlButton({
 
 export function ActiveCallScreen({
   peerTitle,
+  peerAvatarUrl,
   phase,
   callMode,
   durationSec,
@@ -253,15 +250,14 @@ export function ActiveCallScreen({
               autoPlay
               playsInline
               muted
+              controls={false}
+              disablePictureInPicture
+              disableRemotePlayback
               className="absolute inset-0 h-full w-full bg-black object-cover"
             />
           ) : (
-            <div className="flex h-40 w-40 items-center justify-center rounded-full bg-[#1f2c34] ring-1 ring-white/10 shadow-2xl">
-              {peerInitial(peerTitle) ? (
-                <span className="text-6xl font-light text-[#00a884]">{peerInitial(peerTitle)}</span>
-              ) : (
-                <PhoneIcon className="h-16 w-16 text-[#00a884]" />
-              )}
+            <div className="shadow-2xl rounded-full">
+              <MessengerAvatar src={peerAvatarUrl} label={peerTitle} size="call" />
             </div>
           )}
           {isVideoCall && (
@@ -272,6 +268,9 @@ export function ActiveCallScreen({
                   autoPlay
                   playsInline
                   muted
+                  controls={false}
+                  disablePictureInPicture
+                  disableRemotePlayback
                   className="h-full w-full object-cover"
                 />
               ) : (

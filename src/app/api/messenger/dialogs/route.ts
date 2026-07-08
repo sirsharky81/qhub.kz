@@ -29,6 +29,7 @@ export async function GET() {
           ...d,
           displayName: profiles[d.peerPhone]?.displayName ?? null,
           label: displayNameForPhone(d.peerPhone, profiles),
+          avatarUrl: profiles[d.peerPhone]?.avatarUrl ?? null,
           peerOnline: isMessengerOnline(presence),
           pinnedAt: prefs.pinnedAt,
           pinOrder: prefs.pinOrder,

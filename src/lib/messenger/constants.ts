@@ -73,5 +73,11 @@ export const CALL_HEARTBEAT_INTERVAL_MS = 30_000;
 export const CALL_HEARTBEAT_ACTIVE_IOS_MS = 10_000;
 
 export const MAX_DISPLAY_NAME_LENGTH = 30;
+export const MAX_ROOM_NAME_LENGTH = 40;
+export const MAX_AVATAR_BYTES = 120 * 1024; // ~120 KB after compression
+export const AVATAR_MAX_DIM = 256;
 export const QUOTE_PREVIEW_LENGTH = 80;
 export const SENDER_GROUP_MS = 5 * 60 * 1000;
+
+export const REDIS_AVATAR_USER_PREFIX = "qhub:messenger:avatar:user:";
+export const REDIS_AVATAR_ROOM_PREFIX = "qhub:messenger:avatar:room:";

@@ -7,7 +7,7 @@ import { CallProvider } from "../components/call/CallProvider";
 import { DmWaitingView } from "../components/DmWaitingView";
 import { MessengerShell } from "../components/MessengerShell";
 import { PinUnlockGate } from "../components/PinUnlockGate";
-import { fetchAccessCheck, fetchPeerPublicKey, fetchProfilesMap } from "@/lib/messenger/client";
+import { fetchAccessCheck, fetchPeerPublicKey, fetchProfilesInfoMap } from "@/lib/messenger/client";
 import { deriveDmAesKey, getOrCreateDeviceKeyPair } from "@/lib/messenger/crypto";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
@@ -57,6 +57,7 @@ function MessengerChatInner() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [checking, setChecking] = useState(false);
   const [profileLabels, setProfileLabels] = useState<Record<string, string>>({});
+  const [peerAvatarUrl, setPeerAvatarUrl] = useState<string | null>(null);
   const [identityAlert, setIdentityAlert] = useState<{
     previousFingerprint: string | null;
     currentFingerprint: string;
@@ -99,17 +100,23 @@ function MessengerChatInner() {
       setPhase("ready");
 
       // Heavy contacts/profile fetch is best-effort and should not block opening chat.
-      void fetchProfilesMap()
+      void fetchProfilesInfoMap()
         .then((profiles) => {
-          setProfileLabels(profiles);
+          const labels: Record<string, string> = {};
+          for (const [phone, info] of Object.entries(profiles)) {
+            labels[phone] = info.label;
+          }
+          setProfileLabels(labels);
           const enriched = profiles[peerPhone];
           if (!enriched) return;
+          setPeerAvatarUrl(enriched.avatarUrl);
           upsertLocalDialog({
             id: chatId,
             kind: "dm",
-            title: enriched,
+            title: enriched.label,
             peerPhone,
-            displayName: enriched,
+            displayName: enriched.label,
+            avatarUrl: enriched.avatarUrl,
             createdAt: Date.now(),
           });
         })
@@ -265,6 +272,7 @@ function MessengerChatInner() {
         peerPhone={peerPhone}
         channel={channel}
         peerTitle={peerTitle}
+        peerAvatarUrl={peerAvatarUrl}
         deepLinkCallId={deepLinkCallId}
       >
         <ChatView
@@ -273,6 +281,7 @@ function MessengerChatInner() {
           backHref={backHref}
           myPhone={myPhone}
           aesKey={aesKey}
+          avatarUrl={peerAvatarUrl}
           profileLabels={profileLabels}
           identityAlert={
             identityAlert

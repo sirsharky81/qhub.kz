@@ -143,12 +143,12 @@ export async function fetchPeerPublicKey(phone: string): Promise<string | null> 
 }
 
 export async function fetchContacts(): Promise<
-  { phone: string; displayName: string | null; label: string; online?: boolean }[]
+  { phone: string; displayName: string | null; label: string; avatarUrl?: string | null; online?: boolean }[]
 > {
   const res = await platformFetch("/api/messenger/contacts");
   if (!res.ok) return [];
   const data = (await res.json()) as {
-    contacts: { phone: string; displayName: string | null; label: string; online?: boolean }[];
+    contacts: { phone: string; displayName: string | null; label: string; avatarUrl?: string | null; online?: boolean }[];
   };
   return data.contacts;
 }
@@ -158,6 +158,7 @@ export interface DmDialogsResponseItem {
   peerPhone: string;
   label: string;
   displayName: string | null;
+  avatarUrl?: string | null;
   lastMessageAt: number;
   lastMessageType: MessageType | null;
   lastMessageFromMe: boolean;
@@ -180,6 +181,7 @@ export interface RoomDialogsResponseItem {
   lastMessageAt: number;
   lastMessageType: MessageType | null;
   lastReadVersion: number;
+  avatarUrl?: string | null;
 }
 
 export async function fetchDmDialogs(): Promise<{
@@ -313,11 +315,17 @@ export async function touchChatPresence(channel: string): Promise<void> {
 export async function fetchProfile(): Promise<{
   phone: string;
   displayName: string | null;
+  avatarUrl: string | null;
   allowRoomAutoAdd: boolean;
 } | null> {
   const res = await platformFetch("/api/messenger/profile");
   if (!res.ok) return null;
-  return res.json() as Promise<{ phone: string; displayName: string | null; allowRoomAutoAdd: boolean }>;
+  return res.json() as Promise<{
+    phone: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    allowRoomAutoAdd: boolean;
+  }>;
 }
 
 export async function updateProfile(input: { displayName: string; allowRoomAutoAdd?: boolean }): Promise<boolean> {
@@ -329,11 +337,79 @@ export async function updateProfile(input: { displayName: string; allowRoomAutoA
   return res.ok;
 }
 
+export async function uploadUserAvatar(data: string, mime: string): Promise<{ ok: boolean; avatarUrl?: string | null; error?: string }> {
+  const res = await platformFetch("/api/messenger/avatar", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, mime }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; avatarUrl?: string; error?: string };
+  if (!res.ok) return { ok: false, error: body.error ?? "Не удалось загрузить аватар" };
+  return { ok: true, avatarUrl: body.avatarUrl ?? null };
+}
+
+export async function deleteUserAvatar(): Promise<boolean> {
+  const res = await platformFetch("/api/messenger/avatar", { method: "DELETE" });
+  return res.ok;
+}
+
+export async function uploadRoomAvatar(
+  roomId: string,
+  data: string,
+  mime: string,
+): Promise<{ ok: boolean; avatarUrl?: string | null; error?: string }> {
+  const res = await platformFetch(`/api/messenger/avatar?roomId=${encodeURIComponent(roomId.toUpperCase())}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, mime }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; avatarUrl?: string; error?: string };
+  if (!res.ok) return { ok: false, error: body.error ?? "Не удалось загрузить аватар" };
+  return { ok: true, avatarUrl: body.avatarUrl ?? null };
+}
+
+export async function deleteRoomAvatar(roomId: string): Promise<boolean> {
+  const res = await platformFetch(`/api/messenger/avatar?roomId=${encodeURIComponent(roomId.toUpperCase())}`, {
+    method: "DELETE",
+  });
+  return res.ok;
+}
+
+export async function updateRoomSettingsApi(input: {
+  roomId: string;
+  name: string;
+}): Promise<{ ok: boolean; name?: string | null; avatarUrl?: string | null; error?: string }> {
+  const res = await platformFetch("/api/messenger/room/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    name?: string | null;
+    avatarUrl?: string | null;
+    error?: string;
+  };
+  if (!res.ok || !body.ok) return { ok: false, error: body.error ?? "Не удалось сохранить" };
+  return { ok: true, name: body.name ?? null, avatarUrl: body.avatarUrl ?? null };
+}
+
 export async function fetchProfilesMap(): Promise<Record<string, string>> {
   const contacts = await fetchContacts();
   const map: Record<string, string> = {};
   for (const c of contacts) {
     map[c.phone] = c.label;
+  }
+  return map;
+}
+
+export async function fetchProfilesInfoMap(): Promise<
+  Record<string, { label: string; avatarUrl: string | null }>
+> {
+  const contacts = await fetchContacts();
+  const map: Record<string, { label: string; avatarUrl: string | null }> = {};
+  for (const c of contacts) {
+    map[c.phone] = { label: c.label, avatarUrl: c.avatarUrl ?? null };
   }
   return map;
 }
@@ -381,6 +457,8 @@ export interface RoomManageSnapshot {
   roomId: string;
   ownerPhone: string;
   actorRole: "owner" | "admin" | "member";
+  name?: string | null;
+  avatarUrl?: string | null;
   roomMaxParticipants: number;
   participants: RoomManageParticipant[];
 }

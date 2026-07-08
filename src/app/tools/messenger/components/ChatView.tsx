@@ -8,6 +8,7 @@ import { ChatComposer, type MediaSendPayload } from "./ChatComposer";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { MessageBubble, type DisplayMessage } from "./MessageBubble";
 import { MessengerShell } from "./MessengerShell";
+import { MessengerAvatar } from "./MessengerAvatar";
 import { IconSettings } from "@/components/PlatformIcons";
 import { useMessengerUnlock } from "./MessengerUnlockProvider";
 import { SENDER_GROUP_MS } from "@/lib/messenger/constants";
@@ -61,6 +62,7 @@ interface Props {
   aesKey: CryptoKey;
   isRoom?: boolean;
   roomId?: string;
+  avatarUrl?: string | null;
   onLeaveRoom?: (participantCount: number) => void | Promise<void>;
   onRoomEnded?: () => void;
   profileLabels?: Record<string, string>;
@@ -82,6 +84,7 @@ export function ChatView({
   aesKey,
   isRoom,
   roomId,
+  avatarUrl,
   onLeaveRoom,
   onRoomEnded,
   profileLabels = {},
@@ -902,9 +905,19 @@ export function ChatView({
     </div>
   );
 
+  const headerAvatar = (
+    <MessengerAvatar
+      src={avatarUrl}
+      label={title}
+      size="sm"
+      kind={isRoom ? "room" : "user"}
+      seed={isRoom ? roomId : channel}
+    />
+  );
+
   if (!historyLoaded) {
     return (
-      <MessengerShell variant="chat" title={title} backHref={backHref}>
+      <MessengerShell variant="chat" title={title} backHref={backHref} leading={headerAvatar}>
         <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
           Загрузка истории…
         </div>
@@ -919,6 +932,7 @@ export function ChatView({
         title={title}
         subtitle={headerSubtitle}
         backHref={backHref}
+        leading={headerAvatar}
         trailing={headerTrailing}
       >
         <div

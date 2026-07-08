@@ -2,16 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessengerShell } from "../components/MessengerShell";
+import { MessengerAvatar } from "../components/MessengerAvatar";
 import { PinInput } from "../components/PinInput";
 import {
   changeMessengerPin,
+  deleteUserAvatar,
   fetchAccessCheck,
   fetchProfile,
   updateProfile,
+  uploadUserAvatar,
 } from "@/lib/messenger/client";
 import { MAX_DISPLAY_NAME_LENGTH, PIN_LENGTH } from "@/lib/messenger/constants";
+import { blobToBase64, compressAvatarImage } from "@/lib/messenger/files";
 import {
   isMessengerPushEnabledLocally,
   NativePushNotConfiguredError,
@@ -29,8 +33,12 @@ import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 export function MessengerSettingsClient() {
   const router = useRouter();
   const { setStorageKeyFromPin } = useMessengerUnlock();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [phone, setPhone] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [allowRoomAutoAdd, setAllowRoomAutoAdd] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -67,9 +75,43 @@ export function MessengerSettingsClient() {
       setPhone(data.phone ?? "");
       const profile = await fetchProfile();
       setDisplayName(profile?.displayName ?? "");
+      setAvatarUrl(profile?.avatarUrl ?? null);
       setAllowRoomAutoAdd(profile?.allowRoomAutoAdd ?? true);
     });
   }, [router, refreshPushState]);
+
+  async function handleAvatarPick(file: File | null) {
+    if (!file) return;
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      const { blob, mime } = await compressAvatarImage(file);
+      const data = await blobToBase64(blob);
+      const res = await uploadUserAvatar(data, mime);
+      if (!res.ok) {
+        setAvatarError(res.error ?? "Не удалось загрузить");
+        return;
+      }
+      setAvatarUrl(res.avatarUrl ?? null);
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : "Не удалось загрузить");
+    } finally {
+      setAvatarBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleAvatarRemove() {
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      const ok = await deleteUserAvatar();
+      if (ok) setAvatarUrl(null);
+      else setAvatarError("Не удалось удалить аватар");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
 
   async function handlePushToggle() {
     setPushBusy(true);
@@ -149,6 +191,43 @@ export function MessengerSettingsClient() {
       backHref="/tools/messenger/home"
     >
       <div className="p-4 space-y-6 max-w-md w-full mx-auto">
+        <div className="flex flex-col items-center gap-3">
+          <MessengerAvatar
+            src={avatarUrl}
+            label={displayName || phone || "?"}
+            size="lg"
+            seed={phone}
+          />
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              disabled={avatarBusy}
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50"
+            >
+              {avatarBusy ? "Загрузка…" : avatarUrl ? "Сменить фото" : "Загрузить фото"}
+            </button>
+            {avatarUrl && (
+              <button
+                type="button"
+                disabled={avatarBusy}
+                onClick={() => void handleAvatarRemove()}
+                className="rounded-xl border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-50"
+              >
+                Удалить
+              </button>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => void handleAvatarPick(e.target.files?.[0] ?? null)}
+          />
+          {avatarError && <p className="text-xs text-red-600 text-center">{avatarError}</p>}
+        </div>
+
         <div className="space-y-2">
           <label className="text-xs font-medium text-gray-500">Имя</label>
           <input
@@ -340,7 +419,7 @@ export function MessengerSettingsClient() {
         </button>
 
         <p className="text-xs text-gray-400 leading-relaxed">
-          Имя видно участникам комнат и в списке контактов. Номер привязан к whitelist и не
+          Имя и аватар видны в чатах, звонках и списке диалогов. Номер привязан к whitelist и не
           изменяется.
         </p>
 

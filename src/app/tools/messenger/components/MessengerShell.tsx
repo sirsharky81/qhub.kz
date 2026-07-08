@@ -12,6 +12,7 @@ interface Props {
   subtitle?: ReactNode;
   backHref?: string;
   trailing?: ReactNode;
+  leading?: ReactNode;
   children: ReactNode;
   variant?: ShellVariant;
   keyboardAware?: boolean;
@@ -28,6 +29,7 @@ export function MessengerShell({
   subtitle,
   backHref,
   trailing,
+  leading,
   children,
   variant = "default",
   keyboardAware,
@@ -72,6 +74,7 @@ export function MessengerShell({
           ←
         </Link>
       )}
+      {leading && <div className="shrink-0">{leading}</div>}
       <div className="flex-1 min-w-0">
         <h1 className="text-base font-semibold truncate">{title}</h1>
         {subtitle && (

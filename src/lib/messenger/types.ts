@@ -34,6 +34,8 @@ export type ChannelEnvelope =
 export interface MessengerProfile {
   phone: string;
   displayName: string | null;
+  /** Public avatar URL path (served by /api/messenger/avatar). */
+  avatarUrl?: string | null;
   allowRoomAutoAdd?: boolean;
   updatedAt: number;
 }
@@ -60,6 +62,9 @@ export interface ChannelMeta {
 export interface RoomMeta extends ChannelMeta {
   createdAt: number;
   createdBy: string;
+  name?: string | null;
+  /** Public avatar URL path (served by /api/messenger/avatar). */
+  avatarUrl?: string | null;
 }
 
 export interface RoomParticipant {
@@ -103,6 +108,7 @@ export interface LocalDialog {
   roomId?: string;
   createdAt: number;
   displayName?: string;
+  avatarUrl?: string | null;
 }
 
 export interface DialogPrefs {

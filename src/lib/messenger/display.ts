@@ -9,12 +9,49 @@ const SENDER_COLORS = [
   "text-indigo-700",
 ];
 
-export function senderColorClass(phone: string): string {
+const AVATAR_BG_COLORS = [
+  "bg-sky-100 text-sky-700",
+  "bg-violet-100 text-violet-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+  "bg-cyan-100 text-cyan-700",
+  "bg-orange-100 text-orange-700",
+  "bg-indigo-100 text-indigo-700",
+];
+
+function hashString(value: string): number {
   let hash = 0;
-  for (let i = 0; i < phone.length; i++) {
-    hash = (hash * 31 + phone.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
   }
-  return SENDER_COLORS[hash % SENDER_COLORS.length];
+  return hash;
+}
+
+export function senderColorClass(phone: string): string {
+  return SENDER_COLORS[hashString(phone) % SENDER_COLORS.length];
+}
+
+export function avatarBgClass(seed: string): string {
+  return AVATAR_BG_COLORS[hashString(seed || "x") % AVATAR_BG_COLORS.length];
+}
+
+/** First letter from a display name / room title for avatar fallback. */
+export function initialFromLabel(label: string): string | null {
+  const letter = label.trim().match(/[\p{L}\p{N}]/u)?.[0];
+  return letter ? letter.toUpperCase() : null;
+}
+
+export function userAvatarUrl(phone: string, version?: number | null): string {
+  const params = new URLSearchParams({ phone });
+  if (version) params.set("v", String(version));
+  return `/api/messenger/avatar?${params.toString()}`;
+}
+
+export function roomAvatarUrl(roomId: string, version?: number | null): string {
+  const params = new URLSearchParams({ roomId: roomId.toUpperCase() });
+  if (version) params.set("v", String(version));
+  return `/api/messenger/avatar?${params.toString()}`;
 }
 
 export function truncateQuote(text: string, max = 80): string {

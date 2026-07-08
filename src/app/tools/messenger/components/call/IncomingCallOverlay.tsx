@@ -1,18 +1,15 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { MessengerAvatar } from "../MessengerAvatar";
 import { CallStatusText } from "./CallStatusText";
 import { PhoneDownIcon, PhoneIcon } from "./CallControlIcons";
 
 interface Props {
   peerTitle: string;
+  peerAvatarUrl?: string | null;
   onAccept: () => void;
   onDecline: () => void;
-}
-
-function peerInitial(title: string): string | null {
-  const letter = title.trim().match(/[\p{L}]/u)?.[0];
-  return letter ? letter.toUpperCase() : null;
 }
 
 function ActionButton({
@@ -46,9 +43,7 @@ function ActionButton({
   );
 }
 
-export function IncomingCallOverlay({ peerTitle, onAccept, onDecline }: Props) {
-  const initial = peerInitial(peerTitle);
-
+export function IncomingCallOverlay({ peerTitle, peerAvatarUrl, onAccept, onDecline }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col text-white">
       <div
@@ -82,12 +77,8 @@ export function IncomingCallOverlay({ peerTitle, onAccept, onDecline }: Props) {
               style={{ animationDuration: "2.4s", animationDelay: "0.6s" }}
               aria-hidden
             />
-            <div className="relative flex h-40 w-40 items-center justify-center rounded-full bg-[#1f2c34] ring-1 ring-white/10 shadow-2xl">
-              {initial ? (
-                <span className="text-6xl font-light text-[#00a884]">{initial}</span>
-              ) : (
-                <PhoneIcon className="h-16 w-16 text-[#00a884]" />
-              )}
+            <div className="relative shadow-2xl rounded-full">
+              <MessengerAvatar src={peerAvatarUrl} label={peerTitle} size="call" />
             </div>
           </div>
         </div>

@@ -4,9 +4,12 @@ import {
   DEFAULT_MAX_ROOM_ENVELOPES,
   DEFAULT_ROOM_INACTIVE_TTL_HOURS,
   DEFAULT_ROOM_USER_INDEX_TTL_SEC,
+  MAX_ROOM_NAME_LENGTH,
   MESSENGER_DIALOG_PREFS_TTL_SEC,
   MESSENGER_MAX_PINNED_DIALOGS,
   REDIS_AUTH_PREFIX,
+  REDIS_AVATAR_ROOM_PREFIX,
+  REDIS_AVATAR_USER_PREFIX,
   REDIS_DIALOG_PREFS_PREFIX,
   REDIS_DM_PREFIX,
   REDIS_DM_USER_INDEX_PREFIX,
@@ -45,6 +48,7 @@ import {
 } from "./redis";
 import { normalizeKzPhone, peerFromDmChannel } from "./phone";
 import { publishEnvelopesEvent } from "./realtime/publish";
+import { roomAvatarUrl, userAvatarUrl } from "./display";
 
 const WHITELIST_CACHE_TTL_MS = 30_000;
 let whitelistCache: { at: number; data: Record<string, WhitelistEntry> } | null = null;
@@ -168,6 +172,84 @@ export function displayNameForPhone(
 ): string {
   const name = profiles[phone]?.displayName?.trim();
   return name || phone;
+}
+
+export type AvatarBlob = {
+  mime: string;
+  data: string;
+  updatedAt: number;
+};
+
+function userAvatarKey(phone: string): string {
+  return `${REDIS_AVATAR_USER_PREFIX}${normalizeKzPhone(phone)}`;
+}
+
+function roomAvatarStorageKey(roomId: string): string {
+  return `${REDIS_AVATAR_ROOM_PREFIX}${roomId.toUpperCase()}`;
+}
+
+export async function getUserAvatarBlob(phone: string): Promise<AvatarBlob | null> {
+  return redisGetJson<AvatarBlob>(userAvatarKey(phone));
+}
+
+export async function setUserAvatarBlob(
+  phone: string,
+  mime: string,
+  data: string,
+): Promise<{ avatarUrl: string; updatedAt: number }> {
+  const updatedAt = Date.now();
+  const blob: AvatarBlob = { mime, data, updatedAt };
+  await redisSet(userAvatarKey(phone), JSON.stringify(blob));
+  const avatarUrl = userAvatarUrl(phone, updatedAt);
+  const prev = await getProfile(phone);
+  await saveProfile({
+    phone: normalizeKzPhone(phone),
+    displayName: prev?.displayName ?? null,
+    allowRoomAutoAdd: prev?.allowRoomAutoAdd ?? true,
+    avatarUrl,
+    updatedAt,
+  });
+  return { avatarUrl, updatedAt };
+}
+
+export async function deleteUserAvatar(phone: string): Promise<void> {
+  await redisDel(userAvatarKey(phone));
+  const prev = await getProfile(phone);
+  if (!prev) return;
+  await saveProfile({
+    ...prev,
+    avatarUrl: null,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function getRoomAvatarBlob(roomId: string): Promise<AvatarBlob | null> {
+  return redisGetJson<AvatarBlob>(roomAvatarStorageKey(roomId));
+}
+
+export async function setRoomAvatarBlob(
+  roomId: string,
+  mime: string,
+  data: string,
+): Promise<{ avatarUrl: string; updatedAt: number }> {
+  const key = roomId.toUpperCase();
+  const updatedAt = Date.now();
+  const blob: AvatarBlob = { mime, data, updatedAt };
+  await redisSet(roomAvatarStorageKey(key), JSON.stringify(blob));
+  const avatarUrl = roomAvatarUrl(key, updatedAt);
+  const meta = await getRoomMeta(key);
+  if (meta) {
+    await saveRoomMeta(key, { ...meta, avatarUrl, updatedAt });
+  }
+  return { avatarUrl, updatedAt };
+}
+
+export async function deleteRoomAvatar(roomId: string): Promise<void> {
+  const key = roomId.toUpperCase();
+  await redisDel(roomAvatarStorageKey(key));
+  const meta = await getRoomMeta(key);
+  if (!meta) return;
+  await saveRoomMeta(key, { ...meta, avatarUrl: null, updatedAt: Date.now() });
 }
 
 // --- Envelope helpers ---
@@ -621,9 +703,11 @@ async function upsertRoomUserIndex(phone: string, roomId: string, createdAt = Da
   const index = await loadRoomUserIndex(phone);
   const key = roomId.toUpperCase();
   const prev = index[key];
+  const meta = await getRoomMeta(key);
+  const title = meta?.name?.trim() || prev?.title || `Комната ${key}`;
   index[key] = {
     roomId: key,
-    title: prev?.title || `Комната ${key}`,
+    title,
     createdAt: prev?.createdAt ?? createdAt,
     unreadCount: Math.max(0, prev?.unreadCount ?? 0),
     latestUnreadAt: prev?.latestUnreadAt ?? null,
@@ -655,22 +739,33 @@ export async function getRoomDialogsForUser(
     lastMessageAt: number;
     lastMessageType: MessageType | null;
     lastReadVersion: number;
+    avatarUrl: string | null;
   }>
 > {
   const index = await loadRoomUserIndex(phone);
-  return Object.values(index)
-    .map((entry) => ({
-      id: `room:${entry.roomId}`,
-      kind: "room" as const,
-      title: entry.title || `Комната ${entry.roomId}`,
-      roomId: entry.roomId,
-      createdAt: entry.createdAt,
-      unreadCount: Math.max(0, entry.unreadCount ?? 0),
-      latestUnreadAt: entry.latestUnreadAt ?? null,
-      lastMessageAt: entry.lastMessageAt ?? 0,
-      lastMessageType: entry.lastMessageType ?? null,
-      lastReadVersion: Math.max(0, entry.lastReadVersion ?? 0),
-    }))
+  const entries = Object.values(index);
+  const metas = await Promise.all(entries.map((entry) => getRoomMeta(entry.roomId)));
+  return entries
+    .map((entry, i) => {
+      const meta = metas[i];
+      const title =
+        meta?.name?.trim() ||
+        entry.title ||
+        `Комната ${entry.roomId}`;
+      return {
+        id: `room:${entry.roomId}`,
+        kind: "room" as const,
+        title,
+        roomId: entry.roomId,
+        createdAt: entry.createdAt,
+        unreadCount: Math.max(0, entry.unreadCount ?? 0),
+        latestUnreadAt: entry.latestUnreadAt ?? null,
+        lastMessageAt: entry.lastMessageAt ?? 0,
+        lastMessageType: entry.lastMessageType ?? null,
+        lastReadVersion: Math.max(0, entry.lastReadVersion ?? 0),
+        avatarUrl: meta?.avatarUrl ?? null,
+      };
+    })
     .sort((a, b) => {
       const aPriority = a.latestUnreadAt ?? a.lastMessageAt ?? a.createdAt;
       const bPriority = b.latestUnreadAt ?? b.lastMessageAt ?? b.createdAt;
@@ -740,6 +835,42 @@ export async function getRoomMeta(roomId: string): Promise<RoomMeta | null> {
   return redisGetJson<RoomMeta>(roomMetaKey(roomId));
 }
 
+async function saveRoomMeta(roomId: string, meta: RoomMeta): Promise<void> {
+  await redisSet(roomMetaKey(roomId), JSON.stringify(meta), roomInactiveTtlSec());
+}
+
+async function syncRoomTitleForParticipants(roomId: string, title: string): Promise<void> {
+  const key = roomId.toUpperCase();
+  const participants = await getRoomParticipants(key);
+  await Promise.all(
+    participants.map(async (p) => {
+      const index = await loadRoomUserIndex(p.phone);
+      const prev = index[key];
+      if (!prev) return;
+      index[key] = { ...prev, title };
+      await saveRoomUserIndex(p.phone, index);
+    }),
+  );
+}
+
+export async function updateRoomSettings(
+  roomId: string,
+  input: { name?: string | null },
+): Promise<RoomMeta | null> {
+  const key = roomId.toUpperCase();
+  const meta = await getRoomMeta(key);
+  if (!meta) return null;
+  const next: RoomMeta = { ...meta, updatedAt: Date.now() };
+  if (input.name !== undefined) {
+    const raw = (input.name ?? "").trim();
+    next.name = raw.length > 0 ? raw.slice(0, MAX_ROOM_NAME_LENGTH) : null;
+    const title = next.name || `Комната ${key}`;
+    await syncRoomTitleForParticipants(key, title);
+  }
+  await saveRoomMeta(key, next);
+  return next;
+}
+
 export async function getRoomParticipants(roomId: string): Promise<RoomParticipant[]> {
   return (await redisGetJson<RoomParticipant[]>(roomParticipantsKey(roomId))) ?? [];
 }
@@ -752,7 +883,14 @@ async function saveRoomParticipants(roomId: string, participants: RoomParticipan
 export async function createRoomMeta(roomId: string, createdBy: string): Promise<RoomMeta> {
   const ttl = roomInactiveTtlSec();
   const now = Date.now();
-  const meta: RoomMeta = { version: 0, updatedAt: now, createdAt: now, createdBy };
+  const meta: RoomMeta = {
+    version: 0,
+    updatedAt: now,
+    createdAt: now,
+    createdBy,
+    name: null,
+    avatarUrl: null,
+  };
   await redisSet(roomMetaKey(roomId), JSON.stringify(meta), ttl);
   await saveRoomParticipants(roomId, [{ phone: createdBy, lastSeen: now, role: "owner" }]);
   await upsertRoomUserIndex(createdBy, roomId, now);
@@ -876,6 +1014,7 @@ export async function deleteRoom(roomId: string): Promise<void> {
     roomMetaKey(roomId),
     roomParticipantsKey(roomId),
     roomMessagesKey(roomId),
+    roomAvatarStorageKey(roomId),
   );
 }
 

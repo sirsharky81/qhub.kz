@@ -19,6 +19,7 @@ export async function GET() {
           phone: p,
           displayName: profiles[p]?.displayName ?? null,
           label: displayNameForPhone(p, profiles),
+          avatarUrl: profiles[p]?.avatarUrl ?? null,
           online: isMessengerOnline(presence),
         };
       })

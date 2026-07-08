@@ -10,6 +10,7 @@ export async function GET() {
     return NextResponse.json({
       phone,
       displayName: profile?.displayName ?? null,
+      avatarUrl: profile?.avatarUrl ?? null,
       allowRoomAutoAdd: profile?.allowRoomAutoAdd ?? true,
       updatedAt: profile?.updatedAt ?? null,
     });
@@ -37,6 +38,7 @@ export async function PATCH(request: Request) {
     const profile = {
       phone,
       displayName,
+      avatarUrl: prev?.avatarUrl ?? null,
       allowRoomAutoAdd,
       updatedAt: Date.now(),
     };
