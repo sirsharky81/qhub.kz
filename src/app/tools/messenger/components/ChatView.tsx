@@ -10,6 +10,7 @@ import { MessageBubble, type DisplayMessage } from "./MessageBubble";
 import { MessengerShell } from "./MessengerShell";
 import { MessengerAvatar } from "./MessengerAvatar";
 import { IconSettings } from "@/components/PlatformIcons";
+import { messengerChatInfoUrl, messengerRoomInfoUrl } from "@/lib/app-routes";
 import { useMessengerUnlock } from "./MessengerUnlockProvider";
 import { SENDER_GROUP_MS } from "@/lib/messenger/constants";
 import {
@@ -905,7 +906,24 @@ export function ChatView({
     </div>
   );
 
-  const headerAvatar = (
+  const infoHref = isRoom && roomId
+    ? messengerRoomInfoUrl(roomId)
+    : (() => {
+        const peer = peerFromDmChannel(channel, myPhone);
+        return peer ? messengerChatInfoUrl(peer) : null;
+      })();
+
+  const headerAvatar = infoHref ? (
+    <Link href={infoHref} aria-label="Информация о чате" className="shrink-0">
+      <MessengerAvatar
+        src={avatarUrl}
+        label={title}
+        size="sm"
+        kind={isRoom ? "room" : "user"}
+        seed={isRoom ? roomId : channel}
+      />
+    </Link>
+  ) : (
     <MessengerAvatar
       src={avatarUrl}
       label={title}

@@ -27,6 +27,16 @@ export function messengerChatCallUrl(peerPhone: string, callId: string): string 
   return `${base}&call=${encodeURIComponent(callId)}`;
 }
 
+export function messengerChatInfoUrl(peerPhone: string, returnTo?: string): string {
+  const base = `/tools/messenger/chat/info?peer=${encodeURIComponent(peerPhone)}`;
+  if (!returnTo) return base;
+  return `${base}&returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export function messengerRoomUrl(roomId: string): string {
   return `/tools/messenger/room?id=${encodeURIComponent(roomId.toUpperCase())}`;
+}
+
+export function messengerRoomInfoUrl(roomId: string): string {
+  return `/tools/messenger/room/info?id=${encodeURIComponent(roomId.toUpperCase())}`;
 }

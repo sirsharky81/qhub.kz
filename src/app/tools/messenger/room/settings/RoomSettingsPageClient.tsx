@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessengerShell } from "../../components/MessengerShell";
 import { MessengerAvatar } from "../../components/MessengerAvatar";
+import { AvatarCropModal } from "../../components/AvatarCropModal";
 import { messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
 import {
   deleteRoomAvatar,
@@ -17,7 +18,7 @@ import {
 } from "@/lib/messenger/client";
 import { MAX_ROOM_NAME_LENGTH } from "@/lib/messenger/constants";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
-import { blobToBase64, compressAvatarImage } from "@/lib/messenger/files";
+import { blobToBase64, compressAvatarImage, type AvatarCropRect } from "@/lib/messenger/files";
 
 function roomSettingsHref(roomId: string): string {
   return `/tools/messenger/room/settings?id=${encodeURIComponent(roomId)}`;
@@ -41,6 +42,7 @@ export function RoomSettingsPageClient() {
   const [nameSaved, setNameSaved] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
 
   const canEdit = snapshot?.actorRole === "owner" || snapshot?.actorRole === "admin";
 
@@ -129,12 +131,23 @@ export function RoomSettingsPageClient() {
     }
   }
 
-  async function handleAvatarPick(file: File | null) {
+  function handleAvatarPick(file: File | null) {
     if (!file || !canEdit) return;
+    if (!file.type.startsWith("image/")) {
+      setAvatarError("Выберите изображение");
+      return;
+    }
+    setAvatarError(null);
+    setCropFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleAvatarCropConfirm(crop: AvatarCropRect) {
+    if (!cropFile || !canEdit) return;
     setAvatarBusy(true);
     setAvatarError(null);
     try {
-      const { blob, mime } = await compressAvatarImage(file);
+      const { blob, mime } = await compressAvatarImage(cropFile, crop);
       const data = await blobToBase64(blob);
       const res = await uploadRoomAvatar(roomId, data, mime);
       if (!res.ok) {
@@ -142,6 +155,7 @@ export function RoomSettingsPageClient() {
         return;
       }
       setAvatarUrl(res.avatarUrl ?? null);
+      setCropFile(null);
       upsertLocalDialog({
         id: `room:${roomId}`,
         kind: "room",
@@ -154,7 +168,6 @@ export function RoomSettingsPageClient() {
       setAvatarError(err instanceof Error ? err.message : "Не удалось загрузить");
     } finally {
       setAvatarBusy(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -235,12 +248,21 @@ export function RoomSettingsPageClient() {
                         type="file"
                         accept="image/*"
                         className="hidden"
-                        onChange={(e) => void handleAvatarPick(e.target.files?.[0] ?? null)}
+                        onChange={(e) => handleAvatarPick(e.target.files?.[0] ?? null)}
                       />
                     </div>
                   )}
                   {avatarError && <p className="text-xs text-red-600">{avatarError}</p>}
                 </div>
+                <AvatarCropModal
+                  open={Boolean(cropFile)}
+                  file={cropFile}
+                  busy={avatarBusy}
+                  onCancel={() => {
+                    if (!avatarBusy) setCropFile(null);
+                  }}
+                  onConfirm={(crop) => void handleAvatarCropConfirm(crop)}
+                />
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-gray-700">Название комнаты</label>
                   <input

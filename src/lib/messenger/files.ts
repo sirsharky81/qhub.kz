@@ -1,4 +1,4 @@
-import { MAX_ENCRYPTED_FILE_BYTES, AVATAR_MAX_DIM, MAX_AVATAR_BYTES } from "./constants";
+import { MAX_ENCRYPTED_FILE_BYTES } from "./constants";
 
 export async function compressImageIfNeeded(file: File): Promise<{ blob: Blob; compressed: boolean }> {
   if (!file.type.startsWith("image/")) {
@@ -35,51 +35,7 @@ export async function compressImageIfNeeded(file: File): Promise<{ blob: Blob; c
   return { blob, compressed: true };
 }
 
-/** Square-crop and compress an image for messenger avatars. */
-export async function compressAvatarImage(file: File): Promise<{ blob: Blob; mime: string }> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Выберите изображение");
-  }
-  const bitmap = await createImageBitmap(file);
-  const side = Math.min(bitmap.width, bitmap.height);
-  const sx = Math.floor((bitmap.width - side) / 2);
-  const sy = Math.floor((bitmap.height - side) / 2);
-  const out = Math.min(side, AVATAR_MAX_DIM);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = out;
-  canvas.height = out;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    bitmap.close();
-    throw new Error("Не удалось обработать изображение");
-  }
-  ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, out, out);
-  bitmap.close();
-
-  let quality = 0.85;
-  let blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error("compress failed"))),
-      "image/jpeg",
-      quality,
-    );
-  });
-  while (blob.size > MAX_AVATAR_BYTES && quality > 0.45) {
-    quality -= 0.1;
-    blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("compress failed"))),
-        "image/jpeg",
-        quality,
-      );
-    });
-  }
-  if (blob.size > MAX_AVATAR_BYTES) {
-    throw new Error("Аватар слишком большой даже после сжатия");
-  }
-  return { blob, mime: "image/jpeg" };
-}
+export { compressAvatarImage, type AvatarCropRect } from "./avatar-compress";
 
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

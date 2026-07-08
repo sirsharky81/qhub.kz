@@ -17,6 +17,7 @@ interface Props {
   kind?: "user" | "room";
   className?: string;
   seed?: string;
+  onClick?: () => void;
 }
 
 export function MessengerAvatar({
@@ -26,6 +27,7 @@ export function MessengerAvatar({
   kind = "user",
   className = "",
   seed,
+  onClick,
 }: Props) {
   const [broken, setBroken] = useState(false);
   const showImage = Boolean(src) && !broken;
@@ -35,13 +37,8 @@ export function MessengerAvatar({
     ? "bg-[#1f2c34] text-[#00a884] ring-1 ring-white/10"
     : avatarBgClass(seed || label || kind);
 
-  return (
-    <span
-      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full ${SIZE_CLASS[size]} ${
-        showImage && !isCall ? "bg-gray-100" : bg
-      } ${className}`}
-      aria-hidden
-    >
+  const inner = (
+    <>
       {showImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -62,6 +59,29 @@ export function MessengerAvatar({
           <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 1 1-8 0a4 4 0 0 1 8 0ZM4 20a8 8 0 0 1 16 0" />
         </svg>
       )}
+    </>
+  );
+
+  const sharedClass = `relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full ${SIZE_CLASS[size]} ${
+    showImage && !isCall ? "bg-gray-100" : bg
+  } ${className}`;
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${sharedClass} focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500`}
+        aria-label={label}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <span className={sharedClass} aria-hidden>
+      {inner}
     </span>
   );
 }

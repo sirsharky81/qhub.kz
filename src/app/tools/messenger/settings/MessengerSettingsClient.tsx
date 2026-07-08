@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessengerShell } from "../components/MessengerShell";
 import { MessengerAvatar } from "../components/MessengerAvatar";
+import { AvatarCropModal } from "../components/AvatarCropModal";
 import { PinInput } from "../components/PinInput";
 import {
   changeMessengerPin,
@@ -15,7 +16,7 @@ import {
   uploadUserAvatar,
 } from "@/lib/messenger/client";
 import { MAX_DISPLAY_NAME_LENGTH, PIN_LENGTH } from "@/lib/messenger/constants";
-import { blobToBase64, compressAvatarImage } from "@/lib/messenger/files";
+import { blobToBase64, compressAvatarImage, type AvatarCropRect } from "@/lib/messenger/files";
 import {
   isMessengerPushEnabledLocally,
   NativePushNotConfiguredError,
@@ -39,6 +40,7 @@ export function MessengerSettingsClient() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const [allowRoomAutoAdd, setAllowRoomAutoAdd] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -80,12 +82,23 @@ export function MessengerSettingsClient() {
     });
   }, [router, refreshPushState]);
 
-  async function handleAvatarPick(file: File | null) {
+  function handleAvatarPick(file: File | null) {
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setAvatarError("Выберите изображение");
+      return;
+    }
+    setAvatarError(null);
+    setCropFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleAvatarCropConfirm(crop: AvatarCropRect) {
+    if (!cropFile) return;
     setAvatarBusy(true);
     setAvatarError(null);
     try {
-      const { blob, mime } = await compressAvatarImage(file);
+      const { blob, mime } = await compressAvatarImage(cropFile, crop);
       const data = await blobToBase64(blob);
       const res = await uploadUserAvatar(data, mime);
       if (!res.ok) {
@@ -93,11 +106,11 @@ export function MessengerSettingsClient() {
         return;
       }
       setAvatarUrl(res.avatarUrl ?? null);
+      setCropFile(null);
     } catch (err) {
       setAvatarError(err instanceof Error ? err.message : "Не удалось загрузить");
     } finally {
       setAvatarBusy(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -223,10 +236,20 @@ export function MessengerSettingsClient() {
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => void handleAvatarPick(e.target.files?.[0] ?? null)}
+            onChange={(e) => handleAvatarPick(e.target.files?.[0] ?? null)}
           />
           {avatarError && <p className="text-xs text-red-600 text-center">{avatarError}</p>}
         </div>
+
+        <AvatarCropModal
+          open={Boolean(cropFile)}
+          file={cropFile}
+          busy={avatarBusy}
+          onCancel={() => {
+            if (!avatarBusy) setCropFile(null);
+          }}
+          onConfirm={(crop) => void handleAvatarCropConfirm(crop)}
+        />
 
         <div className="space-y-2">
           <label className="text-xs font-medium text-gray-500">Имя</label>
