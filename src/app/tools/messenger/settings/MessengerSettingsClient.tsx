@@ -16,7 +16,7 @@ import {
   uploadUserAvatar,
 } from "@/lib/messenger/client";
 import { MAX_DISPLAY_NAME_LENGTH, PIN_LENGTH } from "@/lib/messenger/constants";
-import { blobToBase64, compressAvatarImage, type AvatarCropRect } from "@/lib/messenger/files";
+import { blobToBase64 } from "@/lib/messenger/files";
 import {
   isMessengerPushEnabledLocally,
   NativePushNotConfiguredError,
@@ -93,12 +93,10 @@ export function MessengerSettingsClient() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function handleAvatarCropConfirm(crop: AvatarCropRect) {
-    if (!cropFile) return;
+  async function handleAvatarCropConfirm(blob: Blob, mime: string) {
     setAvatarBusy(true);
     setAvatarError(null);
     try {
-      const { blob, mime } = await compressAvatarImage(cropFile, crop);
       const data = await blobToBase64(blob);
       const res = await uploadUserAvatar(data, mime);
       if (!res.ok) {
@@ -248,7 +246,7 @@ export function MessengerSettingsClient() {
           onCancel={() => {
             if (!avatarBusy) setCropFile(null);
           }}
-          onConfirm={(crop) => void handleAvatarCropConfirm(crop)}
+          onConfirm={(blob, mime) => void handleAvatarCropConfirm(blob, mime)}
         />
 
         <div className="space-y-2">

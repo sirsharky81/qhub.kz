@@ -18,7 +18,7 @@ import {
 } from "@/lib/messenger/client";
 import { MAX_ROOM_NAME_LENGTH } from "@/lib/messenger/constants";
 import { upsertLocalDialog } from "@/lib/messenger/dialogs";
-import { blobToBase64, compressAvatarImage, type AvatarCropRect } from "@/lib/messenger/files";
+import { blobToBase64 } from "@/lib/messenger/files";
 
 function roomSettingsHref(roomId: string): string {
   return `/tools/messenger/room/settings?id=${encodeURIComponent(roomId)}`;
@@ -142,12 +142,11 @@ export function RoomSettingsPageClient() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function handleAvatarCropConfirm(crop: AvatarCropRect) {
-    if (!cropFile || !canEdit) return;
+  async function handleAvatarCropConfirm(blob: Blob, mime: string) {
+    if (!canEdit) return;
     setAvatarBusy(true);
     setAvatarError(null);
     try {
-      const { blob, mime } = await compressAvatarImage(cropFile, crop);
       const data = await blobToBase64(blob);
       const res = await uploadRoomAvatar(roomId, data, mime);
       if (!res.ok) {
@@ -261,7 +260,7 @@ export function RoomSettingsPageClient() {
                   onCancel={() => {
                     if (!avatarBusy) setCropFile(null);
                   }}
-                  onConfirm={(crop) => void handleAvatarCropConfirm(crop)}
+                  onConfirm={(blob, mime) => void handleAvatarCropConfirm(blob, mime)}
                 />
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-gray-700">Название комнаты</label>
