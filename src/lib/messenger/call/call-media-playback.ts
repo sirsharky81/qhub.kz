@@ -5,26 +5,11 @@ import {
 } from "@/lib/audio-session";
 import {
   applySinkIdToElement,
-  findIosAudioOutputId,
   iosSinkIdCallRoutingEnabled,
 } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 
 const CALL_MEDIA_ATTR = "data-qhub-call-media";
-
-/** Field diagnostics for iOS earpiece routing — server drops it unless AGENT_DEBUG=1. */
-function debugCallLog(tag: string, data: Record<string, unknown>): void {
-  try {
-    void fetch("/api/debug-log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tag, t: new Date().toISOString(), ...data }),
-      keepalive: true,
-    }).catch(() => {});
-  } catch {
-    // Diagnostics must never affect the call.
-  }
-}
 
 /** 16-byte silent WAV — unlocks iOS Safari audio element during user gesture. */
 const SILENT_WAV =
@@ -80,9 +65,6 @@ function destroyElement(el: HTMLMediaElement | null): void {
 }
 
 function destroyEarpieceElement(): void {
-  stopEarpieceSinkWatchers();
-  earpieceSinkApplied = false;
-  earpieceSinkBusy = false;
   destroyElement(earpieceEl);
   earpieceEl = null;
   unlocked.audio = false;
@@ -108,23 +90,6 @@ function teardownRelayNodes(): void {
   relayStream = null;
   destroyElement(relayEl);
   relayEl = null;
-}
-
-/**
- * Clear the element's preferred output back to default. WebKit computes the
- * session-wide "receiver preferred" flag from element sink selections, so a
- * stale receiver preference would keep ALL call audio in the earpiece even
- * after switching to loudspeaker.
- */
-function resetElementSink(el: HTMLMediaElement | null): void {
-  if (!el) return;
-  const sinkEl = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
-  if (typeof sinkEl.setSinkId !== "function") return;
-  try {
-    void sinkEl.setSinkId("").catch(() => {});
-  } catch {
-    // Best-effort.
-  }
 }
 
 function destroyRelayGraph(): void {
@@ -228,9 +193,6 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   unlockElement(el, "audio");
-  // NOTE: do NOT setSinkId(receiver) here. Field data (debug-1c0a94,
-  // 20:54 UTC): applying it before the mic captures resolves successfully
-  // but does not route, and WebKit then ignores identical re-applications.
 }
 
 async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
@@ -293,224 +255,26 @@ function mountLegacyRelayOutput(
 ): HTMLMediaElement {
   if (speakerOn) {
     teardownRelayNodes();
-    // Drop any receiver preference set by the earpiece route BEFORE the
-    // element goes away, so the session regains DefaultToSpeaker.
-    resetElementSink(earpieceEl);
     destroyEarpieceElement();
     // Reuse the element unlocked during the user gesture — recreating it here
     // would lose the autoplay unlock and risk silent playback.
     const el = speakerEl ?? createSpeakerElement();
     el.srcObject = stream;
-    resetElementSink(el);
     return el;
   }
 
-  // Earpiece: direct raw stream on the <audio> element (reliable audio path)
-  // plus a receiver sink preference. WebKit hard-codes DefaultToSpeaker into
-  // the play-and-record session (AudioSessionIOS.mm) UNLESS the page selects
-  // the receiver as preferred speaker via setSinkId — that flips the whole
-  // session to voice-chat/receiver routing. The flip is session-wide, so it
-  // works even though per-element sink routing is unreliable for WebRTC
-  // tracks on iOS. If setSinkId is unavailable or fails, audio simply stays
-  // on the loudspeaker — same as before, never silent.
+  // Earpiece route: direct raw stream on the <audio> element. Receiver
+  // forcing via setSinkId was field-tested extensively (session debug-1c0a94,
+  // июль 2026) and REMOVED as unfixable from the web on these iOS builds:
+  // WebKit demands a user gesture for setSinkId, the receiver device only
+  // sometimes appears in enumerateDevices, applying the sink onto a live
+  // MediaStream player resolves but does not re-route, and player-remount
+  // workarounds delayed call setup and could drop audio entirely.
   teardownRelayNodes();
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   el.srcObject = stream;
-  startEarpieceSinkWatchers(el);
-  scheduleEarpieceSinkRetries(el);
   return el;
-}
-
-/**
- * iOS earpiece sink orchestration.
- *
- * Field data (debug-1c0a94, iOS 18.7):
- * - setSinkId requires a live gesture/transient activation, BUT starting
- *   microphone capture also counts as activation for a few seconds.
- * - Applying setSinkId(receiver) BEFORE capture is live "succeeds" (promise
- *   resolves) yet does NOT route: the receiver port is not in the audio
- *   session yet. Worse, WebKit early-resolves any later setSinkId with the
- *   same id (deviceId == m_audioOutputHashedDeviceId check), so the broken
- *   state is sticky. Hence: never apply before capture, and always force a
- *   re-application by resetting to "" first.
- * - One phone never exposes the receiver in enumerateDevices at all —
- *   extended diagnostics below are for that case.
- */
-let earpieceSinkApplied = false;
-let earpieceSinkBusy = false;
-let earpieceSinkGeneration = 0;
-let watchedDeviceChange: (() => void) | null = null;
-let watchedGesture: (() => void) | null = null;
-
-function stopEarpieceSinkWatchers(): void {
-  earpieceSinkGeneration += 1;
-  if (watchedDeviceChange) {
-    navigator.mediaDevices?.removeEventListener("devicechange", watchedDeviceChange);
-    watchedDeviceChange = null;
-  }
-  if (watchedGesture) {
-    document.removeEventListener("touchend", watchedGesture, true);
-    document.removeEventListener("click", watchedGesture, true);
-    watchedGesture = null;
-  }
-}
-
-async function collectSinkDiagnostics(): Promise<Record<string, unknown>> {
-  let outputs: Array<{ label: string; id: string }> = [];
-  let inputs: string[] = [];
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    outputs = devices
-      .filter((d) => d.kind === "audiooutput")
-      .map((d) => ({ label: d.label ?? "", id: (d.deviceId ?? "").slice(0, 12) }));
-    inputs = devices.filter((d) => d.kind === "audioinput").map((d) => d.label ?? "");
-  } catch {
-    // Logged with empty lists.
-  }
-  const session = (navigator as Navigator & { audioSession?: { type?: string; state?: string } })
-    .audioSession;
-  const standalone =
-    (navigator as Navigator & { standalone?: boolean }).standalone === true ||
-    (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches);
-  return {
-    outputs,
-    inputs,
-    standalone,
-    sessionType: session?.type ?? null,
-    sessionState: session?.state ?? null,
-    ua: navigator.userAgent.slice(40, 90),
-  };
-}
-
-/**
- * Reset-then-set: WebKit early-resolves setSinkId with an id equal to the
- * element's current one without touching the session, so a plain retry after
- * an ineffective pre-capture application would be a silent no-op.
- */
-async function forceApplySink(
-  sinkEl: HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> },
-  id: string,
-): Promise<void> {
-  try {
-    await sinkEl.setSinkId!("");
-  } catch {
-    // Reset is best-effort; the real application below decides success.
-  }
-  await sinkEl.setSinkId!(id);
-}
-
-/**
- * Field data (debug-1c0a94, 21:35 vs 21:37 UTC): the receiver route engages
- * ONLY when setSinkId lands on a freshly created player whose audio renderer
- * has not started yet (first call: sink applied right after srcObject attach
- * — earpiece worked). Once the renderer is live, setSinkId resolves but
- * iOS 18 never re-routes it (later calls: applied:true, still loudspeaker).
- * So the working recipe is: recreate the player (detach/reattach srcObject),
- * THEN reset-and-set the sink on the not-yet-started renderer, then play.
- */
-async function applyEarpieceSinkCycle(
-  el: HTMLMediaElement,
-  sinkEl: HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> },
-  chosenId: string,
-): Promise<void> {
-  const stream = el.srcObject;
-  if (stream) {
-    el.srcObject = null;
-    el.srcObject = stream;
-  }
-  await forceApplySink(sinkEl, chosenId);
-  earpieceSinkApplied = true;
-
-  // The remount pauses playback; silence is worse than a wrong route, so
-  // retry until the element is audibly playing again.
-  for (const delay of [0, 300, 800, 2000]) {
-    if (delay > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-    if (el !== earpieceEl || !el.isConnected) return;
-    if (await playCallMedia(el)) return;
-  }
-  debugCallLog("earpiece_sink", { source: "post-cycle-play", playing: false });
-}
-
-async function tryApplyEarpieceSink(el: HTMLMediaElement, source: string): Promise<void> {
-  if (earpieceSinkApplied || earpieceSinkBusy || el !== earpieceEl) return;
-  const sinkEl = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
-  if (typeof sinkEl.setSinkId !== "function") {
-    debugCallLog("earpiece_sink", { source, hasSetSinkId: false });
-    return;
-  }
-  earpieceSinkBusy = true;
-  let chosenId: string | undefined;
-  let error = "";
-  try {
-    chosenId = await findIosAudioOutputId(false);
-    if (el !== earpieceEl || earpieceSinkApplied) return;
-    if (chosenId !== undefined) {
-      await applyEarpieceSinkCycle(el, sinkEl, chosenId);
-      stopEarpieceSinkWatchers();
-      debugCallLog("earpiece_sink", { source, chosenId: chosenId.slice(0, 12), applied: true });
-      return;
-    }
-    error = "no_receiver_candidate";
-  } catch (err) {
-    error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-  } finally {
-    earpieceSinkBusy = false;
-  }
-  const diag = await collectSinkDiagnostics();
-  debugCallLog("earpiece_sink", {
-    source,
-    chosenId: chosenId?.slice(0, 12) ?? null,
-    applied: false,
-    error,
-    ...diag,
-  });
-}
-
-/**
- * Retry right after the stream is mounted: capture-driven activation lasts a
- * few seconds after getUserMedia, and the receiver may appear in
- * enumerateDevices slightly later than the first mount.
- */
-function scheduleEarpieceSinkRetries(el: HTMLMediaElement): void {
-  const generation = earpieceSinkGeneration;
-  const delays = [0, 700, 1800, 3500];
-  for (const delay of delays) {
-    setTimeout(() => {
-      if (generation !== earpieceSinkGeneration || earpieceSinkApplied) return;
-      void tryApplyEarpieceSink(el, `mount+${delay}`);
-    }, delay);
-  }
-}
-
-function startEarpieceSinkWatchers(el: HTMLMediaElement): void {
-  if (earpieceSinkApplied) return;
-  stopEarpieceSinkWatchers();
-
-  // Receiver typically appears in enumerateDevices once the mic starts
-  // capturing; WebKit fires devicechange at that moment and treats it as an
-  // allowed trigger for speaker selection.
-  if (navigator.mediaDevices?.addEventListener) {
-    watchedDeviceChange = () => {
-      debugCallLog("earpiece_sink", { source: "devicechange_fired" });
-      void tryApplyEarpieceSink(el, "devicechange");
-    };
-    navigator.mediaDevices.addEventListener("devicechange", watchedDeviceChange);
-  }
-
-  // Any tap during the call is a fresh gesture — enumeration plus setSinkId
-  // fit within the transient-activation window.
-  watchedGesture = () => {
-    if (el !== earpieceEl) {
-      stopEarpieceSinkWatchers();
-      return;
-    }
-    void tryApplyEarpieceSink(el, "gesture");
-  };
-  document.addEventListener("touchend", watchedGesture, true);
-  document.addEventListener("click", watchedGesture, true);
 }
 
 /** Attach remote stream to the correct output element. Only one output element exists on iOS. */
@@ -532,11 +296,9 @@ export async function attachCallMediaStream(
 
   if (useDirectVideo) {
     teardownRelayNodes();
-    resetElementSink(earpieceEl);
     destroyEarpieceElement();
     const el = speakerEl ?? createSpeakerElement();
     el.srcObject = stream;
-    resetElementSink(el);
     return el;
   }
 
