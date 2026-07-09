@@ -1025,13 +1025,14 @@ export class CallController {
       },
       onRemoteTrack: () => {
         this.journal.record("TRACK_REMOTE");
-        void this.pc?.playRemoteAudio();
         this.patchPlaybackDebug();
         this.emitMedia();
-        // ontrack fires while applying remote SDP — before any connectivity.
-        // Flipping to "active" here made the callee show "разговор" seconds
-        // before the caller. Only a genuinely connected transport counts;
-        // the ICE/connection state handlers cover the normal path.
+        // Kick the whole audio path (session type, playback retries, media
+        // session) right at track arrival — the timing the working builds
+        // used. Only the PHASE flip waits for real transport connectivity:
+        // flipping to "active" here made the callee show "разговор" seconds
+        // before the caller.
+        this.activateCallAudioPath();
         this.handlePeerConnected(this.pc?.isTransportConnected() ?? false);
       },
     });
@@ -1092,7 +1093,6 @@ export class CallController {
     if (!this.pc) {
       this.pendingRemoteAnswer = payload;
       this.clearRingTimeout();
-      getCallSounds().stop();
       if (this.state.phase === "outgoing") {
         this.patch({ phase: "connecting" });
       }
@@ -1103,7 +1103,6 @@ export class CallController {
     try {
       this.isCaller = true;
       this.clearRingTimeout();
-      getCallSounds().stop();
       if (this.state.phase === "outgoing") {
         this.patch({ phase: "connecting" });
       }
@@ -1116,10 +1115,11 @@ export class CallController {
         this.patch({ phase: "connecting" });
       }
       this.startIceTimeout();
+      // Full audio-path kick at answer-apply time (same timing the working
+      // builds used); the phase flip itself still waits for connectivity.
+      this.activateCallAudioPath();
       void this.pc.playRemoteAudio().then(() => {
         this.patchPlaybackDebug();
-        // Same gating as onRemoteTrack: a remote track exists as soon as the
-        // answer SDP is applied, but "active" must wait for real connectivity.
         if (this.pc?.isTransportConnected()) {
           this.handlePeerConnected(true);
         }
@@ -1353,34 +1353,22 @@ export class CallController {
     this.interruptionUnsub = null;
   }
 
-  private handlePeerConnected(connected: boolean): void {
-    if (!connected) return;
-    if (this.state.phase === "active") {
-      this.recordIgnored("ICE_CONNECTED");
-      return;
-    }
-    this.clearIceTimeout();
-    this.clearRingTimeout();
-    this.clearSetupWatchdog();
-    this.patch({ phase: "active" });
-    this.startDurationTimer();
-    this.startNetworkDebugTimer();
-    this.startVideoHealthWatch();
-    this.startCallAudioWatch();
+  /**
+   * Audio-path activation: audio session type, media session, playback with
+   * a retry ladder. Runs at remote-track arrival (the timing the confirmed
+   * working builds used for sound) AND again on transport connect. Kept
+   * separate from handlePeerConnected so the audio path never waits for the
+   * phase flip.
+   */
+  private activateCallAudioPath(): void {
+    prepareAudioSessionForCall();
     void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
       speakerOn: this.state.speakerOn,
       videoEnabled: this.state.videoEnabled,
     });
-    void setCallProximityEnabled(this.state.callMode === "audio" && !this.state.speakerOn);
-    if (this.pollCallId) {
-      this.startHeartbeat(this.pollCallId);
-    }
-    getCallSounds().stop();
-    prepareAudioSessionForCall();
     void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
-    void this.refreshNetworkPathDebug();
-    // Faster post-connect retries reduce the "caller hears later" gap on weak
-    // networks and iOS Safari resume quirks.
+    // Retries reduce the "one side hears later" gap on weak networks and iOS
+    // Safari resume quirks.
     for (const delay of [120, 320, 700, 1400]) {
       setTimeout(() => {
         if (!this.pc?.needsPlaybackRetry()) return;
@@ -1390,6 +1378,29 @@ export class CallController {
         void this.pc?.playRemoteAudio().then(() => this.patchPlaybackDebug());
       }, delay);
     }
+  }
+
+  private handlePeerConnected(connected: boolean): void {
+    if (!connected) return;
+    if (this.state.phase === "active") {
+      this.recordIgnored("ICE_CONNECTED");
+      return;
+    }
+    this.clearIceTimeout();
+    this.clearRingTimeout();
+    this.clearSetupWatchdog();
+    getCallSounds().stop();
+    this.patch({ phase: "active" });
+    this.startDurationTimer();
+    this.startNetworkDebugTimer();
+    this.startVideoHealthWatch();
+    this.startCallAudioWatch();
+    void setCallProximityEnabled(this.state.callMode === "audio" && !this.state.speakerOn);
+    if (this.pollCallId) {
+      this.startHeartbeat(this.pollCallId);
+    }
+    this.activateCallAudioPath();
+    void this.refreshNetworkPathDebug();
   }
 
   private async bufferRemoteIce(payload: string): Promise<void> {
@@ -1567,7 +1578,11 @@ export class CallController {
       void sounds.startIncoming();
       return;
     }
-    if (phase === "outgoing") {
+    // Caller keeps hearing гудки through "connecting" until the call is
+    // genuinely active — accepting used to cut the ringback and leave dead
+    // silence for the 2-3s of ICE setup. (The callee's "connecting" after
+    // tapping Accept must stay silent.)
+    if (phase === "outgoing" || (phase === "connecting" && this.isCaller)) {
       void sounds.startOutgoing();
       return;
     }
@@ -1656,7 +1671,6 @@ export class CallController {
     const sessionConnecting = session.status === "connecting";
     if ((sessionConnecting || hasRemoteAnswer) && this.state.phase === "outgoing") {
       this.clearRingTimeout();
-      getCallSounds().stop();
       this.patch({ phase: "connecting" });
       if (hasRemoteAnswer && !this.pc?.hasRemoteDescription()) {
         void this.applyRemoteAnswer(session.answerSdp!);
@@ -1725,7 +1739,6 @@ export class CallController {
 
     if (type === "accept" && this.isCaller && this.state.phase === "outgoing") {
       this.clearRingTimeout();
-      getCallSounds().stop();
       this.patch({ phase: "connecting" });
     }
 

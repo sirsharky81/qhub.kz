@@ -87,10 +87,11 @@ export class CallSounds {
       el.setAttribute("playsinline", "true");
       el.setAttribute("webkit-playsinline", "true");
       el.volume = 1;
+      // Standard telephony cadence: ~1s tone, ~3s pause (KZ/RU ringback).
       el.src =
         mode === "incoming"
-          ? pcmToneWav(440, 0.35, 0.45)
-          : pcmToneWav(425, 0.45, 0.4);
+          ? pcmToneWav(440, 1.0, 0.45)
+          : pcmToneWav(425, 1.0, 0.4);
       this.audio = el;
       try {
         await el.play();
@@ -100,8 +101,7 @@ export class CallSounds {
     };
 
     void playBurst();
-    const intervalMs = mode === "incoming" ? 4000 : 6000;
-    this.pulseTimer = setInterval(() => void playBurst(), intervalMs);
+    this.pulseTimer = setInterval(() => void playBurst(), 4000);
   }
 
   stop(): void {

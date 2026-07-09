@@ -3,7 +3,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getCallController } from "@/lib/messenger/call/call-controller";
 import type { CallDebugInfo } from "@/lib/messenger/call/types";
-import { isIOSDevice } from "@/lib/platform/device";
 import { MessengerAvatar } from "../MessengerAvatar";
 import { CallStatusText } from "./CallStatusText";
 import {
@@ -181,8 +180,6 @@ export function ActiveCallScreen({
   const hasRemoteVideo =
     isVideoCall &&
     Boolean(remoteVideoTrack && remoteVideoTrack.readyState === "live" && !remoteVideoTrack.muted);
-  const [earpieceBlank, setEarpieceBlank] = useState(false);
-  const iosEarpiece = isIOSDevice() && phase === "active" && !speakerOn;
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null);
   const [remoteVideoEl, setRemoteVideoEl] = useState<HTMLVideoElement | null>(null);
 
@@ -201,29 +198,8 @@ export function ActiveCallScreen({
     remoteVideoEl.srcObject = new MediaStream([remoteVideoTrack]);
   }, [hasRemoteVideo, remoteVideoTrack, remoteVideoEl]);
 
-  useEffect(() => {
-    if (!iosEarpiece) setEarpieceBlank(false);
-  }, [iosEarpiece]);
-
-  useEffect(() => {
-    if (!iosEarpiece || earpieceBlank) return;
-    const timer = setTimeout(() => {
-      // iOS Safari PWA does not expose a reliable proximity sensor.
-      // Auto-blanking after entering earpiece mode reduces accidental touches.
-      setEarpieceBlank(true);
-    }, 1800);
-    return () => clearTimeout(timer);
-  }, [iosEarpiece, earpieceBlank]);
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col text-white">
-      {iosEarpiece && earpieceBlank && (
-        <div
-          className="fixed inset-0 z-[60] bg-black touch-none"
-          aria-hidden
-          onClick={() => setEarpieceBlank(false)}
-        />
-      )}
       <div
         className="absolute inset-0 bg-[#0b141a]"
         style={{
@@ -284,28 +260,6 @@ export function ActiveCallScreen({
 
         {showDebugOverlay && debug && (phase === "outgoing" || phase === "connecting" || phase === "active") && (
           <DebugPanel phase={phase} debug={debug} />
-        )}
-        {phase === "active" && !speakerOn && isIOSDevice() && (
-          <div className="mx-6 mt-2 flex flex-col items-center gap-2">
-            <p className="text-center text-[11px] leading-snug text-white/45">
-              Safari не включает датчик приближения. Нажмите «Погасить экран», чтобы убрать
-              случайные касания у уха.
-            </p>
-            {!earpieceBlank && (
-              <button
-                type="button"
-                onClick={() => setEarpieceBlank(true)}
-                className="rounded-full bg-white/10 px-4 py-1.5 text-xs text-white/80 ring-1 ring-white/20"
-              >
-                Погасить экран
-              </button>
-            )}
-            {earpieceBlank && (
-              <p className="text-center text-[11px] leading-snug text-white/45">
-                Экран погашен автоматически. Коснитесь экрана, чтобы вернуть интерфейс.
-              </p>
-            )}
-          </div>
         )}
       </div>
 
