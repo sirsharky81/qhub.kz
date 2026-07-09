@@ -23,6 +23,8 @@ let relaySource: MediaStreamAudioSourceNode | null = null;
 let relayDestination: MediaStreamAudioDestinationNode | null = null;
 let relayEl: HTMLAudioElement | null = null;
 let relayStream: MediaStream | null = null;
+/** True while earpiece audio is emitted by WebAudio and the <audio> element is a muted keep-alive. */
+let earpieceRelayActive = false;
 const unlocked = { audio: false, video: false };
 
 export type CallMediaRoute = "sink" | "relay-video" | "relay-audio" | "default";
@@ -88,6 +90,7 @@ function teardownRelayNodes(): void {
   relayDestination?.disconnect();
   relayDestination = null;
   relayStream = null;
+  earpieceRelayActive = false;
   destroyElement(relayEl);
   relayEl = null;
 }
@@ -98,6 +101,52 @@ function destroyRelayGraph(): void {
     void relayCtx.close();
     relayCtx = null;
   }
+}
+
+/**
+ * Create/resume the relay AudioContext synchronously inside the user gesture
+ * (Accept/Call tap). A context created later, during async stream attach,
+ * starts suspended on iOS and resume() outside a gesture may never succeed.
+ */
+function primeRelayContext(): void {
+  try {
+    relayCtx = relayCtx ?? new AudioContext();
+    if (relayCtx.state !== "running") {
+      void relayCtx.resume().catch(() => {});
+    }
+  } catch {
+    // WebAudio unavailable — earpiece falls back to audible element playback.
+  }
+}
+
+/**
+ * iOS earpiece routing: WebRTC audio played by a media element always goes to
+ * the loudspeaker; only WebAudio output (with a play-and-record session)
+ * reaches the receiver. Route the raw stream into ctx.destination and keep
+ * the <audio> element as a MUTED keep-alive — without an element consuming
+ * the raw stream, WebKit's MediaStreamAudioSourceNode over a remote WebRTC
+ * stream produces silence (both failure modes field-confirmed).
+ *
+ * Returns true when WebAudio is emitting (element must stay muted); false =
+ * caller leaves the element audible, i.e. today's loudspeaker behaviour.
+ */
+function startEarpieceRelay(stream: MediaStream): boolean {
+  try {
+    relayCtx = relayCtx ?? new AudioContext();
+    if (relaySource?.mediaStream !== stream) {
+      relaySource?.disconnect();
+      relaySource = relayCtx.createMediaStreamSource(stream);
+    }
+    // Duplicate connections to the same node are ignored per WebAudio spec.
+    relaySource.connect(relayCtx.destination);
+    if (relayCtx.state !== "running") {
+      void relayCtx.resume().catch(() => {});
+    }
+    earpieceRelayActive = relayCtx.state === "running";
+  } catch {
+    earpieceRelayActive = false;
+  }
+  return earpieceRelayActive;
 }
 
 function createEarpieceElement(): HTMLAudioElement {
@@ -193,6 +242,7 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   unlockElement(el, "audio");
+  primeRelayContext();
 }
 
 async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
@@ -264,16 +314,16 @@ function mountLegacyRelayOutput(
     return el;
   }
 
-  // Earpiece: attach the remote WebRTC stream DIRECTLY to <audio>.
-  // The WebAudio relay (MediaStreamAudioSourceNode over a remote WebRTC
-  // stream) produces silence on iOS unless the raw stream is also consumed
-  // by a media element — field-tested as "аудиозвонок без звука" while the
-  // direct element path played fine. Earpiece routing itself comes from the
-  // play-and-record audio session type, not from the relay.
-  teardownRelayNodes();
+  // Earpiece: raw stream on the <audio> element (keeps WebRTC audio alive)
+  // plus WebAudio output to the receiver. When WebAudio runs, the element is
+  // muted; when it can't, the element stays audible — loudspeaker fallback,
+  // never silence.
+  destroyElement(relayEl);
+  relayEl = null;
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   el.srcObject = stream;
+  el.muted = startEarpieceRelay(stream);
   return el;
 }
 
@@ -392,8 +442,23 @@ export async function applyCallSpeakerRoute(
  */
 export async function playCallMedia(el: HTMLMediaElement): Promise<boolean> {
   prepareAudioSessionForCall();
+  // Earpiece relay: while the WebAudio context is running, sound is emitted
+  // by WebAudio (receiver) and the element is a muted keep-alive — unmuting
+  // it would add loudspeaker output on top. If the context is not running
+  // (resume failed, interruption), unmute the element: loudspeaker fallback
+  // instead of silence. This is re-evaluated on every playback retry
+  // (scheduleRemoteAudioSync / post-connect kicks), so the route converges.
+  const isEarpieceRelayRoute = el === earpieceEl && relaySource !== null && relayCtx !== null;
+  if (isEarpieceRelayRoute && relayCtx!.state !== "running") {
+    await Promise.race([
+      relayCtx!.resume().catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 250)),
+    ]);
+  }
+  earpieceRelayActive = isEarpieceRelayRoute && relayCtx!.state === "running";
+  const keepMuted = earpieceRelayActive;
   try {
-    el.muted = false;
+    el.muted = keepMuted;
     el.volume = 1;
     if (isIOSDevice()) {
       await el.play();
