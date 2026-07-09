@@ -82,6 +82,7 @@ function destroyElement(el: HTMLMediaElement | null): void {
 function destroyEarpieceElement(): void {
   stopEarpieceSinkWatchers();
   earpieceSinkApplied = false;
+  earpieceSinkBusy = false;
   destroyElement(earpieceEl);
   earpieceEl = null;
   unlocked.audio = false;
@@ -337,6 +338,7 @@ function mountLegacyRelayOutput(
  *   extended diagnostics below are for that case.
  */
 let earpieceSinkApplied = false;
+let earpieceSinkBusy = false;
 let earpieceSinkGeneration = 0;
 let watchedDeviceChange: (() => void) | null = null;
 let watchedGesture: (() => void) | null = null;
@@ -399,65 +401,63 @@ async function forceApplySink(
 }
 
 /**
- * Recreate the element's internal media player. Field data (debug-1c0a94,
- * 21:17 UTC): setSinkId(receiver) on a LIVE MediaStream player resolves but
- * does not re-route on iOS 18 — the loudspeaker keeps playing. Player
- * CREATION, however, reads the element's persisted audio output id and
- * pushes it into the audio session (RemoteMediaPlayerProxy passes
- * m_configuration.audioOutputDeviceId to setPreferredSpeakerID). So after a
- * successful setSinkId we detach/reattach the stream to force a new player
- * that starts life on the receiver.
+ * Field data (debug-1c0a94, 21:35 vs 21:37 UTC): the receiver route engages
+ * ONLY when setSinkId lands on a freshly created player whose audio renderer
+ * has not started yet (first call: sink applied right after srcObject attach
+ * — earpiece worked). Once the renderer is live, setSinkId resolves but
+ * iOS 18 never re-routes it (later calls: applied:true, still loudspeaker).
+ * So the working recipe is: recreate the player (detach/reattach srcObject),
+ * THEN reset-and-set the sink on the not-yet-started renderer, then play.
  */
-function remountEarpiecePlayer(el: HTMLMediaElement): void {
+async function applyEarpieceSinkCycle(
+  el: HTMLMediaElement,
+  sinkEl: HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> },
+  chosenId: string,
+): Promise<void> {
   const stream = el.srcObject;
-  if (!stream) return;
-  el.srcObject = null;
-  el.srcObject = stream;
-  void playCallMedia(el);
-}
-
-/**
- * Other media players created later in the call (sound effects, stream
- * re-binds) can clobber the session's preferred speaker back to default.
- * A couple of delayed player remounts re-push the receiver preference —
- * cheap, no sink flapping, ~100ms audio gap at most.
- */
-function scheduleEarpieceReasserts(el: HTMLMediaElement): void {
-  const generation = earpieceSinkGeneration;
-  for (const delay of [4000, 10000]) {
-    setTimeout(() => {
-      if (generation !== earpieceSinkGeneration) return;
-      if (el !== earpieceEl || !earpieceSinkApplied) return;
-      remountEarpiecePlayer(el);
-      debugCallLog("earpiece_sink", { source: `reassert+${delay}`, applied: true });
-    }, delay);
+  if (stream) {
+    el.srcObject = null;
+    el.srcObject = stream;
   }
+  await forceApplySink(sinkEl, chosenId);
+  earpieceSinkApplied = true;
+
+  // The remount pauses playback; silence is worse than a wrong route, so
+  // retry until the element is audibly playing again.
+  for (const delay of [0, 300, 800, 2000]) {
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    if (el !== earpieceEl || !el.isConnected) return;
+    if (await playCallMedia(el)) return;
+  }
+  debugCallLog("earpiece_sink", { source: "post-cycle-play", playing: false });
 }
 
 async function tryApplyEarpieceSink(el: HTMLMediaElement, source: string): Promise<void> {
-  if (earpieceSinkApplied || el !== earpieceEl) return;
+  if (earpieceSinkApplied || earpieceSinkBusy || el !== earpieceEl) return;
   const sinkEl = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
   if (typeof sinkEl.setSinkId !== "function") {
     debugCallLog("earpiece_sink", { source, hasSetSinkId: false });
     return;
   }
+  earpieceSinkBusy = true;
   let chosenId: string | undefined;
   let error = "";
   try {
     chosenId = await findIosAudioOutputId(false);
     if (el !== earpieceEl || earpieceSinkApplied) return;
     if (chosenId !== undefined) {
-      await forceApplySink(sinkEl, chosenId);
-      earpieceSinkApplied = true;
+      await applyEarpieceSinkCycle(el, sinkEl, chosenId);
       stopEarpieceSinkWatchers();
-      remountEarpiecePlayer(el);
-      scheduleEarpieceReasserts(el);
       debugCallLog("earpiece_sink", { source, chosenId: chosenId.slice(0, 12), applied: true });
       return;
     }
     error = "no_receiver_candidate";
   } catch (err) {
     error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  } finally {
+    earpieceSinkBusy = false;
   }
   const diag = await collectSinkDiagnostics();
   debugCallLog("earpiece_sink", {
