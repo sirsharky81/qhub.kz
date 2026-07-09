@@ -27,37 +27,6 @@ export function iosSinkIdCallRoutingEnabled(): boolean {
 }
 
 /**
- * Cached receiver deviceId. WebKit requires setSinkId to be INVOKED while a
- * user gesture is being processed (HTMLMediaElement::setAudioOutputDevice
- * rejects with "A user gesture is required" otherwise). enumerateDevices is
- * async and would burn the gesture, so we remember the receiver id the moment
- * any enumeration sees it, and later call setSinkId synchronously inside taps.
- * WebKit deviceIds are stable per origin, so localStorage survives reloads.
- */
-const RECEIVER_ID_STORAGE_KEY = "qhub.ios.receiverSinkId";
-let knownReceiverId: string | null = null;
-
-export function getKnownIosReceiverId(): string | null {
-  if (knownReceiverId) return knownReceiverId;
-  try {
-    knownReceiverId = localStorage.getItem(RECEIVER_ID_STORAGE_KEY);
-  } catch {
-    // Storage unavailable — session-only cache.
-  }
-  return knownReceiverId;
-}
-
-export function rememberIosReceiverId(id: string): void {
-  if (!id || id === "default") return;
-  knownReceiverId = id;
-  try {
-    localStorage.setItem(RECEIVER_ID_STORAGE_KEY, id);
-  } catch {
-    // Best-effort.
-  }
-}
-
-/**
  * Pick the receiver (earpiece) or loudspeaker deviceId on iOS 18+.
  *
  * Field data (session debug-1c0a94, iOS 18.7 PWA): labels are LOCALIZED by
@@ -90,10 +59,7 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
     const label = (device.label ?? "").toLowerCase();
     if (!label) continue;
     if (speaker && matchesSpeaker(label)) return device.deviceId;
-    if (!speaker && matchesEarpiece(label)) {
-      rememberIosReceiverId(device.deviceId);
-      return device.deviceId;
-    }
+    if (!speaker && matchesEarpiece(label)) return device.deviceId;
   }
 
   // 2) Structural rule against the "Default - <speaker>" pseudo-device.
@@ -102,10 +68,7 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
     const insideDefault = real.filter((d) => d.label && defaultLabel.includes(d.label));
     const outsideDefault = real.filter((d) => d.label && !defaultLabel.includes(d.label));
     if (speaker && insideDefault.length === 1) return insideDefault[0]!.deviceId;
-    if (!speaker && outsideDefault.length === 1) {
-      rememberIosReceiverId(outsideDefault[0]!.deviceId);
-      return outsideDefault[0]!.deviceId;
-    }
+    if (!speaker && outsideDefault.length === 1) return outsideDefault[0]!.deviceId;
   }
 
   // 3) Unlabeled outputs: positional guess (receiver first, speaker last).

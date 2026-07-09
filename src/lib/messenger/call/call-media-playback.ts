@@ -6,7 +6,6 @@ import {
 import {
   applySinkIdToElement,
   findIosAudioOutputId,
-  getKnownIosReceiverId,
   iosSinkIdCallRoutingEnabled,
 } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
@@ -228,9 +227,9 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   unlockElement(el, "audio");
-  // We are inside the accept/call tap — the only reliable moment for
-  // setSinkId(receiver) on iOS ("A user gesture is required" otherwise).
-  tryApplyEarpieceSinkSync(el, "prime");
+  // NOTE: do NOT setSinkId(receiver) here. Field data (debug-1c0a94,
+  // 20:54 UTC): applying it before the mic captures resolves successfully
+  // but does not route, and WebKit then ignores identical re-applications.
 }
 
 async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
@@ -317,32 +316,33 @@ function mountLegacyRelayOutput(
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   el.srcObject = stream;
-  void tryApplyEarpieceSinkAsync(el, "mount");
   startEarpieceSinkWatchers(el);
+  scheduleEarpieceSinkRetries(el);
   return el;
 }
 
 /**
  * iOS earpiece sink orchestration.
  *
- * Field data (debug-1c0a94, iOS 18.7): the receiver IS found, but WebKit
- * rejects setSinkId with "A user gesture is required" — the check is
- * Document::processingUserGestureForMedia(), i.e. the call must happen while
- * a gesture/transient activation is live. Async enumerateDevices burns it.
- *
- * WebKit's intended flow (W3C WebRTC WG minutes, Sep 2025, youennf): starting
- * microphone capture counts as activation, the receiver appears in
- * enumerateDevices with a `devicechange` event, and setSinkId should be
- * called from that trigger. So we:
- *  1) apply the cached receiver id synchronously inside the accept/call tap;
- *  2) react to `devicechange` (receiver appears once the mic is capturing);
- *  3) as a fallback, retry synchronously on the next tap anywhere on the page.
+ * Field data (debug-1c0a94, iOS 18.7):
+ * - setSinkId requires a live gesture/transient activation, BUT starting
+ *   microphone capture also counts as activation for a few seconds.
+ * - Applying setSinkId(receiver) BEFORE capture is live "succeeds" (promise
+ *   resolves) yet does NOT route: the receiver port is not in the audio
+ *   session yet. Worse, WebKit early-resolves any later setSinkId with the
+ *   same id (deviceId == m_audioOutputHashedDeviceId check), so the broken
+ *   state is sticky. Hence: never apply before capture, and always force a
+ *   re-application by resetting to "" first.
+ * - One phone never exposes the receiver in enumerateDevices at all —
+ *   extended diagnostics below are for that case.
  */
 let earpieceSinkApplied = false;
+let earpieceSinkGeneration = 0;
 let watchedDeviceChange: (() => void) | null = null;
 let watchedGesture: (() => void) | null = null;
 
 function stopEarpieceSinkWatchers(): void {
+  earpieceSinkGeneration += 1;
   if (watchedDeviceChange) {
     navigator.mediaDevices?.removeEventListener("devicechange", watchedDeviceChange);
     watchedDeviceChange = null;
@@ -354,45 +354,51 @@ function stopEarpieceSinkWatchers(): void {
   }
 }
 
-function markEarpieceSinkApplied(source: string, chosenId: string): void {
-  earpieceSinkApplied = true;
-  stopEarpieceSinkWatchers();
-  debugCallLog("earpiece_sink", { source, chosenId: chosenId.slice(0, 16), applied: true });
+async function collectSinkDiagnostics(): Promise<Record<string, unknown>> {
+  let outputs: Array<{ label: string; id: string }> = [];
+  let inputs: string[] = [];
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    outputs = devices
+      .filter((d) => d.kind === "audiooutput")
+      .map((d) => ({ label: d.label ?? "", id: (d.deviceId ?? "").slice(0, 12) }));
+    inputs = devices.filter((d) => d.kind === "audioinput").map((d) => d.label ?? "");
+  } catch {
+    // Logged with empty lists.
+  }
+  const session = (navigator as Navigator & { audioSession?: { type?: string; state?: string } })
+    .audioSession;
+  const standalone =
+    (navigator as Navigator & { standalone?: boolean }).standalone === true ||
+    (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches);
+  return {
+    outputs,
+    inputs,
+    standalone,
+    sessionType: session?.type ?? null,
+    sessionState: session?.state ?? null,
+    ua: navigator.userAgent.slice(40, 90),
+  };
 }
 
 /**
- * Synchronous attempt — must be called while a user gesture is processed.
- * Uses the cached receiver id (setSinkId itself is invoked before any await).
+ * Reset-then-set: WebKit early-resolves setSinkId with an id equal to the
+ * element's current one without touching the session, so a plain retry after
+ * an ineffective pre-capture application would be a silent no-op.
  */
-function tryApplyEarpieceSinkSync(el: HTMLMediaElement, source: string): void {
-  if (earpieceSinkApplied) return;
-  const sinkEl = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
-  if (typeof sinkEl.setSinkId !== "function") return;
-  const knownId = getKnownIosReceiverId();
-  if (!knownId) {
-    // No cached id yet — enumerate in background so the NEXT gesture has one.
-    void findIosAudioOutputId(false).catch(() => {});
-    return;
+async function forceApplySink(
+  sinkEl: HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> },
+  id: string,
+): Promise<void> {
+  try {
+    await sinkEl.setSinkId!("");
+  } catch {
+    // Reset is best-effort; the real application below decides success.
   }
-  sinkEl
-    .setSinkId(knownId)
-    .then(() => markEarpieceSinkApplied(source, knownId))
-    .catch((err: unknown) => {
-      const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      // NotFoundError can simply mean the receiver is not exposed yet (mic
-      // not capturing) — keep the cache; fresh enumerations overwrite it.
-      debugCallLog("earpiece_sink", {
-        source,
-        chosenId: knownId.slice(0, 16),
-        applied: false,
-        error: message,
-      });
-      void findIosAudioOutputId(false).catch(() => {});
-    });
+  await sinkEl.setSinkId!(id);
 }
 
-/** Async attempt — works when capture-driven activation is still counted. */
-async function tryApplyEarpieceSinkAsync(el: HTMLMediaElement, source: string): Promise<void> {
+async function tryApplyEarpieceSink(el: HTMLMediaElement, source: string): Promise<void> {
   if (earpieceSinkApplied || el !== earpieceEl) return;
   const sinkEl = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
   if (typeof sinkEl.setSinkId !== "function") {
@@ -403,44 +409,67 @@ async function tryApplyEarpieceSinkAsync(el: HTMLMediaElement, source: string): 
   let error = "";
   try {
     chosenId = await findIosAudioOutputId(false);
+    if (el !== earpieceEl || earpieceSinkApplied) return;
     if (chosenId !== undefined) {
-      await sinkEl.setSinkId(chosenId);
-      markEarpieceSinkApplied(source, chosenId);
+      await forceApplySink(sinkEl, chosenId);
+      earpieceSinkApplied = true;
+      stopEarpieceSinkWatchers();
+      debugCallLog("earpiece_sink", { source, chosenId: chosenId.slice(0, 12), applied: true });
       return;
     }
     error = "no_receiver_candidate";
   } catch (err) {
     error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
   }
+  const diag = await collectSinkDiagnostics();
   debugCallLog("earpiece_sink", {
     source,
-    chosenId: chosenId?.slice(0, 16) ?? null,
+    chosenId: chosenId?.slice(0, 12) ?? null,
     applied: false,
     error,
+    ...diag,
   });
+}
+
+/**
+ * Retry right after the stream is mounted: capture-driven activation lasts a
+ * few seconds after getUserMedia, and the receiver may appear in
+ * enumerateDevices slightly later than the first mount.
+ */
+function scheduleEarpieceSinkRetries(el: HTMLMediaElement): void {
+  const generation = earpieceSinkGeneration;
+  const delays = [0, 700, 1800, 3500];
+  for (const delay of delays) {
+    setTimeout(() => {
+      if (generation !== earpieceSinkGeneration || earpieceSinkApplied) return;
+      void tryApplyEarpieceSink(el, `mount+${delay}`);
+    }, delay);
+  }
 }
 
 function startEarpieceSinkWatchers(el: HTMLMediaElement): void {
   if (earpieceSinkApplied) return;
   stopEarpieceSinkWatchers();
 
-  // Receiver typically appears in enumerateDevices only once the mic is
-  // capturing; WebKit fires devicechange at that moment and counts it as an
+  // Receiver typically appears in enumerateDevices once the mic starts
+  // capturing; WebKit fires devicechange at that moment and treats it as an
   // allowed trigger for speaker selection.
   if (navigator.mediaDevices?.addEventListener) {
     watchedDeviceChange = () => {
-      void tryApplyEarpieceSinkAsync(el, "devicechange");
+      debugCallLog("earpiece_sink", { source: "devicechange_fired" });
+      void tryApplyEarpieceSink(el, "devicechange");
     };
     navigator.mediaDevices.addEventListener("devicechange", watchedDeviceChange);
   }
 
-  // Any tap during the call is a fresh gesture — retry synchronously.
+  // Any tap during the call is a fresh gesture — enumeration plus setSinkId
+  // fit within the transient-activation window.
   watchedGesture = () => {
     if (el !== earpieceEl) {
       stopEarpieceSinkWatchers();
       return;
     }
-    tryApplyEarpieceSinkSync(el, "gesture");
+    void tryApplyEarpieceSink(el, "gesture");
   };
   document.addEventListener("touchend", watchedGesture, true);
   document.addEventListener("click", watchedGesture, true);
