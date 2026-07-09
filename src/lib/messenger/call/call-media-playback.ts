@@ -225,6 +225,9 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   unlockElement(el, "audio");
+  // Best-effort receiver sink while transient user activation is alive —
+  // field data (debug-1c0a94) shows setSinkId can demand a user gesture.
+  void applySinkIdToElement(el, false).catch(() => {});
 }
 
 async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
@@ -315,45 +318,66 @@ function mountLegacyRelayOutput(
   return el;
 }
 
-/** setSinkId(receiver) + field diagnostics of what iOS actually exposes. */
+/**
+ * setSinkId(receiver) with retries + field diagnostics.
+ *
+ * Retries matter (field data, session debug-1c0a94): iOS exposes the receiver
+ * as an audiooutput only while the microphone is actively capturing, and
+ * setSinkId may throw NotAllowedError before capture is live. During an
+ * active call the mic is on, so later attempts succeed.
+ */
 async function applyEarpieceSinkWithDiagnostics(el: HTMLMediaElement): Promise<void> {
   const sinkEl = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
-  const hasSetSinkId = typeof sinkEl.setSinkId === "function";
-  let outputs: Array<{ kind: string; label: string; id: string }> = [];
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    outputs = devices
-      .filter((d) => d.kind === "audiooutput")
-      .map((d) => ({ kind: d.kind, label: d.label ?? "", id: (d.deviceId ?? "").slice(0, 16) }));
-  } catch {
-    // enumerate failed — logged below with empty outputs.
+  if (typeof sinkEl.setSinkId !== "function") {
+    debugCallLog("earpiece_sink", { hasSetSinkId: false, ua: navigator.userAgent.slice(0, 80) });
+    return;
   }
 
-  let chosenId: string | undefined;
-  let applied = false;
-  let error = "";
-  try {
-    chosenId = await findIosAudioOutputId(false);
-    if (hasSetSinkId && chosenId !== undefined) {
-      await sinkEl.setSinkId!(chosenId);
-      applied = true;
+  const delays = [0, 600, 1500, 3000, 6000];
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    if (delays[attempt]! > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
     }
-  } catch (err) {
-    error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-  }
+    // Route changed mid-retry (speaker toggle / call ended) — stop.
+    if (el !== earpieceEl || !el.isConnected) return;
 
-  const session = (navigator as Navigator & { audioSession?: { type?: string; state?: string } })
-    .audioSession;
-  debugCallLog("earpiece_sink", {
-    hasSetSinkId,
-    outputs,
-    chosenId: chosenId?.slice(0, 16) ?? null,
-    applied,
-    error,
-    sessionType: session?.type ?? "unavailable",
-    sessionState: session?.state ?? "unavailable",
-    ua: navigator.userAgent.slice(0, 80),
-  });
+    let outputs: Array<{ label: string; id: string }> = [];
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      outputs = devices
+        .filter((d) => d.kind === "audiooutput")
+        .map((d) => ({ label: d.label ?? "", id: (d.deviceId ?? "").slice(0, 16) }));
+    } catch {
+      // Logged below with empty outputs.
+    }
+
+    let chosenId: string | undefined;
+    let applied = false;
+    let error = "";
+    try {
+      chosenId = await findIosAudioOutputId(false);
+      if (chosenId !== undefined) {
+        await sinkEl.setSinkId!(chosenId);
+        applied = true;
+      } else {
+        error = "no_receiver_candidate";
+      }
+    } catch (err) {
+      error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    }
+
+    debugCallLog("earpiece_sink", {
+      attempt,
+      hasSetSinkId: true,
+      outputs,
+      chosenId: chosenId?.slice(0, 16) ?? null,
+      applied,
+      error,
+      ua: navigator.userAgent.slice(0, 80),
+    });
+
+    if (applied) return;
+  }
 }
 
 /** Attach remote stream to the correct output element. Only one output element exists on iOS. */

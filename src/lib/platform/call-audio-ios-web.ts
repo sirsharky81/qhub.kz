@@ -26,6 +26,18 @@ export function iosSinkIdCallRoutingEnabled(): boolean {
   return false;
 }
 
+/**
+ * Pick the receiver (earpiece) or loudspeaker deviceId on iOS 18+.
+ *
+ * Field data (session debug-1c0a94, iOS 18.7 PWA): labels are LOCALIZED by
+ * system language — Russian devices report "Приемник" (receiver) and
+ * "Динамик" (speaker), plus a pseudo-device `deviceId: "default"` labelled
+ * "По умолчанию - Динамик". WebKit builds that default label as
+ * "<Default> - <real default device label>" (MediaDevices.cpp), so the real
+ * loudspeaker's label is a substring of the default label — which gives a
+ * locale-independent structural rule: among the non-default outputs, the one
+ * whose label is NOT contained in the default label is the receiver.
+ */
 export async function findIosAudioOutputId(speaker: boolean): Promise<string | undefined> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
     return undefined;
@@ -35,38 +47,39 @@ export async function findIosAudioOutputId(speaker: boolean): Promise<string | u
   if (outputs.length === 0) return undefined;
 
   const matchesSpeaker = (value: string) =>
-    /speaker|громк|built.?in.?speaker|main|громкоговор/i.test(value);
+    /speaker|динамик|громк|haut-parleur|lautsprecher|altavoz|hoparl|스피커|扬声器|スピーカー/i.test(value);
   const matchesEarpiece = (value: string) =>
-    /receiver|earpiece|трубк|built.?in.?receiver/i.test(value);
-  const describe = (device: MediaDeviceInfo) =>
-    `${device.label ?? ""} ${device.deviceId ?? ""}`.toLowerCase();
-  const normalized = outputs.map((d) => ({ id: d.deviceId, descriptor: describe(d) }));
+    /receiver|earpiece|при[её]мник|трубк|récepteur|hörer|auricular|kulakl|受话|受話|리시버/i.test(value);
 
-  for (const device of normalized) {
-    if (speaker && matchesSpeaker(device.descriptor)) return device.id;
-    if (!speaker && matchesEarpiece(device.descriptor)) return device.id;
+  const defaultDevice = outputs.find((d) => d.deviceId === "default");
+  const real = outputs.filter((d) => d.deviceId !== "default" && d.deviceId);
+
+  // 1) Label match (localized names included).
+  for (const device of real) {
+    const label = (device.label ?? "").toLowerCase();
+    if (!label) continue;
+    if (speaker && matchesSpeaker(label)) return device.deviceId;
+    if (!speaker && matchesEarpiece(label)) return device.deviceId;
   }
 
+  // 2) Structural rule against the "Default - <speaker>" pseudo-device.
+  const defaultLabel = defaultDevice?.label ?? "";
+  if (defaultLabel) {
+    const insideDefault = real.filter((d) => d.label && defaultLabel.includes(d.label));
+    const outsideDefault = real.filter((d) => d.label && !defaultLabel.includes(d.label));
+    if (speaker && insideDefault.length === 1) return insideDefault[0]!.deviceId;
+    if (!speaker && outsideDefault.length === 1) return outsideDefault[0]!.deviceId;
+  }
+
+  // 3) Unlabeled outputs: positional guess (receiver first, speaker last).
   const hasReadableLabels = outputs.some((d) => Boolean(d.label?.trim()));
-  if (!hasReadableLabels && outputs.length >= 2) {
-    // iOS often exposes receiver + speaker without labels until after getUserMedia.
-    return speaker ? outputs[outputs.length - 1]!.deviceId : outputs[0]!.deviceId;
+  if (!hasReadableLabels && real.length >= 2) {
+    return speaker ? real[real.length - 1]!.deviceId : real[0]!.deviceId;
   }
 
-  if (normalized.length >= 2) {
-    const first = normalized[0];
-    const last = normalized[normalized.length - 1];
-    const firstIsReceiver = first ? matchesEarpiece(first.descriptor) : false;
-    const lastIsReceiver = last ? matchesEarpiece(last.descriptor) : false;
-    if (speaker) {
-      if (firstIsReceiver && !lastIsReceiver) return last?.id;
-      if (lastIsReceiver && !firstIsReceiver) return first?.id;
-      return last?.id;
-    }
-    if (firstIsReceiver) return first.id;
-    if (lastIsReceiver) return last?.id;
-    return first?.id;
-  }
+  if (speaker) return defaultDevice?.deviceId;
+  // No confident receiver candidate — better to stay on the loudspeaker than
+  // to actively select it via a wrong sink.
   return undefined;
 }
 
