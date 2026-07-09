@@ -550,7 +550,15 @@ export async function pollChannel(
   });
   if (heartbeat) params.set("heartbeat", "1");
   if (!heartbeat && options?.wait) params.set("wait", "1");
-  const res = await platformFetch(`/api/messenger/poll?${params}`);
+  // Hard deadline: the server long-poll answers within ~7.5s. Without it a
+  // silently dead socket (network switch, app suspension during a call) hangs
+  // the fetch forever, the poll loop's inFlight flag never clears and new
+  // messages stop arriving until the page remounts.
+  const signal =
+    typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+      ? AbortSignal.timeout(20_000)
+      : undefined;
+  const res = await platformFetch(`/api/messenger/poll?${params}`, { signal });
   if (res.status === 410) {
     return { error: "room_gone" };
   }

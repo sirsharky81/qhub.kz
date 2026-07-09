@@ -181,6 +181,8 @@ export class CallController {
   private endedOnServer = new Set<string>();
   private pendingRemoteAnswer: string | null = null;
   private localMediaPromise: Promise<void> | null = null;
+  /** Bumped on cleanup/reset — invalidates in-flight getUserMedia requests. */
+  private mediaEpoch = 0;
   private catchUpPollTimers: ReturnType<typeof setTimeout>[] = [];
   private iceOutBatch: IceCandidatePayload[] = [];
   private iceOutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -365,20 +367,68 @@ export class CallController {
       this.localMediaPromise = null;
     });
 
+    // Build the RTCPeerConnection and local offer in parallel with
+    // /call/initiate — the offer itself doesn't depend on callId, only
+    // sending it does. Early ICE candidates queue up (flushLocalIce holds
+    // them until callId arrives). Saves an initiate round-trip + PC init
+    // from the connect timeline.
+    const epoch = this.mediaEpoch;
+    const offerTask = (async () => {
+      await mediaTask;
+      try {
+        await this.setupPeerConnection();
+        // Cleanup may have run while we were setting up (initiate failed or
+        // the user hung up) — close the freshly built PC instead of leaking it.
+        if (epoch !== this.mediaEpoch) {
+          this.pc?.close();
+          this.pc = null;
+          throw new Error("call_ended_during: peer_setup");
+        }
+        const offerSdp = await this.pc!.createOffer({
+          receiveVideo: callMode === "video",
+        });
+        this.localOfferSdp = offerSdp;
+        this.patchDebug({ hasLocalOffer: true });
+        return offerSdp;
+      } catch (err) {
+        const text = describeError(err);
+        if (text.includes("call_ended_during")) throw err;
+        throw new Error(`peer_setup: ${text}`);
+      }
+    })();
+
+    const initiatePromise = initiateCall({
+      channel: this.channel,
+      peerPhone: this.peerPhone,
+      media: callMode,
+    });
+
     let initiate: Awaited<ReturnType<typeof initiateCall>>;
+    let offerSdp: string;
     try {
-      const [, initiateResult] = await Promise.all([
-        mediaTask,
-        initiateCall({
-          channel: this.channel,
-          peerPhone: this.peerPhone,
-          media: callMode,
-        }),
+      const [offerResult, initiateResult] = await Promise.all([
+        offerTask,
+        initiatePromise,
       ]);
+      offerSdp = offerResult;
       initiate = initiateResult;
     } catch (err) {
-      this.patchDebug({ lastError: describeError(err) });
-      await this.cleanup("error", mediaAccessErrorMessage(err));
+      // The local half failed but /call/initiate may still succeed — end that
+      // call on the server so the callee's phone stops ringing.
+      void initiatePromise
+        .then((r) => {
+          if (r.ok && r.callId) void endCallApi(r.callId, "error");
+        })
+        .catch(() => {});
+      const text = describeError(err);
+      // User hung up (or cleanup ran) while capture was pending — the hangup
+      // path already cleaned up; showing an error on top would be wrong.
+      if (text.includes("call_ended_during")) return;
+      this.patchDebug({ lastError: text });
+      const msg = text.startsWith("peer_setup")
+        ? "Не удалось установить соединение"
+        : mediaAccessErrorMessage(err);
+      await this.cleanup("error", msg);
       return;
     }
 
@@ -392,17 +442,13 @@ export class CallController {
     }
 
     if (!initiate.ok || !initiate.callId) {
-      if (this.localStream) {
-        for (const t of this.localStream.getTracks()) t.stop();
-        this.localStream = null;
-        this.emitMedia();
-      }
       const msg =
         initiate.error === "busy"
           ? "Собеседник занят"
           : "Не удалось начать звонок";
-      this.patch({ phase: "ended", errorMessage: msg, endReason: "busy" });
-      this.scheduleReset();
+      // cleanup (not a manual stop) — the peer connection already exists here
+      // and must be closed, and mediaEpoch must invalidate late captures.
+      await this.cleanup("busy", msg);
       return;
     }
 
@@ -416,25 +462,15 @@ export class CallController {
     this.startSetupWatchdog();
     this.startSdpKeepalive();
 
-    try {
-      await this.setupPeerConnection();
-      const offerSdp = await this.pc!.createOffer({
-        receiveVideo: this.state.callMode === "video",
-      });
-      this.localOfferSdp = offerSdp;
-      this.patchDebug({ hasLocalOffer: true });
-      this.setTransportPhase("offer_sent");
-      this.journal.record("OFFER_SENT");
-
-      void this.sendSignalReliable({
-        callId: initiate.callId,
-        type: "offer",
-        payload: offerSdp,
-      });
-    } catch (err) {
-      this.patchDebug({ lastError: describeError(err) });
-      await this.cleanup("error", "Не удалось установить соединение");
-    }
+    this.setTransportPhase("offer_sent");
+    this.journal.record("OFFER_SENT");
+    void this.sendSignalReliable({
+      callId: initiate.callId,
+      type: "offer",
+      payload: offerSdp,
+    });
+    // Release ICE candidates gathered while callId was still unknown.
+    void this.flushLocalIce();
   }
 
   /**
@@ -515,7 +551,9 @@ export class CallController {
         void this.pollNow();
       }
     } catch (err) {
-      this.patchDebug({ lastError: describeError(err) });
+      const text = describeError(err);
+      if (text.includes("call_ended_during")) return;
+      this.patchDebug({ lastError: text });
       if (this.state.callId) {
         await sendCallSignal({ callId: this.state.callId, type: "reject" });
       }
@@ -538,6 +576,10 @@ export class CallController {
   async hangup(): Promise<void> {
     if (!this.state.callId) {
       this.recordIgnored("HANGUP");
+      // Cancel while dialing, before /call/initiate returned: the mic (and
+      // possibly the PC) is already live — a bare reset() left the capture
+      // running, which iOS shows as a stuck mic/camera indicator.
+      await this.cleanup("hangup", undefined, { skipServerEnd: true });
       this.reset();
       return;
     }
@@ -584,8 +626,8 @@ export class CallController {
         }
       }
       try {
-        const videoOnly = await withTimeout(
-          navigator.mediaDevices.getUserMedia({ audio: false, video: { width: 640, height: 360, frameRate: 15 } }),
+        const videoOnly = await this.captureUserMedia(
+          { audio: false, video: { width: 640, height: 360, frameRate: 15 } },
           12000,
           "get_user_media_video",
         );
@@ -832,11 +874,44 @@ export class CallController {
     return null;
   }
 
+  /**
+   * getUserMedia wrapper that guarantees the captured tracks get stopped when
+   * the call ends (cleanup bumps mediaEpoch) or the deadline fires before the
+   * promise resolves. A bare withTimeout(getUserMedia) leaks the capture: the
+   * browser resolves it later with live tracks nobody stops — on iOS that kept
+   * the mic/camera indicator in the Dynamic Island after the call ended.
+   */
+  private async captureUserMedia(
+    constraints: MediaStreamConstraints,
+    ms: number,
+    label: string,
+  ): Promise<MediaStream> {
+    const epoch = this.mediaEpoch;
+    let adopted = false;
+    const request = navigator.mediaDevices.getUserMedia(constraints);
+    void request
+      .then((stream) => {
+        if (!adopted) {
+          for (const t of stream.getTracks()) t.stop();
+        }
+      })
+      .catch(() => {});
+    const stream = await withTimeout(request, ms, label);
+    if (epoch !== this.mediaEpoch) {
+      throw new Error(`call_ended_during: ${label}`);
+    }
+    adopted = true;
+    return stream;
+  }
+
   private async acquireLocalMedia(options: {
     video: boolean;
     speakerOn: boolean;
   }): Promise<void> {
     prepareAudioSessionForCall();
+    // A re-acquire (e.g. ensureLocalMedia on the answer path) must not orphan
+    // a previous capture — its live tracks would keep the mic busy on iOS.
+    const previousStream = this.localStream;
     const needVideo = options.video;
     const audioConstraints = {
       echoCancellation: true,
@@ -853,11 +928,8 @@ export class CallController {
 
     // getUserMedia must be the first await after the user gesture on iOS.
     try {
-      this.localStream = await withTimeout(
-        navigator.mediaDevices.getUserMedia({
-          audio: audioConstraints,
-          video: videoConstraints,
-        }),
+      this.localStream = await this.captureUserMedia(
+        { audio: audioConstraints, video: videoConstraints },
         15000,
         "get_user_media",
       );
@@ -868,26 +940,24 @@ export class CallController {
         "media_permissions",
       );
       try {
-        this.localStream = await withTimeout(
-          navigator.mediaDevices.getUserMedia({
-            audio: audioConstraints,
-            video: videoConstraints,
-          }),
+        this.localStream = await this.captureUserMedia(
+          { audio: audioConstraints, video: videoConstraints },
           15000,
           "get_user_media_retry",
         );
       } catch {
         if (!needVideo) throw firstErr;
-        this.localStream = await withTimeout(
-          navigator.mediaDevices.getUserMedia({
-            audio: audioConstraints,
-            video: false,
-          }),
+        this.localStream = await this.captureUserMedia(
+          { audio: audioConstraints, video: false },
           15000,
           "get_user_media_audio_only",
         );
         this.patch({ videoEnabled: false, callMode: "audio" });
       }
+    }
+
+    if (previousStream && previousStream !== this.localStream) {
+      for (const t of previousStream.getTracks()) t.stop();
     }
 
     await prepareCallAudioOutput({ speakerOn: options.speakerOn });
@@ -920,11 +990,12 @@ export class CallController {
     this.pc.setSpeakerphone(this.state.speakerOn);
     this.pc.setHandlers({
       onIceCandidate: (candidate) => {
-        if (!this.state.callId) return;
         if (!candidate.candidate) {
           void this.flushLocalIce();
           return;
         }
+        // Candidates may arrive before /call/initiate returns a callId —
+        // queue them; flushLocalIce keeps the batch until the id exists.
         this.queueLocalIce(candidate);
       },
       onConnectionState: (connState) => {
@@ -1512,8 +1583,11 @@ export class CallController {
 
   private async flushLocalIce(): Promise<void> {
     this.iceOutTimer = null;
+    if (!this.iceOutBatch.length) return;
+    // No callId yet (offer prepared in parallel with /call/initiate) — keep
+    // the batch queued instead of dropping it; it flushes once the id arrives.
+    if (!this.state.callId) return;
     const batch = this.iceOutBatch.splice(0);
-    if (!batch.length || !this.state.callId) return;
     const payload = batch.length === 1 ? JSON.stringify(batch[0]) : JSON.stringify(batch);
     await this.sendSignalReliable({
       callId: this.state.callId,
@@ -1771,6 +1845,10 @@ export class CallController {
   ): Promise<void> {
     if (this.cleanupInFlight) return;
     this.cleanupInFlight = true;
+    // Invalidate in-flight getUserMedia — late-resolving captures must be
+    // stopped, not adopted, or iOS keeps the mic/camera active after the call.
+    this.mediaEpoch += 1;
+    this.localMediaPromise = null;
     this.journal.record("CLEANUP_START", endReason ?? "null");
 
     const callId = this.state.callId;
@@ -1844,6 +1922,7 @@ export class CallController {
   }
 
   private reset(): void {
+    this.mediaEpoch += 1;
     this.sinceSeq = 0;
     this.isCaller = false;
     this.lastSession = null;

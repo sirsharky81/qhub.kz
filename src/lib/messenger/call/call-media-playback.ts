@@ -100,23 +100,6 @@ function destroyRelayGraph(): void {
   }
 }
 
-/**
- * Create/resume the relay AudioContext synchronously inside a user gesture.
- * An AudioContext created later (during async stream attach) starts suspended
- * on iOS and resume() outside a gesture may never succeed — that manifested
- * as completely silent earpiece calls between iPhones.
- */
-function primeRelayContext(): void {
-  try {
-    relayCtx = relayCtx ?? new AudioContext();
-    if (relayCtx.state !== "running") {
-      void relayCtx.resume().catch(() => {});
-    }
-  } catch {
-    // WebAudio unavailable — legacy element playback will still try.
-  }
-}
-
 function createEarpieceElement(): HTMLAudioElement {
   destroyEarpieceElement();
   earpieceEl = document.createElement("audio");
@@ -210,7 +193,6 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   unlockElement(el, "audio");
-  primeRelayContext();
 }
 
 async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
@@ -267,12 +249,12 @@ async function mountSinkRelayOutput(
   return null;
 }
 
-async function mountLegacyRelayOutput(
+function mountLegacyRelayOutput(
   stream: MediaStream,
   speakerOn: boolean,
-): Promise<HTMLMediaElement> {
+): HTMLMediaElement {
   if (speakerOn) {
-    // iOS routes loudspeaker only for direct WebRTC on <video>, not WebAudio relay.
+    // iOS routes loudspeaker only for direct WebRTC on <video>.
     teardownRelayNodes();
     destroyEarpieceElement();
     // Reuse the element unlocked during the user gesture — recreating it here
@@ -282,10 +264,16 @@ async function mountLegacyRelayOutput(
     return el;
   }
 
+  // Earpiece: attach the remote WebRTC stream DIRECTLY to <audio>.
+  // The WebAudio relay (MediaStreamAudioSourceNode over a remote WebRTC
+  // stream) produces silence on iOS unless the raw stream is also consumed
+  // by a media element — field-tested as "аудиозвонок без звука" while the
+  // direct element path played fine. Earpiece routing itself comes from the
+  // play-and-record audio session type, not from the relay.
+  teardownRelayNodes();
   destroySpeakerElement();
-  const routed = await ensureRelayGraph(stream);
   const el = earpieceEl ?? createEarpieceElement();
-  el.srcObject = routed;
+  el.srcObject = stream;
   return el;
 }
 
@@ -381,23 +369,8 @@ export async function switchCallSpeakerRoute(
     return mountLegacyRelayOutput(fallbackStream, speakerOn);
   }
 
-  const routed = relayStream ?? (stream && !speakerOn ? await ensureRelayGraph(stream) : null);
-
-  if (speakerOn) {
-    if (!stream) return null;
-    teardownRelayNodes();
-    destroyEarpieceElement();
-    const el = speakerEl ?? createSpeakerElement();
-    el.srcObject = stream;
-    return el;
-  }
-
-  if (!routed) return null;
-
-  destroySpeakerElement();
-  const el = earpieceEl ?? createEarpieceElement();
-  el.srcObject = routed;
-  return el;
+  if (!stream) return null;
+  return mountLegacyRelayOutput(stream, speakerOn);
 }
 
 /** @deprecated Use switchCallSpeakerRoute */
