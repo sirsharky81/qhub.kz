@@ -774,8 +774,15 @@ export class CallController {
   }
 
   private async applyPollData(data: CallPollResponse): Promise<void> {
+    // NOTE: the `sinceSeq` poll cursor is deliberately NOT advanced here.
+    // This method also runs for single-signal WS pushes; if a WS subscription
+    // becomes live mid-burst, the client can receive seq N without ever
+    // having seen N-1. Jumping the cursor to N would make polling skip the
+    // missed signals forever — lost ICE candidates were a real cause of slow
+    // (TURN-only) or failed connects. The cursor only moves in pollOnce(),
+    // from complete poll listings; WS stays a pure low-latency delivery path
+    // and signal handling is idempotent for the resulting re-deliveries.
     for (const signal of data.signals) {
-      this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
       await this.handleSignal(signal.type, signal.from, signal.payload);
     }
 
@@ -1021,7 +1028,11 @@ export class CallController {
         void this.pc?.playRemoteAudio();
         this.patchPlaybackDebug();
         this.emitMedia();
-        this.handlePeerConnected(true);
+        // ontrack fires while applying remote SDP — before any connectivity.
+        // Flipping to "active" here made the callee show "разговор" seconds
+        // before the caller. Only a genuinely connected transport counts;
+        // the ICE/connection state handlers cover the normal path.
+        this.handlePeerConnected(this.pc?.isTransportConnected() ?? false);
       },
     });
     this.patchPlaybackDebug();
@@ -1107,7 +1118,9 @@ export class CallController {
       this.startIceTimeout();
       void this.pc.playRemoteAudio().then(() => {
         this.patchPlaybackDebug();
-        if (this.pc?.getPlaybackDebug()?.hasRemoteTrack) {
+        // Same gating as onRemoteTrack: a remote track exists as soon as the
+        // answer SDP is applied, but "active" must wait for real connectivity.
+        if (this.pc?.isTransportConnected()) {
           this.handlePeerConnected(true);
         }
       });
@@ -1448,6 +1461,11 @@ export class CallController {
         return;
       }
       await this.applyPollDataSafe(result.data);
+      // Advance the cursor only from poll responses: the server returns the
+      // complete list of signals past `since`, so there can be no gaps.
+      for (const signal of result.data.signals) {
+        this.sinceSeq = Math.max(this.sinceSeq, signal.seq);
+      }
     } catch (err) {
       console.error("[call] poll tick failed:", err);
       this.patchDebug({ lastError: describeError(err) });
@@ -1559,7 +1577,9 @@ export class CallController {
   private queueLocalIce(candidate: IceCandidatePayload): void {
     this.iceOutBatch.push(candidate);
     if (!this.iceOutTimer) {
-      this.iceOutTimer = setTimeout(() => void this.flushLocalIce(), 120);
+      // Short window: just enough to group the initial host-candidate burst
+      // into one request without materially delaying trickle ICE.
+      this.iceOutTimer = setTimeout(() => void this.flushLocalIce(), 40);
     }
   }
 

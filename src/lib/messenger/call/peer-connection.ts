@@ -113,6 +113,22 @@ export class CallPeerConnection {
     return this.remoteDescriptionSet;
   }
 
+  /**
+   * True only when ICE/DTLS actually reached the connected state. Used to
+   * gate the "active" phase: ontrack fires while the SDP is being applied —
+   * long before any packets can flow — so remote-track arrival alone must
+   * never flip the UI into "talking".
+   */
+  isTransportConnected(): boolean {
+    if (!this.pc) return false;
+    const ice = this.pc.iceConnectionState;
+    return (
+      this.pc.connectionState === "connected" ||
+      ice === "connected" ||
+      ice === "completed"
+    );
+  }
+
   needsPlaybackRetry(): boolean {
     if (!this.remoteStream) return true;
     if (!this.remoteMedia) return true;
