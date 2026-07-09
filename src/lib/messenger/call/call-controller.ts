@@ -367,68 +367,22 @@ export class CallController {
       this.localMediaPromise = null;
     });
 
-    // Build the RTCPeerConnection and local offer in parallel with
-    // /call/initiate — the offer itself doesn't depend on callId, only
-    // sending it does. Early ICE candidates queue up (flushLocalIce holds
-    // them until callId arrives). Saves an initiate round-trip + PC init
-    // from the connect timeline.
-    const epoch = this.mediaEpoch;
-    const offerTask = (async () => {
-      await mediaTask;
-      try {
-        await this.setupPeerConnection();
-        // Cleanup may have run while we were setting up (initiate failed or
-        // the user hung up) — close the freshly built PC instead of leaking it.
-        if (epoch !== this.mediaEpoch) {
-          this.pc?.close();
-          this.pc = null;
-          throw new Error("call_ended_during: peer_setup");
-        }
-        const offerSdp = await this.pc!.createOffer({
-          receiveVideo: callMode === "video",
-        });
-        this.localOfferSdp = offerSdp;
-        this.patchDebug({ hasLocalOffer: true });
-        return offerSdp;
-      } catch (err) {
-        const text = describeError(err);
-        if (text.includes("call_ended_during")) throw err;
-        throw new Error(`peer_setup: ${text}`);
-      }
-    })();
-
-    const initiatePromise = initiateCall({
-      channel: this.channel,
-      peerPhone: this.peerPhone,
-      media: callMode,
-    });
-
     let initiate: Awaited<ReturnType<typeof initiateCall>>;
-    let offerSdp: string;
     try {
-      const [offerResult, initiateResult] = await Promise.all([
-        offerTask,
-        initiatePromise,
+      const [, initiateResult] = await Promise.all([
+        mediaTask,
+        initiateCall({
+          channel: this.channel,
+          peerPhone: this.peerPhone,
+          media: callMode,
+        }),
       ]);
-      offerSdp = offerResult;
       initiate = initiateResult;
     } catch (err) {
-      // The local half failed but /call/initiate may still succeed — end that
-      // call on the server so the callee's phone stops ringing.
-      void initiatePromise
-        .then((r) => {
-          if (r.ok && r.callId) void endCallApi(r.callId, "error");
-        })
-        .catch(() => {});
       const text = describeError(err);
-      // User hung up (or cleanup ran) while capture was pending — the hangup
-      // path already cleaned up; showing an error on top would be wrong.
       if (text.includes("call_ended_during")) return;
       this.patchDebug({ lastError: text });
-      const msg = text.startsWith("peer_setup")
-        ? "Не удалось установить соединение"
-        : mediaAccessErrorMessage(err);
-      await this.cleanup("error", msg);
+      await this.cleanup("error", mediaAccessErrorMessage(err));
       return;
     }
 
@@ -446,8 +400,6 @@ export class CallController {
         initiate.error === "busy"
           ? "Собеседник занят"
           : "Не удалось начать звонок";
-      // cleanup (not a manual stop) — the peer connection already exists here
-      // and must be closed, and mediaEpoch must invalidate late captures.
       await this.cleanup("busy", msg);
       return;
     }
@@ -462,15 +414,28 @@ export class CallController {
     this.startSetupWatchdog();
     this.startSdpKeepalive();
 
-    this.setTransportPhase("offer_sent");
-    this.journal.record("OFFER_SENT");
-    void this.sendSignalReliable({
-      callId: initiate.callId,
-      type: "offer",
-      payload: offerSdp,
-    });
-    // Release ICE candidates gathered while callId was still unknown.
-    void this.flushLocalIce();
+    try {
+      await this.setupPeerConnection();
+      const offerSdp = await this.pc!.createOffer({
+        receiveVideo: callMode === "video",
+      });
+      this.localOfferSdp = offerSdp;
+      this.patchDebug({ hasLocalOffer: true });
+      this.setTransportPhase("offer_sent");
+      this.journal.record("OFFER_SENT");
+
+      void this.sendSignalReliable({
+        callId: initiate.callId,
+        type: "offer",
+        payload: offerSdp,
+      });
+      void this.flushLocalIce();
+    } catch (err) {
+      const text = describeError(err);
+      if (text.includes("call_ended_during")) return;
+      this.patchDebug({ lastError: text });
+      await this.cleanup("error", "Не удалось установить соединение");
+    }
   }
 
   /**
@@ -538,6 +503,12 @@ export class CallController {
         videoEnabled: mode === "video" ? this.state.videoEnabled || offerHasVideo : false,
         speakerOn,
       });
+      const needsVideo =
+        mode === "video" &&
+        !this.localStream?.getVideoTracks().some((t) => t.readyState === "live");
+      if (needsVideo) {
+        await this.acquireLocalMedia({ video: true, speakerOn });
+      }
       void activateCallMediaSession(this.peerPhone || this.state.peerPhone || "QHub", {
         speakerOn,
         videoEnabled: mode === "video" && (this.state.videoEnabled || offerHasVideo),
@@ -887,20 +858,29 @@ export class CallController {
     label: string,
   ): Promise<MediaStream> {
     const epoch = this.mediaEpoch;
-    let adopted = false;
     const request = navigator.mediaDevices.getUserMedia(constraints);
-    void request
-      .then((stream) => {
-        if (!adopted) {
-          for (const t of stream.getTracks()) t.stop();
-        }
-      })
-      .catch(() => {});
-    const stream = await withTimeout(request, ms, label);
+    let stream: MediaStream;
+    try {
+      stream = await withTimeout(request, ms, label);
+    } catch (err) {
+      // Deadline fired (or getUserMedia rejected). If the browser resolves
+      // the request later, nobody owns those tracks — stop them on arrival.
+      // NOTE: this stopper must only be registered on the failure path.
+      // Registering it upfront with an "adopted" flag is a footgun: the
+      // .then() fires before the awaiting code can set the flag, killing
+      // every successful capture instantly.
+      void request
+        .then((late) => {
+          for (const t of late.getTracks()) t.stop();
+        })
+        .catch(() => {});
+      throw err;
+    }
     if (epoch !== this.mediaEpoch) {
+      // Call ended while capture was pending — release instead of adopting.
+      for (const t of stream.getTracks()) t.stop();
       throw new Error(`call_ended_during: ${label}`);
     }
-    adopted = true;
     return stream;
   }
 
@@ -973,6 +953,8 @@ export class CallController {
   }
 
   private async setupPeerConnection(): Promise<void> {
+    this.pc?.close();
+    this.pc = null;
     this.sessionId = this.nextSessionId();
     this.setTransportPhase("new");
     this.journal.record("CREATE_PC");
