@@ -4,7 +4,15 @@ import { appendCallSignal, CallStoreError, getCallSession } from "@/lib/messenge
 import { assertMessengerSession, jsonAuthError } from "@/lib/messenger/guard";
 import type { CallSignalType } from "@/lib/messenger/types";
 
-const ALLOWED_TYPES: CallSignalType[] = ["offer", "answer", "ice", "reject", "end", "busy"];
+const ALLOWED_TYPES: CallSignalType[] = [
+  "offer",
+  "answer",
+  "ice",
+  "accept",
+  "reject",
+  "end",
+  "busy",
+];
 
 export async function POST(request: Request) {
   try {
@@ -38,7 +46,7 @@ export async function POST(request: Request) {
     if (type === "offer" && phone !== session.caller) {
       return NextResponse.json({ error: "Offer только от звонящего" }, { status: 403 });
     }
-    if (type === "answer" && phone !== session.callee) {
+    if ((type === "answer" || type === "accept") && phone !== session.callee) {
       return NextResponse.json({ error: "Answer только от принимающего" }, { status: 403 });
     }
 

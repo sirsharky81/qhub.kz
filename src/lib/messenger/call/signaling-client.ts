@@ -46,10 +46,16 @@ async function fetchWithRetry(url: string, init?: RequestInit): Promise<Response
   return fetchWithTimeout(url, init);
 }
 
-export async function fetchIceServers(): Promise<{
+type IceConfigResult = {
   iceServers: RTCIceServer[];
   turnSource: "metered" | "static" | "fallback" | null;
-}> {
+};
+
+const ICE_CACHE_TTL_MS = 2 * 60 * 1000;
+let iceCache: { value: IceConfigResult; expiresAt: number } | null = null;
+let iceInFlight: Promise<IceConfigResult> | null = null;
+
+async function fetchIceServersUncached(): Promise<IceConfigResult> {
   try {
     const res = await fetchWithTimeout("/api/messenger/call/ice-config");
     if (!res.ok) {
@@ -68,6 +74,38 @@ export async function fetchIceServers(): Promise<{
   } catch {
     return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }], turnSource: null };
   }
+}
+
+/**
+ * Fetching the ICE config used to sit on the critical path of both
+ * setupPeerConnection() calls (up to 8s on a bad network), delaying the offer
+ * on the caller and — worse — the answer on the callee. Cache successful
+ * results briefly and let the UI prefetch during the call-button gesture so
+ * the actual setup sees a warm cache.
+ */
+export async function fetchIceServers(): Promise<IceConfigResult> {
+  if (iceCache && Date.now() < iceCache.expiresAt) {
+    return iceCache.value;
+  }
+  if (iceInFlight) return iceInFlight;
+
+  iceInFlight = fetchIceServersUncached()
+    .then((value) => {
+      // Only cache real TURN answers; a STUN-only fallback should be retried.
+      if (value.turnSource) {
+        iceCache = { value, expiresAt: Date.now() + ICE_CACHE_TTL_MS };
+      }
+      return value;
+    })
+    .finally(() => {
+      iceInFlight = null;
+    });
+  return iceInFlight;
+}
+
+/** Warm the ICE config cache without blocking the caller. */
+export function prefetchIceServers(): void {
+  void fetchIceServers().catch(() => {});
 }
 
 export async function initiateCall(params: {

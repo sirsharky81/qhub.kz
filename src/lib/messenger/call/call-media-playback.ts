@@ -5,7 +5,7 @@ import {
 } from "@/lib/audio-session";
 import {
   applySinkIdToElement,
-  useIosSinkIdCallRouting,
+  iosSinkIdCallRoutingEnabled,
 } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 
@@ -76,18 +76,45 @@ function destroySpeakerElement(): void {
   unlocked.video = false;
 }
 
-function destroyRelayGraph(): void {
+/**
+ * Tear down relay nodes/element but keep the AudioContext alive. The context
+ * must survive route toggles: it can only be (re)started from a user gesture
+ * on iOS, so closing it mid-call would leave the earpiece route permanently
+ * silent after a speaker → earpiece switch.
+ */
+function teardownRelayNodes(): void {
   relaySource?.disconnect();
   relaySource = null;
   relayDestination?.disconnect();
   relayDestination = null;
   relayStream = null;
+  destroyElement(relayEl);
+  relayEl = null;
+}
+
+function destroyRelayGraph(): void {
+  teardownRelayNodes();
   if (relayCtx) {
     void relayCtx.close();
     relayCtx = null;
   }
-  destroyElement(relayEl);
-  relayEl = null;
+}
+
+/**
+ * Create/resume the relay AudioContext synchronously inside a user gesture.
+ * An AudioContext created later (during async stream attach) starts suspended
+ * on iOS and resume() outside a gesture may never succeed — that manifested
+ * as completely silent earpiece calls between iPhones.
+ */
+function primeRelayContext(): void {
+  try {
+    relayCtx = relayCtx ?? new AudioContext();
+    if (relayCtx.state !== "running") {
+      void relayCtx.resume().catch(() => {});
+    }
+  } catch {
+    // WebAudio unavailable — legacy element playback will still try.
+  }
 }
 
 function createEarpieceElement(): HTMLAudioElement {
@@ -148,7 +175,7 @@ export function useIosWebAudioRelay(): boolean {
 
 export function getCallMediaRoute(speakerOn: boolean): CallMediaRoute {
   if (!isIOSDevice()) return "default";
-  if (useIosSinkIdCallRouting()) return "sink";
+  if (iosSinkIdCallRoutingEnabled()) return "sink";
   return speakerOn ? "relay-video" : "relay-audio";
 }
 
@@ -161,7 +188,7 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   prepareAudioSessionForCall();
   if (!isIOSDevice()) return;
 
-  if (useIosSinkIdCallRouting()) {
+  if (iosSinkIdCallRoutingEnabled()) {
     if (!relayEl) {
       relayEl = document.createElement("audio");
       configureCallMediaElement(relayEl);
@@ -183,12 +210,13 @@ export function primeCallMediaPlayback(speakerOn = false): void {
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   unlockElement(el, "audio");
+  primeRelayContext();
 }
 
 async function ensureRelayGraph(stream: MediaStream): Promise<MediaStream> {
   relayCtx = relayCtx ?? new AudioContext();
-  if (relayCtx.state === "suspended") {
-    await relayCtx.resume();
+  if (relayCtx.state !== "running") {
+    await relayCtx.resume().catch(() => {});
   }
 
   if (relaySource?.mediaStream === stream && relayStream) {
@@ -212,12 +240,12 @@ async function mountSinkRelayOutput(
   if (speakerOn) {
     const hasVideo = stream.getVideoTracks().some((t) => t.readyState === "live");
     if (hasVideo) {
-      destroyRelayGraph();
+      teardownRelayNodes();
       destroyEarpieceElement();
-      const el = createSpeakerElement();
+      const el = speakerEl ?? createSpeakerElement();
       el.srcObject = stream;
-      const routedOk = await applySinkIdToElement(el, true);
-      return routedOk ? el : el;
+      await applySinkIdToElement(el, true);
+      return el;
     }
   }
 
@@ -245,16 +273,18 @@ async function mountLegacyRelayOutput(
 ): Promise<HTMLMediaElement> {
   if (speakerOn) {
     // iOS routes loudspeaker only for direct WebRTC on <video>, not WebAudio relay.
-    destroyRelayGraph();
+    teardownRelayNodes();
     destroyEarpieceElement();
-    const el = createSpeakerElement();
+    // Reuse the element unlocked during the user gesture — recreating it here
+    // would lose the autoplay unlock and risk silent playback.
+    const el = speakerEl ?? createSpeakerElement();
     el.srcObject = stream;
     return el;
   }
 
   destroySpeakerElement();
   const routed = await ensureRelayGraph(stream);
-  const el = createEarpieceElement();
+  const el = earpieceEl ?? createEarpieceElement();
   el.srcObject = routed;
   return el;
 }
@@ -275,22 +305,19 @@ export async function attachCallMediaStream(
   const hasLiveVideo = stream.getVideoTracks().some((t) => t.readyState === "live");
   // Direct WebRTC on <video> only when loudspeaker + live video track (iOS quirk).
   const useDirectVideo = hasLiveVideo && speakerOn;
-  // #region agent log
-  fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H4',location:'call-media-playback.ts:attachCallMediaStream',message:'Selected iOS media route',data:{speakerOn,hasLiveVideo,useDirectVideo,audioTracks:stream.getAudioTracks().length,videoTracks:stream.getVideoTracks().length,sinkRouting:useIosSinkIdCallRouting()},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (useDirectVideo) {
-    destroyRelayGraph();
+    teardownRelayNodes();
     destroyEarpieceElement();
-    const el = createSpeakerElement();
+    const el = speakerEl ?? createSpeakerElement();
     el.srcObject = stream;
-    if (useIosSinkIdCallRouting()) {
+    if (iosSinkIdCallRoutingEnabled()) {
       await applySinkIdToElement(el, speakerOn);
     }
     return el;
   }
 
-  if (useIosSinkIdCallRouting()) {
+  if (iosSinkIdCallRoutingEnabled()) {
     const sinkEl = await mountSinkRelayOutput(stream, speakerOn);
     if (sinkEl) return sinkEl;
   }
@@ -311,7 +338,9 @@ export async function rebuildCallMediaStream(
 
   destroyEarpieceElement();
   destroySpeakerElement();
-  destroyRelayGraph();
+  // Keep the AudioContext: it can only be restarted from a user gesture,
+  // and interruption recovery runs without one.
+  teardownRelayNodes();
   unlocked.audio = false;
   unlocked.video = false;
 
@@ -337,7 +366,7 @@ export async function switchCallSpeakerRoute(
   kickAudioSessionAfterCapture();
   prepareAudioSessionForCall();
 
-  if (useIosSinkIdCallRouting()) {
+  if (iosSinkIdCallRoutingEnabled()) {
     if (!relayEl) {
       if (!stream) return null;
       const sinkEl = await mountSinkRelayOutput(stream, speakerOn);
@@ -346,7 +375,7 @@ export async function switchCallSpeakerRoute(
     }
     const routedOk = await applySinkIdToElement(relayEl, speakerOn);
     if (routedOk) return relayEl;
-    destroyRelayGraph();
+    teardownRelayNodes();
     const fallbackStream = stream ?? relayStream;
     if (!fallbackStream) return null;
     return mountLegacyRelayOutput(fallbackStream, speakerOn);
@@ -356,9 +385,9 @@ export async function switchCallSpeakerRoute(
 
   if (speakerOn) {
     if (!stream) return null;
-    destroyRelayGraph();
+    teardownRelayNodes();
     destroyEarpieceElement();
-    const el = createSpeakerElement();
+    const el = speakerEl ?? createSpeakerElement();
     el.srcObject = stream;
     return el;
   }
@@ -366,7 +395,7 @@ export async function switchCallSpeakerRoute(
   if (!routed) return null;
 
   destroySpeakerElement();
-  const el = createEarpieceElement();
+  const el = earpieceEl ?? createEarpieceElement();
   el.srcObject = routed;
   return el;
 }
@@ -376,14 +405,19 @@ export async function applyCallSpeakerRoute(
   el: HTMLMediaElement,
   speakerOn: boolean,
 ): Promise<void> {
-  if (useIosSinkIdCallRouting()) {
+  if (iosSinkIdCallRoutingEnabled()) {
     await applySinkIdToElement(el, speakerOn);
   }
 }
 
-/** WebKit bug #196539: pause() then play() revives silent WebRTC playback on iOS. */
+/** WebKit bug #196539: pause() then play() revives silent WebRTC playback on iOS.
+ *
+ * Must NOT call recoverAudioSessionAfterInterruption() here: this runs on
+ * every playback retry, and audio-session type flips on each play were one of
+ * the confirmed causes of calls jumping to the loudspeaker (session 480e62).
+ * Interruption recovery has its own dedicated path (rebuildCallMediaStream).
+ */
 export async function playCallMedia(el: HTMLMediaElement): Promise<boolean> {
-  recoverAudioSessionAfterInterruption();
   prepareAudioSessionForCall();
   try {
     el.muted = false;

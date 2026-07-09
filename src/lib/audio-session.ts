@@ -21,20 +21,17 @@ export function prepareAudioSessionForCapture(): void {
   nav.audioSession.type = "play-and-record";
 }
 
-/** Keep duplex audio session for live calls. */
+/**
+ * Keep duplex audio session for live calls.
+ *
+ * Deliberately does NOT set audioSession.mode = "voice-chat": field debugging
+ * (июль 2026, session 480e62/H48) confirmed that setting voice-chat mode on
+ * iOS PWA flipped call output to the loudspeaker even when the earpiece
+ * <audio> route was mounted correctly. Plain play-and-record routes the
+ * receiver (earpiece) as expected.
+ */
 export function prepareAudioSessionForCall(): void {
   prepareAudioSessionForCapture();
-  if (typeof navigator === "undefined") return;
-  const session = (navigator as AudioSessionNavigator).audioSession;
-  if (!session) return;
-  const extended = session as AudioSession & { mode?: string };
-  if ("mode" in extended) {
-    try {
-      extended.mode = "voice-chat";
-    } catch {
-      /* WebKit versions vary */
-    }
-  }
 }
 
 /**
@@ -52,12 +49,15 @@ export function kickAudioSessionAfterCapture(): void {
 /**
  * Re-assert call routing after another app ducks or interrupts our session
  * (push notification sounds, banners, brief backgrounding).
+ *
+ * No "playback" hop here: field debugging (session 480e62/H53) confirmed the
+ * playback → auto → play-and-record sequence itself re-routed the call to the
+ * loudspeaker on iOS. auto → play-and-record is enough to re-kick routing.
  */
 export function recoverAudioSessionAfterInterruption(): void {
   if (typeof navigator === "undefined") return;
   const nav = navigator as AudioSessionNavigator;
   if (!nav.audioSession) return;
-  nav.audioSession.type = "playback";
   nav.audioSession.type = "auto";
   nav.audioSession.type = "play-and-record";
 }

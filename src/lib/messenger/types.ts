@@ -130,7 +130,14 @@ export interface DmDialogSummary {
   archivedAt: number | null;
 }
 
-export type CallSignalType = "offer" | "answer" | "ice" | "reject" | "end" | "busy";
+export type CallSignalType =
+  | "offer"
+  | "answer"
+  | "ice"
+  | "accept"
+  | "reject"
+  | "end"
+  | "busy";
 export type CallStatus = "ringing" | "connecting" | "active" | "ended";
 export type CallMediaMode = "audio" | "video";
 

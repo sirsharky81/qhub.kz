@@ -51,9 +51,6 @@ async function pushToPhone(
   payload: { title: string; body: string; url: string; action?: "messenger:message" | "messenger:call" },
 ): Promise<void> {
   const presence = await getMessengerPresence(recipientPhone);
-  // #region agent log
-  fetch('http://127.0.0.1:7377/ingest/122138cd-66a6-4400-a055-756aebd5d29d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'480e62'},body:JSON.stringify({sessionId:'480e62',runId:'pre-fix',hypothesisId:'H6',location:'push-notify.ts:pushToPhone',message:'Evaluating push suppression',data:{hasPresence:Boolean(presence),sameChannel:isViewingChannel(presence,channel),presenceAgeMs:presence?Date.now()-presence.at:null},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   if (presence && isViewingChannel(presence, channel)) {
     return;
   }

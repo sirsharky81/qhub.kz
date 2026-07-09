@@ -16,6 +16,7 @@ import {
   redisExpire,
   redisGet,
   redisGetJson,
+  redisIncr,
   redisLpush,
   redisLtrim,
   redisLrange,
@@ -37,6 +38,22 @@ function signalsKey(callId: string): string {
   return `${REDIS_CALL_PREFIX}${callId}:signals`;
 }
 
+function signalSeqKey(callId: string): string {
+  return `${REDIS_CALL_PREFIX}${callId}:seq`;
+}
+
+function offerSdpKey(callId: string): string {
+  return `${REDIS_CALL_PREFIX}${callId}:offer`;
+}
+
+function answerSdpKey(callId: string): string {
+  return `${REDIS_CALL_PREFIX}${callId}:answer`;
+}
+
+function acceptedKey(callId: string): string {
+  return `${REDIS_CALL_PREFIX}${callId}:accepted`;
+}
+
 function incomingKey(calleePhone: string): string {
   return `${REDIS_CALL_INCOMING_PREFIX}${calleePhone}`;
 }
@@ -53,11 +70,40 @@ async function touchCallKeys(callId: string, channel: string): Promise<void> {
   const ttl = callTtlSec();
   await redisExpire(callKey(callId), ttl);
   await redisExpire(signalsKey(callId), ttl);
+  await redisExpire(signalSeqKey(callId), ttl);
+  await redisExpire(offerSdpKey(callId), ttl);
+  await redisExpire(answerSdpKey(callId), ttl);
+  await redisExpire(acceptedKey(callId), ttl);
   await redisExpire(dmActiveKey(channel), ttl);
 }
 
+/**
+ * SDP lives in dedicated keys because the session JSON is updated with
+ * non-atomic read-modify-write: a concurrent offer + answer (or ICE) append
+ * could overwrite each other's session snapshot and silently drop offerSdp /
+ * answerSdp / the "connecting" status. Merging from dedicated keys makes the
+ * session view converge regardless of write ordering.
+ */
 export async function getCallSession(callId: string): Promise<CallSession | null> {
-  return redisGetJson<CallSession>(callKey(callId));
+  const session = await redisGetJson<CallSession>(callKey(callId));
+  if (!session) return null;
+
+  if (!session.offerSdp) {
+    const offer = await redisGet(offerSdpKey(callId));
+    if (offer) session.offerSdp = offer;
+  }
+  if (!session.answerSdp) {
+    const answer = await redisGet(answerSdpKey(callId));
+    if (answer) session.answerSdp = answer;
+  }
+  if (session.status === "ringing") {
+    // A concurrent stale write (e.g. offer resend racing an accept) can roll
+    // the status back to "ringing" — the dedicated keys are the truth.
+    if (session.answerSdp || (await redisGet(acceptedKey(callId)))) {
+      session.status = "connecting";
+    }
+  }
+  return session;
 }
 
 export async function getActiveCallForChannel(channel: string): Promise<CallSession | null> {
@@ -232,18 +278,25 @@ export async function appendCallSignal(params: {
     throw new CallStoreError("call_ended", 410);
   }
 
+  // Seq must be atomic: both peers append signals concurrently (ICE from each
+  // side, offer vs answer). A read-modify-write seq gave two signals the same
+  // number, and the client's `since=seq` cursor dropped one of them forever —
+  // lost ICE candidates (slow/failed connect) or a lost answer (phase desync).
+  const seq = await redisIncr(signalSeqKey(params.callId));
+
   const signal: CallSignal = {
     id: generateMessageId(),
     type: params.type,
     from: params.from,
     ts: Date.now(),
-    seq: session.signalSeq + 1,
+    seq,
     payload: params.payload,
   };
 
-  session.signalSeq = signal.seq;
+  session.signalSeq = Math.max(session.signalSeq, signal.seq);
   session.version += 1;
 
+  const ttlForSdp = callTtlSec();
   if (params.type === "reject" || params.type === "busy") {
     session.status = "ended";
     session.endedAt = Date.now();
@@ -259,10 +312,25 @@ export async function appendCallSignal(params: {
   } else if (params.type === "answer") {
     session.answerSdp = params.payload;
     session.status = "connecting";
+    if (params.payload) {
+      await redisSet(answerSdpKey(params.callId), params.payload, ttlForSdp);
+    }
     await clearIncomingForCallee(session.callee);
   } else if (params.type === "offer") {
     session.offerSdp = params.payload;
+    if (params.payload) {
+      await redisSet(offerSdpKey(params.callId), params.payload, ttlForSdp);
+    }
     // offer stays ringing until answer
+  } else if (params.type === "accept") {
+    // Callee tapped Accept: flip the session to "connecting" immediately so
+    // the caller's UI leaves "Звоним…" right away, without waiting for
+    // getUserMedia + ICE config + createAnswer to finish on the callee side.
+    if (session.status === "ringing") {
+      session.status = "connecting";
+    }
+    await redisSet(acceptedKey(params.callId), "1", ttlForSdp);
+    await clearIncomingForCallee(session.callee);
   }
 
   const ttl = callTtlSec();

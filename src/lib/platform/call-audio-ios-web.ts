@@ -12,12 +12,18 @@ export function supportsIosWebSinkId(): boolean {
 }
 
 /**
- * Use setSinkId when available on iOS Safari/PWA.
- * On newer iPhones this is more reliable than element-type routing (<audio>/<video>)
- * and avoids sticky earpiece output during video calls.
+ * setSinkId-based routing is DISABLED on iOS.
+ *
+ * Field debugging (июль 2026, session 480e62/H35) confirmed it is harmful in
+ * practice: iOS exposes outputs without readable labels, the device guess
+ * lands on "default" (= loudspeaker), setSinkId intermittently fails, and
+ * WebRTC remote tracks bypass HTMLMediaElement.setSinkId on iOS anyway
+ * (see livekit/client-sdk-js#1568). Disabling it restored video-call audio
+ * during those tests. Legacy element-type routing (<audio> + play-and-record
+ * = earpiece, direct stream on <video> = loudspeaker) is used instead.
  */
-export function useIosSinkIdCallRouting(): boolean {
-  return supportsIosWebSinkId();
+export function iosSinkIdCallRoutingEnabled(): boolean {
+  return false;
 }
 
 export async function findIosAudioOutputId(speaker: boolean): Promise<string | undefined> {
