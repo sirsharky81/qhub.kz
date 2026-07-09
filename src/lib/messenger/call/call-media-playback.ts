@@ -5,11 +5,26 @@ import {
 } from "@/lib/audio-session";
 import {
   applySinkIdToElement,
+  findIosAudioOutputId,
   iosSinkIdCallRoutingEnabled,
 } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 
 const CALL_MEDIA_ATTR = "data-qhub-call-media";
+
+/** Field diagnostics for iOS earpiece routing — server drops it unless AGENT_DEBUG=1. */
+function debugCallLog(tag: string, data: Record<string, unknown>): void {
+  try {
+    void fetch("/api/debug-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag, t: new Date().toISOString(), ...data }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // Diagnostics must never affect the call.
+  }
+}
 
 /** 16-byte silent WAV — unlocks iOS Safari audio element during user gesture. */
 const SILENT_WAV =
@@ -296,8 +311,49 @@ function mountLegacyRelayOutput(
   destroySpeakerElement();
   const el = earpieceEl ?? createEarpieceElement();
   el.srcObject = stream;
-  void applySinkIdToElement(el, false);
+  void applyEarpieceSinkWithDiagnostics(el);
   return el;
+}
+
+/** setSinkId(receiver) + field diagnostics of what iOS actually exposes. */
+async function applyEarpieceSinkWithDiagnostics(el: HTMLMediaElement): Promise<void> {
+  const sinkEl = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
+  const hasSetSinkId = typeof sinkEl.setSinkId === "function";
+  let outputs: Array<{ kind: string; label: string; id: string }> = [];
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    outputs = devices
+      .filter((d) => d.kind === "audiooutput")
+      .map((d) => ({ kind: d.kind, label: d.label ?? "", id: (d.deviceId ?? "").slice(0, 16) }));
+  } catch {
+    // enumerate failed — logged below with empty outputs.
+  }
+
+  let chosenId: string | undefined;
+  let applied = false;
+  let error = "";
+  try {
+    chosenId = await findIosAudioOutputId(false);
+    if (hasSetSinkId && chosenId !== undefined) {
+      await sinkEl.setSinkId!(chosenId);
+      applied = true;
+    }
+  } catch (err) {
+    error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  }
+
+  const session = (navigator as Navigator & { audioSession?: { type?: string; state?: string } })
+    .audioSession;
+  debugCallLog("earpiece_sink", {
+    hasSetSinkId,
+    outputs,
+    chosenId: chosenId?.slice(0, 16) ?? null,
+    applied,
+    error,
+    sessionType: session?.type ?? "unavailable",
+    sessionState: session?.state ?? "unavailable",
+    ua: navigator.userAgent.slice(0, 80),
+  });
 }
 
 /** Attach remote stream to the correct output element. Only one output element exists on iOS. */
