@@ -162,8 +162,14 @@ export default function Home() {
             Сделано с ❤️ в Казахстане.
           </p>
           <div className="flex gap-4">
+            <Link
+              href="/privacy"
+              className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
+            >
+              Конфиденциальность
+            </Link>
             <a
-              href="mailto:hello@qhub.kz"
+              href="mailto:qhub.kz@proton.me"
               className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
             >
               Контакты
