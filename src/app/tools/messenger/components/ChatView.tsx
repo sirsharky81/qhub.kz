@@ -31,6 +31,7 @@ import {
   type PlainMessage,
 } from "@/lib/messenger/crypto";
 import { senderColorClass, truncateQuote, messagePreview } from "@/lib/messenger/display";
+import { maskPhone } from "@/lib/messenger/phone-format";
 import {
   clearChatHistory,
   loadChatHistory,
@@ -133,7 +134,7 @@ export function ChatView({
   }, [messages]);
 
   const labelForPhone = useCallback(
-    (phone: string) => profileLabels[phone] ?? phone,
+    (phone: string) => profileLabels[phone] ?? maskPhone(phone),
     [profileLabels],
   );
 

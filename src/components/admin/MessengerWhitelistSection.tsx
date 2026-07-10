@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { WhitelistEntry } from "@/lib/messenger/types";
 import { maskPhone } from "@/lib/messenger/phone-format";
 
@@ -17,14 +17,6 @@ export function MessengerWhitelistSection() {
   const [phone, setPhone] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const phoneInputRef = useRef<HTMLInputElement>(null);
-  const scrollInputIntoView = useCallback(() => {
-    requestAnimationFrame(() => {
-      phoneInputRef.current?.scrollIntoView({ block: "center", inline: "nearest" });
-    });
-  }, []);
-
-
   const [inviteUrl, setInviteUrl] = useState(`https://qhub.kz${MESSENGER_ENTRY_PATH}`);
 
   const load = useCallback(async () => {
@@ -134,11 +126,9 @@ export function MessengerWhitelistSection() {
 
       <form onSubmit={handleAdd} className="p-4 flex flex-col sm:flex-row gap-2 border-b border-gray-100">
         <input
-          ref={phoneInputRef}
           type="tel"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
-          onFocus={scrollInputIntoView}
           placeholder="+7XXXXXXXXXX"
           className="flex-1 rounded-xl border border-gray-200 px-4 py-2 text-sm"
           style={{ fontSize: "16px" }}

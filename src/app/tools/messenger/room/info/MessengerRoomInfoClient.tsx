@@ -11,7 +11,7 @@ import {
   type RoomManageSnapshot,
 } from "@/lib/messenger/client";
 import { cleanupRoomLocalState } from "@/lib/messenger/dialogs";
-import { maskPhone } from "@/lib/messenger/phone-format";
+import { maskPhone, peerDisplayLabel } from "@/lib/messenger/phone-format";
 import { ChatInfoView } from "../../components/ChatInfoView";
 import { MessengerShell } from "../../components/MessengerShell";
 import { PinUnlockGate } from "../../components/PinUnlockGate";
@@ -28,7 +28,7 @@ function MessengerRoomInfoInner() {
   const [myPhone, setMyPhone] = useState("");
   const [snapshot, setSnapshot] = useState<RoomManageSnapshot | null>(null);
   const [profileMap, setProfileMap] = useState<
-    Record<string, { label: string; avatarUrl: string | null }>
+    Record<string, { label: string; displayName: string | null; avatarUrl: string | null }>
   >({});
   const [loading, setLoading] = useState(true);
 
@@ -77,7 +77,7 @@ function MessengerRoomInfoInner() {
   const canManage = snapshot?.actorRole === "owner" || snapshot?.actorRole === "admin";
   const participants = (snapshot?.participants ?? []).map((p) => ({
     phone: p.phone,
-    label: profileMap[p.phone]?.label ?? maskPhone(p.phone),
+    label: peerDisplayLabel(p.phone, profileMap[p.phone]?.displayName),
     role: p.role,
     online: p.online,
     avatarUrl: profileMap[p.phone]?.avatarUrl ?? null,

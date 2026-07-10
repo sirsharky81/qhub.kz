@@ -16,6 +16,8 @@ import {
 import { saveBase64Media } from "@/lib/messenger/files";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
 import { maskPhone } from "@/lib/messenger/phone-format";
+import { openExternalUrl } from "@/lib/platform/open-url";
+import { useCallOptional } from "./call/CallProvider";
 
 type TabId = "media" | "docs" | "links";
 
@@ -93,6 +95,7 @@ export function ChatInfoView({
   onLeaveRoom,
 }: Props) {
   const { storageKey, isUnlocked } = useMessengerUnlock();
+  const call = useCallOptional();
   const [tab, setTab] = useState<TabId>("media");
   const [items, setItems] = useState<HistoryMediaItem[]>([]);
   const [loadingMedia, setLoadingMedia] = useState(false);
@@ -164,6 +167,26 @@ export function ChatInfoView({
                 <p className="text-sm text-gray-600 mt-1 tabular-nums">{maskPhone(phone)}</p>
               )}
             </div>
+            {kind === "dm" && call && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={call.startAudioCall}
+                  disabled={call.isInCall}
+                  className="rounded-xl bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 disabled:opacity-40"
+                >
+                  Аудиозвонок
+                </button>
+                <button
+                  type="button"
+                  onClick={call.startVideoCall}
+                  disabled={call.isInCall}
+                  className="rounded-xl bg-sky-50 px-4 py-2 text-sm font-medium text-sky-700 disabled:opacity-40"
+                >
+                  Видеозвонок
+                </button>
+              </div>
+            )}
             {adminHref && (
               <Link
                 href={adminHref}
@@ -173,6 +196,25 @@ export function ChatInfoView({
               </Link>
             )}
           </section>
+
+          {kind === "dm" && phone && (
+            <section className="border-t border-gray-100 px-4 py-3">
+              <p className="mb-2 text-xs font-semibold text-gray-500">Контакт</p>
+              <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{maskPhone(phone)}</p>
+                  <p className="text-[11px] text-gray-400">{subtitle ?? "Контакт мессенджера"}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard.writeText(phone)}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600"
+                >
+                  Копировать
+                </button>
+              </div>
+            </section>
+          )}
 
           {kind === "room" && participants.length > 0 && (
             <section className="border-t border-gray-100 px-4 py-3">
@@ -282,16 +324,15 @@ export function ChatInfoView({
               <ul className="mt-3 divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden">
                 {activeList.map((item) => (
                   <li key={`${item.messageId}-${item.url}`}>
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block px-3 py-2.5 hover:bg-gray-50"
+                    <button
+                      type="button"
+                      onClick={() => item.url && void openExternalUrl(item.url)}
+                      className="block w-full px-3 py-2.5 text-left hover:bg-gray-50"
                     >
                       <p className="text-sm font-medium text-sky-700 truncate">{item.url}</p>
                       <p className="text-[11px] text-gray-400 truncate">{item.context}</p>
                       <p className="text-[11px] text-gray-400">{formatTs(item.ts)}</p>
-                    </a>
+                    </button>
                   </li>
                 ))}
               </ul>

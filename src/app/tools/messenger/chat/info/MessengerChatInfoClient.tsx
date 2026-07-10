@@ -9,10 +9,11 @@ import {
   fetchProfilesInfoMap,
 } from "@/lib/messenger/client";
 import { deriveDmChatId, normalizeKzPhone } from "@/lib/messenger/phone";
-import { maskPhone } from "@/lib/messenger/phone-format";
+import { maskPhone, peerDisplayLabel } from "@/lib/messenger/phone-format";
 import { ChatInfoView } from "../../components/ChatInfoView";
 import { MessengerShell } from "../../components/MessengerShell";
 import { PinUnlockGate } from "../../components/PinUnlockGate";
+import { CallProvider } from "../../components/call/CallProvider";
 
 function safeReturnTo(raw: string | null): string | null {
   if (!raw) return null;
@@ -58,7 +59,7 @@ function MessengerChatInfoInner() {
         ]);
         const info = profiles[peerPhone];
         if (!cancelled) {
-          setTitle(info?.label ?? maskPhone(peerPhone));
+          setTitle(peerDisplayLabel(peerPhone, info?.displayName));
           setAvatarUrl(info?.avatarUrl ?? null);
           setOnline(Boolean(contacts.find((c) => c.phone === peerPhone)?.online));
         }
@@ -85,16 +86,24 @@ function MessengerChatInfoInner() {
 
   return (
     <PinUnlockGate phone={myPhone} maskedPhone={maskPhone(myPhone)} title={title} backHref={backHref}>
-      <ChatInfoView
-        kind="dm"
-        title={title}
-        subtitle={online ? "в сети" : "не в сети"}
-        avatarUrl={avatarUrl}
+      <CallProvider
+        myPhone={myPhone}
+        peerPhone={peerPhone}
         channel={channel}
-        backHref={backHref}
-        phone={peerPhone}
-        seed={peerPhone}
-      />
+        peerTitle={title}
+        peerAvatarUrl={avatarUrl}
+      >
+        <ChatInfoView
+          kind="dm"
+          title={title}
+          subtitle={online ? "в сети" : "не в сети"}
+          avatarUrl={avatarUrl}
+          channel={channel}
+          backHref={backHref}
+          phone={peerPhone}
+          seed={peerPhone}
+        />
+      </CallProvider>
     </PinUnlockGate>
   );
 }

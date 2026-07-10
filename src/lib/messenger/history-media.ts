@@ -1,4 +1,5 @@
 import type { DecryptedHistoryMessage } from "./history-db";
+import { extractHttpLinks } from "./linkify";
 
 export type HistoryMediaBucket = "media" | "docs" | "links";
 
@@ -16,8 +17,6 @@ export interface HistoryMediaItem {
   url?: string;
   context?: string;
 }
-
-const URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+/gi;
 
 function isDocumentMime(mime?: string, filename?: string): boolean {
   const m = (mime ?? "").toLowerCase();
@@ -70,8 +69,7 @@ export function extractHistoryMedia(history: DecryptedHistoryMessage[]): History
     }
 
     if (msg.type === "text" && plain.text) {
-      const matches = plain.text.match(URL_RE) ?? [];
-      for (const url of matches) {
+      for (const url of extractHttpLinks(plain.text)) {
         items.push({
           messageId: msg.id,
           ts: msg.ts,

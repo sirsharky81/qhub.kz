@@ -398,12 +398,19 @@ export async function fetchProfilesMap(): Promise<Record<string, string>> {
 }
 
 export async function fetchProfilesInfoMap(): Promise<
-  Record<string, { label: string; avatarUrl: string | null }>
+  Record<string, { label: string; displayName: string | null; avatarUrl: string | null }>
 > {
   const contacts = await fetchContacts();
-  const map: Record<string, { label: string; avatarUrl: string | null }> = {};
+  const map: Record<
+    string,
+    { label: string; displayName: string | null; avatarUrl: string | null }
+  > = {};
   for (const c of contacts) {
-    map[c.phone] = { label: c.label, avatarUrl: c.avatarUrl ?? null };
+    map[c.phone] = {
+      label: c.label,
+      displayName: c.displayName,
+      avatarUrl: c.avatarUrl ?? null,
+    };
   }
   return map;
 }

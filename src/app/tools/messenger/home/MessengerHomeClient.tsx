@@ -19,7 +19,7 @@ import {
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import { saveLocalDialogs, syncRoomDialogs } from "@/lib/messenger/dialogs";
 import { loadChatHistory } from "@/lib/messenger/history-db";
-import { maskPhone } from "@/lib/messenger/phone-format";
+import { maskPhone, peerDisplayLabel } from "@/lib/messenger/phone-format";
 import { messagePreview, truncateQuote } from "@/lib/messenger/display";
 import { refreshAppBadge } from "@/lib/messenger/app-badge";
 import {
@@ -183,7 +183,7 @@ export function MessengerHomeClient() {
       mergedMap.set(item.chatId, {
         id: item.chatId,
         kind: "dm",
-        title: item.label,
+        title: peerDisplayLabel(item.peerPhone, item.displayName),
         peerPhone: item.peerPhone,
         displayName: item.displayName ?? undefined,
         avatarUrl: item.avatarUrl ?? null,

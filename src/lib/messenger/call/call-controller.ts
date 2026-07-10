@@ -19,6 +19,7 @@ import { normalizeKzPhone } from "../phone";
 import { refreshIosAudioOutputEnumeration } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
+import { CallScreenShare, canUseNativeScreenShare } from "./call-screen-share";
 import { watchCallAudioInterruptions } from "./call-audio-interruption";
 import {
   activateCallMediaSession,
@@ -50,7 +51,11 @@ import type { CallDebugInfo, CallEndReason, CallPhase, CallState, TransportPhase
 import type { CallPollResponse } from "./types";
 
 type Listener = (state: CallState) => void;
-type MediaListener = (media: { localStream: MediaStream | null; remoteStream: MediaStream | null }) => void;
+type MediaListener = (media: {
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  screenStream: MediaStream | null;
+}) => void;
 
 function describeError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -133,6 +138,8 @@ const INITIAL_STATE: CallState = {
   callMode: "audio",
   muted: false,
   videoEnabled: false,
+  screenSharing: false,
+  remoteScreenSharing: false,
   speakerOn: false,
   durationSec: 0,
   errorMessage: null,
@@ -157,6 +164,9 @@ export class CallController {
   private durationTimer: ReturnType<typeof setInterval> | null = null;
   private sinceSeq = 0;
   private localStream: MediaStream | null = null;
+  private remoteScreenStream: MediaStream | null = null;
+  private screenShare: CallScreenShare | null = null;
+  private cameraEnabledBeforeScreenShare = true;
   private lastSession: CallPollResponse["session"] | null = null;
   private sdpSyncInFlight = false;
   private sdpSyncStartedAt = 0;
@@ -181,6 +191,10 @@ export class CallController {
   private endedOnServer = new Set<string>();
   private pendingRemoteAnswer: string | null = null;
   private localMediaPromise: Promise<void> | null = null;
+  private cameraFacing: "user" | "environment" = "user";
+  private cameraSwitchInFlight = false;
+  private sawFirstLocalIce = false;
+  private sawFirstRemoteIce = false;
   /** Bumped on cleanup/reset — invalidates in-flight getUserMedia requests. */
   private mediaEpoch = 0;
   private catchUpPollTimers: ReturnType<typeof setTimeout>[] = [];
@@ -214,7 +228,11 @@ export class CallController {
 
   subscribeMedia(listener: MediaListener): () => void {
     this.mediaListeners.add(listener);
-    listener({ localStream: this.localStream, remoteStream: this.pc?.getRemoteStream() ?? null });
+    listener({
+      localStream: this.localStream,
+      remoteStream: this.pc?.getRemoteStream() ?? null,
+      screenStream: this.remoteScreenStream,
+    });
     return () => this.mediaListeners.delete(listener);
   }
 
@@ -230,6 +248,14 @@ export class CallController {
     return this.pc?.getRemoteStream() ?? null;
   }
 
+  getRemoteScreenStream(): MediaStream | null {
+    return this.remoteScreenStream;
+  }
+
+  canShareScreen(): boolean {
+    return canUseNativeScreenShare();
+  }
+
   exportCallJournal(): string {
     return this.journal.exportText();
   }
@@ -242,6 +268,7 @@ export class CallController {
     const payload = {
       localStream: this.localStream,
       remoteStream: this.pc?.getRemoteStream() ?? null,
+      screenStream: this.remoteScreenStream,
     };
     for (const listener of this.mediaListeners) listener(payload);
   }
@@ -419,6 +446,7 @@ export class CallController {
       const offerSdp = await this.pc!.createOffer({
         receiveVideo: callMode === "video",
       });
+      this.journal.record("OFFER_CREATED");
       this.localOfferSdp = offerSdp;
       this.patchDebug({ hasLocalOffer: true });
       this.setTransportPhase("offer_sent");
@@ -598,7 +626,7 @@ export class CallController {
       }
       try {
         const videoOnly = await this.captureUserMedia(
-          { audio: false, video: { width: 640, height: 360, frameRate: 15 } },
+          { audio: false, video: this.videoConstraints(this.cameraFacing) },
           12000,
           "get_user_media_video",
         );
@@ -630,6 +658,134 @@ export class CallController {
     }
     this.startVideoHealthWatch();
     this.patchPlaybackDebug();
+    this.emitMedia();
+  }
+
+  async switchCamera(): Promise<void> {
+    if (
+      this.cameraSwitchInFlight ||
+      this.state.callMode !== "video" ||
+      !this.state.videoEnabled ||
+      !this.localStream
+    ) {
+      return;
+    }
+
+    this.cameraSwitchInFlight = true;
+    const previousFacing = this.cameraFacing;
+    const nextFacing = previousFacing === "user" ? "environment" : "user";
+    const previousTracks = this.localStream.getVideoTracks();
+
+    try {
+      // Mobile WebKit/Chromium generally cannot open both physical cameras at
+      // once. Release only the video track; the live audio track and call
+      // audio session stay untouched.
+      for (const track of previousTracks) {
+        this.localStream.removeTrack(track);
+        track.stop();
+      }
+
+      const videoOnly = await this.captureUserMedia(
+        { audio: false, video: this.videoConstraints(nextFacing) },
+        12000,
+        "switch_camera",
+      );
+      const nextTrack = videoOnly.getVideoTracks()[0];
+      if (!nextTrack) throw new Error("camera_track_missing");
+
+      this.localStream.addTrack(nextTrack);
+      await this.pc?.attachLocalStream(this.localStream);
+      this.cameraFacing = nextFacing;
+      this.journal.record("CAMERA_SWITCH", nextFacing);
+      this.patchPlaybackDebug();
+      this.emitMedia();
+    } catch (err) {
+      this.patchDebug({ lastError: describeError(err) });
+      // Best-effort restore of the previous camera. Never reacquire audio here.
+      try {
+        const fallback = await this.captureUserMedia(
+          { audio: false, video: this.videoConstraints(previousFacing) },
+          12000,
+          "restore_camera",
+        );
+        const fallbackTrack = fallback.getVideoTracks()[0];
+        if (fallbackTrack && this.localStream) {
+          this.localStream.addTrack(fallbackTrack);
+          await this.pc?.attachLocalStream(this.localStream);
+          this.emitMedia();
+        }
+      } catch {
+        this.patch({ videoEnabled: false });
+      }
+      throw err;
+    } finally {
+      this.cameraSwitchInFlight = false;
+    }
+  }
+
+  async toggleScreenShare(): Promise<void> {
+    if (this.state.screenSharing) {
+      await this.stopScreenShare(true);
+      return;
+    }
+    if (
+      !this.canShareScreen() ||
+      this.state.callMode !== "video" ||
+      this.state.phase !== "active" ||
+      !this.state.callId
+    ) {
+      throw new Error("screen_share_unavailable");
+    }
+
+    this.ensureScreenShare();
+    this.cameraEnabledBeforeScreenShare = this.state.videoEnabled;
+    for (const track of this.localStream?.getVideoTracks() ?? []) {
+      track.enabled = false;
+    }
+    this.pc?.setVideoEnabled(false);
+    this.patch({ screenSharing: true, videoEnabled: false });
+    this.emitMedia();
+    try {
+      await this.screenShare!.startLocal();
+    } catch (err) {
+      this.restoreCameraAfterScreenShare();
+      throw err;
+    }
+  }
+
+  private ensureScreenShare(): void {
+    if (this.screenShare) return;
+    this.screenShare = new CallScreenShare(
+      (type, payload) => {
+        const callId = this.state.callId;
+        if (!callId) return;
+        void this.sendSignalReliable({ callId, type, payload });
+      },
+      (stream) => {
+        this.remoteScreenStream = stream;
+        this.patch({ remoteScreenSharing: Boolean(stream) });
+        this.emitMedia();
+      },
+      (active, error) => {
+        this.patch({ screenSharing: active });
+        if (!active) this.restoreCameraAfterScreenShare();
+        if (error) this.patchDebug({ lastError: error });
+      },
+    );
+  }
+
+  private async stopScreenShare(notifyPeer: boolean): Promise<void> {
+    await this.screenShare?.stopLocal(notifyPeer);
+    this.restoreCameraAfterScreenShare();
+  }
+
+  private restoreCameraAfterScreenShare(): void {
+    const shouldEnable = this.cameraEnabledBeforeScreenShare;
+    for (const track of this.localStream?.getVideoTracks() ?? []) {
+      track.enabled = shouldEnable && track.readyState === "live";
+    }
+    this.pc?.setVideoEnabled(shouldEnable);
+    this.patch({ screenSharing: false, videoEnabled: shouldEnable });
     this.emitMedia();
   }
 
@@ -891,11 +1047,21 @@ export class CallController {
     return stream;
   }
 
+  private videoConstraints(facingMode: "user" | "environment"): MediaTrackConstraints {
+    return {
+      facingMode: { ideal: facingMode },
+      width: { ideal: 640, max: 1280 },
+      height: { ideal: 360, max: 720 },
+      frameRate: { ideal: 15, max: 24 },
+    };
+  }
+
   private async acquireLocalMedia(options: {
     video: boolean;
     speakerOn: boolean;
   }): Promise<void> {
     prepareAudioSessionForCall();
+    this.journal.record("MEDIA_START", options.video ? "audio+video" : "audio");
     // A re-acquire (e.g. ensureLocalMedia on the answer path) must not orphan
     // a previous capture — its live tracks would keep the mic busy on iOS.
     const previousStream = this.localStream;
@@ -905,13 +1071,7 @@ export class CallController {
       noiseSuppression: true,
       autoGainControl: true,
     };
-    const videoConstraints = needVideo
-      ? {
-          width: { ideal: 640, max: 1280 },
-          height: { ideal: 360, max: 720 },
-          frameRate: { ideal: 15, max: 24 },
-        }
-      : false;
+    const videoConstraints = needVideo ? this.videoConstraints(this.cameraFacing) : false;
 
     // getUserMedia must be the first await after the user gesture on iOS.
     try {
@@ -948,6 +1108,10 @@ export class CallController {
     }
 
     await prepareCallAudioOutput({ speakerOn: options.speakerOn });
+    this.journal.record("MEDIA_READY", options.video ? "audio+video" : "audio", {
+      audioTracks: this.localStream.getAudioTracks().length,
+      videoTracks: this.localStream.getVideoTracks().length,
+    });
     kickAudioSessionAfterCapture();
     void refreshIosAudioOutputEnumeration();
     this.patchPlaybackDebug();
@@ -965,7 +1129,9 @@ export class CallController {
     this.sessionId = this.nextSessionId();
     this.setTransportPhase("new");
     this.journal.record("CREATE_PC");
+    this.journal.record("ICE_CONFIG_START");
     const { iceServers, turnSource } = await fetchIceServers();
+    this.journal.record("ICE_CONFIG_READY", turnSource ?? "stun");
     this.patchDebug({ turnSource, isCaller: this.isCaller });
     this.pc = new CallPeerConnection();
     this.pc.setCallMode(this.state.callMode);
@@ -976,6 +1142,7 @@ export class CallController {
     if (this.localStream) {
       await this.pc.attachLocalStream(this.localStream);
     }
+    this.journal.record("PC_READY");
     this.pc.setSpeakerphone(this.state.speakerOn);
     this.pc.setHandlers({
       onIceCandidate: (candidate) => {
@@ -1047,7 +1214,18 @@ export class CallController {
 
   private async sendSignalReliable(params: {
     callId: string;
-    type: "offer" | "answer" | "ice" | "accept" | "reject" | "end" | "busy";
+    type:
+      | "offer"
+      | "answer"
+      | "ice"
+      | "screen-offer"
+      | "screen-answer"
+      | "screen-ice"
+      | "screen-stop"
+      | "accept"
+      | "reject"
+      | "end"
+      | "busy";
     payload?: string;
   }): Promise<void> {
     const trackSdp = params.type === "offer" || params.type === "answer";
@@ -1141,6 +1319,7 @@ export class CallController {
         await this.setupPeerConnection();
       }
       const answerSdp = await this.pc!.createAnswer(offerPayload);
+      this.journal.record("ANSWER_CREATED");
       this.localAnswerSdp = answerSdp;
       this.patchDebug({ hasRemoteDescription: true, hasLocalAnswer: true });
       await this.flushPendingRemoteIce();
@@ -1387,6 +1566,7 @@ export class CallController {
       return;
     }
     this.clearIceTimeout();
+    this.journal.record("TRANSPORT_CONNECTED");
     this.clearRingTimeout();
     this.clearSetupWatchdog();
     getCallSounds().stop();
@@ -1590,6 +1770,10 @@ export class CallController {
   }
 
   private queueLocalIce(candidate: IceCandidatePayload): void {
+    if (!this.sawFirstLocalIce) {
+      this.sawFirstLocalIce = true;
+      this.journal.record("ICE_LOCAL_FIRST");
+    }
     this.iceOutBatch.push(candidate);
     if (!this.iceOutTimer) {
       // Short window: just enough to group the initial host-candidate burst
@@ -1626,6 +1810,10 @@ export class CallController {
   }
 
   private async applyRemoteIcePayloads(payload: string): Promise<void> {
+    if (!this.sawFirstRemoteIce) {
+      this.sawFirstRemoteIce = true;
+      this.journal.record("ICE_REMOTE_FIRST");
+    }
     for (const item of this.expandIcePayloads(payload)) {
       await this.bufferRemoteIce(item);
     }
@@ -1735,6 +1923,17 @@ export class CallController {
 
     if (type === "ice" && payload) {
       await this.applyRemoteIcePayloads(payload);
+    }
+
+    if (
+      type === "screen-offer" ||
+      type === "screen-answer" ||
+      type === "screen-ice" ||
+      type === "screen-stop"
+    ) {
+      this.ensureScreenShare();
+      await this.screenShare?.handleSignal(type, payload);
+      return;
     }
 
     if (type === "accept" && this.isCaller && this.state.phase === "outgoing") {
@@ -1887,6 +2086,11 @@ export class CallController {
     this.stopCallAudioWatch();
     getCallSounds().stop();
 
+    await this.screenShare?.close();
+    this.screenShare = null;
+    this.remoteScreenStream = null;
+    this.cameraEnabledBeforeScreenShare = true;
+
     if (this.iceOutTimer) {
       clearTimeout(this.iceOutTimer);
       this.iceOutTimer = null;
@@ -1906,6 +2110,10 @@ export class CallController {
     this.resendInFlight = false;
     this.sdpApplyInFlight = false;
     this.videoRecoveryInFlight = false;
+    this.cameraSwitchInFlight = false;
+    this.cameraFacing = "user";
+    this.sawFirstLocalIce = false;
+    this.sawFirstRemoteIce = false;
     this.pendingRemoteIce = [];
 
     this.pc?.close();
@@ -1947,6 +2155,10 @@ export class CallController {
     this.cleanupInFlight = false;
     this.pendingRemoteIce = [];
     this.videoRecoveryInFlight = false;
+    this.cameraSwitchInFlight = false;
+    this.cameraFacing = "user";
+    this.sawFirstLocalIce = false;
+    this.sawFirstRemoteIce = false;
     this.transportPhase = "new";
     this.sessionId = "s-init";
     this.journal.clear();

@@ -8,6 +8,10 @@ const ALLOWED_TYPES: CallSignalType[] = [
   "offer",
   "answer",
   "ice",
+  "screen-offer",
+  "screen-answer",
+  "screen-ice",
+  "screen-stop",
   "accept",
   "reject",
   "end",
@@ -55,7 +59,15 @@ export async function POST(request: Request) {
         ? body.payload.slice(0, 32_000)
         : undefined;
 
-    if ((type === "offer" || type === "answer" || type === "ice") && !payload) {
+    if (
+      (type === "offer" ||
+        type === "answer" ||
+        type === "ice" ||
+        type === "screen-offer" ||
+        type === "screen-answer" ||
+        type === "screen-ice") &&
+      !payload
+    ) {
       return NextResponse.json({ error: "Требуется payload" }, { status: 400 });
     }
 

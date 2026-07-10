@@ -7,7 +7,7 @@ import { MessengerShell } from "../components/MessengerShell";
 import { MessengerAvatar } from "../components/MessengerAvatar";
 import { fetchAccessCheck, fetchContacts } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
-import { maskPhone } from "@/lib/messenger/phone-format";
+import { maskPhone, peerDisplayLabel } from "@/lib/messenger/phone-format";
 import { onAppResume } from "@/lib/platform/app-resume";
 
 export function MessengerContactsClient() {
@@ -86,13 +86,15 @@ export function MessengerContactsClient() {
                 <div className="flex items-center gap-3">
                   <MessengerAvatar
                     src={c.avatarUrl}
-                    label={c.label}
+                    label={peerDisplayLabel(c.phone, c.displayName)}
                     size="sm"
                     seed={c.phone}
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium truncate">{c.label}</p>
+                      <p className="text-sm font-medium truncate">
+                        {peerDisplayLabel(c.phone, c.displayName)}
+                      </p>
                       <span
                         className={`h-2.5 w-2.5 shrink-0 rounded-full ${
                           c.online ? "bg-emerald-500" : "bg-gray-300"
@@ -100,7 +102,7 @@ export function MessengerContactsClient() {
                       />
                     </div>
                     <p className="text-xs text-gray-400">
-                      {c.displayName ? maskPhone(c.phone) : c.phone} {c.online ? "· в сети" : ""}
+                      {maskPhone(c.phone)} {c.online ? "· в сети" : ""}
                     </p>
                   </div>
                 </div>

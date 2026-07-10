@@ -70,6 +70,8 @@ export interface CallState {
   callMode: "audio" | "video";
   muted: boolean;
   videoEnabled: boolean;
+  screenSharing: boolean;
+  remoteScreenSharing: boolean;
   speakerOn: boolean;
   durationSec: number;
   errorMessage: string | null;

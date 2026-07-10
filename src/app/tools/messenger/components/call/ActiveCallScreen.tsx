@@ -8,9 +8,12 @@ import { CallStatusText } from "./CallStatusText";
 import {
   CameraIcon,
   CameraOffIcon,
+  FlipCameraIcon,
   MicIcon,
   MicOffIcon,
+  MoreIcon,
   PhoneDownIcon,
+  ScreenShareIcon,
   SpeakerIcon,
   SpeakerOffIcon,
 } from "./CallControlIcons";
@@ -34,8 +37,13 @@ interface Props {
   debug?: CallDebugInfo;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
+  screenStream: MediaStream | null;
   onToggleMute: () => void;
   onToggleVideo: () => void;
+  onSwitchCamera: () => Promise<void>;
+  canShareScreen?: boolean;
+  screenSharing?: boolean;
+  onToggleScreenShare?: () => Promise<void>;
   onToggleSpeaker: () => void;
   onHangup: () => void;
 }
@@ -162,8 +170,13 @@ export function ActiveCallScreen({
   debug,
   localStream,
   remoteStream,
+  screenStream,
   onToggleMute,
   onToggleVideo,
+  onSwitchCamera,
+  canShareScreen = false,
+  screenSharing = false,
+  onToggleScreenShare,
   onToggleSpeaker,
   onHangup,
 }: Props) {
@@ -173,15 +186,24 @@ export function ActiveCallScreen({
   const showDebugOverlay = process.env.NEXT_PUBLIC_MESSENGER_CALL_DEBUG_OVERLAY === "1";
   const localVideoTrack = localStream?.getVideoTracks()[0] ?? null;
   const remoteVideoTrack = remoteStream?.getVideoTracks()[0] ?? null;
+  const remoteScreenTrack = screenStream?.getVideoTracks()[0] ?? null;
+  const displayedRemoteTrack = remoteScreenTrack ?? remoteVideoTrack;
   const hasLocalVideo =
     isVideoCall &&
     videoEnabled &&
     Boolean(localVideoTrack && localVideoTrack.readyState === "live" && localVideoTrack.enabled);
   const hasRemoteVideo =
     isVideoCall &&
-    Boolean(remoteVideoTrack && remoteVideoTrack.readyState === "live" && !remoteVideoTrack.muted);
+    Boolean(
+      displayedRemoteTrack &&
+        displayedRemoteTrack.readyState === "live" &&
+        !displayedRemoteTrack.muted,
+    );
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null);
   const [remoteVideoEl, setRemoteVideoEl] = useState<HTMLVideoElement | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!localVideoEl) return;
@@ -190,13 +212,27 @@ export function ActiveCallScreen({
 
   useEffect(() => {
     if (!remoteVideoEl) return;
-    if (!hasRemoteVideo || !remoteVideoTrack) {
+    if (!hasRemoteVideo || !displayedRemoteTrack) {
       remoteVideoEl.srcObject = null;
       return;
     }
     // Video-only stream: keeps audio routing on call-media-playback elements (iOS).
-    remoteVideoEl.srcObject = new MediaStream([remoteVideoTrack]);
-  }, [hasRemoteVideo, remoteVideoTrack, remoteVideoEl]);
+    remoteVideoEl.srcObject = new MediaStream([displayedRemoteTrack]);
+  }, [displayedRemoteTrack, hasRemoteVideo, remoteVideoEl]);
+
+  const runMenuAction = async (action: () => Promise<void>) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await action();
+      setMoreOpen(false);
+    } catch {
+      setActionError("Не удалось выполнить действие");
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col text-white">
@@ -238,7 +274,12 @@ export function ActiveCallScreen({
           )}
           {isVideoCall && (
             <div className="absolute bottom-6 right-6 z-20 h-32 w-24 overflow-hidden rounded-xl border border-white/20 bg-black/80 shadow-lg">
-              {hasLocalVideo ? (
+              {screenSharing ? (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-2 text-center text-[11px] text-white/80">
+                  <ScreenShareIcon className="h-6 w-6" />
+                  Экран транслируется
+                </div>
+              ) : hasLocalVideo ? (
                 <video
                   ref={setLocalVideoEl}
                   autoPlay
@@ -267,7 +308,49 @@ export function ActiveCallScreen({
         className="relative px-4"
         style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}
       >
+        {isVideoCall && moreOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="Закрыть меню звонка"
+              className="fixed inset-0 z-30 cursor-default"
+              onClick={() => setMoreOpen(false)}
+            />
+            <div className="absolute bottom-full left-4 z-40 mb-3 w-64 overflow-hidden rounded-2xl bg-[#23313a] p-2 shadow-2xl ring-1 ring-white/15">
+              <button
+                type="button"
+                disabled={actionBusy || !videoEnabled || screenSharing}
+                onClick={() => void runMenuAction(onSwitchCamera)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm hover:bg-white/10 disabled:opacity-40"
+              >
+                <FlipCameraIcon className="h-5 w-5" />
+                Перевернуть камеру
+              </button>
+              {canShareScreen && onToggleScreenShare && (
+                <button
+                  type="button"
+                  disabled={actionBusy}
+                  onClick={() => void runMenuAction(onToggleScreenShare)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm hover:bg-white/10 disabled:opacity-40"
+                >
+                  <ScreenShareIcon className="h-5 w-5" />
+                  {screenSharing ? "Остановить демонстрацию" : "Поделиться экраном"}
+                </button>
+              )}
+              {actionError && <p className="px-3 py-2 text-xs text-red-300">{actionError}</p>}
+            </div>
+          </>
+        )}
         <div className="mx-auto flex max-w-md items-center justify-between rounded-full bg-[#1f2c34]/95 px-5 py-4 shadow-xl ring-1 ring-white/10 backdrop-blur">
+          {isVideoCall && (
+            <ControlButton
+              active={moreOpen || screenSharing}
+              label="Дополнительные действия"
+              onClick={() => setMoreOpen((value) => !value)}
+            >
+              <MoreIcon />
+            </ControlButton>
+          )}
           <ControlButton
             active={speakerOn}
             label={speakerOn ? "Выключить громкую связь" : "Включить громкую связь"}

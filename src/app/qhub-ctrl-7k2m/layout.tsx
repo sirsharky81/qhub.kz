@@ -24,6 +24,10 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#1e293b",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-visual",
 };
 
 export default function AdminPanelLayout({ children }: { children: ReactNode }) {

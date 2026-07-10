@@ -21,3 +21,8 @@ export function maskPhone(phone: string): string {
   const digits = m[1];
   return `+7${digits.slice(0, 3)}XXXX${digits.slice(-3)}`;
 }
+
+export function peerDisplayLabel(phone: string, displayName?: string | null): string {
+  const name = displayName?.trim();
+  return name || maskPhone(phone);
+}

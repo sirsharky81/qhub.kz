@@ -6,6 +6,7 @@ import type { DeliveryStatus } from "@/lib/messenger/types";
 import { useSwipeToReply } from "@/lib/messenger/use-swipe-to-reply";
 import { AudioMessagePlayer } from "./AudioMessagePlayer";
 import { VideoMessagePlayer } from "./VideoMessagePlayer";
+import { LinkifiedText } from "./LinkifiedText";
 
 export interface DisplayMessage {
   id: string;
@@ -163,7 +164,10 @@ export function MessageBubble({
               className="text-sm whitespace-pre-wrap break-all [overflow-wrap:anywhere] max-w-full select-text"
               style={{ WebkitUserSelect: "text", userSelect: "text" }}
             >
-              {message.plain?.text}
+              <LinkifiedText
+                text={message.plain?.text ?? ""}
+                linkClassName={message.mine ? "text-white" : "text-sky-700"}
+              />
             </p>
           )}
           {message.type === "image" && message.plain?.data && (

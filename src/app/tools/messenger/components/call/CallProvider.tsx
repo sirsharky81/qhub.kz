@@ -13,6 +13,8 @@ import {
 import { prepareAudioSessionForCall } from "@/lib/audio-session";
 import { getCallController } from "@/lib/messenger/call/call-controller";
 import { primeCallMediaPlayback } from "@/lib/messenger/call/call-media-playback";
+import { prefetchIceServers } from "@/lib/messenger/call/signaling-client";
+import { canUseNativeScreenShare } from "@/lib/messenger/call/call-screen-share";
 import type { CallState } from "@/lib/messenger/call/types";
 import { ActiveCallScreen } from "./ActiveCallScreen";
 import { IncomingCallOverlay } from "./IncomingCallOverlay";
@@ -26,6 +28,8 @@ interface CallContextValue {
   hangup: () => void;
   toggleMute: () => void;
   toggleVideo: () => void;
+  switchCamera: () => Promise<void>;
+  toggleScreenShare: () => Promise<void>;
   toggleSpeaker: () => void;
   isInCall: boolean;
 }
@@ -67,17 +71,25 @@ export function CallProvider({
   const [state, setState] = useState<CallState>(controllerRef.current.getState());
   const [localStream, setLocalStream] = useState<MediaStream | null>(controllerRef.current.getLocalStream());
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(controllerRef.current.getRemoteStream());
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(
+    controllerRef.current.getRemoteScreenStream(),
+  );
   const deepLinkHandled = useRef(false);
 
   useEffect(() => {
     const controller = controllerRef.current;
     controller.configure({ myPhone, peerPhone, channel });
+    // Warm TURN credentials while the user is reading the chat. Starting this
+    // only on the call-button gesture leaves a cold third-party request on the
+    // critical path, which can add several seconds to iPhone video calls.
+    prefetchIceServers();
     // Incoming discovery is owned by MessengerGlobalCallWatcher to avoid
     // dual polling races (/call/incoming + per-channel /call/poll).
     const unsubState = controller.subscribe(setState);
     const unsubMedia = controller.subscribeMedia((media) => {
       setLocalStream(media.localStream);
       setRemoteStream(media.remoteStream);
+      setScreenStream(media.screenStream);
     });
     return () => {
       unsubState();
@@ -142,6 +154,14 @@ export function CallProvider({
     void controllerRef.current.setVideoEnabled(!state.videoEnabled);
   }, [state.videoEnabled]);
 
+  const switchCamera = useCallback(() => {
+    return controllerRef.current.switchCamera();
+  }, []);
+
+  const toggleScreenShare = useCallback(() => {
+    return controllerRef.current.toggleScreenShare();
+  }, []);
+
   const toggleSpeaker = useCallback(() => {
     const nextSpeakerOn = !state.speakerOn;
     primeCallMediaPlayback(nextSpeakerOn);
@@ -158,10 +178,12 @@ export function CallProvider({
       hangup,
       toggleMute,
       toggleVideo,
+      switchCamera,
+      toggleScreenShare,
       toggleSpeaker,
       isInCall: state.phase !== "idle" && state.phase !== "ended",
     }),
-    [state, startAudioCall, startVideoCall, acceptCall, rejectCall, hangup, toggleMute, toggleVideo, toggleSpeaker],
+    [state, startAudioCall, startVideoCall, acceptCall, rejectCall, hangup, toggleMute, toggleVideo, switchCamera, toggleScreenShare, toggleSpeaker],
   );
 
   const showIncoming = state.phase === "incoming";
@@ -196,8 +218,13 @@ export function CallProvider({
           debug={state.debug}
           localStream={localStream}
           remoteStream={remoteStream}
+          screenStream={screenStream}
           onToggleMute={toggleMute}
           onToggleVideo={toggleVideo}
+          onSwitchCamera={switchCamera}
+          canShareScreen={canUseNativeScreenShare()}
+          screenSharing={state.screenSharing}
+          onToggleScreenShare={toggleScreenShare}
           onToggleSpeaker={toggleSpeaker}
           onHangup={hangup}
         />

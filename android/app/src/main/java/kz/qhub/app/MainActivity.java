@@ -18,6 +18,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(CallAudioPlugin.class);
+        registerPlugin(ScreenSharePlugin.class);
         registerPlugin(QHubAppPlugin.class);
         super.onCreate(savedInstanceState);
         captureFamilyLocateIntent(getIntent());
