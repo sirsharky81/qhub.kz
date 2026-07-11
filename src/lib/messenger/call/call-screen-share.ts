@@ -31,6 +31,57 @@ export function canUseNativeScreenShare(): boolean {
   return isNativePlatform() && getNativePlatform() === "android";
 }
 
+/** Extract Capacitor / Error code text for screen-share failures. */
+export function screenShareErrorCode(err: unknown): string {
+  if (!err) return "screen_share_error";
+  if (typeof err === "string") return err;
+  if (typeof err === "object") {
+    const obj = err as { code?: unknown; message?: unknown; errorMessage?: unknown };
+    const code = typeof obj.code === "string" ? obj.code : "";
+    const message =
+      typeof obj.message === "string"
+        ? obj.message
+        : typeof obj.errorMessage === "string"
+          ? obj.errorMessage
+          : "";
+    const raw = `${code} ${message}`.trim();
+    if (raw) return raw;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return String(err);
+}
+
+export function describeScreenShareError(err: unknown): string {
+  const raw = screenShareErrorCode(err).toLowerCase();
+  if (raw.includes("screen_share_cancelled") || raw.includes("cancelled")) {
+    return "Демонстрация отменена";
+  }
+  if (raw.includes("screen_share_service_timeout")) {
+    return "Не удалось подготовить сервис записи экрана";
+  }
+  if (raw.includes("screen_share_unavailable")) {
+    return "Демонстрация доступна только во время активного видеозвонка";
+  }
+  if (raw.includes("screen_share_already_active")) {
+    return "Демонстрация уже запущена";
+  }
+  if (raw.includes("not implemented") || raw.includes("unimplemented") || raw.includes("plugin_not")) {
+    return "Обновите приложение до последней версии";
+  }
+  if (
+    raw.includes("securityexception") ||
+    raw.includes("media projection") ||
+    raw.includes("foreground service") ||
+    raw.includes("screen_share_start_failed")
+  ) {
+    return "Не удалось начать запись экрана. Разрешите доступ и повторите";
+  }
+  if (raw.includes("screen_share_offer_failed") || raw.includes("screen_ice_failed")) {
+    return "Не удалось установить соединение для демонстрации экрана";
+  }
+  return "Не удалось начать демонстрацию экрана";
+}
+
 export class CallScreenShare {
   private nativeListener: PluginListenerHandle | null = null;
   private senderActive = false;
@@ -76,16 +127,24 @@ export class CallScreenShare {
       }
       if (event.type === "error") {
         this.senderActive = false;
-        this.onLocalState(false, event.message ?? "Не удалось начать демонстрацию экрана");
+        this.onLocalState(false, describeScreenShareError(event.message ?? "screen_share_error"));
       }
     });
 
     try {
       await NativeScreenShare.start({ iceServersJson: JSON.stringify(iceServers) });
+      // Native start now resolves only after the local offer is set. Ensure UI
+      // marks sharing active even if the signal event ordering races.
+      if (!this.senderActive) {
+        this.senderActive = true;
+        this.onLocalState(true);
+      }
     } catch (err) {
       await this.removeNativeListener();
-      this.onLocalState(false, err instanceof Error ? err.message : String(err));
-      throw err;
+      this.senderActive = false;
+      const message = describeScreenShareError(err);
+      this.onLocalState(false, message);
+      throw new Error(message);
     }
   }
 
