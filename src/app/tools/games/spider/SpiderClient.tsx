@@ -336,7 +336,7 @@ export default function SpiderClient() {
     <PdfToolLayout
       title="Пасьянс «Паук»"
       iconSrc="/tools/games/icon-192.png"
-      shellClassName="min-h-[100dvh] flex flex-col bg-gray-50 dark:bg-gray-950 max-sm:landscape:min-h-0 max-sm:landscape:h-[100dvh] max-sm:landscape:overflow-hidden [&>header]:max-sm:landscape:h-10 [&>header>div]:max-sm:landscape:h-10 [&>header>div]:max-sm:landscape:px-2"
+      shellClassName="min-h-[100dvh] flex flex-col bg-gray-50 dark:bg-gray-950 max-sm:landscape:min-h-0 max-sm:landscape:h-[100dvh] [&>header]:max-sm:landscape:h-10 [&>header>div]:max-sm:landscape:h-10 [&>header>div]:max-sm:landscape:px-2"
       badge={false}
     >
       <SpiderAnimationLayer items={flyItems} />
@@ -355,10 +355,10 @@ export default function SpiderClient() {
         />
       )}
 
-      <main className="flex-1 overflow-y-auto max-sm:landscape:overflow-hidden max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:min-h-0">
-        <div className="mx-auto w-full max-w-[1400px] px-2 sm:px-4 py-3 space-y-3 max-sm:landscape:flex-1 max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:min-h-0 max-sm:landscape:py-1 max-sm:landscape:px-1.5 max-sm:landscape:space-y-1">
+      <main className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
+        <div className="mx-auto w-full max-w-[1400px] px-2 sm:px-4 py-3 space-y-3 max-sm:landscape:py-1 max-sm:landscape:px-1.5 max-sm:landscape:space-y-1">
           {showGameBoard && state && (
-            <div className="max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:flex-1 max-sm:landscape:min-h-0 max-sm:landscape:space-y-1">
+            <div className="max-sm:landscape:space-y-1">
               <SpiderTopBar
                 state={state}
                 elapsed={elapsed}
@@ -371,7 +371,7 @@ export default function SpiderClient() {
               />
 
               <section
-                className="rounded-2xl border p-3 sm:p-5 space-y-4 shadow-[inset_0_2px_10px_rgba(0,0,0,0.04)] max-sm:landscape:flex-1 max-sm:landscape:flex max-sm:landscape:flex-col max-sm:landscape:min-h-0 max-sm:landscape:p-2 max-sm:landscape:space-y-1 max-sm:landscape:rounded-xl"
+                className="rounded-2xl border p-3 sm:p-5 space-y-4 shadow-[inset_0_2px_10px_rgba(0,0,0,0.04)] max-sm:landscape:p-2 max-sm:landscape:space-y-1 max-sm:landscape:rounded-xl"
                 style={{
                   backgroundColor: SPIDER_FELT,
                   borderColor: SPIDER_FELT_BORDER,
@@ -400,7 +400,7 @@ export default function SpiderClient() {
                   </p>
                 )}
 
-                <div className="min-w-0 max-sm:landscape:flex-1 max-sm:landscape:min-h-0">
+                <div className="min-w-0">
                   <SpiderTableau
                     columns={state.columns}
                     selection={selection}

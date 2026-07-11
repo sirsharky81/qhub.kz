@@ -75,12 +75,7 @@ export function SpiderTableau({
       } as React.CSSProperties);
 
   return (
-    <div
-      ref={hostRef}
-      className={
-        isLandscapePhone ? "h-full min-h-0 flex flex-col min-w-0" : "space-y-2"
-      }
-    >
+    <div ref={hostRef} className="space-y-2">
       {isTouch && !isLandscapePhone && (
         <p className="text-[11px] text-center text-emerald-950/85 sm:hidden px-2 leading-snug">
           {selection
@@ -91,19 +86,19 @@ export function SpiderTableau({
       <div
         className={
           isLandscapePhone
-            ? `spider-tableau flex-1 min-h-0 w-full overflow-y-auto overscroll-y-contain pb-1 pt-0.5 [-webkit-overflow-scrolling:touch] ${
+            ? `spider-tableau w-full overflow-y-visible pb-1 pt-0.5 ${
                 fitsWidth
                   ? "overflow-x-hidden"
-                  : "overflow-x-auto overscroll-x-contain"
+                  : "overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
               }`
-            : "spider-tableau w-full max-h-[calc(100dvh-17rem)] sm:max-h-[calc(100dvh-15rem)] overflow-x-auto overflow-y-auto pb-2 pt-1 overscroll-x-contain overscroll-y-contain [-webkit-overflow-scrolling:touch]"
+            : "spider-tableau w-full overflow-x-auto overflow-y-visible pb-2 pt-1 overscroll-x-contain [-webkit-overflow-scrolling:touch]"
         }
         style={cardStyle}
       >
         <div
           className={
             isLandscapePhone
-              ? `flex justify-between gap-[2px] h-full px-0.5 ${fitsWidth ? "w-full" : "min-w-full w-max"}`
+              ? `flex justify-between gap-[2px] px-0.5 ${fitsWidth ? "w-full" : "min-w-full w-max"}`
               : "flex justify-between gap-[2px] sm:gap-1 min-w-full w-max sm:w-full px-0.5"
           }
         >
