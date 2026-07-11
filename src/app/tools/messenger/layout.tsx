@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { MessengerAppUnlockGate } from "./components/MessengerAppUnlockGate";
 import { MessengerCallBootstrap } from "./components/MessengerCallBootstrap";
 import { MessengerPresenceHeartbeat } from "./components/MessengerPresenceHeartbeat";
 import { MessengerRealtimeBootstrap } from "./components/MessengerRealtimeBootstrap";
@@ -44,7 +45,7 @@ export default function MessengerLayout({ children }: { children: ReactNode }) {
       <MessengerRealtimeBootstrap />
       <MessengerCallBootstrap />
       <MessengerPresenceHeartbeat />
-      {children}
+      <MessengerAppUnlockGate>{children}</MessengerAppUnlockGate>
     </MessengerUnlockProvider>
   );
 }

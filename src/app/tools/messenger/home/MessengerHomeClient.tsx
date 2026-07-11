@@ -332,6 +332,7 @@ export function MessengerHomeClient() {
   );
 
   async function handleLogout() {
+    unlock?.lock();
     await logoutMessenger();
     router.replace("/tools/messenger/login");
   }

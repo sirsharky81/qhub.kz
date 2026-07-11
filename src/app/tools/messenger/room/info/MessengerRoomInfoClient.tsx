@@ -11,10 +11,9 @@ import {
   type RoomManageSnapshot,
 } from "@/lib/messenger/client";
 import { cleanupRoomLocalState } from "@/lib/messenger/dialogs";
-import { maskPhone, peerDisplayLabel } from "@/lib/messenger/phone-format";
+import { peerDisplayLabel } from "@/lib/messenger/phone-format";
 import { ChatInfoView } from "../../components/ChatInfoView";
 import { MessengerShell } from "../../components/MessengerShell";
-import { PinUnlockGate } from "../../components/PinUnlockGate";
 
 function MessengerRoomInfoInner() {
   const searchParams = useSearchParams();
@@ -84,25 +83,23 @@ function MessengerRoomInfoInner() {
   }));
 
   return (
-    <PinUnlockGate phone={myPhone} maskedPhone={maskPhone(myPhone)} title={title} backHref={backHref}>
-      <ChatInfoView
-        kind="room"
-        title={title}
-        subtitle={`Код ${roomId}`}
-        avatarUrl={snapshot?.avatarUrl ?? null}
-        channel={`room:${roomId}`}
-        backHref={backHref}
-        seed={roomId}
-        participants={participants}
-        adminHref={canManage ? `/tools/messenger/room/settings?id=${encodeURIComponent(roomId)}` : null}
-        onLeaveRoom={async () => {
-          if (participants.length > 1 && !window.confirm("Покинуть комнату?")) return;
-          await leaveRoomApi(roomId);
-          await cleanupRoomLocalState(roomId);
-          router.replace("/tools/messenger/home");
-        }}
-      />
-    </PinUnlockGate>
+    <ChatInfoView
+      kind="room"
+      title={title}
+      subtitle={`Код ${roomId}`}
+      avatarUrl={snapshot?.avatarUrl ?? null}
+      channel={`room:${roomId}`}
+      backHref={backHref}
+      seed={roomId}
+      participants={participants}
+      adminHref={canManage ? `/tools/messenger/room/settings?id=${encodeURIComponent(roomId)}` : null}
+      onLeaveRoom={async () => {
+        if (participants.length > 1 && !window.confirm("Покинуть комнату?")) return;
+        await leaveRoomApi(roomId);
+        await cleanupRoomLocalState(roomId);
+        router.replace("/tools/messenger/home");
+      }}
+    />
   );
 }
 

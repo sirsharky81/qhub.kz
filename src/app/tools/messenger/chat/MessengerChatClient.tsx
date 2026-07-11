@@ -6,7 +6,6 @@ import { ChatView } from "../components/ChatView";
 import { CallProvider } from "../components/call/CallProvider";
 import { DmWaitingView } from "../components/DmWaitingView";
 import { MessengerShell } from "../components/MessengerShell";
-import { PinUnlockGate } from "../components/PinUnlockGate";
 import { fetchAccessCheck, fetchPeerPublicKey, fetchProfilesInfoMap } from "@/lib/messenger/client";
 import { deriveDmAesKey, getOrCreateDeviceKeyPair } from "@/lib/messenger/crypto";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
@@ -52,7 +51,6 @@ function MessengerChatInner() {
   const router = useRouter();
   const peerPhone = normalizeKzPhone(decodeURIComponent(searchParams.get("peer") ?? ""));
   const [myPhone, setMyPhone] = useState("");
-  const [maskedPhone, setMaskedPhone] = useState("");
   const [aesKey, setAesKey] = useState<CryptoKey | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [checking, setChecking] = useState(false);
@@ -158,7 +156,6 @@ function MessengerChatInner() {
 
       const me = access.phone;
       setMyPhone(me);
-      setMaskedPhone(maskPhone(me));
 
       try {
         // Do not block first open on network-bound key publishing.
@@ -266,38 +263,36 @@ function MessengerChatInner() {
   const channel = deriveDmChatId(myPhone, peerPhone);
 
   return (
-    <PinUnlockGate phone={myPhone} maskedPhone={maskedPhone} title={peerTitle} backHref={backHref}>
-      <CallProvider
-        myPhone={myPhone}
-        peerPhone={peerPhone}
+    <CallProvider
+      myPhone={myPhone}
+      peerPhone={peerPhone}
+      channel={channel}
+      peerTitle={peerTitle}
+      peerAvatarUrl={peerAvatarUrl}
+      deepLinkCallId={deepLinkCallId}
+    >
+      <ChatView
         channel={channel}
-        peerTitle={peerTitle}
-        peerAvatarUrl={peerAvatarUrl}
-        deepLinkCallId={deepLinkCallId}
-      >
-        <ChatView
-          channel={channel}
-          title={peerTitle}
-          backHref={backHref}
-          myPhone={myPhone}
-          aesKey={aesKey}
-          avatarUrl={peerAvatarUrl}
-          profileLabels={profileLabels}
-          identityAlert={
-            identityAlert
-              ? {
-                  previousShort: identityAlert.previousFingerprint
-                    ? shortFingerprint(identityAlert.previousFingerprint)
-                    : null,
-                  currentShort: shortFingerprint(identityAlert.currentFingerprint),
-                }
-              : undefined
-          }
-          onTrustIdentity={identityAlert ? () => handleTrustIdentity() : undefined}
-          initialDraftText={draftText}
-        />
-      </CallProvider>
-    </PinUnlockGate>
+        title={peerTitle}
+        backHref={backHref}
+        myPhone={myPhone}
+        aesKey={aesKey}
+        avatarUrl={peerAvatarUrl}
+        profileLabels={profileLabels}
+        identityAlert={
+          identityAlert
+            ? {
+                previousShort: identityAlert.previousFingerprint
+                  ? shortFingerprint(identityAlert.previousFingerprint)
+                  : null,
+                currentShort: shortFingerprint(identityAlert.currentFingerprint),
+              }
+            : undefined
+        }
+        onTrustIdentity={identityAlert ? () => handleTrustIdentity() : undefined}
+        initialDraftText={draftText}
+      />
+    </CallProvider>
   );
 }
 

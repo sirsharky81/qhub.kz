@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
-import { PinUnlockGate } from "../components/PinUnlockGate";
 import {
   fetchAccessCheck,
   fetchProfile,
@@ -15,7 +14,6 @@ import {
 } from "@/lib/messenger/client";
 import { deriveRoomAesKeyFromCode, exportRoomKeyBase64Url, importRoomKeyBase64Url } from "@/lib/messenger/crypto";
 import { cleanupRoomLocalState, upsertLocalDialog } from "@/lib/messenger/dialogs";
-import { maskPhone } from "@/lib/messenger/phone-format";
 import { getRoomKey, setRoomKey } from "@/lib/messenger/room-keys";
 
 const ROOM_STEP_TIMEOUT_MS = 10_000;
@@ -285,26 +283,19 @@ function MessengerRoomInner() {
   }
 
   return (
-    <PinUnlockGate
-      phone={myPhone}
-      maskedPhone={maskPhone(myPhone)}
+    <ChatView
+      channel={`room:${roomId}`}
       title={roomTitle}
       backHref="/tools/messenger/home"
-    >
-      <ChatView
-        channel={`room:${roomId}`}
-        title={roomTitle}
-        backHref="/tools/messenger/home"
-        myPhone={myPhone}
-        aesKey={aesKey}
-        isRoom
-        roomId={roomId}
-        avatarUrl={roomAvatarUrl}
-        onLeaveRoom={handleLeaveRoom}
-        onRoomEnded={handleRoomEnded}
-        profileLabels={profileLabels}
-      />
-    </PinUnlockGate>
+      myPhone={myPhone}
+      aesKey={aesKey}
+      isRoom
+      roomId={roomId}
+      avatarUrl={roomAvatarUrl}
+      onLeaveRoom={handleLeaveRoom}
+      onRoomEnded={handleRoomEnded}
+      profileLabels={profileLabels}
+    />
   );
 }
 
