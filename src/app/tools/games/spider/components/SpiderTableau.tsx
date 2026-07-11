@@ -91,12 +91,12 @@ export function SpiderTableau({
       <div
         className={
           isLandscapePhone
-            ? `spider-tableau flex-1 min-h-0 w-full overflow-y-visible pb-1 pt-0.5 ${
+            ? `spider-tableau flex-1 min-h-0 w-full overflow-y-auto overscroll-y-contain pb-1 pt-0.5 [-webkit-overflow-scrolling:touch] ${
                 fitsWidth
                   ? "overflow-x-hidden"
-                  : "overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]"
+                  : "overflow-x-auto overscroll-x-contain"
               }`
-            : "spider-tableau w-full overflow-x-auto overflow-y-visible pb-2 pt-1 overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]"
+            : "spider-tableau w-full max-h-[calc(100dvh-17rem)] sm:max-h-[calc(100dvh-15rem)] overflow-x-auto overflow-y-auto pb-2 pt-1 overscroll-x-contain overscroll-y-contain [-webkit-overflow-scrolling:touch]"
         }
         style={cardStyle}
       >

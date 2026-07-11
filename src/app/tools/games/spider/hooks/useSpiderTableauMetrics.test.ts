@@ -28,4 +28,16 @@ describe("computeSpiderTableauMetrics", () => {
     const columnHeight = metrics.cardH + (18 - 1) * metrics.offset;
     expect(columnHeight).toBeLessThanOrEqual(220 + 2);
   });
+
+  it("fits very deep columns in a short landscape viewport", () => {
+    const metrics = computeSpiderTableauMetrics({
+      availableW: 720,
+      availableH: 250,
+      maxColumnDepth: 100,
+      preferredOffsetRatio: 0.28,
+    });
+
+    const columnHeight = metrics.cardH + (100 - 1) * metrics.offset;
+    expect(columnHeight).toBeLessThanOrEqual(250 + 2);
+  });
 });

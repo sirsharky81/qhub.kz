@@ -8,7 +8,8 @@ const COLUMN_COUNT = 10;
 const COLUMN_GAP = 2;
 const MIN_CARD_W = 26;
 const MAX_CARD_W = 92;
-const MIN_OFFSET_RATIO = 0.1;
+const MIN_CARD_H = 28;
+const MIN_OFFSET_RATIO = 0.04;
 
 export interface SpiderTableauMetrics {
   cardW: number;
@@ -61,7 +62,7 @@ export function computeSpiderTableauMetrics(options: {
 
   if (availableH > 0 && columnHeight > availableH) {
     const maxCardH = availableH / (1 + (depth - 1) * offsetRatio);
-    cardH = Math.max(36, maxCardH);
+    cardH = Math.max(MIN_CARD_H, maxCardH);
     cardW = Math.max(MIN_CARD_W, Math.min(maxCardWFromWidth, cardH / CARD_ASPECT));
     cardH = cardW * CARD_ASPECT;
     columnHeight = cardH + (depth - 1) * cardH * offsetRatio;
@@ -71,6 +72,15 @@ export function computeSpiderTableauMetrics(options: {
         MIN_OFFSET_RATIO,
         (availableH / cardH - 1) / (depth - 1),
       );
+      columnHeight = cardH + (depth - 1) * cardH * offsetRatio;
+    }
+
+    if (columnHeight > availableH && depth > 1) {
+      const targetCardH = availableH / (1 + (depth - 1) * offsetRatio);
+      cardH = Math.max(MIN_CARD_H, targetCardH);
+      cardW = Math.max(MIN_CARD_W, Math.min(maxCardWFromWidth, cardH / CARD_ASPECT));
+      cardH = cardW * CARD_ASPECT;
+      columnHeight = cardH + (depth - 1) * cardH * offsetRatio;
     }
   }
 
