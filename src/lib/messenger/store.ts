@@ -46,7 +46,7 @@ import {
   redisLtrim,
   redisSet,
 } from "./redis";
-import { normalizeKzPhone, peerFromDmChannel } from "./phone";
+import { canonicalDmChatId, deriveDmChatId, normalizeKzPhone, peerFromDmChannel } from "./phone";
 import { publishEnvelopesEvent } from "./realtime/publish";
 import { roomAvatarUrl, userAvatarUrl } from "./display";
 
@@ -455,7 +455,8 @@ export async function pushDmEnvelope(chatId: string, envelope: ChannelEnvelope):
 }
 
 export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise<void> {
-  const parts = chatId.split(":");
+  const canonicalId = canonicalDmChatId(chatId) ?? chatId;
+  const parts = canonicalId.split(":");
   if (parts.length !== 3 || parts[0] !== "dm") return;
   const a = normalizeKzPhone(parts[1] ?? "");
   const b = normalizeKzPhone(parts[2] ?? "");
@@ -463,9 +464,19 @@ export async function touchDmUserIndex(chatId: string, at = Date.now()): Promise
 
   const updateOne = async (me: string, peer: string) => {
     const existing = await loadDmUserIndex(me);
-    const prev = existing[chatId];
-    existing[chatId] = {
-      chatId,
+    const peerNorm = normalizeKzPhone(peer);
+    let prev = existing[canonicalId];
+    for (const [key, entry] of Object.entries(existing)) {
+      if (key === canonicalId) continue;
+      if (normalizeKzPhone(entry.peerPhone) === peerNorm) {
+        if (!prev || (entry.lastMessageAt ?? 0) > (prev.lastMessageAt ?? 0)) {
+          prev = { ...entry, chatId: canonicalId };
+        }
+        delete existing[key];
+      }
+    }
+    existing[canonicalId] = {
+      chatId: canonicalId,
       peerPhone: peer,
       lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, at),
       lastMessageType: prev?.lastMessageType ?? null,
@@ -489,8 +500,9 @@ export async function applyDmUnreadOnMessage(params: {
   ts: number;
   recipientViewingThisChat: boolean;
 }): Promise<void> {
-  const { chatId, senderPhone, type, ts, recipientViewingThisChat } = params;
-  const parts = chatId.split(":");
+  const canonicalId = canonicalDmChatId(params.chatId) ?? params.chatId;
+  const { senderPhone, type, ts, recipientViewingThisChat } = params;
+  const parts = canonicalId.split(":");
   if (parts.length !== 3 || parts[0] !== "dm") return;
   const a = normalizeKzPhone(parts[1] ?? "");
   const b = normalizeKzPhone(parts[2] ?? "");
@@ -508,10 +520,20 @@ export async function applyDmUnreadOnMessage(params: {
     lastMessageFromMe: boolean,
   ) => {
     const existing = await loadDmUserIndex(me);
-    const prev = existing[chatId];
+    const peerNorm = normalizeKzPhone(peer);
+    let prev = existing[canonicalId];
+    for (const [key, entry] of Object.entries(existing)) {
+      if (key === canonicalId) continue;
+      if (normalizeKzPhone(entry.peerPhone) === peerNorm) {
+        if (!prev || (entry.unreadCount ?? 0) > (prev.unreadCount ?? 0)) {
+          prev = { ...entry, chatId: canonicalId };
+        }
+        delete existing[key];
+      }
+    }
     const nextUnread = Math.max(0, (prev?.unreadCount ?? 0) + (incrementUnread ? 1 : 0));
-    existing[chatId] = {
-      chatId,
+    existing[canonicalId] = {
+      chatId: canonicalId,
       peerPhone: peer,
       lastMessageAt: Math.max(prev?.lastMessageAt ?? 0, ts),
       lastMessageType: type,
@@ -535,17 +557,20 @@ export async function applyDmUnreadOnMessage(params: {
 
 export async function markDmDialogRead(phone: string, chatId: string): Promise<void> {
   const me = normalizeKzPhone(phone);
+  const canonicalId = canonicalDmChatId(chatId) ?? chatId;
   const existing = await loadDmUserIndex(me);
-  const entry = existing[chatId];
+  const entry = existing[canonicalId] ?? existing[chatId];
   if (!entry) return;
-  existing[chatId] = {
+  existing[canonicalId] = {
     ...entry,
+    chatId: canonicalId,
     unreadCount: 0,
     latestUnreadAt: null,
     pinnedAt: entry.pinnedAt ?? null,
     pinOrder: entry.pinOrder ?? null,
     archivedAt: entry.archivedAt ?? null,
   };
+  if (chatId !== canonicalId) delete existing[chatId];
   await saveDmUserIndex(me, existing);
 }
 
@@ -636,12 +661,117 @@ export async function getDmDialogSummariesForUser(phone: string): Promise<DmDial
     await saveDmUserIndex(me, index);
   }
 
-  result.sort((a, b) => {
+  const deduped = dedupeDmDialogSummaries(result, me);
+  if (deduped.indexChanged) {
+    await saveDmUserIndex(me, deduped.index);
+  }
+
+  deduped.summaries.sort((a, b) => {
     const aPriority = a.latestUnreadAt ?? a.lastMessageAt;
     const bPriority = b.latestUnreadAt ?? b.lastMessageAt;
     return bPriority - aPriority;
   });
-  return result;
+  return deduped.summaries;
+}
+
+function mergeDmDialogSummary(
+  a: DmDialogSummary,
+  b: DmDialogSummary,
+  canonicalId: string,
+): DmDialogSummary {
+  const primary = a.lastMessageAt >= b.lastMessageAt ? a : b;
+  return {
+    chatId: canonicalId,
+    peerPhone: primary.peerPhone,
+    lastMessageAt: Math.max(a.lastMessageAt, b.lastMessageAt),
+    lastMessageType: primary.lastMessageType,
+    lastMessageFromMe: primary.lastMessageFromMe,
+    latestUnreadAt: Math.max(a.latestUnreadAt ?? 0, b.latestUnreadAt ?? 0) || null,
+    unreadCount: Math.max(a.unreadCount ?? 0, b.unreadCount ?? 0),
+    pinnedAt: Math.max(a.pinnedAt ?? 0, b.pinnedAt ?? 0) || null,
+    pinOrder: (a.pinOrder ?? 0) > (b.pinOrder ?? 0) ? a.pinOrder : b.pinOrder,
+    archivedAt: Math.max(a.archivedAt ?? 0, b.archivedAt ?? 0) || null,
+  };
+}
+
+function dedupeDmDialogSummaries(
+  summaries: DmDialogSummary[],
+  me: string,
+): { summaries: DmDialogSummary[]; index: Record<string, DmUserIndexEntry>; indexChanged: boolean } {
+  const byPeer = new Map<string, DmDialogSummary>();
+  for (const entry of summaries) {
+    const peer = normalizeKzPhone(entry.peerPhone);
+    const canonicalId = deriveDmChatId(me, peer);
+    const prev = byPeer.get(peer);
+    byPeer.set(peer, prev ? mergeDmDialogSummary(prev, entry, canonicalId) : { ...entry, chatId: canonicalId });
+  }
+
+  const deduped = Array.from(byPeer.values());
+  if (deduped.length === summaries.length) {
+    return { summaries: deduped, index: {}, indexChanged: false };
+  }
+
+  const index: Record<string, DmUserIndexEntry> = {};
+  for (const summary of deduped) {
+    index[summary.chatId] = {
+      chatId: summary.chatId,
+      peerPhone: summary.peerPhone,
+      lastMessageAt: summary.lastMessageAt,
+      lastMessageType: summary.lastMessageType,
+      lastMessageFromMe: summary.lastMessageFromMe,
+      unreadCount: summary.unreadCount,
+      latestUnreadAt: summary.latestUnreadAt,
+      pinnedAt: summary.pinnedAt,
+      pinOrder: summary.pinOrder,
+      archivedAt: summary.archivedAt,
+    };
+  }
+  return { summaries: deduped, index, indexChanged: true };
+}
+
+export async function hideDialogForUser(phone: string, dialogId: string): Promise<void> {
+  const me = normalizeKzPhone(phone);
+  const canonicalId =
+    dialogId.startsWith("dm:") ? (canonicalDmChatId(dialogId) ?? dialogId) : dialogId;
+
+  if (canonicalId.startsWith("dm:")) {
+    const peer = peerFromDmChannel(canonicalId, me);
+    const index = await loadDmUserIndex(me);
+    let changed = false;
+    if (peer) {
+      const peerNorm = normalizeKzPhone(peer);
+      for (const [key, entry] of Object.entries(index)) {
+        if (normalizeKzPhone(entry.peerPhone) === peerNorm || key === canonicalId || key === dialogId) {
+          delete index[key];
+          changed = true;
+        }
+      }
+    } else if (index[canonicalId] || index[dialogId]) {
+      delete index[canonicalId];
+      delete index[dialogId];
+      changed = true;
+    }
+    if (changed) await saveDmUserIndex(me, index);
+  } else if (canonicalId.startsWith("room:")) {
+    await removeRoomUserIndex(me, canonicalId.slice(5).toUpperCase());
+  }
+
+  const prefs = await loadDialogPrefs(me);
+  let prefsChanged = false;
+  for (const key of Object.keys(prefs)) {
+    if (key === canonicalId || key === dialogId) {
+      delete prefs[key];
+      prefsChanged = true;
+    }
+    if (canonicalId.startsWith("dm:")) {
+      const peer = peerFromDmChannel(canonicalId, me);
+      if (peer && key.startsWith("dm:") && peerFromDmChannel(key, me) === peer) {
+        delete prefs[key];
+        prefsChanged = true;
+      }
+    }
+  }
+  if (prefsChanged) await saveDialogPrefs(me, prefs);
 }
 
 export async function getDmMessagesSince(

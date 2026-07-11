@@ -15,7 +15,7 @@ import {
 import { notifyDmMessage, notifyRoomMessage, sanitizePushPreview } from "@/lib/messenger/push-notify";
 import { publishDialogUpdateEvent } from "@/lib/messenger/realtime/publish";
 import { getMessengerPresence, isViewingChannel } from "@/lib/messenger/push-store";
-import { peerFromDmChannel } from "@/lib/messenger/phone";
+import { canonicalDmChatId, peerFromDmChannel } from "@/lib/messenger/phone";
 import { trackMessengerApiRequest } from "@/lib/messenger/metrics";
 
 export async function POST(request: Request) {
@@ -58,11 +58,13 @@ export async function POST(request: Request) {
       return respond({ error: "Неверный формат" }, 400);
     }
 
-    const channel = body.channel ?? "";
-    if (!channel) {
+    const channelRaw = body.channel ?? "";
+    if (!channelRaw) {
       return respond({ error: "Укажите channel" }, 400);
     }
-    await assertChannelParticipant(phone, channel);
+    await assertChannelParticipant(phone, channelRaw);
+    const channel =
+      channelRaw.startsWith("dm:") ? (canonicalDmChatId(channelRaw) ?? channelRaw) : channelRaw;
 
     if (body.kind === "receipt") {
       const refMessageId = body.refMessageId ?? "";

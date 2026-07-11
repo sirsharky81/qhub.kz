@@ -17,7 +17,7 @@ import {
   updateDialogPrefs,
 } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
-import { saveLocalDialogs, syncRoomDialogs } from "@/lib/messenger/dialogs";
+import { dedupeDialogsByRecipient, hideMessengerDialog, saveLocalDialogs, syncRoomDialogs } from "@/lib/messenger/dialogs";
 import { loadChatHistory } from "@/lib/messenger/history-db";
 import { maskPhone, peerDisplayLabel } from "@/lib/messenger/phone-format";
 import { messagePreview, truncateQuote } from "@/lib/messenger/display";
@@ -90,7 +90,6 @@ function dmPreview(summary: DmDialogsResponseItem | undefined): string {
 }
 
 export function MessengerHomeClient() {
-  type DialogTab = "active" | "archived";
   const router = useRouter();
   const unlock = useMessengerUnlockOptional();
   const [dialogs, setDialogs] = useState<LocalDialog[]>([]);
@@ -99,7 +98,6 @@ export function MessengerHomeClient() {
   const [roomSummaries, setRoomSummaries] = useState<Record<string, RoomDialogsResponseItem>>({});
   const [localTextPreviewByChat, setLocalTextPreviewByChat] = useState<Record<string, string>>({});
   const [dialogPrefsMap, setDialogPrefsMap] = useState<Record<string, DialogPrefs>>({});
-  const [dialogTab, setDialogTab] = useState<DialogTab>("active");
   const [prefsError, setPrefsError] = useState<string | null>(null);
   const [longPressDialogId, setLongPressDialogId] = useState<string | null>(null);
   const [dmUnreadTotal, setDmUnreadTotal] = useState(0);
@@ -200,11 +198,14 @@ export function MessengerHomeClient() {
         createdAt: room.createdAt,
       });
     }
-    const merged = sortDialogsByPriority(
-      Array.from(mergedMap.values()),
-      summaryMap,
-      roomSummaryMap,
-      dialogPrefs,
+    const merged = dedupeDialogsByRecipient(
+      sortDialogsByPriority(
+        Array.from(mergedMap.values()),
+        summaryMap,
+        roomSummaryMap,
+        dialogPrefs,
+      ),
+      phone,
     );
     setDialogs(merged);
     saveLocalDialogs(merged);
@@ -364,14 +365,8 @@ export function MessengerHomeClient() {
     return dialogPrefsMap[d.id] ?? { pinnedAt: null, pinOrder: null, archivedAt: null };
   }
 
-  const visibleDialogs = dialogs.filter((d) => {
-    const archived = (dialogPrefsFor(d).archivedAt ?? 0) > 0;
-    return dialogTab === "archived" ? archived : !archived;
-  });
-  const pinnedActiveDialogs = dialogs.filter((d) => {
-    const prefs = dialogPrefsFor(d);
-    return (prefs.pinnedAt ?? 0) > 0 && (prefs.archivedAt ?? 0) <= 0;
-  });
+  const visibleDialogs = dialogs.filter((d) => (dialogPrefsFor(d).archivedAt ?? 0) <= 0);
+  const pinnedActiveDialogs = visibleDialogs.filter((d) => (dialogPrefsFor(d).pinnedAt ?? 0) > 0);
   const longPressDialog = longPressDialogId ? dialogs.find((d) => d.id === longPressDialogId) ?? null : null;
 
   async function handleTogglePin(dialog: LocalDialog) {
@@ -390,17 +385,19 @@ export function MessengerHomeClient() {
     await refreshDialogsAndUnread();
   }
 
-  async function handleToggleArchive(dialog: LocalDialog) {
+  async function handleDeleteDialog(dialog: LocalDialog) {
     setPrefsError(null);
-    const prefs = dialogPrefsFor(dialog);
-    const nextArchived = !(prefs.archivedAt && prefs.archivedAt > 0);
-    const result = await updateDialogPrefs({
-      dialogId: dialog.id,
-      archived: nextArchived,
-      pinned: nextArchived ? false : undefined,
-    });
-    if (!result.ok) {
-      setPrefsError(result.error ?? "Не удалось обновить архив");
+    const noun = dialog.kind === "room" ? "комнату" : "чат";
+    if (
+      !window.confirm(
+        `Удалить ${noun} «${dialog.title}» из списка? Локальная история на этом устройстве будет очищена.`,
+      )
+    ) {
+      return;
+    }
+    const res = await hideMessengerDialog(dialog, phone, unlock?.storageKey ?? null);
+    if (!res.ok) {
+      setPrefsError(res.error ?? "Не удалось удалить диалог");
       return;
     }
     await refreshDialogsAndUnread();
@@ -511,35 +508,17 @@ export function MessengerHomeClient() {
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <h2 className="text-xs font-mono uppercase tracking-wider text-gray-400">
-                  {dialogTab === "active" ? "Активные диалоги" : "Архив"}
+                  Активные диалоги
                 </h2>
-                {dialogTab === "active" && (
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                      pinnedActiveDialogs.length >= MESSENGER_MAX_PINNED_DIALOGS
-                        ? "border-amber-300 bg-amber-50 text-amber-700"
-                        : "border-gray-200 bg-gray-50 text-gray-500"
-                    }`}
-                  >
-                    Pin {pinnedActiveDialogs.length}/{MESSENGER_MAX_PINNED_DIALOGS}
-                  </span>
-                )}
-              </div>
-              <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setDialogTab("active")}
-                  className={`px-2.5 py-1 rounded-lg ${dialogTab === "active" ? "bg-gray-900 text-white" : "text-gray-600"}`}
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                    pinnedActiveDialogs.length >= MESSENGER_MAX_PINNED_DIALOGS
+                      ? "border-amber-300 bg-amber-50 text-amber-700"
+                      : "border-gray-200 bg-gray-50 text-gray-500"
+                  }`}
                 >
-                  Активные
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDialogTab("archived")}
-                  className={`px-2.5 py-1 rounded-lg ${dialogTab === "archived" ? "bg-gray-900 text-white" : "text-gray-600"}`}
-                >
-                  Архив
-                </button>
+                  Pin {pinnedActiveDialogs.length}/{MESSENGER_MAX_PINNED_DIALOGS}
+                </span>
               </div>
             </div>
             <ul className="divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white overflow-hidden">
@@ -603,7 +582,7 @@ export function MessengerHomeClient() {
                         >
                           Pin
                         </button>
-                        {dialogTab === "active" && pinned && (
+                        {pinned && (
                           <>
                             <button
                               type="button"
@@ -627,11 +606,12 @@ export function MessengerHomeClient() {
                         )}
                         <button
                           type="button"
-                          onClick={() => void handleToggleArchive(d)}
-                          className="rounded-lg bg-gray-100 px-2 py-1 text-[11px] text-gray-600"
-                          title={dialogTab === "archived" ? "Вернуть в активные" : "В архив"}
+                          onClick={() => void handleDeleteDialog(d)}
+                          className="rounded-lg bg-red-50 px-2 py-1 text-[11px] text-red-700"
+                          title="Удалить"
+                          aria-label="Удалить диалог"
                         >
-                          {dialogTab === "archived" ? "Вернуть" : "Архив"}
+                          ✕
                         </button>
                       </div>
                     </div>
@@ -640,7 +620,7 @@ export function MessengerHomeClient() {
               })}
               {visibleDialogs.length === 0 && (
                 <li className="px-4 py-6 text-center text-sm text-gray-400">
-                  {dialogTab === "archived" ? "Архив пуст" : "Нет активных диалогов"}
+                  Нет активных диалогов
                 </li>
               )}
             </ul>
@@ -667,7 +647,7 @@ export function MessengerHomeClient() {
                 >
                   {(dialogPrefsFor(longPressDialog).pinnedAt ?? 0) > 0 ? "Открепить" : "Закрепить"}
                 </button>
-                {dialogTab === "active" && (dialogPrefsFor(longPressDialog).pinnedAt ?? 0) > 0 && (
+                {(dialogPrefsFor(longPressDialog).pinnedAt ?? 0) > 0 && (
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -687,10 +667,10 @@ export function MessengerHomeClient() {
                 )}
                 <button
                   type="button"
-                  onClick={() => void runFromLongPress(() => handleToggleArchive(longPressDialog))}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700"
+                  onClick={() => void runFromLongPress(() => handleDeleteDialog(longPressDialog))}
+                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-left text-sm text-red-700"
                 >
-                  {dialogTab === "archived" ? "Вернуть в активные" : "В архив"}
+                  Удалить чат
                 </button>
                 <button
                   type="button"

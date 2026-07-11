@@ -233,6 +233,21 @@ export async function reorderPinnedDialogs(dialogIds: string[]): Promise<boolean
   return res.ok;
 }
 
+export async function deleteMessengerDialog(
+  dialogId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await platformFetch("/api/messenger/dialogs/delete", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dialogId }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  return {
+    ok: !!data.ok && res.ok,
+    error: typeof data.error === "string" ? data.error : undefined,
+  };
+}
+
 export async function sendTypingStatus(channel: string, active: boolean): Promise<void> {
   const realtime = getMessengerRealtimeClient();
   if (!realtime.shouldUsePollingFallback()) {

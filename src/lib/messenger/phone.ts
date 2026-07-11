@@ -31,6 +31,17 @@ export function deriveDmChatId(phoneA: string, phoneB: string): string {
   return `dm:${sorted[0]}:${sorted[1]}`;
 }
 
+/** Canonical dm channel id regardless of phone order in the string. */
+export function canonicalDmChatId(channel: string): string | null {
+  if (!channel.startsWith("dm:")) return null;
+  const parts = channel.split(":");
+  if (parts.length !== 3) return null;
+  const a = normalizeKzPhone(parts[1] ?? "");
+  const b = normalizeKzPhone(parts[2] ?? "");
+  if (!a || !b) return null;
+  return deriveDmChatId(a, b);
+}
+
 export function peerFromDmChannel(channel: string, myPhone: string): string | null {
   if (!channel.startsWith("dm:")) return null;
   const parts = channel.split(":");

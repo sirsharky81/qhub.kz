@@ -131,7 +131,6 @@ describe("messenger dm unread cursor", () => {
       },
     };
     await redisSet(dmIndexKey(me), JSON.stringify(meIndex));
-    await touchDmUserIndex(chatId, 3900);
 
     await pushDmEnvelope(chatId, {
       kind: "message",
@@ -226,6 +225,23 @@ describe("messenger dm unread cursor", () => {
     expect(await countPinnedDialogs(me)).toBe(2);
 
     await cleanupDmKeys(chat2, me, peer2);
+  });
+
+  it("dedupes reversed dm channel ids for the same peer", async () => {
+    const reversedChatId = `dm:${peer}:${me}`;
+    await cleanupDmKeys(reversedChatId, me, peer);
+
+    await touchDmUserIndex(chatId, 8000);
+    await touchDmUserIndex(reversedChatId, 8100);
+
+    const summaries = await getDmDialogSummariesForUser(me);
+    const forPeer = summaries.filter((d) => d.peerPhone === peer);
+    expect(forPeer).toHaveLength(1);
+    expect(forPeer[0]?.chatId).toBe(chatId);
+
+    const index = await redisGetJson<Record<string, unknown>>(dmIndexKey(me));
+    expect(index?.[reversedChatId]).toBeUndefined();
+    expect(index?.[chatId]).toBeDefined();
   });
 });
 
