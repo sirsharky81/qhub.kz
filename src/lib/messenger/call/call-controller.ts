@@ -19,7 +19,7 @@ import { normalizeKzPhone } from "../phone";
 import { refreshIosAudioOutputEnumeration } from "@/lib/platform/call-audio-ios-web";
 import { isIOSDevice } from "@/lib/platform/device";
 import { getCallSounds } from "./call-sounds";
-import { CallScreenShare, canUseNativeScreenShare, describeScreenShareError } from "./call-screen-share";
+import { CallScreenShare, canUseNativeScreenShare } from "./call-screen-share";
 import { watchCallAudioInterruptions } from "./call-audio-interruption";
 import {
   activateCallMediaSession,
@@ -734,7 +734,7 @@ export class CallController {
       this.state.phase !== "active" ||
       !this.state.callId
     ) {
-      throw new Error(describeScreenShareError("screen_share_unavailable"));
+      throw new Error("screen_share_unavailable");
     }
 
     this.ensureScreenShare();
@@ -743,14 +743,13 @@ export class CallController {
       track.enabled = false;
     }
     this.pc?.setVideoEnabled(false);
-    // Do not mark screenSharing until native start succeeds (offer ready).
-    this.patch({ videoEnabled: false });
+    this.patch({ screenSharing: true, videoEnabled: false });
     this.emitMedia();
     try {
       await this.screenShare!.startLocal();
     } catch (err) {
       this.restoreCameraAfterScreenShare();
-      throw err instanceof Error ? err : new Error(describeScreenShareError(err));
+      throw err;
     }
   }
 

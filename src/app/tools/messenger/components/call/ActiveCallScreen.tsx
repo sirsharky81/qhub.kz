@@ -2,7 +2,6 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { getCallController } from "@/lib/messenger/call/call-controller";
-import { describeScreenShareError } from "@/lib/messenger/call/call-screen-share";
 import type { CallDebugInfo } from "@/lib/messenger/call/types";
 import { MessengerAvatar } from "../MessengerAvatar";
 import { CallStatusText } from "./CallStatusText";
@@ -228,12 +227,8 @@ export function ActiveCallScreen({
     try {
       await action();
       setMoreOpen(false);
-    } catch (err) {
-      const message =
-        err instanceof Error && err.message.trim()
-          ? err.message
-          : describeScreenShareError(err);
-      setActionError(message || "Не удалось выполнить действие");
+    } catch {
+      setActionError("Не удалось выполнить действие");
     } finally {
       setActionBusy(false);
     }
@@ -334,7 +329,7 @@ export function ActiveCallScreen({
               {canShareScreen && onToggleScreenShare && (
                 <button
                   type="button"
-                  disabled={actionBusy || (!screenSharing && phase !== "active")}
+                  disabled={actionBusy}
                   onClick={() => void runMenuAction(onToggleScreenShare)}
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm hover:bg-white/10 disabled:opacity-40"
                 >

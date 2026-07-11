@@ -13,8 +13,6 @@ import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
 public class ScreenShareService extends Service {
-    public static final String ACTION_READY = "kz.qhub.app.SCREEN_SHARE_SERVICE_READY";
-
     private static final String CHANNEL_ID = "qhub_screen_share";
     private static final int NOTIFICATION_ID = 4102;
 
@@ -52,13 +50,6 @@ public class ScreenShareService extends Service {
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
-
-        // Signal the plugin only after we are actually in the foreground so
-        // MediaProjection / ScreenCapturerAndroid is legal on Android 14+.
-        Intent ready = new Intent(ACTION_READY);
-        ready.setPackage(getPackageName());
-        sendBroadcast(ready);
-
         return START_NOT_STICKY;
     }
 

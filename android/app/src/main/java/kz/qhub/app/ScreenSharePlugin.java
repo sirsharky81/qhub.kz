@@ -1,13 +1,10 @@
 package kz.qhub.app;
 
 import android.app.Activity;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
@@ -29,6 +26,7 @@ import org.webrtc.EglBase;
 import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
 import org.webrtc.MediaStream;
+import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.RtpReceiver;
@@ -43,14 +41,9 @@ import org.webrtc.VideoTrack;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @CapacitorPlugin(name = "ScreenShare")
 public class ScreenSharePlugin extends Plugin {
-    private static final long SERVICE_READY_TIMEOUT_MS = 3000;
-
     private PeerConnectionFactory factory;
     private PeerConnection peerConnection;
     private EglBase eglBase;
@@ -62,7 +55,6 @@ public class ScreenSharePlugin extends Plugin {
     private boolean remoteDescriptionSet;
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
     private List<PeerConnection.IceServer> pendingIceServers = Collections.emptyList();
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @PluginMethod
     public void start(PluginCall call) {
@@ -94,65 +86,21 @@ public class ScreenSharePlugin extends Plugin {
             return;
         }
 
-        final CountDownLatch readyLatch = new CountDownLatch(1);
-        final AtomicBoolean receiverRegistered = new AtomicBoolean(false);
-        final BroadcastReceiver readyReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                readyLatch.countDown();
-            }
-        };
-
-        IntentFilter filter = new IntentFilter(ScreenShareService.ACTION_READY);
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                getContext().registerReceiver(readyReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                getContext().registerReceiver(readyReceiver, filter);
-            }
-            receiverRegistered.set(true);
-        } catch (Exception err) {
-            call.reject("screen_share_start_failed", err);
-            return;
-        }
-
         Intent serviceIntent = new Intent(getContext(), ScreenShareService.class);
         ContextCompat.startForegroundService(getContext(), serviceIntent);
 
-        new Thread(() -> {
-            boolean ready = false;
+        // The foreground service must enter startForeground before WebRTC asks
+        // MediaProjectionManager for the one-shot token (Android 14+).
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
             try {
-                ready = readyLatch.await(SERVICE_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
+                startCapture(data);
+                call.resolve();
+            } catch (Exception err) {
+                stopInternal(false);
+                call.reject("screen_share_start_failed", err);
+                emitError(err.getMessage());
             }
-
-            final boolean serviceReady = ready;
-            mainHandler.post(() -> {
-                if (receiverRegistered.get()) {
-                    try {
-                        getContext().unregisterReceiver(readyReceiver);
-                    } catch (Exception ignored) {
-                        // Already unregistered or context gone.
-                    }
-                    receiverRegistered.set(false);
-                }
-
-                if (!serviceReady) {
-                    stopInternal(false);
-                    call.reject("screen_share_service_timeout");
-                    return;
-                }
-
-                try {
-                    startCapture(data, call);
-                } catch (Exception err) {
-                    stopInternal(false);
-                    call.reject("screen_share_start_failed", err);
-                    emitError(err.getMessage());
-                }
-            });
-        }, "qhub-screen-share-ready").start();
+        }, 250);
     }
 
     @PluginMethod
@@ -226,7 +174,7 @@ public class ScreenSharePlugin extends Plugin {
         }
     }
 
-    private void startCapture(Intent projectionData, PluginCall call) throws Exception {
+    private void startCapture(Intent projectionData) throws Exception {
         stopping = false;
         remoteDescriptionSet = false;
         pendingRemoteCandidates.clear();
@@ -267,10 +215,7 @@ public class ScreenSharePlugin extends Plugin {
         peerConnection.createOffer(new SdpObserver() {
             @Override
             public void onCreateSuccess(SessionDescription description) {
-                if (peerConnection == null) {
-                    call.reject("screen_share_offer_failed");
-                    return;
-                }
+                if (peerConnection == null) return;
                 peerConnection.setLocalDescription(new SdpObserver() {
                     @Override
                     public void onSetSuccess() {
@@ -278,38 +223,17 @@ public class ScreenSharePlugin extends Plugin {
                         payload.put("type", "offer");
                         payload.put("sdp", description.description);
                         emitSignal("offer", payload.toString());
-                        call.resolve();
                     }
 
-                    @Override
-                    public void onSetFailure(String error) {
-                        stopInternal(false);
-                        call.reject("screen_share_offer_failed", error);
-                        emitError(error);
-                    }
-
+                    @Override public void onSetFailure(String error) { emitError(error); }
                     @Override public void onCreateSuccess(SessionDescription ignored) {}
-                    @Override public void onCreateFailure(String error) {
-                        stopInternal(false);
-                        call.reject("screen_share_offer_failed", error);
-                        emitError(error);
-                    }
+                    @Override public void onCreateFailure(String error) { emitError(error); }
                 }, description);
             }
 
-            @Override
-            public void onCreateFailure(String error) {
-                stopInternal(false);
-                call.reject("screen_share_offer_failed", error);
-                emitError(error);
-            }
-
+            @Override public void onCreateFailure(String error) { emitError(error); }
             @Override public void onSetSuccess() {}
-            @Override public void onSetFailure(String error) {
-                stopInternal(false);
-                call.reject("screen_share_offer_failed", error);
-                emitError(error);
-            }
+            @Override public void onSetFailure(String error) { emitError(error); }
         }, constraints);
     }
 
