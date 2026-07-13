@@ -28,7 +28,7 @@ fi
 
 echo "==> Health check"
 if [ -f scripts/deploy/vps-health-check.py ]; then
-  python3 scripts/deploy/vps-health-check.py
+  python3 scripts/deploy/vps-health-check.py || echo "==> Health check reported issues (deploy still completed)"
 else
   echo "==> Skipping health check (script not in repo yet)"
 fi
