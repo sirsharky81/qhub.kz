@@ -27,6 +27,10 @@ else
 fi
 
 echo "==> Health check"
-python3 scripts/deploy/vps-health-check.py
+if [ -f scripts/deploy/vps-health-check.py ]; then
+  python3 scripts/deploy/vps-health-check.py
+else
+  echo "==> Skipping health check (script not in repo yet)"
+fi
 
 echo "==> Deployed: $(git log -1 --oneline)"
