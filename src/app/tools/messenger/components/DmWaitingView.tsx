@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { chatWallpaperStyle } from "./chat-wallpaper";
 import { MessengerShell } from "./MessengerShell";
 
 interface Props {
@@ -12,7 +13,10 @@ interface Props {
 export function DmWaitingView({ peerTitle, checking, onCheckNow }: Props) {
   return (
     <MessengerShell variant="chat" title={peerTitle} backHref="/tools/messenger/home">
-      <div className="flex-1 flex flex-col items-center justify-center px-6 py-10 text-center">
+      <div
+        className="flex-1 flex flex-col items-center justify-center px-6 py-10 text-center"
+        style={chatWallpaperStyle}
+      >
         <div className="flex items-center gap-2 text-sm text-sky-700 mb-6">
           <span className="relative flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-60" />

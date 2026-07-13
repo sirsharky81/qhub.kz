@@ -54,6 +54,7 @@ import { useCallOptional } from "./call/CallProvider";
 import { DmCallHeaderButton } from "./call/DmCallHeaderButton";
 import { getMessengerRealtimeClient } from "@/lib/messenger/realtime/client";
 import { normalizeKzPhone, peerFromDmChannel } from "@/lib/messenger/phone";
+import { chatWallpaperStyle } from "./chat-wallpaper";
 
 interface Props {
   channel: string;
@@ -937,7 +938,7 @@ export function ChatView({
   if (!historyLoaded) {
     return (
       <MessengerShell variant="chat" title={title} backHref={backHref} leading={headerAvatar}>
-        <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-sm text-gray-500" style={chatWallpaperStyle}>
           Загрузка истории…
         </div>
       </MessengerShell>
@@ -958,10 +959,7 @@ export function ChatView({
           ref={listRef}
           className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 min-w-0 py-3 space-y-2 overscroll-y-contain touch-pan-y relative"
           style={{
-            backgroundColor: "#eceff1",
-            backgroundImage:
-              "radial-gradient(circle at 1px 1px, rgb(15 23 42 / 0.035) 1px, transparent 0)",
-            backgroundSize: "18px 18px",
+            ...chatWallpaperStyle,
             WebkitOverflowScrolling: "touch",
           }}
         >

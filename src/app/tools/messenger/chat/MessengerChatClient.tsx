@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { CallProvider } from "../components/call/CallProvider";
 import { DmWaitingView } from "../components/DmWaitingView";
+import { chatWallpaperStyle } from "../components/chat-wallpaper";
 import { MessengerShell } from "../components/MessengerShell";
 import { fetchAccessCheck, fetchPeerPublicKey, fetchProfilesInfoMap } from "@/lib/messenger/client";
 import { deriveDmAesKey, getOrCreateDeviceKeyPair } from "@/lib/messenger/crypto";
@@ -253,7 +254,7 @@ function MessengerChatInner() {
   if (phase === "loading" || !aesKey || !myPhone) {
     return (
       <MessengerShell variant="chat" title={peerTitle} backHref={backHref}>
-        <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-sm text-gray-500" style={chatWallpaperStyle}>
           Подготовка защищённого канала…
         </div>
       </MessengerShell>
