@@ -25,18 +25,21 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy on VPS
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.1
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script_stop: true
-          command_timeout: 30m
-          script: |
-            set -euo pipefail
-            cd /var/www/qhub.kz
-            git fetch origin main
-            git reset --hard origin/main
-            sed -i 's/\r$//' scripts/deploy/vps-deploy.sh
-            bash scripts/deploy/vps-deploy.sh
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add VPS host key
+        run: ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on VPS
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
+          set -euo pipefail
+          cd /var/www/qhub.kz
+          git fetch origin main
+          git reset --hard origin/main
+          sed -i 's/\r$//' scripts/deploy/vps-deploy.sh
+          bash scripts/deploy/vps-deploy.sh
+          EOF
