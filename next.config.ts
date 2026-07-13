@@ -39,14 +39,15 @@ const sharedConfig: NextConfig = {
         permanent: false,
       },
       {
-        source: "/tools/messenger/chat/:peerId",
+        // Legacy /chat/:peerPhone links — do not hijack /chat/info (contact card).
+        source: "/tools/messenger/chat/:peerId((?!info$).+)",
         destination: "/tools/messenger/chat?peer=:peerId",
         permanent: false,
       },
       {
         // Keep legacy room links working, but do not hijack real subroutes:
-        // /tools/messenger/room/create, /tools/messenger/room/join, /tools/messenger/room/settings.
-        source: "/tools/messenger/room/:roomId((?!create$|join$|settings$).+)",
+        // /tools/messenger/room/create, /tools/messenger/room/join, /tools/messenger/room/settings, /room/info.
+        source: "/tools/messenger/room/:roomId((?!create$|join$|settings$|info$).+)",
         destination: "/tools/messenger/room?id=:roomId",
         permanent: false,
       },
