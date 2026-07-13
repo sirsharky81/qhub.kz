@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 ENV_PATH = Path("/var/www/qhub.kz/.env.production")
 REDIS_PASSWORD_FILE = Path("/root/.redis_password")
@@ -85,15 +86,11 @@ def check_redis(env: dict[str, str]) -> dict:
             return fail("Redis whitelist", "qhub:messenger:whitelist empty")
 
         detail = f"PONG, whitelist={size} bytes"
-        url_ping = subprocess.run(
-            ["redis-cli", "-u", env["REDIS_URL"], "--no-auth-warning", "PING"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if url_ping.stdout.strip() != "PONG":
-            detail += " (WARN: REDIS_URL password out of sync — fix .env.production)"
+        if REDIS_PASSWORD_FILE.exists():
+            file_pass = REDIS_PASSWORD_FILE.read_text(encoding="utf-8").strip()
+            url_pass = unquote(urlparse(env["REDIS_URL"]).password or "")
+            if file_pass and url_pass != file_pass:
+                detail += " (WARN: REDIS_URL password out of sync — run scripts/deploy/sync-redis-url.py)"
         return ok("Redis", detail)
     except Exception as exc:
         return fail("Redis", str(exc))
