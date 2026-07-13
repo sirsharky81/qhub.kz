@@ -141,17 +141,42 @@ MESSENGER_WS_PORT=3001
 
 ## Деплой (обновление production)
 
-После `git push` в `main` Vercel **не** обновляет `www.qhub.kz`. Нужен деплой на VPS:
+После `git push` в `main` GitHub Actions **автоматически** деплоит на VPS (аналог Vercel).
+
+Поток:
+
+```
+git push origin main  →  CI (lint, typecheck, build)  →  SSH на VPS  →  vps-deploy.sh
+```
+
+Скрипт деплоя: `scripts/deploy/vps-deploy.sh` (pull → `npm ci` → build → `pm2 restart` → health-check).
+
+Workflow: `.github/workflows/deploy.yml`.
+
+### Однократная настройка GitHub Secrets
+
+В репозитории: **Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret | Значение |
+|--------|----------|
+| `VPS_HOST` | `65.108.215.248` |
+| `VPS_USER` | `root` |
+| `VPS_SSH_KEY` | содержимое приватного ключа `~/.ssh/id_ed25519_qhub` |
+
+Публичный ключ от этой пары должен быть в `~/.ssh/authorized_keys` на VPS.
+
+Проверить статус деплоя:
+
+```bash
+gh run list --workflow=deploy.yml --limit 5
+gh run watch
+```
+
+### Ручной деплой (если нужен)
 
 ```bash
 ssh -i ~/.ssh/id_ed25519_qhub root@65.108.215.248
-
-cd /var/www/qhub.kz
-git pull origin main
-npm install          # или npm ci
-npm run build
-pm2 restart qhub
-pm2 restart qhub-ws   # если WebSocket включён
+bash /var/www/qhub.kz/scripts/deploy/vps-deploy.sh
 ```
 
 Первичная установка — `scripts/deploy/vps-bootstrap.sh` (nginx, clone, build, подсказки по PM2 и certbot).
@@ -160,9 +185,9 @@ pm2 restart qhub-ws   # если WebSocket включён
 
 | Где | Действие |
 |-----|----------|
-| Cursor (любой ПК / iPhone) | commit → `git push origin main` |
+| Cursor (любой ПК / iPhone) | commit → `git push origin main` → автодеплой |
 | Другой ноутбук | `git pull origin main` |
-| **Production** | SSH на VPS → pull → build → `pm2 restart qhub` |
+| **Production** | Автоматически через GitHub Actions |
 | iPhone/Android app | Ничего — UI с `www.qhub.kz` |
 
 ---
@@ -312,6 +337,7 @@ tail -f /var/log/nginx/error.log
 | Файл | Назначение |
 |------|------------|
 | `scripts/deploy/vps-bootstrap.sh` | Первичная установка на Ubuntu |
+| `scripts/deploy/vps-deploy.sh` | Деплой: pull, build, pm2 restart, health-check |
 | `scripts/deploy/vps-health-check.py` | Проверка интеграций на сервере |
 | `scripts/migrate-upstash-to-redis.mjs` | Перенос ключей Upstash → VPS Redis |
 | `src/lib/redis/` | Выбор бэкенда и команды Redis |
@@ -325,5 +351,9 @@ tail -f /var/log/nginx/error.log
 
 ## CI на GitHub
 
-`.github/workflows/ci.yml` — lint, typecheck, build web и Capacitor на **pull request**.  
-Автодеплоя на VPS в CI **нет**; деплой — вручную по SSH или через запрос Агенту Cursor.
+| Workflow | Когда | Что делает |
+|----------|-------|------------|
+| `ci.yml` | pull request → `main` | lint, typecheck, build web и Capacitor |
+| `deploy.yml` | push → `main` | те же проверки + SSH-деплой на VPS |
+
+Откат: `git revert` нужного коммита → `git push origin main` → автодеплой предыдущей версии.
