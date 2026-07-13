@@ -251,7 +251,7 @@ cd /var/www/qhub.kz && git log -1 --oneline
 python3 /var/www/qhub.kz/scripts/deploy/vps-health-check.py
 ```
 
-Проверяет: HTTPS, Redis, Turnstile, Telegram, OpenAI, VAPID, Firebase, Metered TURN, session secrets.
+Проверяет: HTTPS, Redis (локальный + сверка REDIS_URL), Turnstile, Telegram, OpenAI, VAPID, Firebase, Coturn/static TURN (или Metered, если включён), session secrets.
 
 ### Быстро снаружи (без SSH)
 

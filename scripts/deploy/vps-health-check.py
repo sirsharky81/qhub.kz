@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import urllib.error
@@ -13,6 +12,7 @@ import urllib.request
 from pathlib import Path
 
 ENV_PATH = Path("/var/www/qhub.kz/.env.production")
+REDIS_PASSWORD_FILE = Path("/root/.redis_password")
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -50,22 +50,31 @@ def http_get(url: str, headers: dict | None = None, timeout: int = 8) -> tuple[i
         return resp.status, resp.read(4096).decode("utf-8", errors="replace")
 
 
+def redis_cli_cmd(*extra: str) -> list[str] | None:
+    """Prefer VPS password file; fall back to REDIS_URL from env."""
+    if REDIS_PASSWORD_FILE.exists():
+        password = REDIS_PASSWORD_FILE.read_text(encoding="utf-8").strip()
+        if password:
+            return ["redis-cli", "-h", "127.0.0.1", "-p", "6379", "-a", password, "--no-auth-warning", *extra]
+    return None
+
+
 def check_redis(env: dict[str, str]) -> dict:
-    url = env.get("REDIS_URL", "")
-    if not url:
-        return fail("Redis", "REDIS_URL missing")
+    if not env.get("REDIS_URL", "").strip():
+        return fail("Redis", "REDIS_URL missing in .env.production")
+
+    cmd = redis_cli_cmd("PING")
+    if not cmd:
+        return fail("Redis", "REDIS_URL set but /root/.redis_password not found")
+
     try:
-        ping = subprocess.run(
-            ["redis-cli", "-u", url, "PING"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
+        ping = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
         if ping.stdout.strip() != "PONG":
-            return fail("Redis", ping.stderr.strip() or ping.stdout.strip() or "PING failed")
+            detail = ping.stderr.strip() or ping.stdout.strip() or "PING failed"
+            return fail("Redis", detail)
+
         wl = subprocess.run(
-            ["redis-cli", "-u", url, "STRLEN", "qhub:messenger:whitelist"],
+            redis_cli_cmd("STRLEN", "qhub:messenger:whitelist") or [],
             capture_output=True,
             text=True,
             timeout=5,
@@ -74,7 +83,18 @@ def check_redis(env: dict[str, str]) -> dict:
         size = int(wl.stdout.strip() or "0")
         if size < 10:
             return fail("Redis whitelist", "qhub:messenger:whitelist empty")
-        return ok("Redis", f"PONG, whitelist={size} bytes")
+
+        detail = f"PONG, whitelist={size} bytes"
+        url_ping = subprocess.run(
+            ["redis-cli", "-u", env["REDIS_URL"], "--no-auth-warning", "PING"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if url_ping.stdout.strip() != "PONG":
+            detail += " (WARN: REDIS_URL password out of sync — fix .env.production)"
+        return ok("Redis", detail)
     except Exception as exc:
         return fail("Redis", str(exc))
 
@@ -187,6 +207,59 @@ try {
         return fail("Firebase FCM", str(exc))
 
 
+def parse_turn_urls(raw: str) -> list[str]:
+    urls: list[str] = []
+    text = raw.strip()
+    if not text:
+        return urls
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict) and item.get("urls"):
+                    val = item["urls"]
+                    if isinstance(val, list):
+                        urls.extend(str(u).strip() for u in val if str(u).strip())
+                    else:
+                        urls.append(str(val).strip())
+            return urls
+    except json.JSONDecodeError:
+        pass
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def coturn_service_active() -> bool:
+    try:
+        proc = subprocess.run(
+            ["systemctl", "is-active", "coturn"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return proc.stdout.strip() == "active"
+    except Exception:
+        return False
+
+
+def check_turn(env: dict[str, str]) -> dict:
+    urls = parse_turn_urls(env.get("MESSENGER_TURN_URLS", ""))
+    username = env.get("MESSENGER_TURN_USERNAME", "").strip()
+    credential = env.get("MESSENGER_TURN_CREDENTIAL", "").strip()
+
+    if urls and username and credential:
+        if not coturn_service_active():
+            return fail("Coturn (static TURN)", "MESSENGER_TURN_* configured but coturn service is not active")
+        return ok("Coturn (static TURN)", f"service active, {len(urls)} URL(s)")
+
+    domain = env.get("MESSENGER_METERED_DOMAIN", "").strip()
+    api_key = env.get("MESSENGER_METERED_TURN_API_KEY", "").strip()
+    if domain and api_key:
+        return check_metered(env)
+
+    return skip("TURN", "no static Coturn or Metered TURN configured")
+
+
 def check_metered(env: dict[str, str]) -> dict:
     domain = env.get("MESSENGER_METERED_DOMAIN", "").strip()
     api_key = env.get("MESSENGER_METERED_TURN_API_KEY", "").strip()
@@ -246,12 +319,19 @@ def main() -> int:
         check_openai(env),
         check_vapid(env),
         check_firebase(env),
-        check_metered(env),
+        check_turn(env),
         *check_secrets(env),
     ]
     passed = sum(1 for r in results if r["status"] == "ok")
     failed = [r for r in results if r["status"] == "fail"]
-    print(json.dumps({"passed": passed, "total": len(results), "results": results}, ensure_ascii=False, indent=2))
+    skipped = [r for r in results if r["status"] == "skip"]
+    print(
+        json.dumps(
+            {"passed": passed, "failed": len(failed), "skipped": len(skipped), "total": len(results), "results": results},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 1 if failed else 0
 
 
