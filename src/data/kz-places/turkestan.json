@@ -1,0 +1,17 @@
+[
+  {
+    "id": "turkestan-mausoleum",
+    "name": "Мавзолей Ходжи Ахмеда Ясави",
+    "lat": 43.2978,
+    "lng": 68.2517,
+    "region": "turkestan",
+    "category": "historic",
+    "summary": "Шедевр тимуридской архитектуры XIV века — главная достопримечательность Туркестана и объекта ЮНЕСКО. Купол, мозаика и тихие внутренние дворы.",
+    "tags": ["юнеско", "архитектура", "туркестан", "ясави"],
+    "difficulty": "easy",
+    "season": ["spring", "summer", "autumn"],
+    "source": "qhub",
+    "published": true,
+    "updatedAt": 1739390400000
+  }
+]

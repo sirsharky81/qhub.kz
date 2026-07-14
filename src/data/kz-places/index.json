@@ -1,0 +1,9 @@
+{
+  "regions": [
+    { "id": "almaty-city", "name": "Алматы", "placeCount": 2 },
+    { "id": "almaty-oblast", "name": "Алматинская область", "placeCount": 7 },
+    { "id": "turkestan", "name": "Туркестанская область", "placeCount": 1 },
+    { "id": "mangystau", "name": "Мангистауская область", "placeCount": 1 }
+  ],
+  "updatedAt": 1739390400000
+}
