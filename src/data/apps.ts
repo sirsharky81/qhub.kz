@@ -318,6 +318,21 @@ export const apps: App[] = [
     sortOrder: 51,
   },
   {
+    id: "split",
+    title: "Split",
+    description: "Совместные расходы: баланс, долги и погашения без платёжек.",
+    longDescription:
+      "Комната для учёта общих трат. Разделение поровну, по суммам, процентам и долям. Курсы валют задаёт владелец. Рекомендуемые погашения и экспорт CSV.",
+    href: "/tools/split",
+    tags: ["finance", "tools", "lifestyle"],
+    icon: "÷",
+    color: "from-teal-500/10 to-teal-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    beta: true,
+    sortOrder: 52,
+  },
+  {
     id: "kz-maps",
     title: "KZ Maps",
     description: "Карты Казахстана, треки GPX, маршруты и каталог красивых мест.",
@@ -330,7 +345,7 @@ export const apps: App[] = [
     author: "QHub",
     authorType: "qhub",
     beta: true,
-    sortOrder: 52,
+    sortOrder: 53,
   },
   {
     id: "deposit-calculator",

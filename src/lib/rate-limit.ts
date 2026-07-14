@@ -189,6 +189,12 @@ export async function checkFamilyRateLimit(
   return checkRateLimit("qhub:family", identifier);
 }
 
+export async function checkSplitRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:split", identifier);
+}
+
 export async function checkFamilyLocationRequestRateLimit(
   parentMemberId: string,
   targetMemberId: string,
