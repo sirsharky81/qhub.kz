@@ -318,6 +318,21 @@ export const apps: App[] = [
     sortOrder: 51,
   },
   {
+    id: "kz-maps",
+    title: "KZ Maps",
+    description: "Карты Казахстана, треки GPX, маршруты и каталог красивых мест.",
+    longDescription:
+      "Онлайн и офлайн карты, запись походов, личные точки и мини-репозиторий достопримечательностей. Маршруты по дорогам и тропам, скачивание регионов как в Organic Maps.",
+    href: "/tools/kz-maps",
+    tags: ["lifestyle", "tools"],
+    icon: "🗺️",
+    color: "from-emerald-500/10 to-emerald-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    beta: true,
+    sortOrder: 52,
+  },
+  {
     id: "deposit-calculator",
     title: "Калькулятор депозита",
     description: "Считайте доходность депозитов с учётом ГФСС и капитализации.",

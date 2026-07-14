@@ -1,0 +1,17 @@
+[
+  {
+    "id": "boszhira",
+    "name": "Бозжира",
+    "lat": 43.4167,
+    "lng": 52.8667,
+    "region": "mangystau",
+    "category": "viewpoint",
+    "summary": "Белые меловые плато и острые пики над пустынным плато Устюрт. Один из самых сюрреалистичных ландшафтов Мангистау — лучше с высоким клиренсом.",
+    "tags": ["устюрт", "мангистау", "мел", "плато"],
+    "difficulty": "medium",
+    "season": ["spring", "autumn"],
+    "source": "qhub",
+    "published": true,
+    "updatedAt": 1739390400000
+  }
+]

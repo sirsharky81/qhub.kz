@@ -1,0 +1,32 @@
+[
+  {
+    "id": "big-almaty-lake",
+    "name": "Большое Алматинское озеро",
+    "lat": 43.0478,
+    "lng": 77.2744,
+    "region": "almaty-city",
+    "category": "lake",
+    "summary": "Горное озеро в Заилийском Алатау на высоте около 2510 м. Популярная цель однодневных походов из Алматы — бирюзовая вода и вид на пики.",
+    "tags": ["озеро", "горы", "поход", "алатау"],
+    "difficulty": "medium",
+    "season": ["summer", "autumn"],
+    "source": "qhub",
+    "published": true,
+    "updatedAt": 1739390400000
+  },
+  {
+    "id": "medeu-shymbulak",
+    "name": "Медеу и Шымбулак",
+    "lat": 43.1586,
+    "lng": 77.0589,
+    "region": "almaty-city",
+    "category": "urban",
+    "summary": "Высокогорный каток Медеу и канатная дорога к горнолыжному комплексу Шымбулак. Круглый год — виды на город и ледники.",
+    "tags": ["горы", "каток", "канатка", "зима"],
+    "difficulty": "easy",
+    "season": ["winter", "summer"],
+    "source": "qhub",
+    "published": true,
+    "updatedAt": 1739390400000
+  }
+]
