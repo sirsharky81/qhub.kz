@@ -1,200 +1,205 @@
-# QHub Split — оценка ТЗ v2.1 и план реализации
+# QHub Split — оценка ТЗ v3.3 (MVP) и план реализации
 
-Источник: `QHub_Split_TZ_v2.1` (обновление: не платёжная система, `DebtSettlement` вместо Transfer).
+Источник: `QHub_Split_TZ_v3.3_MVP`. Заменяет оценку по v2.1.
 
 ## 1. Вердикт
 
-ТЗ хорошо задаёт **продуктовую границу** и **ядро домена** (расходы → доли → баланс → погашение), но для старта разработки **неполно**: нет схемы полей, API, ролей/прав, UI-экранов, NFR и определения MVP vs post-MVP.
+v3.3 **годится как рабочий MVP-spec**: есть границы scope, инварианты, greedy settle, Decimal + Largest Remainder, блокировка расходов после settlement, черновик API и критерии приёмки.
 
-В текущем репозитории QHub **нет модуля Room Core** и **нет Split**. Комнаты уже есть у Family и Messenger — каждая со своей Redis-моделью. Без решения по Room Core Split либо блокируется, либо вынужденно копирует room-паттерн Family.
+Главное архитектурное решение ТЗ: **Room Core создаётся вместе со Split и используется только Split** — снимает блокер «ждать общий Core для Family/Messenger».
 
-**Рекомендация:** уточнить пробелы ниже, затем идти фазами: каноничный движок расчёта → MVP Split с минимальной room-оболочкой → вынос/подключение Room Core → медиа/статистика.
+Остаются уточнения до/во время фазы 1: Offline First (протокол синка), права ролей, семантика «связанных расходов», формат экспорта, ортогональность режимов 5.5/5.6 к 5.1–5.4.
+
+**Статус относительно репо:** модулей `room-core` / `split` нет; ближайший паттерн — Family (`src/lib/family/`: Redis room + invite token + versioned poll).
 
 ---
 
-## 2. Что сильно в ТЗ
+## 2. Что закрыто относительно v2.1
 
-| Пункт | Почему важно |
+| Тема | v3.3 |
 | --- | --- |
-| Явный отказ от статуса платёжной системы | Снимает compliance-scope: нет карт, реквизитов, статусов банковских переводов |
-| `DebtSettlement` вместо Transfer | Фиксирует «факт договорённого погашения», а не платёж |
-| Валюта комнаты + курс на момент расхода | Избегает хаоса пересчёта задним числом |
-| Разделение: equal / fixed / % / shares / subset / exclude payer | Покрывает типовые сценарии Splitwise-класса |
-| Разрез Room Core vs Split | Правильное разделение ответственности, если Core реально появится |
+| Room Core vs Split | Core только для Split, пишется параллельно |
+| FX | Курсы задаёт владелец комнаты вручную; нет внешнего FX API в MVP |
+| Алгоритм | Balance = Paid − Share; greedy creditors/debtors |
+| Округление | Decimal + Largest Remainder |
+| Блокировка | После первого DebtSettlement связанные расходы read-only; правки — корректирующими расходами |
+| Инварианты | Σ balances = 0; leave с ненулевым балансом запрещён; archive = view-only |
+| API | Room Core ops + REST Split endpoints |
+| MVP out | OCR, itemized receipt, AI, maps, recurring, advanced analytics |
+| Приёмка | Split methods + invariants + greedy + offline sync + export |
+
+`ExchangeRate` как сущность убрана из §15 — курс живёт на уровне комнаты (таблица владельца) и снепшотится в расход (`exchangeRate`, `exchangeTimestamp`, `amountBase`).
 
 ---
 
-## 3. Пробелы и риски (нужны решения до кода)
+## 3. Оставшиеся пробелы
 
-### 3.1 Критично
+### 3.1 Нужно зафиксировать до реализации sync
 
-1. **Room Core не существует в codebase.** Зависимость §9/§10 некуда цеплять. Варианты:
-   - A) сначала общий `room-core` (Room, Member, Role, Invitation, sync/events);
-   - B) MVP Split со своей room-оболочкой по образцу Family (`src/lib/family/`), позже миграция на Core;
-   - C) переиспользовать Messenger room — спорно (другой auth/модель/TTL).
-2. **Нет схемы полей сущностей.** Перечислены имена (`Expense`, `ExpenseShare`, …), но не типы, обязательность, инварианты, индексы, TTL.
-3. **Алгоритм баланса и settle graph не специфицирован.** Нужны: net balance per member, минимизация платежей (greedy / pairwise), rounding, кто «должен» при симметричных долгах.
-4. **Инварианты разделения.** Что если % ≠ 100, fixed sums ≠ total, доли = 0, плательщик не в участниках, участник вышел из комнаты после расходов.
-5. **Права и роли.** Кто создаёт/правит/удаляет расход, кто отмечает settlement, может ли чужой settlement подтвердить только кредитор, soft-delete vs hard-delete.
-6. **Идемпотентность и concurrent edits.** Два участника правят один расход → как версионировать и пересчитывать баланс.
-7. **Статус «Расчеты завершены».** Кто/что выставляет, обратимость при новом расходе, хранение статуса на Room или в Split-агрегате.
+1. **Offline First** — что кэшируется локально, очередь мутаций, конфликт при `version` mismatch, кто выигрывает (server wins / last-write / merge), поведение при offline settlement, нарушающем долг.
+2. **«Связанные расходы»** после DebtSettlement — все расходы комнаты или только те, что формируют долг пары `from→to`? Рекомендация: **все expenses комнаты lock на edit/delete** после любого settlement (проще инварианты); корректировки = новые expenses / reversing expenses.
+3. **Роли (`RoomRole`)** — минимум: `owner` (курсы, archive, invite), `member` (CRUD expenses/settlements до lock), `viewer`? Кто может DELETE settlement.
+4. **Auth / identity** для invite через Messenger + QR + link: phone session как Messenger, или Split-local member token как Family.
+5. **Формат экспорта** — CSV/JSON/PDF; поля; язык; только base currency или originals тоже.
+6. **5.5 и 5.6** — это модификаторы участник-сета поверх 5.1–5.4, а не отдельные methods. В модели: `splitMethod` ∈ {equal, fixed, percentage, shares} + `participantIds[]` (+ опция exclude payer = participantIds без payer).
+7. **Attachments в MVP** — ТЗ включает поле вложений, OCR out. Нужен ли upload в MVP или поле отложить? Рекомендация: **отложить binary attachments**, оставить тип/API-заглушку, чтобы не раздувать offline sync.
+8. **GET /statistics** vs «расширенная аналитика out» — для MVP: суммы по категориям/участникам в base currency достаточно; иначе убрать endpoint из MVP.
 
-### 3.2 Важно
+### 3.2 Важно, но можно решить в коде с разумными дефолтами
 
-8. **Auth.** Phone/session как Messenger, token как Family, или гостевые invite-links без аккаунта.
-9. **Курсы.** Источник API, кэш `ExchangeRate`, список валют MVP, ручной override, точность округления (тг vs дробные).
-10. **Attachments.** Где хранить фото чеков (диск/S3/локально), лимиты, EXIF/geo privacy.
-11. **ExpenseHistory.** Что логируется, UI истории, хранение vs audit-only.
-12. **Realtime.** «Синхронизация» и «события комнаты» — poll (Family) vs WS (Messenger); для Split достаточно versioned poll на MVP.
-13. **Категории.** Системный набор vs custom per room; мультиязычность каталога.
-14. **Статистика.** Вне MVP или минимальный отчёт (сумма по категориям / участникам).
-
-### 3.3 Продуктовые краевые случаи
-
-- Удаление участника с ненулевым балансом.
-- Правка/удаление расхода после settlement.
-- Частичное погашение и несколько settlements по одной паре.
-- Отрицательные/нулевые суммы, валютный mismatch settlement vs room currency.
-- Офлайн/повторная отправка формы (нужен client mutation id).
+- Валидация fixed/percentage в `currencyOriginal` vs после FX в base (рекомендация: fixed в исходной валюте расхода, equality check до FX; percentage/shares — после нормализации в base с LRM).
+- Частичные settlements; несколько settlements по одной паре.
+- DELETE settlement → unlock expenses? Рекомендация: unlock только если **не осталось** ни одного settlement в комнате.
+- Идемпотентность POST (clientMutationId) — особенно для offline.
+- Precision Decimal (scale 2 для KZT/USD UI; внутренний scale ≥ 4).
+- Geo optional — хранить lat/lng без карт UI.
 
 ---
 
-## 4. Соответствие текущему QHub
+## 4. Целевая модель (черновик реализации)
 
-| Ожидание ТЗ | Факт в репо |
-| --- | --- |
-| Room Core | Нет общего модуля |
-| Split tool `/tools/…` | Нет |
-| Паттерн multi-user room + Redis | Есть: Family (`src/lib/family/`), Messenger, Hearts/Lotto |
-| Фото/вложения | Сканеры и Capacitor camera — можно опереться позже |
-| Гео | Family geo — опционально для expense geo |
-| Каталог tools + manifest | Стандартный путь регистрации инструмента |
+### Room Core (`src/lib/room-core/` или `src/lib/split/room/`)
 
-Практичный путь MVP: зеркало Family — `src/lib/split/` + `src/app/tools/split/` + Redis keys + session/invite, **без ожидания полного Room Core**.
+```
+Room: id, name, baseCurrency, rates[{currency, rate, updatedAt, updatedBy}],
+      status: open|archived, ownerMemberId, version, createdAt, updatedAt
+RoomMember: memberId, roomId, displayName, role, userRef?, joinedAt, leftAt?
+RoomInvitation: token, roomId, role, channel: link|qr|messenger, expiresAt, createdBy
+RoomEvent: (optional log) type, payload, at, actorId  // для sync/cursor
+```
 
----
+### Split (`src/lib/split/`)
 
-## 5. Предлагаемая модель данных (черновик для уточнения ТЗ)
+```
+Expense: id, roomId, description, amountOriginal, currencyOriginal,
+         exchangeRate, exchangeTimestamp, amountBase, categoryId,
+         paidByMemberId, splitMethod, participantIds[], comment?,
+         geo?, locked: boolean, createdBy, createdAt, updatedAt, version,
+         clientMutationId?
+ExpenseParticipant: expenseId, memberId, inputValue (amount|%|shares), amountBase
+DebtSettlement: id, roomId, fromMemberId, toMemberId, amountBase, date,
+                comment?, createdBy, createdAt, clientMutationId?
+Category: id, key|label (seed list)
+Attachment: post-MVP / stub
+ExpenseHistory: id, expenseId, at, actorId, op, patch
+```
 
-### Room Core (или локальная оболочка MVP)
-
-- `SplitRoom`: `roomId`, `name`, `baseCurrency`, `status` (`open` \| `settled`), `ownerId`, `memberIds`, `version`, `createdAt`, `updatedAt`
-- `SplitMember`: `memberId`, `roomId`, `displayName`, `role` (`owner` \| `member` \| `viewer`), `userRef?`, `joinedAt`
-- `SplitInvitation`: `token`, `roomId`, `role`, `expiresAt`, `createdBy`
-
-### Split domain
-
-- `Expense`: `id`, `roomId`, `description`, `amountOriginal`, `currencyOriginal`, `fxRateToRoom`, `amountRoom`, `categoryId`, `paidByMemberId`, `splitMethod`, `date`, `comment?`, `geo?`, `createdBy`, `createdAt`, `updatedAt`, `version`
-- `ExpenseShare`: `expenseId`, `memberId`, `shareValue` (смысл зависит от method: amount / percent / parts), `amountRoom` (каноническая доля после нормализации)
-- `DebtSettlement`: `id`, `roomId`, `fromMemberId`, `toMemberId`, `amount`, `currency`, `amountRoom`, `date`, `comment?`, `createdBy`, `createdAt`
-- `Category`: `id`, `key` \| custom `label`, `roomId?`
-- `ExchangeRate`: `base`, `quote`, `rate`, `asOf`, `source` (`system` \| `manual`)
-- `Attachment`: `id`, `expenseId`, `mime`, `size`, `storageKey`, `createdAt`
-- `ExpenseHistory`: `id`, `expenseId`, `at`, `actorId`, `op`, `patch`
-
-Баланс **не хранить как primary source of truth** — вычислять из expenses + settlements; опционально кэш `BalanceSnapshot` на `room.version`.
+Баланс не персистить как source of truth — только derive + опциональный cache на `room.version`.
 
 ---
 
-## 6. Канонический алгоритм (ядро продукта)
+## 5. Engine (чистая логика)
 
-1. Для каждого `Expense` нормализовать `ExpenseShare[]` → доли в валюте комнаты; сумма долей = `amountRoom` (правила rounding: largest remainder).
-2. Net: для плательщика `+amountRoom`, для каждого share-участника `-share.amountRoom`.
-3. Применить settlements: `from -= amountRoom`, `to += amountRoom` (в знаке «долговой» модели: погашение уменьшает долг from→to).
-4. Построить минимальный набор рекомендованных погашений из net balances (жадный settle: самые отрицательные ↔ самые положительные).
-5. `status = settled`, когда все \|net\| < epsilon (например 0.01 в base currency) **и** нет незакрытых расхождений rounding — либо явная кнопка владельца при нулевых nets.
+1. `normalizeShares(expense, method, participants)` → `amountBase[]` с LRM, Σ = `amountBase`.
+2. `computeBalances(expenses, settlements)` → net per member; assert Σ ≈ 0.
+3. `suggestSettlements(balances)` → greedy pairs в base currency.
+4. `assertSettlement(balances, from, to, amount)` — amount ≤ debt from→to (по net / по рекомендованной паре — зафиксировать: **amount ≤ min(−net[from], net[to])** при net[from]<0 и net[to]>0).
+5. Lock policy helpers.
 
-Unit-тесты обязательны на equal/fixed/%/shares/subset/exclude-payer + multi-currency + partial settlements.
+Стек: decimal.js (или equivalente); **запрет number для денег** в engine/API validation.
 
----
-
-## 7. План работ по фазам
-
-### Фаза 0 — Доработка ТЗ (без кода)
-
-- Зафиксировать вариант Room Core: A / B / C (рекомендуется **B** для скорости).
-- Добавить в ТЗ: поля сущностей, инварианты split, rounding, права, auth, MVP-границы.
-- Acceptance checklist: сценарии «поездка 3 человека / 2 валюты / частичное погашение».
-
-### Фаза 1 — Domain engine (pure TS)
-
-- `src/lib/split/engine/`: normalize shares, net balance, suggest settlements, room status.
-- Vitest: матрица методов разделения + FX lock + settlements.
-- Без UI и без Redis.
-
-### Фаза 2 — Persistence + API MVP
-
-- Redis store (как Family): rooms, members, invites, expenses, shares, settlements.
-- API: create/join room, CRUD expense, list balance, create settlement, room snapshot poll by `version`.
-- Auth: invite token + session cookie/header (упрощённо Family-like).
-- Base currency + manual FX; system rate stub/optional.
-
-**MVP scope (вкл.):** equal + fixed + percent + shares; subset + exclude payer; balance + suggest; DebtSettlement; room status settled.
-
-**MVP out:** receipts photos, geo, rich stats, ExpenseHistory UI, custom categories editor (достаточно seed-списка).
-
-### Фаза 3 — UI tool
-
-- `/tools/split`: create/join, room home (balance summary), expense form, expense list, settlements screen, mark settled.
-- Manifest + catalog entry + i18n (ru минимум).
-- Mobile-first, без карточного спама в hero; один primary CTA «Добавить расход».
-
-### Фаза 4 — Hardening
-
-- Permissions, validation, rate limits, idempotency keys.
-- Concurrent edit via `version` / optimistic conflict.
-- History audit log (server-side) for edits/deletes.
-- Soft-delete expenses with balance recalc.
-
-### Фаза 5 — Post-MVP
-
-- Attachments (чеки), geo optional.
-- System FX provider + `ExchangeRate` cache.
-- Statistics.
-- Вынос общей room-модели в `room-core` и миграция Split (и позже Family) — только если появится второй потребитель с теми же требованиями.
+Vitest матрица: equal/fixed/%/shares × subset × exclude payer × FX × LRM × settlements × lock × leave guard × archive.
 
 ---
 
-## 8. Рекомендуемый порядок реализации файлов
+## 6. План фаз
+
+### Фаза 0 — Уточнения (коротко, в ТЗ или ADR)
+
+- Offline sync: server-wins + mutation queue + `clientMutationId`.
+- Lock scope: вся комната после любого settlement.
+- Roles: owner | member.
+- Export: CSV (UTF-8) expenses + settlements + balances snapshot.
+- Attachments: out of binary MVP (поле optional null).
+- Auth: Family-like member accessToken + invite link/QR; Messenger invite = deep link / share URL в существующий messenger share flow где возможно.
+
+### Фаза 1 — Domain engine
+
+- `src/lib/split/engine/*` + тесты инвариантов.
+- Без Redis/UI.
+
+### Фаза 2 — Room Core (Split-only) + persistence
+
+- Redis store: room, members, invites, rates, version bump.
+- API: CreateRoom, InviteMember, JoinRoom, LeaveRoom, GetMembers, ArchiveRoom.
+- Owner sets FX rates; rates apply only to new expenses.
+
+### Фаза 3 — Split API
+
+- Expenses CRUD с валидацией methods + lock rules.
+- Balances, settlements suggest+POST+DELETE, export CSV.
+- Statistics minimal или отложить endpoint.
+- Idempotency + membership guards + rate limit.
+
+### Фаза 4 — UI `/tools/split`
+
+- Create/join (link + QR), room rates (owner), expense form (все methods MVP), list, balances + suggested settlements, mark settlement, archive view, export button.
+- Manifest + catalog.
+- Mobile-first.
+
+### Фаза 5 — Offline First
+
+- IndexedDB cache snapshot + outbox queue.
+- Sync on reconnect against `room.version` / event cursor.
+- Reject/replay mutations that break invariants; surface conflicts in UI.
+- Acceptance: offline create expense → online sync preserves Σ balances = 0.
+
+### Фаза 6 — Hardening / polish
+
+- ExpenseHistory audit, correcting-expense UX, Messenger share invite, i18n ru.
+- Push/poll sync как у Family (`version` poll) если WS не нужен.
+
+---
+
+## 7. Карта файлов
 
 ```
 src/lib/split/
   types.ts
   constants.ts
-  engine/{shares,balance,settle,fx}.ts
+  decimal.ts
+  engine/{shares,balance,settle,lock,invariants}.ts
   engine/*.test.ts
-  store.ts
-  session.ts
-  guard.ts
+  room/{store,invites,guard,session}.ts   # Room Core Split-only
+  store.ts                                 # expenses, settlements
+  export/csv.ts
+  sync/{outbox,apply}.ts                   # offline
   client.ts
-src/app/api/split/...
-src/app/tools/split/...
+src/app/api/split/**                       # rooms + expenses + …
+src/app/tools/split/**
 public/tools/split/manifest.json
 ```
 
----
-
-## 9. Критерии готовности MVP
-
-- Комната создаётся, участники входят по invite.
-- Расход во всех 4 основных методах split корректно ложится в balance.
-- FX: сумма в валюте комнаты фиксируется и не плывёт при смене курса.
-- Settlement уменьшает долг; UI показывает «кто кому»; при нулевых nets — «Расчеты завершены».
-- Нет полей способа оплаты / карт / банковских статусов в API и UI.
-- Unit-тесты engine зелёные; ручной checklist из 5 сценариев пройден.
+Rooms API можно держать под `/api/split/rooms/*`, а «Room Core» — как lib-слой, не отдельный публичный продукт.
 
 ---
 
-## 10. Вопросы владельцу продукта (блокер списка)
+## 8. Критерии готовности (из ТЗ + операционализация)
 
-1. Room Core сначала или Split со своей оболочкой (рекомендация: своя оболочка)?
-2. Обязательна ли авторизация через Messenger phone, или достаточно display name + invite link?
-3. Список валют и источник курса для MVP?
-4. Кто имеет право удалять чужой расход / чужой settlement?
-5. Нужны ли чеки и geo в первом релизе или явно post-MVP?
+- [ ] equal / fixed / percentage / shares + selected participants + exclude payer
+- [ ] Σ member balances = 0 на каждом fixture
+- [ ] Σ shares = amountBase (LRM)
+- [ ] Greedy suggestions только в base currency
+- [ ] Settlement ≤ текущий долг; после settlement expenses locked; correcting expense path работает
+- [ ] Leave запрещён при ненулевом net; archive = read-only
+- [ ] FX owner-defined; old expenses immutable по курсу
+- [ ] Export выдаёт файл с расходами/погашениями/балансом
+- [ ] Offline outbox sync не нарушает инварианты (интеграционный тест)
+- [ ] Нет платежных реквизитов / статусов банка в модели и UI
 
 ---
 
-## 11. Итог
+## 9. Риски
 
-ТЗ v2.1 **годится как продуктовый манифест**, но **не как spec для кодинга** без §полей/инвариантов/MVP-границ. Самый дешёвый путь в текущем QHub: **вынести и покрыть тестами engine**, поднять **Family-like room MVP**, отложить Room Core и медиа. Юридически/продуктово формулировка «не платёжка + DebtSettlement» — правильная и должна остаться жёстким инвариантом API.
+| Риск | Митигация |
+| --- | --- |
+| Offline First в том же MVP, что и полный split matrix | Сначала online-correct engine+API+UI, затем offline как отдельная фаза с тем же DoD |
+| Lock «связанных» расходов неоднозначен | Lock всей комнаты |
+| Messenger invite тянет связность с messenger auth | Deep link на Split join; не требовать полного messenger identity в MVP |
+| Binary attachments + offline | Вынести из MVP |
+
+---
+
+## 10. Итог
+
+v3.3 — **зелёный свет на реализацию** с оговоркой: Offline First и вложения не должны блокировать фазы 1–4. Рекомендуемый порядок: **engine → Room Core Split-only → API → UI → offline → export/hardening**. Юридически формулировка «не платёжка» и Decimal-инварианты остаются жёсткими требованиями.
