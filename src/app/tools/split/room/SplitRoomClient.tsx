@@ -453,7 +453,21 @@ export default function SplitRoomClient() {
                     const invite = await apiCreateInvite(session, "link");
                     const url = `${window.location.origin}${invite.joinPath}`;
                     setInviteUrl(url);
-                    await navigator.clipboard?.writeText(url);
+                    // iOS: clipboard after await loses user-gesture → NotAllowedError.
+                    // Never surface that as a room error; link is shown below for manual copy.
+                    try {
+                      if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(url);
+                      }
+                    } catch {
+                      try {
+                        if (navigator.share) {
+                          await navigator.share({ title: "QHub Split", url, text: url });
+                        }
+                      } catch {
+                        // User dismissed share or unavailable — URL still visible.
+                      }
+                    }
                   } catch (err) {
                     setError(err instanceof Error ? err.message : "Ошибка");
                   }
