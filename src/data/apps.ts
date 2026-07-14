@@ -318,6 +318,21 @@ export const apps: App[] = [
     sortOrder: 51,
   },
   {
+    id: "split",
+    title: "Split",
+    description: "Совместные расходы: баланс, долги и погашения без платёжек.",
+    longDescription:
+      "Комната для учёта общих трат. Разделение поровну, по суммам, процентам и долям. Курсы валют задаёт владелец. Рекомендуемые погашения и экспорт CSV.",
+    href: "/tools/split",
+    tags: ["finance", "tools", "lifestyle"],
+    icon: "÷",
+    color: "from-teal-500/10 to-teal-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    beta: true,
+    sortOrder: 52,
+  },
+  {
     id: "deposit-calculator",
     title: "Калькулятор депозита",
     description: "Считайте доходность депозитов с учётом ГФСС и капитализации.",

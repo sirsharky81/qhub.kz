@@ -1,0 +1,26 @@
+{
+  "name": "QHub Split",
+  "short_name": "Split",
+  "description": "Совместный учёт расходов и балансов — QHub",
+  "start_url": "/tools/split",
+  "scope": "/tools/split",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#e8f0ec",
+  "theme_color": "#115e59",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/tools/split/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/split/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

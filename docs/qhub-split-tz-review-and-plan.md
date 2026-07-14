@@ -2,6 +2,19 @@
 
 Источник: `QHub_Split_TZ_v3.3_MVP`. Заменяет оценку по v2.1.
 
+## Статус реализации
+
+**MVP online (фазы 1–4) — в коде:**
+
+- `src/lib/split/engine` — Decimal, LRM, balance, greedy, lock (+ vitest)
+- `src/lib/split/store` — Room Core Split-only + expenses/settlements (Redis/memory)
+- `src/app/api/split/**` — rooms, invite, join, rates, expenses, balances, settlements, export, statistics
+- `src/app/tools/split/**` — create/join/room UI, CSV export, catalog entry (`beta`)
+
+**Ещё не сделано:** Offline First (фаза 5), binary attachments, dedicated Split icons, Messenger deep-link polish.
+
+---
+
 ## 1. Вердикт
 
 v3.3 **годится как рабочий MVP-spec**: есть границы scope, инварианты, greedy settle, Decimal + Largest Remainder, блокировка расходов после settlement, черновик API и критерии приёмки.

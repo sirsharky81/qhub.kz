@@ -61,6 +61,7 @@
     "@upstash/redis": "^1.38.0",
     "@zxing/library": "^0.23.0",
     "cross-env": "^10.1.0",
+    "decimal.js": "^10.6.0",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "exifr": "^7.1.3",
