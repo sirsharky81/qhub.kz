@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { apiCreateRoom } from "@/lib/split/client";
 import { SUPPORTED_CURRENCIES } from "@/lib/split/constants";
+import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import { clearSplitSession, loadSplitSession, saveSplitSession } from "@/lib/split/session";
 import { SplitShell } from "./components/SplitShell";
+
+const inputClass = `w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 outline-none focus:border-teal-700 ${MOBILE_SAFE_INPUT_CLASS}`;
 
 export default function SplitHomeClient() {
   const router = useRouter();
@@ -47,23 +50,27 @@ export default function SplitHomeClient() {
           <label className="block space-y-1">
             <span className="text-xs font-medium text-emerald-950/70">Название</span>
             <input
-              className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm outline-none focus:border-teal-700"
+              className={inputClass}
               value={name}
               onChange={(e) => setName(e.target.value)}
+              autoComplete="off"
+              enterKeyHint="next"
             />
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-emerald-950/70">Ваше имя</span>
             <input
-              className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm outline-none focus:border-teal-700"
+              className={inputClass}
               value={ownerName}
               onChange={(e) => setOwnerName(e.target.value)}
+              autoComplete="name"
+              enterKeyHint="done"
             />
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-emerald-950/70">Валюта комнаты</span>
             <select
-              className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm outline-none focus:border-teal-700"
+              className={inputClass}
               value={baseCurrency}
               onChange={(e) => setBaseCurrency(e.target.value)}
             >

@@ -2,9 +2,12 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, useTransition } from "react";
+import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import { apiJoinRoom } from "@/lib/split/client";
 import { saveSplitSession } from "@/lib/split/session";
 import { SplitShell } from "../components/SplitShell";
+
+const inputClass = `w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 ${MOBILE_SAFE_INPUT_CLASS}`;
 
 function JoinForm() {
   const router = useRouter();
@@ -32,17 +35,21 @@ function JoinForm() {
       <label className="block space-y-1">
         <span className="text-xs font-medium text-emerald-950/70">Токен приглашения</span>
         <input
-          className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm"
+          className={inputClass}
           value={token}
           onChange={(e) => setToken(e.target.value)}
+          autoComplete="off"
+          enterKeyHint="next"
         />
       </label>
       <label className="block space-y-1">
         <span className="text-xs font-medium text-emerald-950/70">Ваше имя</span>
         <input
-          className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm"
+          className={inputClass}
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
+          autoComplete="name"
+          enterKeyHint="done"
         />
       </label>
       {error && <p className="text-sm text-rose-700">{error}</p>}
