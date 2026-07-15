@@ -57,8 +57,6 @@ function formatOpSummary(
       return `${a(op.assetId)} → ${m(op.toCustodianMemberId)}`;
     case "adjustment":
       return op.reason;
-    default:
-      return op.type;
   }
 }
 

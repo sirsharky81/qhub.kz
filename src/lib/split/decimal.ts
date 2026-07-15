@@ -82,7 +82,7 @@ export function allocateLargestRemainder(
   const unit = d(10).pow(-scale);
   const exact = weightDs.map((w) => totalD.mul(w).div(weightSum));
   const floors = exact.map((x) => x.toDecimalPlaces(scale, Decimal.ROUND_FLOOR));
-  let allocated = floors.reduce((acc, x) => acc.plus(x), d(0));
+  const allocated = floors.reduce((acc, x) => acc.plus(x), d(0));
   let remainUnits = totalD.minus(allocated).div(unit).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber();
 
   const remainders = exact.map((x, i) => ({
