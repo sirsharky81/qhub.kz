@@ -1,12 +1,4 @@
-import {
-  ASSET_TTL_SEC,
-  OPERATION_TTL_SEC,
-  REDIS_ASSET_IDS_PREFIX,
-  REDIS_ASSET_PREFIX,
-  REDIS_OP_IDS_PREFIX,
-  REDIS_OP_PREFIX,
-  SUPPORTED_CURRENCIES,
-} from "./constants";
+import { ASSET_TTL_SEC, SUPPORTED_CURRENCIES } from "./constants";
 import { d, money } from "./decimal";
 import {
   canMutateRoom,
@@ -30,6 +22,15 @@ import {
   type TransferOperation,
   type WithdrawalOperation,
 } from "./ledger";
+import {
+  appendOperation,
+  assetIdsKey,
+  assetKey,
+  listAssetIds,
+  listAssets,
+  listOperations,
+  opKey,
+} from "./ledger-repo";
 import { splitRedisGetJson, splitRedisSet } from "./redis";
 import {
   bumpSplitRoomVersion,
@@ -44,53 +45,7 @@ import {
 import { generateEntityId } from "./tokens";
 import type { ExpenseParticipantInput, Money, SplitMethod, SplitRoom } from "./types";
 
-function assetKey(id: string): string {
-  return `${REDIS_ASSET_PREFIX}${id}`;
-}
-function assetIdsKey(roomId: string): string {
-  return `${REDIS_ASSET_IDS_PREFIX}${roomId.toUpperCase()}`;
-}
-function opKey(id: string): string {
-  return `${REDIS_OP_PREFIX}${id}`;
-}
-function opIdsKey(roomId: string): string {
-  return `${REDIS_OP_IDS_PREFIX}${roomId.toUpperCase()}`;
-}
-
-async function listAssetIds(roomId: string): Promise<string[]> {
-  return (await splitRedisGetJson<string[]>(assetIdsKey(roomId))) ?? [];
-}
-
-async function listOpIds(roomId: string): Promise<string[]> {
-  return (await splitRedisGetJson<string[]>(opIdsKey(roomId))) ?? [];
-}
-
-export async function listAssets(roomId: string): Promise<RoomAsset[]> {
-  const ids = await listAssetIds(roomId);
-  const out: RoomAsset[] = [];
-  for (const id of ids) {
-    const a = await splitRedisGetJson<RoomAsset>(assetKey(id));
-    if (a) out.push(a);
-  }
-  return out;
-}
-
-export async function listOperations(roomId: string): Promise<SplitOperation[]> {
-  const ids = await listOpIds(roomId);
-  const out: SplitOperation[] = [];
-  for (const id of ids) {
-    const op = await splitRedisGetJson<SplitOperation>(opKey(id));
-    if (op) out.push(op);
-  }
-  return out;
-}
-
-async function appendOperation(roomId: string, op: SplitOperation): Promise<void> {
-  const ids = await listOpIds(roomId);
-  ids.push(op.id);
-  await splitRedisSet(opKey(op.id), JSON.stringify(op), OPERATION_TTL_SEC);
-  await splitRedisSet(opIdsKey(roomId), JSON.stringify(ids), OPERATION_TTL_SEC);
-}
+export { listAssets, listOperations } from "./ledger-repo";
 
 async function enableAdvanced(room: SplitRoom): Promise<SplitRoom> {
   if (room.advancedAccounting) return room;

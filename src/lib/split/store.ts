@@ -22,13 +22,13 @@ import {
   canMutateExpense,
   canMutateRoom,
   computeAmountBase,
-  computeBalances,
   normalizeShares,
   SplitValidationError,
   suggestSettlements,
   withExpenseLockState,
 } from "./engine";
 import { d, money } from "./decimal";
+import { computeEffectiveBalances } from "./ledger-repo";
 import { splitRedisDel, splitRedisGetJson, splitRedisSet } from "./redis";
 import {
   generateAccessToken,
@@ -762,7 +762,9 @@ export async function createSettlement(input: {
 
   const expenses = await listExpenses(room.roomId);
   const settlements = await listSettlements(room.roomId);
-  const balances = computeBalances(room.memberIds, expenses, settlements);
+  // Ledger-aware: once advanced accounting (assets/contributions) is on, a member's
+  // real balance can differ from what plain expenses show — see computeEffectiveBalances.
+  const balances = await computeEffectiveBalances({ room, expenses, settlements });
   assertSettlementAllowed(balances, input.fromMemberId, input.toMemberId, money(input.amountBase));
 
   const id = generateEntityId("stl");
@@ -826,7 +828,7 @@ export async function leaveRoom(roomId: string, memberId: string): Promise<void>
 
   const expenses = await listExpenses(roomId);
   const settlements = await listSettlements(roomId);
-  const balances = computeBalances(room.memberIds, expenses, settlements);
+  const balances = await computeEffectiveBalances({ room, expenses, settlements });
   if (!canLeaveRoom(balances, memberId)) throw new Error("nonzero_balance");
 
   const member = await getMember(memberId);
@@ -845,7 +847,7 @@ export async function archiveRoom(roomId: string, actorMemberId: string): Promis
 
   const expenses = await listExpenses(roomId);
   const settlements = await listSettlements(roomId);
-  const balances = computeBalances(room.memberIds, expenses, settlements);
+  const balances = await computeEffectiveBalances({ room, expenses, settlements });
   if (!areBalancesSettled(balances)) throw new Error("balances_not_settled");
 
   room.status = "archived";
@@ -859,7 +861,10 @@ export async function getRoomSnapshot(roomId: string): Promise<SplitRoomSnapshot
   const members = (await listMembers(roomId)).map(toPublicMember);
   const expenses = withExpenseLockState(await listExpenses(roomId), await listSettlements(roomId));
   const settlements = await listSettlements(roomId);
-  const balances = computeBalances(room.memberIds, expenses, settlements);
+  // Ledger-aware: once advanced accounting is on, balances must also reflect money moved
+  // through shared assets (contributions/withdrawals/asset-paid expenses), not just plain
+  // per-member expenses — otherwise members who only interacted via the "касса" show 0.
+  const balances = await computeEffectiveBalances({ room, expenses, settlements });
   const suggestions = suggestSettlements(balances);
   return {
     room,
