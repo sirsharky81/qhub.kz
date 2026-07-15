@@ -1,4 +1,4 @@
-import { getMember, verifyMemberToken } from "./store";
+import { canActAsOwner, getMember, getRoom, isMemberConnected, verifyMemberToken } from "./store";
 import type { SplitMember } from "./types";
 
 export class SplitAuthError extends Error {
@@ -22,6 +22,7 @@ export function jsonSplitError(err: unknown): Response {
       expense_not_found: ["Расход не найден", 404],
       settlement_not_found: ["Погашение не найдено", 404],
       invite_expired: ["Приглашение истекло", 410],
+      invite_consumed: ["Приглашение уже использовано", 410],
       room_archived: ["Комната в архиве", 403],
       forbidden: ["Доступ запрещён", 403],
       expense_locked: ["Расход заблокирован после погашения", 409],
@@ -48,6 +49,12 @@ export function jsonSplitError(err: unknown): Response {
       asset_negative_balance: ["Недостаточно средств на активе", 409],
       transfer_currency_mismatch: ["Валюты активов не совпадают", 400],
       ledger_invariant_broken: ["Нарушен инвариант баланса комнаты", 409],
+      invalid_display_name: ["Укажите имя участника", 400],
+      already_connected: ["Участник уже подключён", 409],
+      not_connected: ["Участник ещё не подключён", 409],
+      device_not_whitelisted: ["Устройство не в whitelist", 403],
+      invalid_device_key: ["Некорректный ключ устройства", 400],
+      participant_has_history: ["Нельзя удалить участника с историей", 409],
     };
     const hit = map[err.message] ?? (err.name === "SplitValidationError" ? [err.message, 400] : null);
     if (hit) return Response.json({ error: hit[0] }, { status: hit[1] });
@@ -62,6 +69,7 @@ export async function assertSplitMember(request: Request): Promise<SplitMember> 
   if (!memberId || !accessToken) throw new SplitAuthError("Требуется авторизация", 401);
   const member = await verifyMemberToken(memberId, accessToken);
   if (!member) throw new SplitAuthError("Неверный токен", 401);
+  if (!isMemberConnected(member)) throw new SplitAuthError("Требуется авторизация", 401);
   return member;
 }
 
@@ -75,7 +83,11 @@ export async function assertSplitRoomMember(request: Request, roomId: string): P
 
 export async function assertSplitOwner(request: Request, roomId: string): Promise<SplitMember> {
   const member = await assertSplitRoomMember(request, roomId);
-  if (member.role !== "owner") throw new SplitAuthError("Только владелец", 403);
+  const room = await getRoom(roomId);
+  if (!room) throw new SplitAuthError("Комната не найдена", 404);
+  if (!(await canActAsOwner(room, member.memberId))) {
+    throw new SplitAuthError("Только владелец", 403);
+  }
   return member;
 }
 

@@ -18,6 +18,7 @@ import { clearSplitSession, loadSplitSession } from "@/lib/split/session";
 import type { SplitLedgerResponse, SplitMethod, SplitRoomSnapshot, SplitSession } from "@/lib/split/types";
 import { SplitShell } from "../components/SplitShell";
 import { SplitAdvancedPanel } from "./SplitAdvancedPanel";
+import { SplitParticipantsPanel } from "./SplitParticipantsPanel";
 
 function memberName(snapshot: SplitRoomSnapshot, id: string): string {
   return snapshot.members.find((m) => m.memberId === id)?.displayName ?? id.slice(0, 6);
@@ -40,6 +41,7 @@ export default function SplitRoomClient() {
   const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal");
   const [excludePayer, setExcludePayer] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [paidByMemberId, setPaidByMemberId] = useState<string>("");
   const [fxCurrency, setFxCurrency] = useState("USD");
   const [fxRate, setFxRate] = useState("");
 
@@ -49,6 +51,11 @@ export default function SplitRoomClient() {
     setCurrency(next.room.baseCurrency);
     if (selectedIds.length === 0) {
       setSelectedIds(next.members.map((m) => m.memberId));
+    }
+    if (!paidByMemberId) {
+      setPaidByMemberId(s.memberId);
+    } else if (!next.members.some((m) => m.memberId === paidByMemberId)) {
+      setPaidByMemberId(s.memberId);
     }
     const needLedger = opts?.withLedger ?? next.room.advancedAccounting ?? false;
     if (needLedger) {
@@ -60,7 +67,7 @@ export default function SplitRoomClient() {
     } else {
       setLedger(null);
     }
-  }, [selectedIds.length]);
+  }, [selectedIds.length, paidByMemberId]);
 
   useEffect(() => {
     const s = loadSplitSession();
@@ -80,8 +87,8 @@ export default function SplitRoomClient() {
 
   const participantInputs = useMemo(() => {
     let ids = selectedIds;
-    if (excludePayer && session) {
-      ids = ids.filter((id) => id !== session.memberId);
+    if (excludePayer && paidByMemberId) {
+      ids = ids.filter((id) => id !== paidByMemberId);
     }
     if (ids.length === 0 && snapshot) {
       ids = snapshot.members.map((m) => m.memberId);
@@ -112,7 +119,16 @@ export default function SplitRoomClient() {
           ? (Number(amount) - Number(each) * (n - 1)).toFixed(2)
           : each,
     }));
-  }, [selectedIds, excludePayer, session, snapshot, splitMethod, amount]);
+  }, [selectedIds, excludePayer, paidByMemberId, snapshot, splitMethod, amount]);
+
+  const canEditAsOwner =
+    session?.role === "owner" ||
+    Boolean(
+      snapshot &&
+        snapshot.members.some(
+          (m) => m.memberId === snapshot.room.ownerMemberId && m.status !== "connected",
+        ),
+    );
 
   if (!session) {
     return (
@@ -181,6 +197,22 @@ export default function SplitRoomClient() {
               </p>
             )}
           </section>
+        )}
+
+        {snapshot && (
+          <SplitParticipantsPanel
+            session={session}
+            snapshot={snapshot}
+            pending={pending}
+            inviteUrl={inviteUrl}
+            onInviteUrl={setInviteUrl}
+            onRefresh={() => refresh(session, { withLedger: showAdvanced })}
+            onError={setError}
+            startAction={(fn) => {
+              setError(null);
+              startTransition(fn);
+            }}
+          />
         )}
 
         {snapshot && snapshot.suggestions.length > 0 && (
@@ -293,6 +325,21 @@ export default function SplitRoomClient() {
               />
               Исключая плательщика
             </label>
+            <label className="block space-y-1">
+              <span className="text-xs text-emerald-950/60">Кто заплатил</span>
+              <select
+                className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm"
+                value={paidByMemberId || session.memberId}
+                onChange={(e) => setPaidByMemberId(e.target.value)}
+              >
+                {snapshot.members.map((m) => (
+                  <option key={m.memberId} value={m.memberId}>
+                    {m.displayName}
+                    {m.status === "local" ? " (лок.)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="flex flex-wrap gap-2">
               {snapshot.members.map((m) => {
                 const on = selectedIds.includes(m.memberId);
@@ -329,7 +376,7 @@ export default function SplitRoomClient() {
                       amountOriginal: Number(amount).toFixed(2),
                       currencyOriginal: currency,
                       categoryId,
-                      paidByMemberId: session.memberId,
+                      paidByMemberId: paidByMemberId || session.memberId,
                       splitMethod,
                       participants: participantInputs,
                       clientMutationId: crypto.randomUUID(),
@@ -447,7 +494,7 @@ export default function SplitRoomClient() {
           </section>
         )}
 
-        {session.role === "owner" && snapshot?.room.status === "open" && (
+        {canEditAsOwner && snapshot?.room.status === "open" && (
           <section className="space-y-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
               Курсы (владелец)
@@ -566,7 +613,7 @@ export default function SplitRoomClient() {
             >
               Экспорт CSV
             </button>
-            {session.role === "owner" && snapshot?.room.status === "open" && (
+            {canEditAsOwner && snapshot?.room.status === "open" && (
               <button
                 type="button"
                 className="rounded-xl border border-emerald-900/15 bg-white px-3 py-2 text-xs"

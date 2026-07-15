@@ -2,11 +2,11 @@ import { withCors } from "@/lib/api/cors";
 import { assertSplitRoomMember, jsonSplitError } from "@/lib/split/guard";
 import { createInvitation } from "@/lib/split/store";
 
-export async function POST(request: Request, ctx: { params: Promise<{ roomId: string }> }) {
+export async function POST(request: Request, ctx: { params: Promise<{ roomId: string; memberId: string }> }) {
   try {
-    const { roomId } = await ctx.params;
-    const member = await assertSplitRoomMember(request, roomId);
-    let body: { channel?: "link" | "qr" | "messenger"; seatMemberId?: string } = {};
+    const { roomId, memberId } = await ctx.params;
+    const actor = await assertSplitRoomMember(request, roomId);
+    let body: { channel?: "link" | "qr" | "messenger" } = {};
     try {
       body = await request.json();
     } catch {
@@ -14,15 +14,15 @@ export async function POST(request: Request, ctx: { params: Promise<{ roomId: st
     }
     const invitation = await createInvitation({
       roomId,
-      createdBy: member.memberId,
+      createdBy: actor.memberId,
       channel: body.channel ?? "link",
-      seatMemberId: body.seatMemberId ?? null,
+      seatMemberId: memberId,
     });
     return withCors(
       Response.json({
         token: invitation.token,
         expiresAt: invitation.expiresAt,
-        seatMemberId: invitation.seatMemberId ?? null,
+        seatMemberId: invitation.seatMemberId,
         joinPath: `/tools/split/join?token=${encodeURIComponent(invitation.token)}`,
       }),
       request,

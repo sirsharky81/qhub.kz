@@ -6,8 +6,16 @@
 
 ## Статус
 
-**Phase 0 решений — зафиксирован (2026-07-15).** Код ещё не менялся.
+**Phase 1–3 в коде (ветка PR).** Phase 0 решений зафиксирован (2026-07-15).
 Ответы продукта: A да · B нет · C только через whitelist · D после, в комнате.
+
+Реализовано:
+
+- типы `ParticipantStatus`, optional `tokenHash`, `deviceWhitelist`, seat-bound invite
+- store: `addLocalParticipant`, claim join, transfer ownership, whitelist sessions
+- API: `/participants`, seat invite, whitelist, sessions
+- UI: секция «Участники», статусы, «Добавить», «Пригласить», paidBy любой seat
+- Vitest: local → expense → claim same id; whitelist second device; transfer owner to local
 
 ------------------------------------------------------------------------
 

@@ -22,6 +22,7 @@ export const REDIS_OP_IDS_PREFIX = "split:op-ids:";
 export const FORBIDDEN_KEY_PARTS = ["history", "route", "track"] as const;
 
 export const SESSION_STORAGE_KEY = "qhub_split_session";
+export const DEVICE_KEY_STORAGE_KEY = "qhub_split_device_key";
 
 export const DEFAULT_CATEGORIES = [
   { id: "food", key: "food", labelRu: "Еда" },
