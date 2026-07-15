@@ -83,6 +83,10 @@ async function saveRoom(room: SplitRoom): Promise<void> {
   await splitRedisSet(roomKey(room.roomId), JSON.stringify(room), ROOM_TTL_SEC);
 }
 
+export async function persistSplitRoom(room: SplitRoom): Promise<void> {
+  await saveRoom(room);
+}
+
 async function saveMember(member: SplitMember): Promise<void> {
   await splitRedisSet(memberKey(member.memberId), JSON.stringify(member), MEMBER_TTL_SEC);
 }
@@ -93,6 +97,10 @@ async function bumpRoomVersion(roomId: string): Promise<SplitRoom> {
   room.version += 1;
   await saveRoom(room);
   return room;
+}
+
+export async function bumpSplitRoomVersion(roomId: string): Promise<SplitRoom> {
+  return bumpRoomVersion(roomId);
 }
 
 export async function getRoom(roomId: string): Promise<SplitRoom | null> {
@@ -293,6 +301,13 @@ async function findMutationId(
   return existing?.id ?? null;
 }
 
+export async function findSplitMutationId(
+  roomId: string,
+  clientMutationId: string | null | undefined,
+): Promise<string | null> {
+  return findMutationId(roomId, clientMutationId);
+}
+
 async function saveMutationId(
   roomId: string,
   clientMutationId: string | null | undefined,
@@ -304,6 +319,14 @@ async function saveMutationId(
     JSON.stringify({ id: resultId }),
     ROOM_TTL_SEC,
   );
+}
+
+export async function saveSplitMutationId(
+  roomId: string,
+  clientMutationId: string | null | undefined,
+  resultId: string,
+): Promise<void> {
+  return saveMutationId(roomId, clientMutationId, resultId);
 }
 
 export async function createExpense(input: {
