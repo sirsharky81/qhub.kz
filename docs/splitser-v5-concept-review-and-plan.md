@@ -21,7 +21,12 @@
 - `room.advancedAccounting` включается при первом активе/advanced-op
 - Vitest store flow: 22 tests total in `src/lib/split`
 
-**Ещё не сделано:** UI advanced, полный dual-write legacy→ops, offline.
+**Phase 3 (UI advanced) — в коде:**
+
+- `SplitAdvancedPanel.tsx` — активы (остатки + custodian), создание актива, взнос, расход из кассы, журнал операций
+- `SplitRoomClient.tsx` — toggle «Расширенный учёт» (off by default, auto-on при `room.advancedAccounting`), `refresh` + `apiGetLedger`
+
+**Ещё не сделано:** полный dual-write legacy→ops, offline.
 
 ------------------------------------------------------------------------
 

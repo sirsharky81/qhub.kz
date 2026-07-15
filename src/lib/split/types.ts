@@ -139,3 +139,14 @@ export interface SplitRoomSnapshot {
   expensesLocked: boolean;
   version: number;
 }
+
+import type { LedgerSnapshot, SplitOperation } from "./ledger";
+
+export type { LedgerSnapshot, SplitOperation, AssetBalance } from "./ledger";
+
+export interface SplitLedgerResponse {
+  room: SplitRoom;
+  ledger: LedgerSnapshot;
+  operations: SplitOperation[];
+  suggestions: SuggestedSettlement[];
+}

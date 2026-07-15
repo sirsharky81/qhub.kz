@@ -9,13 +9,15 @@ import {
   apiCreateSettlement,
   apiDeleteExpense,
   apiExportCsv,
+  apiGetLedger,
   apiGetSnapshot,
   apiSetRates,
 } from "@/lib/split/client";
 import { DEFAULT_CATEGORIES, SUPPORTED_CURRENCIES } from "@/lib/split/constants";
 import { clearSplitSession, loadSplitSession } from "@/lib/split/session";
-import type { SplitMethod, SplitRoomSnapshot, SplitSession } from "@/lib/split/types";
+import type { SplitLedgerResponse, SplitMethod, SplitRoomSnapshot, SplitSession } from "@/lib/split/types";
 import { SplitShell } from "../components/SplitShell";
+import { SplitAdvancedPanel } from "./SplitAdvancedPanel";
 
 function memberName(snapshot: SplitRoomSnapshot, id: string): string {
   return snapshot.members.find((m) => m.memberId === id)?.displayName ?? id.slice(0, 6);
@@ -25,6 +27,8 @@ export default function SplitRoomClient() {
   const router = useRouter();
   const [session, setSession] = useState<SplitSession | null>(null);
   const [snapshot, setSnapshot] = useState<SplitRoomSnapshot | null>(null);
+  const [ledger, setLedger] = useState<SplitLedgerResponse | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -39,12 +43,22 @@ export default function SplitRoomClient() {
   const [fxCurrency, setFxCurrency] = useState("USD");
   const [fxRate, setFxRate] = useState("");
 
-  const refresh = useCallback(async (s: SplitSession) => {
+  const refresh = useCallback(async (s: SplitSession, opts?: { withLedger?: boolean }) => {
     const next = await apiGetSnapshot(s);
     setSnapshot(next);
     setCurrency(next.room.baseCurrency);
     if (selectedIds.length === 0) {
       setSelectedIds(next.members.map((m) => m.memberId));
+    }
+    const needLedger = opts?.withLedger ?? next.room.advancedAccounting ?? false;
+    if (needLedger) {
+      const ledgerData = await apiGetLedger(s);
+      setLedger(ledgerData);
+      if (ledgerData.room.advancedAccounting) {
+        setShowAdvanced(true);
+      }
+    } else {
+      setLedger(null);
     }
   }, [selectedIds.length]);
 
@@ -376,6 +390,60 @@ export default function SplitRoomClient() {
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {snapshot && (
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
+                Расширенный учёт
+              </h2>
+              <label className="flex items-center gap-2 text-sm text-emerald-950/70 shrink-0">
+                <span className="text-xs">{showAdvanced ? "Вкл" : "Выкл"}</span>
+                <input
+                  type="checkbox"
+                  checked={showAdvanced}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setShowAdvanced(on);
+                    if (on && session) {
+                      setError(null);
+                      startTransition(async () => {
+                        try {
+                          await refresh(session, { withLedger: true });
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Ошибка загрузки");
+                        }
+                      });
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            {!showAdvanced && (
+              <p className="text-xs text-emerald-950/50">
+                Касса, взносы и расходы из общего фонда. Включается автоматически при первом
+                активе или взносе.
+              </p>
+            )}
+            {showAdvanced && ledger && (
+              <SplitAdvancedPanel
+                session={session}
+                snapshot={snapshot}
+                ledger={ledger}
+                pending={pending}
+                onRefresh={() => refresh(session, { withLedger: true })}
+                onError={setError}
+                startAction={(fn) => {
+                  setError(null);
+                  startTransition(fn);
+                }}
+              />
+            )}
+            {showAdvanced && !ledger && (
+              <p className="text-sm text-emerald-950/45">Загрузка журнала…</p>
+            )}
           </section>
         )}
 

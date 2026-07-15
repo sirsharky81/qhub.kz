@@ -4,10 +4,12 @@ import type {
   ExpenseParticipantInput,
   Money,
   SplitExpense,
+  SplitLedgerResponse,
   SplitMethod,
   SplitRoomSnapshot,
   SplitSession,
 } from "./types";
+import type { RoomAsset, RoomAssetKind } from "./ledger";
 
 function authHeaders(session: SplitSession): HeadersInit {
   return {
@@ -167,28 +169,87 @@ export async function apiArchiveRoom(session: SplitSession): Promise<void> {
   if (!res.ok) throw new Error(await readError(res));
 }
 
-export async function apiGetLedger(session: SplitSession) {
+export async function apiGetLedger(session: SplitSession): Promise<SplitLedgerResponse> {
   const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/ledger`, {
     headers: authHeaders(session),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  return (await res.json()) as SplitLedgerResponse;
 }
 
 export async function apiCreateAsset(
   session: SplitSession,
-  body: { name?: string; currency: string; custodianMemberId?: string; kind?: string },
-) {
+  body: { name?: string; currency: string; custodianMemberId?: string; kind?: RoomAssetKind },
+): Promise<RoomAsset> {
   const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/assets`, {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  return (await res.json()) as RoomAsset;
 }
 
-export async function apiCreateOperation(session: SplitSession, body: Record<string, unknown>) {
+export type CreateOperationBody =
+  | {
+      type: "contribution";
+      toAssetId: string;
+      amount: Money;
+      currency?: string;
+      fromMemberId?: string;
+      comment?: string;
+      clientMutationId?: string;
+    }
+  | {
+      type: "expense_from_asset";
+      assetId: string;
+      description?: string;
+      amountOriginal: Money;
+      currencyOriginal: string;
+      categoryId?: string;
+      splitMethod: SplitMethod;
+      participants: ExpenseParticipantInput[];
+      comment?: string;
+      clientMutationId?: string;
+    }
+  | {
+      type: "withdrawal";
+      fromAssetId: string;
+      toMemberId: string;
+      amount: Money;
+      currency?: string;
+      comment?: string;
+      clientMutationId?: string;
+    }
+  | {
+      type: "transfer";
+      fromAssetId: string;
+      toAssetId: string;
+      amount: Money;
+      comment?: string;
+      clientMutationId?: string;
+    }
+  | {
+      type: "exchange";
+      fromAssetId: string;
+      fromAmount: Money;
+      toAssetId: string;
+      toAmount: Money;
+      comment?: string;
+      clientMutationId?: string;
+    }
+  | {
+      type: "custody_handoff";
+      assetId: string;
+      toCustodianMemberId: string;
+      comment?: string;
+      clientMutationId?: string;
+    };
+
+export async function apiCreateOperation(
+  session: SplitSession,
+  body: CreateOperationBody,
+): Promise<unknown> {
   const res = await platformFetch(
     `/api/split/rooms/${encodeURIComponent(session.roomId)}/operations`,
     {
