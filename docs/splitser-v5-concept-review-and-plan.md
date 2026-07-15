@@ -3,6 +3,20 @@
 Источник: концепт «финансовая модель комнаты» (Operation ledger + активы).
 Текущий прод: QHub Split MVP по ТЗ v3.3 (`Expense` + `DebtSettlement`, без активов комнаты).
 
+## Статус реализации
+
+**Phase 1 (ledger engine) — в коде:**
+
+- `src/lib/split/ledger/` — типы ops/assets, `foldLedger`, legacy adapter
+- Инвариант модели A: `Σ member nets (base) === Σ asset balances (base)`
+- Запрет отрицательного остатка актива
+- Custodian обновляется через `custody_handoff`
+- Vitest: регресс v3.3 + contribution/cash/withdrawal/transfer/handoff (21 tests total in split)
+
+**Ещё не сделано:** persistence ops/assets, API, UI advanced, миграция комнат, offline.
+
+------------------------------------------------------------------------
+
 ## 0. Зафиксированные решения продукта
 
 | # | Вопрос | Решение |
