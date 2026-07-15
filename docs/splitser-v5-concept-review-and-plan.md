@@ -3,6 +3,45 @@
 Источник: концепт «финансовая модель комнаты» (Operation ledger + активы).
 Текущий прод: QHub Split MVP по ТЗ v3.3 (`Expense` + `DebtSettlement`, без активов комнаты).
 
+## 0. Зафиксированные решения продукта
+
+| # | Вопрос | Решение |
+| --- | --- | --- |
+| 1 | Equity при расходе из кассы | **Вариант A** — только member nets, без отдельного счёта «комнаты» |
+| 2 | Отрицательный остаток актива | **Запрещён** (операция отклоняется) |
+| 3 | Куда идёт взнос | **Всегда в актив**. У актива есть **ответственный участник (custodian)** — деньги «у кого-то», не «в тумбочке». В UI видно: общий объём активов + сколько у кого на руках |
+| 4 | Имя продукта | **QHub Split** (не переименовывать в Splitser) |
+| 5 | Advanced mode | **Выключен по умолчанию** (progressive disclosure, как в аналогах). Включается вручную *или* автоматически при первом взносе/создании актива. Простой UX = Расход + Погашение |
+
+### Уточнение по активам (п.3)
+
+```text
+RoomAsset
+  id, roomId, name, kind, currency,
+  custodianMemberId   // кто отвечает / держит сумму
+  // balance — только derived из ledger
+```
+
+Пример UI:
+
+```text
+Активы комнаты          120 000 KZT
+  у Бориса (касса)       85 000
+  у Ивана (наличка)      35 000
+```
+
+Смена ответственного = отдельная операция (handoff / transfer custody) или Transfer между двумя активами одного currency с разными custodian — зафиксировать в Phase 0 спеке engine.
+
+### Почему так по п.5 (опыт аналогов)
+
+Splitwise и UX-кейсы bill-split держат **простой поток «добавить расход»** на первом плане; сложное — progressive disclosure. Касса/взносы — сценарий поездки с общим котлом, не каждой комнаты. Значит:
+
+- новая комната стартует в простом режиме;
+- блок «Активы / Взнос / Обмен» появляется после включения advanced или после первого Contribution;
+- не спрашивать пользователя про «расширенный учёт» при создании комнаты.
+
+------------------------------------------------------------------------
+
 ## 1. Вердикт
 
 Концепция **сильная и правильная** как целевая архитектура: журнал операций (ledger) вместо списка расходов лучше описывает поездки/коммуналку с общей кассой и валютами.
@@ -35,57 +74,28 @@
 
 ------------------------------------------------------------------------
 
-## 3. Пробелы (нужно зафиксировать до кода)
+## 3. Пробелы (оставшиеся после решений §0)
 
-### 3.1 Критично
+### Закрыто решениями §0
 
-1. **Инварианты активов**
-   - Σ движений по активу = остаток?
-   - Отрицательный баланс актива запрещён?
-   - Что если Expense из кассы больше остатка?
+- Equity модель → **A**
+- Минус актива → **запрет**
+- Contribution → **всегда в актив + custodian**
+- Бренд → **QHub Split**
+- Advanced → **off by default + auto-on при первом asset/contribution**
 
-2. **Двойная запись**
-   - Нужна ли явная проводка `debit/credit` на счетах (member equity + asset), или деривация из типов операций достаточна?
+### Ещё нужно в Phase 0 спеке (до engine)
 
-3. **Формула member balance**
-   Явно прописать вклад каждого типа:
-
-   | Операция | Эффект на member net |
-   | --- | --- |
-   | Expense (source=member M) | M += amountBase; participants −shares |
-   | Expense (source=asset) | только participants −shares; актив −amount (equity комнаты?) |
-   | Contribution (M → asset) | M += amount (кредитор комнаты) |
-   | Withdrawal (asset → M) | M −= amount |
-   | Settlement (A → B) | A += amount; B −= amount |
-   | Transfer / Exchange | member nets без изменений |
-   | Adjustment | по полям |
-
-   Особенно спорен **Expense из кассы**: уменьшает актив и начисляет доли участникам — кто «кредитор»? Обычно: касса = общий пул; доли уменьшают equity участников относительно пула / или появляется «room equity». Это надо выбрать одной моделью.
-
-4. **Модель «equity комнаты»**
-   - Вариант A: только member balances; касса — буфер, взносы увеличивают net внёсшего.
-   - Вариант B: отдельный счёт `room` / `pool`.
-   - Рекомендация для MVP v5: **A** (проще): Contribution даёт +net внёсшему; Expense из кассы списывает актив и распределяет доли (−share участникам), без отдельного room-member. Проверка: Σ member nets + ? = f(assets). Нужен явный инвариант «закрытия комнаты».
-
-5. **FX**
-   - Курсы владельца остаются для Expense в чужой валюте?
-   - Exchange — отдельная фиксация фактической конвертации активов (rate implied)?
-   - Не смешивать «курс на расход» и «обмен активов».
-
-6. **Lock / audibility**
-   - v3.3: после Settlement expenses lock.
-   - v5: lock всего ledger? только прошлых операций? soft correction via Adjustment?
-
-7. **«Позиции чека»** — в v3.3 out of MVP; в v5 снова в списке split methods. Оставить post-MVP.
-
-### 3.2 Важно
-
-8. Типы активов: cash/bank/card/wallet — поля, мультивалютность одного актива или 1 asset = 1 currency?
-   - Рекомендация: **1 asset = 1 currency** (проще Exchange как 2-leg).
-9. Права: кто создаёт Contribution/Exchange/Asset?
-10. Offline First уже отложен — с ledger становится ещё важнее (идемпотентность операций).
-11. Миграция существующих Redis `split:expense:*` / settlements.
-12. Переименование продукта Splitser vs QHub Split — только бренд/UI или path `/tools/split`?
+1. **Численный инвариант закрытия комнаты** при модели A + активы с custodian (fixtures в тесты).
+2. **Expense из кассы** при A: актив −amount; participants −shares; member nets без «+paid» источнику-активу. Проверить Σ nets vs сумма активов.
+3. **Двойная запись** — достаточно fold по типам ops (без отдельной GL-таблицы) для MVP v5.
+4. **FX:** курсы владельца для Expense; Exchange — implied rate между активами; не смешивать.
+5. **Lock:** после Settlement — как сейчас; Adjustment для правок.
+6. **Handoff custodian** — отдельный op type или reuse Transfer.
+7. **Receipt items** — post-MVP.
+8. **1 asset = 1 currency** (рекомендация остаётся).
+9. Миграция Redis expense/settlement → Operation.
+10. Offline — отдельным релизом после online ledger.
 
 ------------------------------------------------------------------------
 
@@ -94,8 +104,10 @@
 ```text
 RoomAsset
   id, roomId, name, kind: cash|bank|card|wallet|other,
-  currency, balanceBase? (derived) / balanceNative,
+  currency,                // 1 asset = 1 currency
+  custodianMemberId,       // кто держит / отвечает
   createdAt
+  // balanceNative — только derived из ledger
 
 Operation (base)
   id, roomId, type, createdAt, createdBy, comment?,
@@ -113,7 +125,10 @@ SettlementOp
   fromMemberId, toMemberId, amountBase   // как сейчас DebtSettlement
 
 TransferOp
-  fromAssetId, toAssetId, amount, currency  // same currency
+  fromAssetId, toAssetId, amount, currency  // same currency; может менять custodian косвенно
+
+CustodyHandoffOp   // опционально: смена custodian без смены остатка / или через Transfer
+  assetId, fromMemberId, toMemberId
 
 WithdrawalOp
   fromAssetId, toMemberId, amount, currency, amountBase
@@ -208,16 +223,14 @@ UI без advanced: фильтр ленты `expense|settlement` — польз�
 
 ------------------------------------------------------------------------
 
-## 9. Вопросы владельцу
+## 9. Вопросы — закрыты
 
-1. Модель equity при расходе из кассы — вариант A (только member nets) или B (счёт комнаты)?
-2. Можно ли уводить актив в минус?
-3. Contribution всегда в актив или можно «на руки организатору» без asset?
-4. Переименовываем продукт в Splitser в UI или оставляем QHub Split?
-5. Advanced mode default off для всех комнат?
+См. §0. Открытыми остаются только технические детали Phase 0 (инвариант закрытия + custodian handoff), не продуктовые fork'и.
 
 ------------------------------------------------------------------------
 
 ## 10. Итог
 
-v5.0 — **следующий правильный слой** над текущим Split, а не замена продуктовой идеи. Текущий MVP валиден как «простой режим». Следующий инженерный шаг: **спека инвариантов + ledger engine с регрессом v3.3**, затем активы и advanced UI.
+v5.0 — **следующий правильный слой** над текущим Split. Решения §0 разблокируют engine: модель A, без минусов актива, активы с custodian, бренд QHub Split, advanced off by default.
+
+**Следующий шаг разработки:** Phase 1 — ledger engine + fixtures (регресс v3.3 + взнос/касса/custodian).
