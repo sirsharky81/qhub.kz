@@ -111,8 +111,18 @@ export function normalizeMember(raw: SplitMember): SplitMember {
 
 export function toPublicMember(raw: SplitMember): SplitMemberPublic {
   const m = normalizeMember(raw);
-  const { tokenHash: _t, sessionTokenHashes: _s, ...rest } = m;
-  return rest;
+  return {
+    memberId: m.memberId,
+    roomId: m.roomId,
+    displayName: m.displayName,
+    role: m.role,
+    status: m.status,
+    deviceWhitelist: m.deviceWhitelist,
+    linkedUserId: m.linkedUserId,
+    avatarUrl: m.avatarUrl,
+    joinedAt: m.joinedAt,
+    leftAt: m.leftAt,
+  };
 }
 
 export function isMemberConnected(member: SplitMember): boolean {
@@ -217,7 +227,7 @@ export async function createInvitation(input: {
   if (!room) throw new Error("room_not_found");
   if (!canMutateRoom(room)) throw new Error("room_archived");
 
-  let seatMemberId = input.seatMemberId ?? null;
+  const seatMemberId = input.seatMemberId ?? null;
   if (seatMemberId) {
     const seat = await getMember(seatMemberId);
     if (!seat || seat.roomId.toUpperCase() !== room.roomId.toUpperCase() || seat.leftAt) {

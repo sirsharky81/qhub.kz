@@ -26,7 +26,7 @@ function memberName(snapshot: SplitRoomSnapshot, id: string): string {
 
 export default function SplitRoomClient() {
   const router = useRouter();
-  const [session, setSession] = useState<SplitSession | null>(null);
+  const [session] = useState<SplitSession | null>(() => loadSplitSession());
   const [snapshot, setSnapshot] = useState<SplitRoomSnapshot | null>(null);
   const [ledger, setLedger] = useState<SplitLedgerResponse | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -70,20 +70,20 @@ export default function SplitRoomClient() {
   }, [selectedIds.length, paidByMemberId]);
 
   useEffect(() => {
-    const s = loadSplitSession();
-    if (!s) {
+    if (!session) {
       router.replace("/tools/split");
       return;
     }
-    setSession(s);
     startTransition(async () => {
       try {
-        await refresh(s);
+        await refresh(session);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Ошибка загрузки");
       }
     });
-  }, [router, refresh]);
+    // Initial load only — refresh identity is intentionally omitted to avoid loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, session?.roomId, session?.memberId]);
 
   const participantInputs = useMemo(() => {
     let ids = selectedIds;
