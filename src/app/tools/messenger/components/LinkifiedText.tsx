@@ -21,7 +21,7 @@ export function LinkifiedText({
           <button
             key={`link-${index}`}
             type="button"
-            className={`inline cursor-pointer break-all text-left font-medium underline decoration-current/60 underline-offset-2 ${linkClassName}`}
+            className={`inline cursor-pointer break-words hyphens-auto text-left font-medium underline decoration-current/60 underline-offset-2 ${linkClassName}`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();

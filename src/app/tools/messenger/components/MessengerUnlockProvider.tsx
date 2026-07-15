@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from "react";
 import { verifyMessengerPin } from "@/lib/messenger/client";
-import { verifyStorageKeyAgainstHistory } from "@/lib/messenger/history-db";
 import { deriveStorageKey } from "@/lib/messenger/storage-key";
 
 interface UnlockContextValue {
@@ -27,20 +26,15 @@ export function MessengerUnlockProvider({ children }: { children: ReactNode }) {
 
   const unlockWithPin = useCallback(async (_phone: string, pin: string) => {
     try {
+      const res = await verifyMessengerPin(pin);
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: res.error ?? "Неверный PIN",
+        };
+      }
+
       const key = await deriveStorageKey(pin);
-      const localCheck = await verifyStorageKeyAgainstHistory(key);
-
-      if (localCheck === "invalid") {
-        return { ok: false, error: "Неверный PIN" };
-      }
-
-      if (localCheck === "no_history") {
-        const res = await verifyMessengerPin(pin);
-        if (!res.ok) {
-          return { ok: false, error: res.error ?? "Сессия истекла. Войдите снова." };
-        }
-      }
-
       setStorageKey(key);
       return { ok: true };
     } catch {

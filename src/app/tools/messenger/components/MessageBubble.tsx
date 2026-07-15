@@ -151,7 +151,8 @@ export function MessageBubble({
                   {quoted.author}
                 </span>
                 <span
-                  className={`line-clamp-2 break-all [overflow-wrap:anywhere] ${
+                  lang="ru"
+                  className={`line-clamp-2 break-words hyphens-auto ${
                     message.mine ? "text-white/85" : "text-gray-600"
                   }`}
                 >
@@ -161,7 +162,8 @@ export function MessageBubble({
             )}
           {message.type === "text" && (
             <p
-              className="text-sm whitespace-pre-wrap break-all [overflow-wrap:anywhere] max-w-full select-text"
+              lang="ru"
+              className="text-sm whitespace-pre-wrap break-words hyphens-auto max-w-full select-text"
               style={{ WebkitUserSelect: "text", userSelect: "text" }}
             >
               <LinkifiedText
@@ -186,7 +188,7 @@ export function MessageBubble({
                   : "#"
               }
               download={message.plain?.filename ?? "file"}
-              className="text-sm underline break-all"
+              className="text-sm underline break-words hyphens-auto"
             >
               📎 {message.plain?.filename ?? "Файл"}
             </a>
