@@ -17,13 +17,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as { token?: string; displayName?: string };
+    const body = (await request.json()) as {
+      token?: string;
+      displayName?: string;
+      deviceKey?: string;
+    };
     if (!body.token) {
       return withCors(Response.json({ error: "Нужен токен приглашения" }, { status: 400 }), request);
     }
     const { room, member, accessToken } = await joinRoom({
       token: body.token,
       displayName: body.displayName || "Участник",
+      deviceKey: body.deviceKey ?? null,
     });
     return withCors(
       Response.json({
@@ -32,6 +37,7 @@ export async function POST(request: Request) {
         accessToken,
         role: member.role,
         displayName: member.displayName,
+        status: member.status,
       }),
       request,
     );

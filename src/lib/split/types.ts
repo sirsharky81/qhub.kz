@@ -9,6 +9,9 @@ export type SplitRoomStatus = "open" | "archived";
 
 export type SplitInviteChannel = "link" | "qr" | "messenger";
 
+/** Seat lifecycle: local → pending_invite → connected. */
+export type ParticipantStatus = "local" | "pending_invite" | "connected";
+
 export interface RoomFxRate {
   currency: string;
   /** Units of base currency per 1 unit of this currency. */
@@ -37,7 +40,16 @@ export interface SplitMember {
   roomId: string;
   displayName: string;
   role: SplitRoomRole;
-  tokenHash: string;
+  /** Missing on legacy rows → inferred from tokenHash. */
+  status: ParticipantStatus;
+  /** Present only when status=connected (and sessions exist). */
+  tokenHash?: string | null;
+  /** Extra access-token hashes for whitelisted devices. */
+  sessionTokenHashes?: string[];
+  /** SHA-256 device keys allowed to open additional sessions. */
+  deviceWhitelist?: string[];
+  linkedUserId?: string | null;
+  avatarUrl?: string | null;
   joinedAt: number;
   leftAt?: number | null;
 }
@@ -50,7 +62,14 @@ export interface SplitInvitation {
   expiresAt: number;
   createdBy: string;
   createdAt: number;
+  /** When set, join claims this Participant instead of creating a new one. */
+  seatMemberId?: string | null;
+  /** Seat-bound invites are one-shot after successful claim. */
+  consumedAt?: number | null;
 }
+
+/** Member as returned to clients (no secrets). */
+export type SplitMemberPublic = Omit<SplitMember, "tokenHash" | "sessionTokenHashes">;
 
 export interface ExpenseParticipantInput {
   memberId: string;
@@ -131,7 +150,7 @@ export interface SplitSession {
 
 export interface SplitRoomSnapshot {
   room: SplitRoom;
-  members: Array<Omit<SplitMember, "tokenHash">>;
+  members: SplitMemberPublic[];
   expenses: SplitExpense[];
   settlements: DebtSettlement[];
   balances: MemberBalance[];

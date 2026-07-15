@@ -5,11 +5,13 @@ import type {
   Money,
   SplitExpense,
   SplitLedgerResponse,
+  SplitMemberPublic,
   SplitMethod,
   SplitRoomSnapshot,
   SplitSession,
 } from "./types";
 import type { RoomAsset, RoomAssetKind } from "./ledger";
+import { getOrCreateSplitDeviceKey } from "./session";
 
 function authHeaders(session: SplitSession): HeadersInit {
   return {
@@ -59,25 +61,92 @@ export async function apiCreateRoom(input: {
   };
 }
 
-export async function apiCreateInvite(session: SplitSession, channel: "link" | "qr" | "messenger" = "link") {
+export async function apiCreateInvite(
+  session: SplitSession,
+  channel: "link" | "qr" | "messenger" = "link",
+  seatMemberId?: string,
+) {
   const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/invite`, {
     method: "POST",
     headers: authHeaders(session),
-    body: JSON.stringify({ channel }),
+    body: JSON.stringify({ channel, seatMemberId }),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return (await res.json()) as { token: string; expiresAt: number; joinPath: string };
+  return (await res.json()) as {
+    token: string;
+    expiresAt: number;
+    joinPath: string;
+    seatMemberId?: string | null;
+  };
 }
 
-export async function apiJoinRoom(input: { token: string; displayName: string }): Promise<SplitSession> {
+export async function apiJoinRoom(input: {
+  token: string;
+  displayName: string;
+}): Promise<SplitSession> {
   const res = await platformFetch("/api/split/rooms/join", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, deviceKey: getOrCreateSplitDeviceKey() }),
   });
   if (!res.ok) throw new Error(await readError(res));
   const data = (await res.json()) as SplitSession;
   return data;
+}
+
+export async function apiAddLocalParticipant(
+  session: SplitSession,
+  body: { displayName: string; avatarUrl?: string | null },
+): Promise<SplitMemberPublic> {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/participants`,
+    { method: "POST", headers: authHeaders(session), body: JSON.stringify(body) },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SplitMemberPublic;
+}
+
+export async function apiInviteParticipant(
+  session: SplitSession,
+  memberId: string,
+  channel: "link" | "qr" | "messenger" = "link",
+) {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/participants/${encodeURIComponent(memberId)}/invite`,
+    { method: "POST", headers: authHeaders(session), body: JSON.stringify({ channel }) },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as {
+    token: string;
+    expiresAt: number;
+    joinPath: string;
+    seatMemberId?: string | null;
+  };
+}
+
+export async function apiTransferOwnership(session: SplitSession, memberId: string): Promise<void> {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/participants/${encodeURIComponent(memberId)}/transfer-ownership`,
+    { method: "POST", headers: authHeaders(session), body: "{}" },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function apiWhitelistDevice(
+  session: SplitSession,
+  memberId: string,
+  deviceKey?: string,
+): Promise<SplitMemberPublic> {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/participants/${encodeURIComponent(memberId)}/whitelist`,
+    {
+      method: "POST",
+      headers: authHeaders(session),
+      body: JSON.stringify({ deviceKey: deviceKey || getOrCreateSplitDeviceKey() }),
+    },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SplitMemberPublic;
 }
 
 export async function apiGetSnapshot(session: SplitSession): Promise<SplitRoomSnapshot> {

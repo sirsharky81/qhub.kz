@@ -42,10 +42,12 @@ import type {
   DebtSettlement,
   ExpenseParticipantInput,
   Money,
+  ParticipantStatus,
   SplitExpense,
   SplitInvitation,
   SplitInviteChannel,
   SplitMember,
+  SplitMemberPublic,
   SplitMethod,
   SplitRoom,
   SplitRoomRole,
@@ -91,6 +93,50 @@ async function saveMember(member: SplitMember): Promise<void> {
   await splitRedisSet(memberKey(member.memberId), JSON.stringify(member), MEMBER_TTL_SEC);
 }
 
+/** Back-compat: legacy rows without status are connected if they have a token. */
+export function normalizeMember(raw: SplitMember): SplitMember {
+  const tokenHash = raw.tokenHash ?? null;
+  const status: ParticipantStatus =
+    raw.status ?? (tokenHash ? "connected" : "local");
+  return {
+    ...raw,
+    status,
+    tokenHash,
+    sessionTokenHashes: raw.sessionTokenHashes ?? [],
+    deviceWhitelist: raw.deviceWhitelist ?? [],
+    linkedUserId: raw.linkedUserId ?? null,
+    avatarUrl: raw.avatarUrl ?? null,
+  };
+}
+
+export function toPublicMember(raw: SplitMember): SplitMemberPublic {
+  const m = normalizeMember(raw);
+  return {
+    memberId: m.memberId,
+    roomId: m.roomId,
+    displayName: m.displayName,
+    role: m.role,
+    status: m.status,
+    deviceWhitelist: m.deviceWhitelist,
+    linkedUserId: m.linkedUserId,
+    avatarUrl: m.avatarUrl,
+    joinedAt: m.joinedAt,
+    leftAt: m.leftAt,
+  };
+}
+
+export function isMemberConnected(member: SplitMember): boolean {
+  const m = normalizeMember(member);
+  return m.status === "connected" && Boolean(m.tokenHash);
+}
+
+function matchesAccessToken(member: SplitMember, accessToken: string): boolean {
+  const m = normalizeMember(member);
+  const h = hashToken(accessToken);
+  if (m.tokenHash && m.tokenHash === h) return true;
+  return (m.sessionTokenHashes ?? []).includes(h);
+}
+
 async function bumpRoomVersion(roomId: string): Promise<SplitRoom> {
   const room = await getRoom(roomId);
   if (!room) throw new Error("room_not_found");
@@ -108,13 +154,15 @@ export async function getRoom(roomId: string): Promise<SplitRoom | null> {
 }
 
 export async function getMember(memberId: string): Promise<SplitMember | null> {
-  return splitRedisGetJson<SplitMember>(memberKey(memberId));
+  const raw = await splitRedisGetJson<SplitMember>(memberKey(memberId));
+  return raw ? normalizeMember(raw) : null;
 }
 
 export async function verifyMemberToken(memberId: string, accessToken: string): Promise<SplitMember | null> {
   const member = await getMember(memberId);
   if (!member || member.leftAt) return null;
-  if (member.tokenHash !== hashToken(accessToken)) return null;
+  if (!isMemberConnected(member)) return null;
+  if (!matchesAccessToken(member, accessToken)) return null;
   return member;
 }
 
@@ -151,7 +199,12 @@ export async function createSplitRoom(input: {
     roomId,
     displayName: input.ownerName?.trim() || "Владелец",
     role: "owner",
+    status: "connected",
     tokenHash: hashToken(accessToken),
+    sessionTokenHashes: [],
+    deviceWhitelist: [],
+    linkedUserId: null,
+    avatarUrl: null,
     joinedAt: now,
   };
 
@@ -168,10 +221,20 @@ export async function createInvitation(input: {
   createdBy: string;
   role?: SplitRoomRole;
   channel?: SplitInviteChannel;
+  seatMemberId?: string | null;
 }): Promise<SplitInvitation> {
   const room = await getRoom(input.roomId);
   if (!room) throw new Error("room_not_found");
   if (!canMutateRoom(room)) throw new Error("room_archived");
+
+  const seatMemberId = input.seatMemberId ?? null;
+  if (seatMemberId) {
+    const seat = await getMember(seatMemberId);
+    if (!seat || seat.roomId.toUpperCase() !== room.roomId.toUpperCase() || seat.leftAt) {
+      throw new Error("member_not_found");
+    }
+    if (isMemberConnected(seat)) throw new Error("already_connected");
+  }
 
   const token = generateInviteToken();
   const invitation: SplitInvitation = {
@@ -182,23 +245,214 @@ export async function createInvitation(input: {
     expiresAt: Date.now() + INVITE_TTL_SEC * 1000,
     createdBy: input.createdBy,
     createdAt: Date.now(),
+    seatMemberId,
+    consumedAt: null,
   };
   await splitRedisSet(inviteKey(token), JSON.stringify(invitation), INVITE_TTL_SEC);
+
+  if (seatMemberId) {
+    const seat = (await getMember(seatMemberId))!;
+    seat.status = "pending_invite";
+    await saveMember(seat);
+  }
+
   await bumpRoomVersion(room.roomId);
   return invitation;
+}
+
+export async function addLocalParticipant(input: {
+  roomId: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  role?: SplitRoomRole;
+}): Promise<SplitMember> {
+  const room = await getRoom(input.roomId);
+  if (!room) throw new Error("room_not_found");
+  if (!canMutateRoom(room)) throw new Error("room_archived");
+
+  const name = input.displayName.trim();
+  if (!name) throw new Error("invalid_display_name");
+
+  const member: SplitMember = {
+    memberId: generateMemberId(),
+    roomId: room.roomId,
+    displayName: name,
+    role: input.role === "owner" ? "member" : "member",
+    status: "local",
+    tokenHash: null,
+    sessionTokenHashes: [],
+    deviceWhitelist: [],
+    linkedUserId: null,
+    avatarUrl: input.avatarUrl?.trim() || null,
+    joinedAt: Date.now(),
+  };
+
+  room.memberIds.push(member.memberId);
+  await saveMember(member);
+  await saveRoom(room);
+  await bumpRoomVersion(room.roomId);
+  return normalizeMember(member);
+}
+
+export async function renameParticipant(input: {
+  roomId: string;
+  memberId: string;
+  displayName: string;
+  avatarUrl?: string | null;
+}): Promise<SplitMember> {
+  const room = await getRoom(input.roomId);
+  if (!room) throw new Error("room_not_found");
+  if (!canMutateRoom(room)) throw new Error("room_archived");
+  const member = await getMember(input.memberId);
+  if (!member || member.roomId.toUpperCase() !== room.roomId.toUpperCase() || member.leftAt) {
+    throw new Error("member_not_found");
+  }
+  const name = input.displayName.trim();
+  if (!name) throw new Error("invalid_display_name");
+  member.displayName = name;
+  if (input.avatarUrl !== undefined) {
+    member.avatarUrl = input.avatarUrl?.trim() || null;
+  }
+  await saveMember(member);
+  await bumpRoomVersion(room.roomId);
+  return normalizeMember(member);
+}
+
+export async function transferOwnership(input: {
+  roomId: string;
+  toMemberId: string;
+}): Promise<SplitRoom> {
+  const room = await getRoom(input.roomId);
+  if (!room) throw new Error("room_not_found");
+  if (!canMutateRoom(room)) throw new Error("room_archived");
+
+  const nextOwner = await getMember(input.toMemberId);
+  if (!nextOwner || nextOwner.roomId.toUpperCase() !== room.roomId.toUpperCase() || nextOwner.leftAt) {
+    throw new Error("member_not_found");
+  }
+
+  const prevOwner = await getMember(room.ownerMemberId);
+  if (prevOwner && prevOwner.memberId !== nextOwner.memberId) {
+    prevOwner.role = "member";
+    await saveMember(prevOwner);
+  }
+  nextOwner.role = "owner";
+  await saveMember(nextOwner);
+  room.ownerMemberId = nextOwner.memberId;
+  await saveRoom(room);
+  await bumpRoomVersion(room.roomId);
+  return (await getRoom(room.roomId))!;
+}
+
+/** Owner-only mutations: owner if connected, else any connected caretaker. */
+export async function canActAsOwner(room: SplitRoom, actorMemberId: string): Promise<boolean> {
+  if (room.ownerMemberId === actorMemberId) return true;
+  const owner = await getMember(room.ownerMemberId);
+  if (!owner || isMemberConnected(owner)) return false;
+  const actor = await getMember(actorMemberId);
+  return Boolean(actor && isMemberConnected(actor) && !actor.leftAt);
+}
+
+export async function addDeviceToWhitelist(input: {
+  roomId: string;
+  memberId: string;
+  deviceKey: string;
+}): Promise<SplitMember> {
+  const member = await getMember(input.memberId);
+  if (!member || member.roomId.toUpperCase() !== input.roomId.toUpperCase() || member.leftAt) {
+    throw new Error("member_not_found");
+  }
+  if (!isMemberConnected(member)) throw new Error("not_connected");
+  const key = input.deviceKey.trim();
+  if (!key) throw new Error("invalid_device_key");
+  const hashed = hashToken(key);
+  const list = member.deviceWhitelist ?? [];
+  if (!list.includes(hashed)) {
+    member.deviceWhitelist = [...list, hashed];
+    await saveMember(member);
+    await bumpRoomVersion(input.roomId);
+  }
+  return normalizeMember(member);
+}
+
+export async function createWhitelistedSession(input: {
+  roomId: string;
+  memberId: string;
+  deviceKey: string;
+}): Promise<{ member: SplitMember; accessToken: string }> {
+  const member = await getMember(input.memberId);
+  if (!member || member.roomId.toUpperCase() !== input.roomId.toUpperCase() || member.leftAt) {
+    throw new Error("member_not_found");
+  }
+  if (!isMemberConnected(member)) throw new Error("not_connected");
+  const hashedDevice = hashToken(input.deviceKey.trim());
+  if (!(member.deviceWhitelist ?? []).includes(hashedDevice)) {
+    throw new Error("device_not_whitelisted");
+  }
+  const accessToken = generateAccessToken();
+  const h = hashToken(accessToken);
+  member.sessionTokenHashes = [...(member.sessionTokenHashes ?? []), h];
+  await saveMember(member);
+  await bumpRoomVersion(input.roomId);
+  return { member: normalizeMember(member), accessToken };
+}
+
+async function consumeInvitation(invitation: SplitInvitation): Promise<void> {
+  invitation.consumedAt = Date.now();
+  await splitRedisSet(inviteKey(invitation.token), JSON.stringify(invitation), INVITE_TTL_SEC);
 }
 
 export async function joinRoom(input: {
   token: string;
   displayName: string;
+  deviceKey?: string | null;
 }): Promise<{ room: SplitRoom; member: SplitMember; accessToken: string }> {
   const invitation = await splitRedisGetJson<SplitInvitation>(inviteKey(input.token));
   if (!invitation || invitation.expiresAt < Date.now()) throw new Error("invite_expired");
+  if (invitation.consumedAt) throw new Error("invite_consumed");
 
   const room = await getRoom(invitation.roomId);
   if (!room) throw new Error("room_not_found");
   if (!canMutateRoom(room)) throw new Error("room_archived");
 
+  // Seat-bound claim — keep the same Participant id.
+  if (invitation.seatMemberId) {
+    const seat = await getMember(invitation.seatMemberId);
+    if (!seat || seat.leftAt) throw new Error("member_not_found");
+
+    if (isMemberConnected(seat)) {
+      // Second device: only if whitelisted.
+      if (!input.deviceKey) throw new Error("device_not_whitelisted");
+      const hashedDevice = hashToken(input.deviceKey.trim());
+      if (!(seat.deviceWhitelist ?? []).includes(hashedDevice)) {
+        throw new Error("device_not_whitelisted");
+      }
+      const accessToken = generateAccessToken();
+      seat.sessionTokenHashes = [...(seat.sessionTokenHashes ?? []), hashToken(accessToken)];
+      await saveMember(seat);
+      await consumeInvitation(invitation);
+      await bumpRoomVersion(room.roomId);
+      return { room: (await getRoom(room.roomId))!, member: normalizeMember(seat), accessToken };
+    }
+
+    const accessToken = generateAccessToken();
+    const name = input.displayName.trim() || seat.displayName;
+    seat.displayName = name;
+    seat.status = "connected";
+    seat.tokenHash = hashToken(accessToken);
+    seat.sessionTokenHashes = [];
+    if (input.deviceKey?.trim()) {
+      seat.deviceWhitelist = Array.from(
+        new Set([...(seat.deviceWhitelist ?? []), hashToken(input.deviceKey.trim())]),
+      );
+    }
+    await saveMember(seat);
+    await consumeInvitation(invitation);
+    await bumpRoomVersion(room.roomId);
+    return { room: (await getRoom(room.roomId))!, member: normalizeMember(seat), accessToken };
+  }
+
+  // Legacy generic invite — new connected seat (reusable until expiry).
   const accessToken = generateAccessToken();
   const memberId = generateMemberId();
   const member: SplitMember = {
@@ -206,7 +460,12 @@ export async function joinRoom(input: {
     roomId: room.roomId,
     displayName: input.displayName.trim() || "Участник",
     role: invitation.role === "owner" ? "member" : invitation.role,
+    status: "connected",
     tokenHash: hashToken(accessToken),
+    sessionTokenHashes: [],
+    deviceWhitelist: input.deviceKey?.trim() ? [hashToken(input.deviceKey.trim())] : [],
+    linkedUserId: null,
+    avatarUrl: null,
     joinedAt: Date.now(),
   };
 
@@ -214,9 +473,8 @@ export async function joinRoom(input: {
   await saveMember(member);
   await saveRoom(room);
   await bumpRoomVersion(room.roomId);
-  // keep invite reusable for MVP link/QR (multiple joins) until expiry
 
-  return { room: (await getRoom(room.roomId))!, member, accessToken };
+  return { room: (await getRoom(room.roomId))!, member: normalizeMember(member), accessToken };
 }
 
 export async function listMembers(roomId: string): Promise<SplitMember[]> {
@@ -225,7 +483,7 @@ export async function listMembers(roomId: string): Promise<SplitMember[]> {
   const members: SplitMember[] = [];
   for (const id of room.memberIds) {
     const m = await getMember(id);
-    if (m && !m.leftAt) members.push(m);
+    if (m && !m.leftAt) members.push(normalizeMember(m));
   }
   return members;
 }
@@ -238,7 +496,7 @@ export async function setRoomRates(
   const room = await getRoom(roomId);
   if (!room) throw new Error("room_not_found");
   if (!canMutateRoom(room)) throw new Error("room_archived");
-  if (room.ownerMemberId !== actorMemberId) throw new Error("forbidden");
+  if (!(await canActAsOwner(room, actorMemberId))) throw new Error("forbidden");
 
   const next = rates.map((r) => {
     const currency = r.currency.toUpperCase();
@@ -583,7 +841,7 @@ export async function leaveRoom(roomId: string, memberId: string): Promise<void>
 export async function archiveRoom(roomId: string, actorMemberId: string): Promise<SplitRoom> {
   const room = await getRoom(roomId);
   if (!room) throw new Error("room_not_found");
-  if (room.ownerMemberId !== actorMemberId) throw new Error("forbidden");
+  if (!(await canActAsOwner(room, actorMemberId))) throw new Error("forbidden");
 
   const expenses = await listExpenses(roomId);
   const settlements = await listSettlements(roomId);
@@ -598,7 +856,7 @@ export async function archiveRoom(roomId: string, actorMemberId: string): Promis
 export async function getRoomSnapshot(roomId: string): Promise<SplitRoomSnapshot> {
   const room = await getRoom(roomId);
   if (!room) throw new Error("room_not_found");
-  const members = (await listMembers(roomId)).map(({ tokenHash: _t, ...rest }) => rest);
+  const members = (await listMembers(roomId)).map(toPublicMember);
   const expenses = withExpenseLockState(await listExpenses(roomId), await listSettlements(roomId));
   const settlements = await listSettlements(roomId);
   const balances = computeBalances(room.memberIds, expenses, settlements);
