@@ -44,6 +44,10 @@ export function jsonSplitError(err: unknown): Response {
       invalid_shares: ["Некорректные доли", 400],
       settlement_same_member: ["Нельзя погасить долг самому себе", 400],
       invalid_settlement_amount: ["Некорректная сумма погашения", 400],
+      asset_not_found: ["Актив не найден", 404],
+      asset_negative_balance: ["Недостаточно средств на активе", 409],
+      transfer_currency_mismatch: ["Валюты активов не совпадают", 400],
+      ledger_invariant_broken: ["Нарушен инвариант баланса комнаты", 409],
     };
     const hit = map[err.message] ?? (err.name === "SplitValidationError" ? [err.message, 400] : null);
     if (hit) return Response.json({ error: hit[0] }, { status: hit[1] });

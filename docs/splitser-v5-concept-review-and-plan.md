@@ -11,9 +11,17 @@
 - Инвариант модели A: `Σ member nets (base) === Σ asset balances (base)`
 - Запрет отрицательного остатка актива
 - Custodian обновляется через `custody_handoff`
-- Vitest: регресс v3.3 + contribution/cash/withdrawal/transfer/handoff (21 tests total in split)
+- Vitest: регресс v3.3 + contribution/cash/withdrawal/transfer/handoff
 
-**Ещё не сделано:** persistence ops/assets, API, UI advanced, миграция комнат, offline.
+**Phase 2 (persistence + API) — в коде:**
+
+- `src/lib/split/ledger-store.ts` — assets/ops Redis, merge legacy expenses/settlements
+- API: `GET/POST .../assets`, `GET .../ledger`, `GET/POST .../operations`
+- Client: `apiGetLedger`, `apiCreateAsset`, `apiCreateOperation`
+- `room.advancedAccounting` включается при первом активе/advanced-op
+- Vitest store flow: 22 tests total in `src/lib/split`
+
+**Ещё не сделано:** UI advanced, полный dual-write legacy→ops, offline.
 
 ------------------------------------------------------------------------
 

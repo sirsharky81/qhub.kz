@@ -28,6 +28,8 @@ export interface SplitRoom {
   version: number;
   createdAt: number;
   updatedAt: number;
+  /** Progressive disclosure: assets / contributions UI. */
+  advancedAccounting?: boolean;
 }
 
 export interface SplitMember {

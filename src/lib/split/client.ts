@@ -166,3 +166,37 @@ export async function apiArchiveRoom(session: SplitSession): Promise<void> {
   });
   if (!res.ok) throw new Error(await readError(res));
 }
+
+export async function apiGetLedger(session: SplitSession) {
+  const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/ledger`, {
+    headers: authHeaders(session),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function apiCreateAsset(
+  session: SplitSession,
+  body: { name?: string; currency: string; custodianMemberId?: string; kind?: string },
+) {
+  const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/assets`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function apiCreateOperation(session: SplitSession, body: Record<string, unknown>) {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/operations`,
+    {
+      method: "POST",
+      headers: authHeaders(session),
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
