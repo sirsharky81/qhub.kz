@@ -9,7 +9,7 @@ import { computeBalances } from "./engine/balance";
 import { foldLedger, operationsFromLegacy, ratesFx } from "./ledger";
 import type { RoomAsset, SplitOperation } from "./ledger";
 import { splitRedisGetJson, splitRedisSet } from "./redis";
-import type { DebtSettlement, MemberBalance, SplitExpense, SplitRoom } from "./types";
+import type { ConfirmationStatus, DebtSettlement, MemberBalance, SplitExpense, SplitRoom } from "./types";
 
 /**
  * Low-level asset/operation persistence, kept separate from `store.ts` and
@@ -65,6 +65,35 @@ export async function appendOperation(roomId: string, op: SplitOperation): Promi
   await splitRedisSet(opIdsKey(roomId), JSON.stringify(ids), OPERATION_TTL_SEC);
 }
 
+export interface ConfirmationDecision {
+  status: ConfirmationStatus;
+  confirmedBy: string | null;
+  confirmedAt: number | null;
+}
+
+/**
+ * Acceptance decision for a money-changing-hands record (settlement / withdrawal),
+ * shared between store.ts (settlements) and ledger-store.ts (withdrawals):
+ *
+ * - The recipient acted themselves (they're the one recording it) → auto-confirmed.
+ * - The recipient is a local participant (no session of their own, can never confirm
+ *   anything themselves — whoever recorded it, usually the room owner, acted for them)
+ *   → auto-confirmed.
+ * - Otherwise the recipient is a *connected* member who wasn't the actor → stays
+ *   "pending" until they explicitly confirm receipt via a separate action.
+ */
+export function decideConfirmation(input: {
+  actorMemberId: string;
+  recipientMemberId: string;
+  recipientConnected: boolean;
+}): ConfirmationDecision {
+  const { actorMemberId, recipientMemberId, recipientConnected } = input;
+  if (actorMemberId === recipientMemberId || !recipientConnected) {
+    return { status: "confirmed", confirmedBy: actorMemberId, confirmedAt: Date.now() };
+  }
+  return { status: "pending", confirmedBy: null, confirmedAt: null };
+}
+
 /**
  * Balances that account for the whole picture: legacy per-member expenses/settlements
  * plus (once advanced accounting is on) asset contributions, withdrawals, transfers, etc.
@@ -87,8 +116,10 @@ export async function computeEffectiveBalances(input: {
   const assets = await listAssets(room.roomId);
   const journalOps = await listOperations(room.roomId);
   const legacyOps = operationsFromLegacy({ expenses, settlements });
+  // Stable sort: same-millisecond ops keep the true creation order already reflected
+  // by the [legacyOps, journalOps, extraOps] concatenation order.
   const operations = [...legacyOps, ...journalOps, ...extraOps].sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+    (a, b) => a.createdAt - b.createdAt,
   );
   const folded = foldLedger({
     memberIds: room.memberIds,

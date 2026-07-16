@@ -28,7 +28,7 @@ import {
   withExpenseLockState,
 } from "./engine";
 import { d, money } from "./decimal";
-import { computeEffectiveBalances } from "./ledger-repo";
+import { computeEffectiveBalances, decideConfirmation } from "./ledger-repo";
 import { splitRedisDel, splitRedisGetJson, splitRedisSet } from "./redis";
 import {
   generateAccessToken,
@@ -767,6 +767,14 @@ export async function createSettlement(input: {
   const balances = await computeEffectiveBalances({ room, expenses, settlements });
   assertSettlementAllowed(balances, input.fromMemberId, input.toMemberId, money(input.amountBase));
 
+  const recipient = await getMember(input.toMemberId);
+  if (!recipient) throw new Error("member_not_found");
+  const confirmation = decideConfirmation({
+    actorMemberId: input.actorMemberId,
+    recipientMemberId: input.toMemberId,
+    recipientConnected: isMemberConnected(recipient),
+  });
+
   const id = generateEntityId("stl");
   await saveMutationId(room.roomId, input.clientMutationId, id);
 
@@ -781,6 +789,9 @@ export async function createSettlement(input: {
     createdBy: input.actorMemberId,
     createdAt: Date.now(),
     clientMutationId: input.clientMutationId ?? null,
+    status: confirmation.status,
+    confirmedBy: confirmation.confirmedBy,
+    confirmedAt: confirmation.confirmedAt,
   };
 
   const ids = await listSettlementIds(room.roomId);
@@ -797,6 +808,33 @@ export async function createSettlement(input: {
 
   await bumpRoomVersion(room.roomId);
   return settlement;
+}
+
+/** Only the recipient (toMemberId) may confirm receipt of a pending settlement. */
+export async function confirmSettlement(
+  roomId: string,
+  settlementId: string,
+  actorMemberId: string,
+): Promise<DebtSettlement> {
+  const room = await getRoom(roomId);
+  if (!room) throw new Error("room_not_found");
+
+  const settlement = await splitRedisGetJson<DebtSettlement>(settlementKey(settlementId));
+  if (!settlement || settlement.roomId.toUpperCase() !== room.roomId.toUpperCase()) {
+    throw new Error("settlement_not_found");
+  }
+  if (settlement.status === "confirmed") return settlement;
+  if (settlement.toMemberId !== actorMemberId) throw new Error("not_settlement_recipient");
+
+  const confirmed: DebtSettlement = {
+    ...settlement,
+    status: "confirmed",
+    confirmedBy: actorMemberId,
+    confirmedAt: Date.now(),
+  };
+  await splitRedisSet(settlementKey(confirmed.id), JSON.stringify(confirmed), SETTLEMENT_TTL_SEC);
+  await bumpRoomVersion(room.roomId);
+  return confirmed;
 }
 
 export async function deleteSettlement(roomId: string, settlementId: string): Promise<void> {

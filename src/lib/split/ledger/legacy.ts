@@ -43,10 +43,16 @@ export function operationsFromLegacy(input: {
       fromMemberId: s.fromMemberId,
       toMemberId: s.toMemberId,
       amountBase: s.amountBase,
+      status: s.status,
+      confirmedBy: s.confirmedBy,
+      confirmedAt: s.confirmedAt,
     };
     ops.push(op);
   }
 
-  ops.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  // Array.prototype.sort is stable (guaranteed since ES2019), so operations created
+  // within the same millisecond keep their original (true creation) relative order
+  // instead of being reshuffled by an unrelated, effectively-random id comparison.
+  ops.sort((a, b) => a.createdAt - b.createdAt);
   return ops;
 }

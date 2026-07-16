@@ -1,4 +1,4 @@
-import { ASSET_TTL_SEC, SUPPORTED_CURRENCIES } from "./constants";
+import { ASSET_TTL_SEC, OPERATION_TTL_SEC, SUPPORTED_CURRENCIES } from "./constants";
 import { d, money } from "./decimal";
 import {
   canMutateRoom,
@@ -26,6 +26,7 @@ import {
   appendOperation,
   assetIdsKey,
   assetKey,
+  decideConfirmation,
   listAssetIds,
   listAssets,
   listOperations,
@@ -34,18 +35,23 @@ import {
 import { splitRedisGetJson, splitRedisSet } from "./redis";
 import {
   bumpSplitRoomVersion,
+  canActAsOwner,
   findSplitMutationId,
+  getMember,
   getRoom,
+  isMemberConnected,
   listExpenses,
   listMembers,
   listSettlements,
   persistSplitRoom,
   saveSplitMutationId,
 } from "./store";
+import { computeSplitReport, type SplitReport } from "./report";
 import { generateEntityId } from "./tokens";
 import type { ExpenseParticipantInput, Money, SplitMethod, SplitRoom } from "./types";
 
 export { listAssets, listOperations } from "./ledger-repo";
+export type { SplitReport } from "./report";
 
 async function enableAdvanced(room: SplitRoom): Promise<SplitRoom> {
   if (room.advancedAccounting) return room;
@@ -109,8 +115,11 @@ async function previewFold(
   const expenses = await listExpenses(room.roomId);
   const settlements = await listSettlements(room.roomId);
   const legacyOps = operationsFromLegacy({ expenses, settlements });
+  // Stable sort: same-millisecond ops keep the true creation order already reflected
+  // by [legacyOps, journalOps, extraOps] concatenation order, instead of an
+  // effectively-random reshuffle by unrelated id comparison.
   const operations = [...legacyOps, ...journalOps, ...extraOps].sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+    (a, b) => a.createdAt - b.createdAt,
   );
   return foldLedger({
     memberIds: room.memberIds,
@@ -134,9 +143,7 @@ export async function getLedgerSnapshot(roomId: string): Promise<{
   const expenses = await listExpenses(roomId);
   const settlements = await listSettlements(roomId);
   const legacyOps = operationsFromLegacy({ expenses, settlements });
-  const operations = [...legacyOps, ...journalOps].sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
-  );
+  const operations = [...legacyOps, ...journalOps].sort((a, b) => a.createdAt - b.createdAt);
   const ledger = foldLedger({
     memberIds: room.memberIds,
     assets,
@@ -153,6 +160,31 @@ export async function getLedgerSnapshot(roomId: string): Promise<{
     })),
   );
   return { room, ledger, operations, suggestions };
+}
+
+/** Spending report: totals by category + per-member paid/share/contributions/withdrawals. */
+export async function getSplitReport(roomId: string): Promise<SplitReport> {
+  const room = await getRoom(roomId);
+  if (!room) throw new Error("room_not_found");
+  const assets = await listAssets(roomId);
+  const journalOps = await listOperations(roomId);
+  const expenses = await listExpenses(roomId);
+  const settlements = await listSettlements(roomId);
+  const legacyOps = operationsFromLegacy({ expenses, settlements });
+  const operations = [...legacyOps, ...journalOps].sort((a, b) => a.createdAt - b.createdAt);
+  const folded = foldLedger({
+    memberIds: room.memberIds,
+    assets,
+    operations,
+    fx: ratesFx(room.baseCurrency, room.rates),
+    baseCurrency: room.baseCurrency,
+  });
+  return computeSplitReport({
+    memberIds: room.memberIds,
+    operations,
+    memberBalances: folded.members,
+    totalAssetsBase: folded.sumAssetBalancesBase,
+  });
 }
 
 export async function createContribution(input: {
@@ -311,9 +343,26 @@ export async function createWithdrawal(input: {
   const currency = assertCurrency(input.currency ?? asset.currency);
   if (currency !== asset.currency.toUpperCase()) throw new Error("transfer_currency_mismatch");
 
+  // Only whoever physically holds the cash (the asset's custodian) — or the room
+  // owner, acting for a custodian who has no session of their own (a local
+  // participant) — may record money leaving that asset.
+  if (asset.custodianMemberId !== input.actorMemberId) {
+    if (!(await canActAsOwner(room, input.actorMemberId))) {
+      throw new Error("asset_custodian_required");
+    }
+  }
+
   const amount = money(input.amount);
   if (!d(amount).gt(0)) throw new SplitValidationError("invalid_amount");
   const amountBase = computeAmountBase(amount, resolveRate(room, currency));
+
+  const recipient = await getMember(input.toMemberId);
+  if (!recipient) throw new Error("member_not_found");
+  const confirmation = decideConfirmation({
+    actorMemberId: input.actorMemberId,
+    recipientMemberId: input.toMemberId,
+    recipientConnected: isMemberConnected(recipient),
+  });
 
   const id = generateEntityId("op");
   await saveSplitMutationId(room.roomId, input.clientMutationId, id);
@@ -330,12 +379,42 @@ export async function createWithdrawal(input: {
     amount,
     currency,
     amountBase,
+    status: confirmation.status,
+    confirmedBy: confirmation.confirmedBy,
+    confirmedAt: confirmation.confirmedAt,
   };
   await previewFold(room, [op], assets);
   await appendOperation(room.roomId, op);
   await enableAdvanced(room);
   await bumpSplitRoomVersion(room.roomId);
   return op;
+}
+
+/** Only the recipient (toMemberId) may confirm receipt of a pending withdrawal. */
+export async function confirmWithdrawal(
+  roomId: string,
+  operationId: string,
+  actorMemberId: string,
+): Promise<WithdrawalOperation> {
+  const room = await getRoom(roomId);
+  if (!room) throw new Error("room_not_found");
+
+  const op = await splitRedisGetJson<SplitOperation>(opKey(operationId));
+  if (!op || op.roomId.toUpperCase() !== room.roomId.toUpperCase() || op.type !== "withdrawal") {
+    throw new Error("operation_not_found");
+  }
+  if (op.status === "confirmed") return op;
+  if (op.toMemberId !== actorMemberId) throw new Error("not_withdrawal_recipient");
+
+  const confirmed: WithdrawalOperation = {
+    ...op,
+    status: "confirmed",
+    confirmedBy: actorMemberId,
+    confirmedAt: Date.now(),
+  };
+  await splitRedisSet(opKey(confirmed.id), JSON.stringify(confirmed), OPERATION_TTL_SEC);
+  await bumpSplitRoomVersion(room.roomId);
+  return confirmed;
 }
 
 export async function createTransfer(input: {
