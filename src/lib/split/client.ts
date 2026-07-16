@@ -10,7 +10,8 @@ import type {
   SplitRoomSnapshot,
   SplitSession,
 } from "./types";
-import type { RoomAsset, RoomAssetKind } from "./ledger";
+import type { RoomAsset, RoomAssetKind, SplitOperation } from "./ledger";
+import type { SplitReport } from "./report";
 import { getOrCreateSplitDeviceKey } from "./session";
 
 function authHeaders(session: SplitSession): HeadersInit {
@@ -220,6 +221,38 @@ export async function apiCreateSettlement(
   );
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as DebtSettlement;
+}
+
+export async function apiConfirmSettlement(
+  session: SplitSession,
+  settlementId: string,
+): Promise<DebtSettlement> {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/settlements/${encodeURIComponent(settlementId)}/confirm`,
+    { method: "POST", headers: authHeaders(session), body: "{}" },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as DebtSettlement;
+}
+
+export async function apiConfirmWithdrawal(
+  session: SplitSession,
+  operationId: string,
+): Promise<SplitOperation> {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/operations/${encodeURIComponent(operationId)}/confirm`,
+    { method: "POST", headers: authHeaders(session), body: "{}" },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SplitOperation;
+}
+
+export async function apiGetReport(session: SplitSession): Promise<SplitReport> {
+  const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/report`, {
+    headers: authHeaders(session),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SplitReport;
 }
 
 export async function apiExportCsv(session: SplitSession): Promise<string> {
