@@ -6,6 +6,7 @@ import {
   apiInviteParticipant,
   apiTransferOwnership,
 } from "@/lib/split/client";
+import { SPLIT_BRANDED_NAME } from "@/lib/split/constants";
 import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import type { SplitMemberPublic, SplitRoomSnapshot, SplitSession } from "@/lib/split/types";
 
@@ -23,10 +24,10 @@ interface Props {
 function statusLabel(m: SplitMemberPublic): string {
   if (m.role === "owner" && m.status === "local") return "Владелец · локальный";
   if (m.role === "owner" && m.status === "pending_invite") return "Владелец · приглашение отправлено";
-  if (m.role === "owner") return "Владелец · QHub Split";
+  if (m.role === "owner") return "Владелец · QHub";
   switch (m.status) {
     case "connected":
-      return "Пользователь QHub Split";
+      return "Участник QHub";
     case "pending_invite":
       return "Приглашение отправлено";
     default:
@@ -91,7 +92,7 @@ export function SplitParticipantsPanel({
                           } catch {
                             try {
                               if (navigator.share) {
-                                await navigator.share({ title: "QHub Split", url, text: url });
+                                await navigator.share({ title: SPLIT_BRANDED_NAME, url, text: url });
                               }
                             } catch {
                               /* link shown below */

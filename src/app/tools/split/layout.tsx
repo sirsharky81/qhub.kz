@@ -1,13 +1,19 @@
 import type { Metadata, Viewport } from "next";
 
+import {
+  SPLIT_BRANDED_NAME,
+  SPLIT_PWA_SHORT_NAME,
+  SPLIT_PRODUCT_TAGLINE,
+} from "@/lib/split/constants";
+
 export const metadata: Metadata = {
-  title: "QHub Split",
-  description: "Совместный учёт расходов и балансов",
+  title: SPLIT_BRANDED_NAME,
+  description: SPLIT_PRODUCT_TAGLINE,
   manifest: "/tools/split/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "QHub Split",
+    title: SPLIT_PWA_SHORT_NAME,
   },
 };
 

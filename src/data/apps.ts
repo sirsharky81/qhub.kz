@@ -1,3 +1,8 @@
+import {
+  SPLIT_PRODUCT_DESCRIPTION,
+  SPLIT_PRODUCT_NAME,
+} from "@/lib/split/constants";
+
 export type AppTag =
   | "finance"
   | "productivity"
@@ -319,10 +324,10 @@ export const apps: App[] = [
   },
   {
     id: "split",
-    title: "Split",
-    description: "Совместные расходы: баланс, долги и погашения без платёжек.",
+    title: SPLIT_PRODUCT_NAME,
+    description: SPLIT_PRODUCT_DESCRIPTION,
     longDescription:
-      "Комната для учёта общих трат. Разделение поровну, по суммам, процентам и долям. Курсы валют задаёт владелец. Рекомендуемые погашения и экспорт CSV.",
+      "Комната для поездки, семьи или компании. Каждый вносит траты — сервис считает, кто кому должен. Погашения фиксируются без переводов денег в приложении.",
     href: "/tools/split",
     tags: ["finance", "tools", "lifestyle"],
     icon: "÷",

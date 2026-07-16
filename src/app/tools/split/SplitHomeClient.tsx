@@ -4,7 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { apiCreateRoom } from "@/lib/split/client";
-import { SUPPORTED_CURRENCIES } from "@/lib/split/constants";
+import {
+  SPLIT_PRODUCT_NAME,
+  SPLIT_PRODUCT_TAGLINE,
+  SUPPORTED_CURRENCIES,
+} from "@/lib/split/constants";
 import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import {
   clearSplitSession,
@@ -60,7 +64,7 @@ export default function SplitHomeClient() {
   }
 
   return (
-    <SplitShell title="QHub Split" subtitle="Совместные расходы без платёжек" backHref="/">
+    <SplitShell title={SPLIT_PRODUCT_NAME} subtitle={SPLIT_PRODUCT_TAGLINE} backHref="/">
       <div className="p-4 space-y-5">
         {rooms.length > 0 && (
           <section className="space-y-2">

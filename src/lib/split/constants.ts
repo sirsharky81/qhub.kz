@@ -36,3 +36,11 @@ export const DEFAULT_CATEGORIES = [
 ] as const;
 
 export const SUPPORTED_CURRENCIES = ["KZT", "USD", "EUR", "RUB", "TRY", "AED"] as const;
+
+/** User-facing product name (RU). URL slug stays `/tools/split`. */
+export const SPLIT_PRODUCT_NAME = "Общий счёт";
+export const SPLIT_PRODUCT_TAGLINE = "Кто кому сколько должен";
+export const SPLIT_PRODUCT_DESCRIPTION =
+  "Учёт общих трат и расчёт долгов между участниками. Без переводов.";
+export const SPLIT_BRANDED_NAME = "QHub · Общий счёт";
+export const SPLIT_PWA_SHORT_NAME = "Счёт";
