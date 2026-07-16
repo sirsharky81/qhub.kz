@@ -386,7 +386,9 @@ export function SplitAdvancedPanel({
                     <option value="fixed">Фикс. суммы</option>
                     <option value="percentage">Проценты</option>
                     <option value="shares">Доли</option>
-                    <option value="family">По составу семей</option>
+                    {snapshot.room.roomType === "multi_family" && (
+                      <option value="family">По составу семей</option>
+                    )}
                   </select>
                 </div>
                 <div className="flex flex-wrap gap-2">
