@@ -48,6 +48,11 @@ export function normalizeShares(input: NormalizeSharesInput): ExpenseParticipant
       return normalizePercentage(amountBase, participants);
     case "shares":
       return normalizeParts(amountBase, participants);
+    case "family":
+      // By the time this runs, `participants` already carries each household's
+      // resolved weight as inputValue (see buildFamilyWeightedParticipants) —
+      // the allocation math is identical to "shares".
+      return normalizeParts(amountBase, participants);
     default:
       throw new SplitValidationError("invalid_split_method");
   }

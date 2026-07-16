@@ -59,6 +59,8 @@ export function jsonSplitError(err: unknown): Response {
       device_not_whitelisted: ["Устройство не в whitelist", 403],
       invalid_device_key: ["Некорректный ключ устройства", 400],
       participant_has_history: ["Нельзя удалить участника с историей", 409],
+      family_not_found: ["Семья не найдена", 404],
+      member_already_in_family: ["Участник уже состоит в другой семье", 409],
     };
     const hit = map[err.message] ?? (err.name === "SplitValidationError" ? [err.message, 400] : null);
     if (hit) return Response.json({ error: hit[0] }, { status: hit[1] });

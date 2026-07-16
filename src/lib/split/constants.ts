@@ -5,6 +5,7 @@ export const EXPENSE_TTL_SEC = ROOM_TTL_SEC;
 export const SETTLEMENT_TTL_SEC = ROOM_TTL_SEC;
 export const ASSET_TTL_SEC = ROOM_TTL_SEC;
 export const OPERATION_TTL_SEC = ROOM_TTL_SEC;
+export const FAMILY_TTL_SEC = ROOM_TTL_SEC;
 
 export const REDIS_ROOM_PREFIX = "split:room:";
 export const REDIS_MEMBER_PREFIX = "split:member:";
@@ -18,6 +19,8 @@ export const REDIS_ASSET_PREFIX = "split:asset:";
 export const REDIS_ASSET_IDS_PREFIX = "split:asset-ids:";
 export const REDIS_OP_PREFIX = "split:op:";
 export const REDIS_OP_IDS_PREFIX = "split:op-ids:";
+export const REDIS_FAMILY_PREFIX = "split:family:";
+export const REDIS_FAMILY_IDS_PREFIX = "split:family-ids:";
 
 export const FORBIDDEN_KEY_PARTS = ["history", "route", "track"] as const;
 
