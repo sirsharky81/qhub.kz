@@ -17,6 +17,8 @@ import {
   apiSetRates,
 } from "@/lib/split/client";
 import { DEFAULT_CATEGORIES, SPLIT_BRANDED_NAME, SUPPORTED_CURRENCIES } from "@/lib/split/constants";
+import type { ReceiptScanPayload } from "@/lib/split/receipt/types";
+import { scanReceiptImage } from "@/lib/split/receipt/scan-receipt-image";
 import type { SplitReport } from "@/lib/split/report";
 import { loadSplitSession, touchSplitSession } from "@/lib/split/session";
 import type {
@@ -31,6 +33,8 @@ import { SplitAdvancedPanel } from "./SplitAdvancedPanel";
 import { SplitFamiliesPanel } from "./SplitFamiliesPanel";
 import { SplitOwnFamilyPanel } from "./SplitOwnFamilyPanel";
 import { SplitParticipantsPanel } from "./SplitParticipantsPanel";
+import { SplitReceiptCapture } from "./SplitReceiptCapture";
+import { SplitReceiptReview } from "./SplitReceiptReview";
 import { SplitReportPanel } from "./SplitReportPanel";
 
 function memberName(snapshot: SplitRoomSnapshot, id: string): string {
@@ -70,6 +74,9 @@ function SplitRoomInner() {
   const [personal, setPersonal] = useState(false);
   const [fxCurrency, setFxCurrency] = useState("USD");
   const [fxRate, setFxRate] = useState("");
+  const [receiptFlow, setReceiptFlow] = useState<null | "capture" | "processing" | "review">(null);
+  const [receiptDraft, setReceiptDraft] = useState<ReceiptScanPayload | null>(null);
+  const [receiptProgress, setReceiptProgress] = useState<string | null>(null);
 
   const refresh = useCallback(async (
     s: SplitSession,
@@ -175,6 +182,28 @@ function SplitRoomInner() {
           (m) => m.memberId === snapshot.room.ownerMemberId && m.status !== "connected",
         ),
     );
+
+  async function handleReceiptImage(file: File) {
+    setError(null);
+    setReceiptFlow("processing");
+    setReceiptProgress("Распознавание текста…");
+    try {
+      const draft = await scanReceiptImage(file, setReceiptProgress);
+      setReceiptDraft(draft);
+      setReceiptFlow("review");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка распознавания");
+      setReceiptFlow(null);
+    } finally {
+      setReceiptProgress(null);
+    }
+  }
+
+  function closeReceiptFlow() {
+    setReceiptFlow(null);
+    setReceiptDraft(null);
+    setReceiptProgress(null);
+  }
 
   if (!session) {
     return (
@@ -355,9 +384,18 @@ function SplitRoomInner() {
 
         {snapshot?.room.status === "open" && (
           <section className="space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
-              Добавить расход
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
+                Добавить расход
+              </h2>
+              <button
+                type="button"
+                className="text-xs font-medium text-teal-800 shrink-0"
+                onClick={() => setReceiptFlow("capture")}
+              >
+                По чеку
+              </button>
+            </div>
             <input
               placeholder="Описание"
               className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm"
@@ -876,6 +914,60 @@ function SplitRoomInner() {
           </button>
         </section>
       </div>
+
+      {receiptFlow === "capture" && (
+        <SplitReceiptCapture onImage={handleReceiptImage} onClose={closeReceiptFlow} />
+      )}
+
+      {receiptFlow === "processing" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/50 p-4">
+          <div className="rounded-2xl bg-white px-6 py-5 text-sm text-emerald-950/80 shadow-xl">
+            {receiptProgress ?? "Распознавание…"}
+          </div>
+        </div>
+      )}
+
+      {receiptFlow === "review" && receiptDraft && snapshot && (
+        <SplitReceiptReview
+          draft={receiptDraft}
+          baseCurrency={snapshot.room.baseCurrency}
+          pending={pending}
+          onRetake={() => {
+            setReceiptDraft(null);
+            setReceiptFlow("capture");
+          }}
+          onCancel={closeReceiptFlow}
+          onSave={(values) => {
+            setError(null);
+            startTransition(async () => {
+              try {
+                await apiCreateExpense(session, {
+                  description: values.description,
+                  amountOriginal: values.amount,
+                  currencyOriginal: values.currency,
+                  categoryId: values.categoryId,
+                  paidByMemberId: paidByMemberId || session.memberId,
+                  splitMethod: personal ? "equal" : splitMethod,
+                  participants: participantInputs,
+                  personal,
+                  comment: `ocr:confidence=${receiptDraft.confidence}`,
+                  clientMutationId: crypto.randomUUID(),
+                });
+                closeReceiptFlow();
+                setDescription("");
+                setAmount("");
+                await refresh(session, {
+                  withLedger: showAdvanced,
+                  withReport: showReport,
+                  withFamilies: showFamilies,
+                });
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Ошибка");
+              }
+            });
+          }}
+        />
+      )}
     </SplitShell>
   );
 }
