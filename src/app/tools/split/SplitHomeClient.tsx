@@ -6,7 +6,12 @@ import { useState, useTransition } from "react";
 import { apiCreateRoom } from "@/lib/split/client";
 import { SUPPORTED_CURRENCIES } from "@/lib/split/constants";
 import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
-import { clearSplitSession, listSplitSessions, removeSplitSession } from "@/lib/split/session";
+import {
+  clearSplitSession,
+  listSplitSessions,
+  removeSplitSession,
+  saveSplitSession,
+} from "@/lib/split/session";
 import type { SplitRoomType, SplitSession } from "@/lib/split/types";
 import { SplitShell } from "./components/SplitShell";
 
@@ -46,6 +51,7 @@ export default function SplitHomeClient() {
     startTransition(async () => {
       try {
         const session = await apiCreateRoom({ name, ownerName, baseCurrency, roomType });
+        saveSplitSession(session);
         router.push(`/tools/split/room?room=${encodeURIComponent(session.roomId)}`);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Ошибка");
