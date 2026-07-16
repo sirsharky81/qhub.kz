@@ -29,6 +29,7 @@ import type {
 import { SplitShell } from "../components/SplitShell";
 import { SplitAdvancedPanel } from "./SplitAdvancedPanel";
 import { SplitFamiliesPanel } from "./SplitFamiliesPanel";
+import { SplitOwnFamilyPanel } from "./SplitOwnFamilyPanel";
 import { SplitParticipantsPanel } from "./SplitParticipantsPanel";
 import { SplitReportPanel } from "./SplitReportPanel";
 
@@ -99,12 +100,14 @@ function SplitRoomInner() {
     if (needReport) {
       setReport(await apiGetReport(s));
     }
-    const needFamilies = opts?.withFamilies ?? showFamilies ?? next.room.roomType === "multi_family";
+    const roomType = next.room.roomType ?? "individual";
+    const needFamilies =
+      opts?.withFamilies ?? (roomType === "multi_family" || roomType === "own_family");
     if (needFamilies) {
       setFamilies(await apiListFamilies(s));
       setShowFamilies(true);
     }
-  }, [selectedIds.length, paidByMemberId, showReport, showFamilies]);
+  }, [selectedIds.length, paidByMemberId, showReport]);
 
   useEffect(() => {
     if (!session) {
@@ -403,7 +406,9 @@ function SplitRoomInner() {
                 <option value="fixed">Фикс. суммы</option>
                 <option value="percentage">Проценты</option>
                 <option value="shares">Доли</option>
-                <option value="family">По составу семей</option>
+                {snapshot.room.roomType === "multi_family" && (
+                  <option value="family">По составу семей</option>
+                )}
               </select>
             </div>
             <label className="flex items-center gap-2 text-sm text-emerald-950/70">
@@ -609,7 +614,27 @@ function SplitRoomInner() {
           </section>
         )}
 
-        {snapshot && (
+        {snapshot && snapshot.room.roomType === "own_family" && (
+          <section className="space-y-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
+              Семья
+            </h2>
+            <SplitOwnFamilyPanel
+              session={session}
+              snapshot={snapshot}
+              families={families}
+              pending={pending}
+              onRefresh={() => refresh(session, { withFamilies: true })}
+              onError={setError}
+              startAction={(fn) => {
+                setError(null);
+                startTransition(fn);
+              }}
+            />
+          </section>
+        )}
+
+        {snapshot && snapshot.room.roomType === "multi_family" && (
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
