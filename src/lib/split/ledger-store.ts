@@ -22,6 +22,7 @@ import {
   type TransferOperation,
   type WithdrawalOperation,
 } from "./ledger";
+import { buildFamilyWeightedParticipants } from "./family-store";
 import {
   appendOperation,
   assetIdsKey,
@@ -263,6 +264,7 @@ export async function createExpenseFromAsset(input: {
   splitMethod: SplitMethod;
   participants: ExpenseParticipantInput[];
   comment?: string | null;
+  personal?: boolean;
   clientMutationId?: string | null;
 }): Promise<ExpenseOperation> {
   const room = await getRoom(input.roomId);
@@ -281,11 +283,15 @@ export async function createExpenseFromAsset(input: {
   const currencyOriginal = assertCurrency(input.currencyOriginal);
   const exchangeRate = resolveRate(room, currencyOriginal);
   const amountBase = computeAmountBase(input.amountOriginal, exchangeRate);
+  const resolvedParticipants =
+    input.splitMethod === "family"
+      ? await buildFamilyWeightedParticipants(room, input.participants.map((p) => p.memberId))
+      : input.participants;
   const shares = normalizeShares({
     amountOriginal: money(input.amountOriginal),
     amountBase,
     splitMethod: input.splitMethod,
-    participants: input.participants,
+    participants: resolvedParticipants,
   });
 
   const id = generateEntityId("op");
@@ -308,6 +314,7 @@ export async function createExpenseFromAsset(input: {
     paymentSource: { kind: "asset", assetId: input.assetId },
     splitMethod: input.splitMethod,
     participants: shares,
+    personal: input.personal ?? false,
   };
 
   await previewFold(room, [op], assets);
