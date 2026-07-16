@@ -1,4 +1,4 @@
-import type { Money, SplitMethod, ExpenseParticipantShare } from "../types";
+import type { ConfirmationStatus, Money, SplitMethod, ExpenseParticipantShare } from "../types";
 
 export type RoomAssetKind = "cash" | "bank" | "card" | "wallet" | "other";
 
@@ -66,6 +66,10 @@ export interface SettlementOperation extends OperationBase {
   fromMemberId: string;
   toMemberId: string;
   amountBase: Money;
+  /** Recipient (toMemberId) acceptance — see ConfirmationStatus. */
+  status: ConfirmationStatus;
+  confirmedBy?: string | null;
+  confirmedAt?: number | null;
 }
 
 export interface TransferOperation extends OperationBase {
@@ -83,6 +87,10 @@ export interface WithdrawalOperation extends OperationBase {
   amount: Money;
   currency: string;
   amountBase: Money;
+  /** Recipient (toMemberId) acceptance — see ConfirmationStatus. */
+  status: ConfirmationStatus;
+  confirmedBy?: string | null;
+  confirmedAt?: number | null;
 }
 
 export interface ExchangeOperation extends OperationBase {

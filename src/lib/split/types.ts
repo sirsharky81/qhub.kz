@@ -107,6 +107,15 @@ export interface SplitExpense {
   clientMutationId?: string | null;
 }
 
+/**
+ * Acceptance flow for money-changing-hands records (settlements, withdrawals):
+ * "confirmed" as soon as the recipient side either performed the action themselves
+ * or cannot ever confirm themselves (a local participant, acted for by whoever recorded
+ * it — usually the room owner). "pending" while a *connected* recipient hasn't yet
+ * acknowledged receipt via a separate confirm action.
+ */
+export type ConfirmationStatus = "pending" | "confirmed";
+
 export interface DebtSettlement {
   id: string;
   roomId: string;
@@ -118,6 +127,10 @@ export interface DebtSettlement {
   createdBy: string;
   createdAt: number;
   clientMutationId?: string | null;
+  /** Recipient (toMemberId) acceptance — see ConfirmationStatus. */
+  status: ConfirmationStatus;
+  confirmedBy?: string | null;
+  confirmedAt?: number | null;
 }
 
 export interface MemberBalance {
