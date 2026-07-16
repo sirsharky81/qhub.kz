@@ -78,8 +78,8 @@ function buildParticipantInputs(
   amount: string,
   selectedIds: string[],
 ): Array<{ memberId: string; inputValue?: string }> {
-  let ids = selectedIds.length > 0 ? selectedIds : snapshot.members.map((m) => m.memberId);
-  if (splitMethod === "equal") {
+  const ids = selectedIds.length > 0 ? selectedIds : snapshot.members.map((m) => m.memberId);
+  if (splitMethod === "equal" || splitMethod === "family") {
     return ids.map((memberId) => ({ memberId }));
   }
   if (splitMethod === "percentage") {
@@ -386,6 +386,7 @@ export function SplitAdvancedPanel({
                     <option value="fixed">Фикс. суммы</option>
                     <option value="percentage">Проценты</option>
                     <option value="shares">Доли</option>
+                    <option value="family">По составу семей</option>
                   </select>
                 </div>
                 <div className="flex flex-wrap gap-2">

@@ -32,11 +32,16 @@ export function SplitReportPanel({ snapshot, report }: Props) {
     <div className="space-y-5">
       <div className="rounded-xl border border-emerald-900/10 bg-white/60 p-3 space-y-1">
         <p className="text-sm font-medium">
-          Всего потрачено: {report.totalExpensesBase} {baseCurrency}
+          Всего потрачено сообща: {report.totalExpensesBase} {baseCurrency}
         </p>
         {Number(report.totalAssetsBase) !== 0 && (
           <p className="text-xs text-emerald-950/60">
             Остаток в кассе: {report.totalAssetsBase} {baseCurrency}
+          </p>
+        )}
+        {Number(report.totalPersonalExpensesBase) > 0 && (
+          <p className="text-xs text-emerald-950/60">
+            + личные расходы (не делятся): {report.totalPersonalExpensesBase} {baseCurrency}
           </p>
         )}
       </div>
@@ -132,6 +137,12 @@ export function SplitReportPanel({ snapshot, report }: Props) {
                     <div className="flex justify-between gap-2">
                       <dt>Принял погашений</dt>
                       <dd className="tabular-nums">{m.settledInBase}</dd>
+                    </div>
+                  )}
+                  {Number(m.personalExpensesBase) > 0 && (
+                    <div className="flex justify-between gap-2">
+                      <dt>Личные расходы</dt>
+                      <dd className="tabular-nums">{m.personalExpensesBase}</dd>
                     </div>
                   )}
                 </dl>
