@@ -16,7 +16,7 @@ import {
   apiListFamilies,
   apiSetRates,
 } from "@/lib/split/client";
-import { DEFAULT_CATEGORIES, SUPPORTED_CURRENCIES } from "@/lib/split/constants";
+import { DEFAULT_CATEGORIES, SPLIT_BRANDED_NAME, SUPPORTED_CURRENCIES } from "@/lib/split/constants";
 import type { SplitReport } from "@/lib/split/report";
 import { loadSplitSession, touchSplitSession } from "@/lib/split/session";
 import type {
@@ -809,7 +809,7 @@ function SplitRoomInner() {
                     } catch {
                       try {
                         if (navigator.share) {
-                          await navigator.share({ title: "QHub Split", url, text: url });
+                          await navigator.share({ title: SPLIT_BRANDED_NAME, url, text: url });
                         }
                       } catch {
                         // User dismissed share or unavailable — URL still visible.
