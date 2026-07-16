@@ -27,6 +27,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ roomId: st
       splitMethod?: SplitMethod;
       participants?: ExpenseParticipantInput[];
       comment?: string;
+      personal?: boolean;
       clientMutationId?: string;
     };
     if (!body.amountOriginal || !body.currencyOriginal || !body.splitMethod || !body.participants?.length) {
@@ -43,6 +44,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ roomId: st
       splitMethod: body.splitMethod,
       participants: body.participants,
       comment: body.comment,
+      personal: body.personal,
       clientMutationId: body.clientMutationId,
     });
     return withCors(Response.json(expense), request);

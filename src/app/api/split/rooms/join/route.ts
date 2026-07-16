@@ -38,6 +38,8 @@ export async function POST(request: Request) {
         role: member.role,
         displayName: member.displayName,
         status: member.status,
+        roomName: room.name,
+        baseCurrency: room.baseCurrency,
       }),
       request,
     );

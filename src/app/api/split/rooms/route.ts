@@ -17,7 +17,12 @@ export async function POST(request: Request) {
       );
     }
 
-    let body: { name?: string; ownerName?: string; baseCurrency?: string } = {};
+    let body: {
+      name?: string;
+      ownerName?: string;
+      baseCurrency?: string;
+      roomType?: "individual" | "own_family" | "multi_family";
+    } = {};
     try {
       body = await request.json();
     } catch {
@@ -34,6 +39,7 @@ export async function POST(request: Request) {
         role: owner.role,
         displayName: owner.displayName,
         baseCurrency: room.baseCurrency,
+        roomType: room.roomType,
       }),
       request,
     );
