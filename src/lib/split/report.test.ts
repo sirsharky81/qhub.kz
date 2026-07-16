@@ -128,6 +128,68 @@ describe("computeSplitReport", () => {
     expect(b.pendingSettlementsOut).toBe(1);
   });
 
+  it("excludes personal expenses from shared totals but tracks them per payer", () => {
+    const operations: SplitOperation[] = [
+      {
+        id: "e1",
+        roomId: "R1",
+        type: "expense",
+        createdAt: 1,
+        createdBy: "a",
+        locked: false,
+        description: "Dinner",
+        amountOriginal: "40.00",
+        currencyOriginal: "KZT",
+        exchangeRate: "1",
+        amountBase: "40.00",
+        categoryId: "food",
+        paymentSource: { kind: "member", memberId: "a" },
+        splitMethod: "equal",
+        participants: [
+          { memberId: "a", inputValue: null, amountBase: "20.00" },
+          { memberId: "b", inputValue: null, amountBase: "20.00" },
+        ],
+      },
+      {
+        id: "e2",
+        roomId: "R1",
+        type: "expense",
+        createdAt: 2,
+        createdBy: "b",
+        locked: false,
+        description: "Hotel — my own",
+        amountOriginal: "50.00",
+        currencyOriginal: "KZT",
+        exchangeRate: "1",
+        amountBase: "50.00",
+        categoryId: "hotel",
+        paymentSource: { kind: "member", memberId: "b" },
+        splitMethod: "equal",
+        participants: [{ memberId: "b", inputValue: null, amountBase: "50.00" }],
+        personal: true,
+      },
+    ];
+
+    const report = computeSplitReport({
+      memberIds: ["a", "b"],
+      operations,
+      memberBalances: [
+        { memberId: "a", paidBase: "40.00", shareBase: "20.00", netBase: "20.00" },
+        { memberId: "b", paidBase: "50.00", shareBase: "70.00", netBase: "-20.00" },
+      ],
+      totalAssetsBase: "0.00",
+    });
+
+    expect(report.totalExpensesBase).toBe("40.00");
+    expect(report.byCategory).toEqual([{ categoryId: "food", totalBase: "40.00" }]);
+    expect(report.totalPersonalExpensesBase).toBe("50.00");
+
+    const b = report.members.find((m) => m.memberId === "b")!;
+    expect(b.personalExpensesBase).toBe("50.00");
+    const a = report.members.find((m) => m.memberId === "a")!;
+    expect(a.personalExpensesBase).toBe("0.00");
+  });
+
   it("includes members with no balance record and defaults their numbers to zero", () => {
     const report = computeSplitReport({
       memberIds: ["a", "b", "c"],
