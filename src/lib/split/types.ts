@@ -1,7 +1,13 @@
 /** Money amounts are decimal strings — never float/double. */
 export type Money = string;
 
-export type SplitMethod = "equal" | "fixed" | "percentage" | "shares";
+/**
+ * "family" splits proportional to household size (adults + children) — see
+ * SplitFamily. The server resolves participants (any member of a household
+ * stands in for the whole household) into per-representative weights before
+ * allocating, then the math is identical to "shares".
+ */
+export type SplitMethod = "equal" | "fixed" | "percentage" | "shares" | "family";
 
 export type SplitRoomRole = "owner" | "member";
 
@@ -11,6 +17,17 @@ export type SplitInviteChannel = "link" | "qr" | "messenger";
 
 /** Seat lifecycle: local → pending_invite → connected. */
 export type ParticipantStatus = "local" | "pending_invite" | "connected";
+
+/**
+ * Declared at room creation, mostly a UI hint (copy + which panels are shown by
+ * default) — the underlying engine treats all three the same way:
+ * - individual: every member splits/settles on their own.
+ * - own_family: one household travelling together — same engine, but the UI leans
+ *   on personal (unsplit) expenses since there's nobody else to split with.
+ * - multi_family: several households — enables the Families panel so a shared
+ *   expense can be split proportionally by household size instead of per person.
+ */
+export type SplitRoomType = "individual" | "own_family" | "multi_family";
 
 export interface RoomFxRate {
   currency: string;
@@ -33,6 +50,28 @@ export interface SplitRoom {
   updatedAt: number;
   /** Progressive disclosure: assets / contributions UI. */
   advancedAccounting?: boolean;
+  /** See SplitRoomType. Missing on legacy rooms → treated as "individual". */
+  roomType?: SplitRoomType;
+}
+
+/**
+ * A household inside a room (see SplitRoomType "multi_family"). Children aren't
+ * room members — they don't split/settle anything themselves — but they add to
+ * the family's weight when an expense is split proportionally by household size.
+ */
+export interface SplitFamily {
+  id: string;
+  roomId: string;
+  name: string;
+  /** Adult room members belonging to this family. First entry is the "billing
+   * representative": whoever's picked to carry the family's share of a
+   * family-weighted expense on their personal balance (the household settles
+   * internally — that's the whole point of grouping them). */
+  memberIds: string[];
+  childrenCount: number;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: string;
 }
 
 export interface SplitMember {
@@ -99,6 +138,14 @@ export interface SplitExpense {
   participants: ExpenseParticipantShare[];
   comment?: string | null;
   geo?: { lat: number; lng: number } | null;
+  /**
+   * Marked "for my own tracking, not meant to be split with the wider group"
+   * (e.g. each family/person keeping their own hotel bill). Doesn't change the
+   * engine at all — it's a display/report hint: personal expenses are excluded
+   * from the "shared" category totals in computeSplitReport, but still count
+   * fully towards whoever paid them in their own personal total.
+   */
+  personal?: boolean;
   locked: boolean;
   createdBy: string;
   createdAt: number;
@@ -159,6 +206,9 @@ export interface SplitSession {
   accessToken: string;
   displayName: string;
   role: SplitRoomRole;
+  /** Best-effort cache for the "my rooms" list — may go stale, refreshed on open. */
+  roomName?: string;
+  baseCurrency?: string;
 }
 
 export interface SplitRoomSnapshot {

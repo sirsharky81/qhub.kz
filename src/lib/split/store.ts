@@ -28,6 +28,7 @@ import {
   withExpenseLockState,
 } from "./engine";
 import { d, money } from "./decimal";
+import { buildFamilyWeightedParticipants } from "./family-store";
 import { computeEffectiveBalances, decideConfirmation } from "./ledger-repo";
 import { splitRedisDel, splitRedisGetJson, splitRedisSet } from "./redis";
 import {
@@ -52,6 +53,7 @@ import type {
   SplitRoom,
   SplitRoomRole,
   SplitRoomSnapshot,
+  SplitRoomType,
 } from "./types";
 
 function roomKey(roomId: string): string {
@@ -166,15 +168,20 @@ export async function verifyMemberToken(memberId: string, accessToken: string): 
   return member;
 }
 
+const ROOM_TYPES: readonly SplitRoomType[] = ["individual", "own_family", "multi_family"];
+
 export async function createSplitRoom(input: {
   name?: string;
   ownerName?: string;
   baseCurrency?: string;
+  roomType?: SplitRoomType;
 }): Promise<{ room: SplitRoom; owner: SplitMember; accessToken: string }> {
   const baseCurrency = (input.baseCurrency ?? "KZT").toUpperCase();
   if (!SUPPORTED_CURRENCIES.includes(baseCurrency as (typeof SUPPORTED_CURRENCIES)[number])) {
     throw new Error("unsupported_currency");
   }
+  const roomType: SplitRoomType =
+    input.roomType && ROOM_TYPES.includes(input.roomType) ? input.roomType : "individual";
 
   const roomId = generateSplitRoomId();
   const ownerMemberId = generateMemberId();
@@ -192,6 +199,7 @@ export async function createSplitRoom(input: {
     version: 1,
     createdAt: now,
     updatedAt: now,
+    roomType,
   };
 
   const owner: SplitMember = {
@@ -587,6 +595,19 @@ export async function saveSplitMutationId(
   return saveMutationId(roomId, clientMutationId, resultId);
 }
 
+/**
+ * "family" is resolved server-side into "shares" weighted by household size
+ * before the engine ever sees it — see buildFamilyWeightedParticipants.
+ */
+async function resolveParticipantInputs(
+  room: SplitRoom,
+  splitMethod: SplitMethod,
+  participants: ExpenseParticipantInput[],
+): Promise<ExpenseParticipantInput[]> {
+  if (splitMethod !== "family") return participants;
+  return buildFamilyWeightedParticipants(room, participants.map((p) => p.memberId));
+}
+
 export async function createExpense(input: {
   roomId: string;
   actorMemberId: string;
@@ -600,6 +621,7 @@ export async function createExpense(input: {
   comment?: string | null;
   geo?: { lat: number; lng: number } | null;
   date?: number;
+  personal?: boolean;
   clientMutationId?: string | null;
 }): Promise<SplitExpense> {
   const room = await getRoom(input.roomId);
@@ -619,11 +641,16 @@ export async function createExpense(input: {
 
   const exchangeRate = resolveExchangeRate(room, input.currencyOriginal);
   const amountBase = computeAmountBase(input.amountOriginal, exchangeRate);
+  const resolvedParticipants = await resolveParticipantInputs(
+    room,
+    input.splitMethod,
+    input.participants,
+  );
   const shares = normalizeShares({
     amountOriginal: money(input.amountOriginal),
     amountBase,
     splitMethod: input.splitMethod,
-    participants: input.participants,
+    participants: resolvedParticipants,
   });
 
   const id = generateEntityId("exp");
@@ -646,6 +673,7 @@ export async function createExpense(input: {
     participants: shares,
     comment: input.comment ?? null,
     geo: input.geo ?? null,
+    personal: input.personal ?? false,
     locked: areExpensesLocked(settlements),
     createdBy: input.actorMemberId,
     createdAt: now,
@@ -674,6 +702,7 @@ export async function updateExpense(input: {
   splitMethod?: SplitMethod;
   participants?: ExpenseParticipantInput[];
   comment?: string | null;
+  personal?: boolean;
 }): Promise<SplitExpense> {
   const room = await getRoom(input.roomId);
   if (!room) throw new Error("room_not_found");
@@ -695,11 +724,12 @@ export async function updateExpense(input: {
       memberId: p.memberId,
       inputValue: p.inputValue ?? undefined,
     }));
+  const resolvedParticipants = await resolveParticipantInputs(room, splitMethod, participantInputs);
   const shares = normalizeShares({
     amountOriginal,
     amountBase,
     splitMethod,
-    participants: participantInputs,
+    participants: resolvedParticipants,
   });
 
   const updated: SplitExpense = {
@@ -716,6 +746,7 @@ export async function updateExpense(input: {
     participantIds: shares.map((s) => s.memberId),
     participants: shares,
     comment: input.comment === undefined ? existing.comment : input.comment,
+    personal: input.personal === undefined ? existing.personal : input.personal,
     updatedAt: Date.now(),
     version: existing.version + 1,
   };

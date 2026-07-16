@@ -15,6 +15,9 @@ export interface MemberReportItem {
   shareBase: Money;
   /** paidBase − shareBase, ledger-aware (see computeEffectiveBalances). Positive = owed money. */
   netBase: Money;
+  /** Sum of expenses this member paid that are flagged "personal" — not part of
+   * the shared totals below, just their own tracked spending. */
+  personalExpensesBase: Money;
   /** Money put into shared assets ("касса"). */
   contributedBase: Money;
   /** Money taken out of shared assets, confirmed or not. */
@@ -32,8 +35,13 @@ export interface MemberReportItem {
 }
 
 export interface SplitReport {
+  /** Sum of non-personal expenses only — the group's actual shared spending. */
   totalExpensesBase: Money;
+  /** Category breakdown, non-personal expenses only. */
   byCategory: CategoryReportItem[];
+  /** Sum of expenses flagged "personal" across everyone — for context only,
+   * already excluded from totalExpensesBase/byCategory. */
+  totalPersonalExpensesBase: Money;
   totalAssetsBase: Money;
   members: MemberReportItem[];
 }
@@ -52,6 +60,7 @@ export function computeSplitReport(input: {
   const { memberIds, operations, memberBalances, totalAssetsBase } = input;
 
   const categoryTotals = new Map<string, ReturnType<typeof d>>();
+  const personalExpenses = new Map<string, ReturnType<typeof d>>();
   const contributed = new Map<string, ReturnType<typeof d>>();
   const withdrawn = new Map<string, ReturnType<typeof d>>();
   const settledOut = new Map<string, ReturnType<typeof d>>();
@@ -68,10 +77,18 @@ export function computeSplitReport(input: {
   };
 
   let totalExpenses = d(0);
+  let totalPersonalExpenses = d(0);
 
   for (const op of operations) {
     switch (op.type) {
       case "expense": {
+        if (op.personal) {
+          totalPersonalExpenses = totalPersonalExpenses.plus(d(op.amountBase));
+          const payer =
+            op.paymentSource.kind === "member" ? op.paymentSource.memberId : undefined;
+          if (payer) bump(personalExpenses, payer, op.amountBase);
+          break;
+        }
         totalExpenses = totalExpenses.plus(d(op.amountBase));
         bump(categoryTotals, op.categoryId, op.amountBase);
         break;
@@ -114,6 +131,7 @@ export function computeSplitReport(input: {
       paidBase: bal?.paidBase ?? zeroMoney(),
       shareBase: bal?.shareBase ?? zeroMoney(),
       netBase: bal?.netBase ?? zeroMoney(),
+      personalExpensesBase: money(personalExpenses.get(memberId) ?? 0),
       contributedBase: money(contributed.get(memberId) ?? 0),
       withdrawnBase: money(withdrawn.get(memberId) ?? 0),
       settledOutBase: money(settledOut.get(memberId) ?? 0),
@@ -127,6 +145,7 @@ export function computeSplitReport(input: {
   return {
     totalExpensesBase: money(totalExpenses),
     byCategory,
+    totalPersonalExpensesBase: money(totalPersonalExpenses),
     totalAssetsBase,
     members,
   };

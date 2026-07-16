@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   apiArchiveRoom,
   apiConfirmSettlement,
@@ -13,14 +13,22 @@ import {
   apiGetLedger,
   apiGetReport,
   apiGetSnapshot,
+  apiListFamilies,
   apiSetRates,
 } from "@/lib/split/client";
 import { DEFAULT_CATEGORIES, SUPPORTED_CURRENCIES } from "@/lib/split/constants";
 import type { SplitReport } from "@/lib/split/report";
-import { clearSplitSession, loadSplitSession } from "@/lib/split/session";
-import type { SplitLedgerResponse, SplitMethod, SplitRoomSnapshot, SplitSession } from "@/lib/split/types";
+import { loadSplitSession, touchSplitSession } from "@/lib/split/session";
+import type {
+  SplitFamily,
+  SplitLedgerResponse,
+  SplitMethod,
+  SplitRoomSnapshot,
+  SplitSession,
+} from "@/lib/split/types";
 import { SplitShell } from "../components/SplitShell";
 import { SplitAdvancedPanel } from "./SplitAdvancedPanel";
+import { SplitFamiliesPanel } from "./SplitFamiliesPanel";
 import { SplitParticipantsPanel } from "./SplitParticipantsPanel";
 import { SplitReportPanel } from "./SplitReportPanel";
 
@@ -28,14 +36,24 @@ function memberName(snapshot: SplitRoomSnapshot, id: string): string {
   return snapshot.members.find((m) => m.memberId === id)?.displayName ?? id.slice(0, 6);
 }
 
-export default function SplitRoomClient() {
+const ROOM_TYPE_LABEL: Record<string, string> = {
+  individual: "Отдельные участники",
+  own_family: "Своя семья",
+  multi_family: "Несколько семей",
+};
+
+function SplitRoomInner() {
   const router = useRouter();
-  const [session] = useState<SplitSession | null>(() => loadSplitSession());
+  const searchParams = useSearchParams();
+  const roomIdParam = searchParams.get("room") ?? undefined;
+  const [session] = useState<SplitSession | null>(() => loadSplitSession(roomIdParam));
   const [snapshot, setSnapshot] = useState<SplitRoomSnapshot | null>(null);
   const [ledger, setLedger] = useState<SplitLedgerResponse | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [report, setReport] = useState<SplitReport | null>(null);
   const [showReport, setShowReport] = useState(false);
+  const [families, setFamilies] = useState<SplitFamily[]>([]);
+  const [showFamilies, setShowFamilies] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -48,12 +66,13 @@ export default function SplitRoomClient() {
   const [excludePayer, setExcludePayer] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [paidByMemberId, setPaidByMemberId] = useState<string>("");
+  const [personal, setPersonal] = useState(false);
   const [fxCurrency, setFxCurrency] = useState("USD");
   const [fxRate, setFxRate] = useState("");
 
   const refresh = useCallback(async (
     s: SplitSession,
-    opts?: { withLedger?: boolean; withReport?: boolean },
+    opts?: { withLedger?: boolean; withReport?: boolean; withFamilies?: boolean },
   ) => {
     const next = await apiGetSnapshot(s);
     setSnapshot(next);
@@ -80,13 +99,19 @@ export default function SplitRoomClient() {
     if (needReport) {
       setReport(await apiGetReport(s));
     }
-  }, [selectedIds.length, paidByMemberId, showReport]);
+    const needFamilies = opts?.withFamilies ?? showFamilies ?? next.room.roomType === "multi_family";
+    if (needFamilies) {
+      setFamilies(await apiListFamilies(s));
+      setShowFamilies(true);
+    }
+  }, [selectedIds.length, paidByMemberId, showReport, showFamilies]);
 
   useEffect(() => {
     if (!session) {
       router.replace("/tools/split");
       return;
     }
+    touchSplitSession(session.roomId);
     startTransition(async () => {
       try {
         await refresh(session);
@@ -99,6 +124,9 @@ export default function SplitRoomClient() {
   }, [router, session?.roomId, session?.memberId]);
 
   const participantInputs = useMemo(() => {
+    if (personal) {
+      return [{ memberId: paidByMemberId || (snapshot ? snapshot.members[0]?.memberId ?? "" : "") }];
+    }
     let ids = selectedIds;
     if (excludePayer && paidByMemberId) {
       ids = ids.filter((id) => id !== paidByMemberId);
@@ -106,7 +134,9 @@ export default function SplitRoomClient() {
     if (ids.length === 0 && snapshot) {
       ids = snapshot.members.map((m) => m.memberId);
     }
-    if (splitMethod === "equal") {
+    if (splitMethod === "equal" || splitMethod === "family") {
+      // "family" sends plain member picks too — the server resolves each into
+      // its household's weighted representative (see buildFamilyWeightedParticipants).
       return ids.map((memberId) => ({ memberId }));
     }
     if (splitMethod === "percentage") {
@@ -132,7 +162,7 @@ export default function SplitRoomClient() {
           ? (Number(amount) - Number(each) * (n - 1)).toFixed(2)
           : each,
     }));
-  }, [selectedIds, excludePayer, paidByMemberId, snapshot, splitMethod, amount]);
+  }, [selectedIds, excludePayer, paidByMemberId, snapshot, splitMethod, amount, personal]);
 
   const canEditAsOwner =
     session?.role === "owner" ||
@@ -156,24 +186,12 @@ export default function SplitRoomClient() {
       title={snapshot?.room.name ?? "Комната"}
       subtitle={
         snapshot
-          ? `${snapshot.room.baseCurrency} · v${snapshot.version}${
+          ? `${snapshot.room.baseCurrency} · ${ROOM_TYPE_LABEL[snapshot.room.roomType ?? "individual"]}${
               snapshot.room.status === "archived" ? " · архив" : ""
             }`
           : session.displayName
       }
       backHref="/tools/split"
-      trailing={
-        <button
-          type="button"
-          className="text-xs text-emerald-900/50 px-2"
-          onClick={() => {
-            clearSplitSession();
-            router.replace("/tools/split");
-          }}
-        >
-          Выйти
-        </button>
-      }
     >
       <div className="p-4 space-y-6">
         {error && <p className="text-sm text-rose-700">{error}</p>}
@@ -376,24 +394,36 @@ export default function SplitRoomClient() {
                 ))}
               </select>
               <select
-                className="rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm"
+                className="rounded-xl border border-emerald-900/15 bg-white px-3 py-2.5 text-sm disabled:opacity-50"
                 value={splitMethod}
+                disabled={personal}
                 onChange={(e) => setSplitMethod(e.target.value as SplitMethod)}
               >
                 <option value="equal">Поровну</option>
                 <option value="fixed">Фикс. суммы</option>
                 <option value="percentage">Проценты</option>
                 <option value="shares">Доли</option>
+                <option value="family">По составу семей</option>
               </select>
             </div>
             <label className="flex items-center gap-2 text-sm text-emerald-950/70">
               <input
                 type="checkbox"
-                checked={excludePayer}
-                onChange={(e) => setExcludePayer(e.target.checked)}
+                checked={personal}
+                onChange={(e) => setPersonal(e.target.checked)}
               />
-              Исключая плательщика
+              Личный расход — не делить с остальными, только для своего учёта
             </label>
+            {!personal && (
+              <label className="flex items-center gap-2 text-sm text-emerald-950/70">
+                <input
+                  type="checkbox"
+                  checked={excludePayer}
+                  onChange={(e) => setExcludePayer(e.target.checked)}
+                />
+                Исключая плательщика
+              </label>
+            )}
             <label className="block space-y-1">
               <span className="text-xs text-emerald-950/60">Кто заплатил</span>
               <select
@@ -409,29 +439,37 @@ export default function SplitRoomClient() {
                 ))}
               </select>
             </label>
-            <div className="flex flex-wrap gap-2">
-              {snapshot.members.map((m) => {
-                const on = selectedIds.includes(m.memberId);
-                return (
-                  <button
-                    key={m.memberId}
-                    type="button"
-                    onClick={() =>
-                      setSelectedIds((prev) =>
-                        on ? prev.filter((id) => id !== m.memberId) : [...prev, m.memberId],
-                      )
-                    }
-                    className={`rounded-lg px-2.5 py-1 text-xs border ${
-                      on
-                        ? "bg-teal-800 text-white border-teal-800"
-                        : "bg-white text-emerald-950/70 border-emerald-900/15"
-                    }`}
-                  >
-                    {m.displayName}
-                  </button>
-                );
-              })}
-            </div>
+            {!personal && (
+              <div className="flex flex-wrap gap-2">
+                {snapshot.members.map((m) => {
+                  const on = selectedIds.includes(m.memberId);
+                  return (
+                    <button
+                      key={m.memberId}
+                      type="button"
+                      onClick={() =>
+                        setSelectedIds((prev) =>
+                          on ? prev.filter((id) => id !== m.memberId) : [...prev, m.memberId],
+                        )
+                      }
+                      className={`rounded-lg px-2.5 py-1 text-xs border ${
+                        on
+                          ? "bg-teal-800 text-white border-teal-800"
+                          : "bg-white text-emerald-950/70 border-emerald-900/15"
+                      }`}
+                    >
+                      {m.displayName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {personal && (
+              <p className="text-xs text-emerald-950/50">
+                Запишется только на {memberName(snapshot, paidByMemberId || session.memberId)} и не
+                повлияет на баланс с остальными.
+              </p>
+            )}
             <button
               type="button"
               disabled={pending || !amount}
@@ -446,8 +484,9 @@ export default function SplitRoomClient() {
                       currencyOriginal: currency,
                       categoryId,
                       paidByMemberId: paidByMemberId || session.memberId,
-                      splitMethod,
+                      splitMethod: personal ? "equal" : splitMethod,
                       participants: participantInputs,
+                      personal,
                       clientMutationId: crypto.randomUUID(),
                     });
                     setDescription("");
@@ -477,7 +516,14 @@ export default function SplitRoomClient() {
                 <li key={e.id} className="text-sm border-b border-emerald-900/5 py-2">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <div className="font-medium">{e.description}</div>
+                      <div className="font-medium">
+                        {e.description}
+                        {e.personal && (
+                          <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-normal text-amber-800">
+                            Личный
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-emerald-950/50">
                         {e.amountOriginal} {e.currencyOriginal} → {e.amountBase}{" "}
                         {snapshot.room.baseCurrency} · {e.splitMethod}
@@ -559,6 +605,57 @@ export default function SplitRoomClient() {
             )}
             {showAdvanced && !ledger && (
               <p className="text-sm text-emerald-950/45">Загрузка журнала…</p>
+            )}
+          </section>
+        )}
+
+        {snapshot && (
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
+                Семьи
+              </h2>
+              <label className="flex items-center gap-2 text-sm text-emerald-950/70 shrink-0">
+                <span className="text-xs">{showFamilies ? "Вкл" : "Выкл"}</span>
+                <input
+                  type="checkbox"
+                  checked={showFamilies}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setShowFamilies(on);
+                    if (on) {
+                      setError(null);
+                      startTransition(async () => {
+                        try {
+                          setFamilies(await apiListFamilies(session));
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Ошибка загрузки");
+                        }
+                      });
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            {!showFamilies && (
+              <p className="text-xs text-emerald-950/50">
+                Сгруппируйте участников по семьям (с числом детей), чтобы делить общие расходы
+                пропорционально составу семьи, а не поровну на человека.
+              </p>
+            )}
+            {showFamilies && (
+              <SplitFamiliesPanel
+                session={session}
+                snapshot={snapshot}
+                families={families}
+                pending={pending}
+                onRefresh={() => refresh(session, { withFamilies: true })}
+                onError={setError}
+                startAction={(fn) => {
+                  setError(null);
+                  startTransition(fn);
+                }}
+              />
             )}
           </section>
         )}
@@ -745,8 +842,29 @@ export default function SplitRoomClient() {
           {inviteUrl && (
             <p className="text-xs break-all text-teal-800 bg-teal-50 rounded-lg p-2">{inviteUrl}</p>
           )}
+          <button
+            type="button"
+            className="w-full text-xs text-emerald-950/40 underline"
+            onClick={() => router.push("/tools/split")}
+          >
+            К списку моих комнат
+          </button>
         </section>
       </div>
     </SplitShell>
+  );
+}
+
+export default function SplitRoomClient() {
+  return (
+    <Suspense
+      fallback={
+        <SplitShell title="Комната" backHref="/tools/split">
+          <div className="p-4 text-sm text-emerald-950/60">Загрузка…</div>
+        </SplitShell>
+      }
+    >
+      <SplitRoomInner />
+    </Suspense>
   );
 }

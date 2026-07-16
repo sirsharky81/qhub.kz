@@ -27,6 +27,7 @@ export function operationsFromLegacy(input: {
       paymentSource: { kind: "member", memberId: e.paidByMemberId },
       splitMethod: e.splitMethod,
       participants: e.participants,
+      personal: e.personal,
     };
     ops.push(op);
   }

@@ -18,7 +18,7 @@ export function exportSnapshotCsv(snapshot: SplitRoomSnapshot): string {
   }
   lines.push("");
   lines.push(
-    "expenses,id,description,amountOriginal,currency,rate,amountBase,paidBy,method,category",
+    "expenses,id,description,amountOriginal,currency,rate,amountBase,paidBy,method,category,personal",
   );
   for (const e of snapshot.expenses) {
     lines.push(
@@ -33,6 +33,7 @@ export function exportSnapshotCsv(snapshot: SplitRoomSnapshot): string {
         e.paidByMemberId,
         e.splitMethod,
         e.categoryId,
+        e.personal ? "1" : "0",
       ].join(","),
     );
   }

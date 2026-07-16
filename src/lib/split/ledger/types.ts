@@ -50,6 +50,8 @@ export interface ExpenseOperation extends OperationBase {
   paymentSource: PaymentSource;
   splitMethod: SplitMethod;
   participants: ExpenseParticipantShare[];
+  /** See SplitExpense.personal — report/display hint only. */
+  personal?: boolean;
 }
 
 export interface ContributionOperation extends OperationBase {

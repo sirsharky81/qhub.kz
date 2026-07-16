@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createFamily } from "./family-store";
 import {
   addLocalParticipant,
   confirmSettlement,
@@ -7,6 +8,7 @@ import {
   createSettlement,
   createSplitRoom,
   createWhitelistedSession,
+  getRoom,
   getRoomSnapshot,
   joinRoom,
   transferOwnership,
@@ -243,6 +245,83 @@ describe("split store flow", () => {
     });
     expect(settlement.status).toBe("confirmed");
     expect(settlement.confirmedBy).toBe(owner.memberId);
+  });
+
+  it("a personal expense with a single participant nets to zero and doesn't touch others", async () => {
+    const { room, owner } = await createSplitRoom({ ownerName: "Alice", baseCurrency: "KZT" });
+    const invite = await createInvitation({ roomId: room.roomId, createdBy: owner.memberId });
+    const bob = await joinRoom({ token: invite.token, displayName: "Bob" });
+
+    const expense = await createExpense({
+      roomId: room.roomId,
+      actorMemberId: bob.member.memberId,
+      description: "My own souvenir",
+      amountOriginal: "30.00",
+      currencyOriginal: "KZT",
+      paidByMemberId: bob.member.memberId,
+      splitMethod: "equal",
+      participants: [{ memberId: bob.member.memberId }],
+      personal: true,
+    });
+    expect(expense.personal).toBe(true);
+    expect(expense.participants).toEqual([
+      { memberId: bob.member.memberId, inputValue: null, amountBase: "30.00" },
+    ]);
+
+    const snap = await getRoomSnapshot(room.roomId);
+    expect(snap.balances.every((b) => b.netBase === "0.00")).toBe(true);
+  });
+
+  it("splitMethod \"family\" allocates a shared expense proportional to household size", async () => {
+    const { room, owner } = await createSplitRoom({
+      ownerName: "Ivanov Dad",
+      baseCurrency: "KZT",
+      roomType: "multi_family",
+    });
+    const invite = await createInvitation({ roomId: room.roomId, createdBy: owner.memberId });
+    const mom = await joinRoom({ token: invite.token, displayName: "Ivanov Mom" });
+    const otherDad = await addLocalParticipant({ roomId: room.roomId, displayName: "Petrov Dad" });
+    const otherMom = await addLocalParticipant({ roomId: room.roomId, displayName: "Petrov Mom" });
+
+    const roomForFamilies = (await getRoom(room.roomId))!;
+    await createFamily({
+      room: roomForFamilies,
+      actorMemberId: owner.memberId,
+      name: "Ивановы",
+      memberIds: [owner.memberId, mom.member.memberId],
+      childrenCount: 2, // household size 4
+    });
+    await createFamily({
+      room: roomForFamilies,
+      actorMemberId: owner.memberId,
+      name: "Петровы",
+      memberIds: [otherDad.memberId, otherMom.memberId],
+      childrenCount: 1, // household size 3
+    });
+
+    // 70.00 split 4:3 → 40.00 / 30.00, landing entirely on each family's
+    // representative (memberIds[0]) — whichever adult of that family gets
+    // picked in the selection.
+    const expense = await createExpense({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      description: "Shared dinner",
+      amountOriginal: "70.00",
+      currencyOriginal: "KZT",
+      paidByMemberId: owner.memberId,
+      splitMethod: "family",
+      participants: [{ memberId: mom.member.memberId }, { memberId: otherMom.memberId }],
+    });
+
+    expect(expense.splitMethod).toBe("family");
+    const byMember = new Map(expense.participants.map((p) => [p.memberId, p.amountBase]));
+    expect(byMember.get(owner.memberId)).toBe("40.00");
+    expect(byMember.get(otherDad.memberId)).toBe("30.00");
+    expect(byMember.size).toBe(2);
+
+    const snap = await getRoomSnapshot(room.roomId);
+    expect(snap.balances.find((b) => b.memberId === owner.memberId)?.netBase).toBe("30.00");
+    expect(snap.balances.find((b) => b.memberId === otherDad.memberId)?.netBase).toBe("-30.00");
   });
 
   it("can transfer ownership to a local participant", async () => {

@@ -19,6 +19,7 @@ export async function PATCH(
       splitMethod?: SplitMethod;
       participants?: ExpenseParticipantInput[];
       comment?: string | null;
+      personal?: boolean;
     };
     const expense = await updateExpense({
       roomId,

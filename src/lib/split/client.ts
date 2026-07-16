@@ -4,10 +4,12 @@ import type {
   ExpenseParticipantInput,
   Money,
   SplitExpense,
+  SplitFamily,
   SplitLedgerResponse,
   SplitMemberPublic,
   SplitMethod,
   SplitRoomSnapshot,
+  SplitRoomType,
   SplitSession,
 } from "./types";
 import type { RoomAsset, RoomAssetKind, SplitOperation } from "./ledger";
@@ -35,6 +37,7 @@ export async function apiCreateRoom(input: {
   name?: string;
   ownerName?: string;
   baseCurrency?: string;
+  roomType?: SplitRoomType;
 }): Promise<SplitSession & { roomName: string; baseCurrency: string }> {
   const res = await platformFetch("/api/split/rooms", {
     method: "POST",
@@ -93,6 +96,49 @@ export async function apiJoinRoom(input: {
   if (!res.ok) throw new Error(await readError(res));
   const data = (await res.json()) as SplitSession;
   return data;
+}
+
+export async function apiListFamilies(session: SplitSession): Promise<SplitFamily[]> {
+  const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/families`, {
+    headers: authHeaders(session),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { families: SplitFamily[] };
+  return data.families;
+}
+
+export async function apiCreateFamily(
+  session: SplitSession,
+  body: { name: string; memberIds: string[]; childrenCount?: number },
+): Promise<SplitFamily> {
+  const res = await platformFetch(`/api/split/rooms/${encodeURIComponent(session.roomId)}/families`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SplitFamily;
+}
+
+export async function apiUpdateFamily(
+  session: SplitSession,
+  familyId: string,
+  body: { name?: string; memberIds?: string[]; childrenCount?: number },
+): Promise<SplitFamily> {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/families/${encodeURIComponent(familyId)}`,
+    { method: "PATCH", headers: authHeaders(session), body: JSON.stringify(body) },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SplitFamily;
+}
+
+export async function apiDeleteFamily(session: SplitSession, familyId: string): Promise<void> {
+  const res = await platformFetch(
+    `/api/split/rooms/${encodeURIComponent(session.roomId)}/families/${encodeURIComponent(familyId)}`,
+    { method: "DELETE", headers: authHeaders(session) },
+  );
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export async function apiAddLocalParticipant(
@@ -181,6 +227,7 @@ export async function apiCreateExpense(
     splitMethod: SplitMethod;
     participants: ExpenseParticipantInput[];
     comment?: string;
+    personal?: boolean;
     clientMutationId?: string;
   },
 ): Promise<SplitExpense> {
@@ -312,6 +359,7 @@ export type CreateOperationBody =
       splitMethod: SplitMethod;
       participants: ExpenseParticipantInput[];
       comment?: string;
+      personal?: boolean;
       clientMutationId?: string;
     }
   | {

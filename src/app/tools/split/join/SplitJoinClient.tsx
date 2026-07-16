@@ -23,7 +23,7 @@ function JoinForm() {
       try {
         const session = await apiJoinRoom({ token: token.trim(), displayName });
         saveSplitSession(session);
-        router.replace("/tools/split/room");
+        router.replace(`/tools/split/room?room=${encodeURIComponent(session.roomId)}`);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Ошибка");
       }
