@@ -9,10 +9,13 @@ import {
   joinRoom,
 } from "./store";
 import {
+  confirmWithdrawal,
   createAsset,
   createContribution,
   createExpenseFromAsset,
+  createWithdrawal,
   getLedgerSnapshot,
+  getSplitReport,
 } from "./ledger-store";
 
 describe("ledger-store persistence", () => {
@@ -181,5 +184,195 @@ describe("ledger-store persistence", () => {
     snap = await getRoomSnapshot(room.roomId);
     expect(snap.balances.find((b) => b.memberId === owner.memberId)?.netBase).toBe("70.00");
     expect(snap.balances.find((b) => b.memberId === bob.member.memberId)?.netBase).toBe("0.00");
+  });
+
+  it("only the asset custodian (or the owner) may withdraw money from it", async () => {
+    const { room, owner } = await createSplitRoom({ name: "Trip", ownerName: "Alice", baseCurrency: "KZT" });
+    const invite = await createInvitation({ roomId: room.roomId, createdBy: owner.memberId });
+    const bob = await joinRoom({ token: invite.token, displayName: "Bob" });
+
+    const cash = await createAsset({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      name: "Касса",
+      currency: "KZT",
+      custodianMemberId: owner.memberId,
+    });
+    await createContribution({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromMemberId: owner.memberId,
+      toAssetId: cash.id,
+      amount: "100.00",
+    });
+
+    // Bob has no physical access to the cash and isn't the owner — rejected.
+    await expect(
+      createWithdrawal({
+        roomId: room.roomId,
+        actorMemberId: bob.member.memberId,
+        fromAssetId: cash.id,
+        toMemberId: bob.member.memberId,
+        amount: "10.00",
+      }),
+    ).rejects.toThrow("asset_custodian_required");
+
+    // The custodian (Alice) can withdraw for herself; auto-confirmed (she's the recipient).
+    const selfWithdrawal = await createWithdrawal({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromAssetId: cash.id,
+      toMemberId: owner.memberId,
+      amount: "10.00",
+    });
+    expect(selfWithdrawal.status).toBe("confirmed");
+  });
+
+  it("withdrawal to a connected member stays pending until they confirm receipt", async () => {
+    const { room, owner } = await createSplitRoom({ name: "Trip", ownerName: "Alice", baseCurrency: "KZT" });
+    const invite = await createInvitation({ roomId: room.roomId, createdBy: owner.memberId });
+    const bob = await joinRoom({ token: invite.token, displayName: "Bob" });
+
+    const cash = await createAsset({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      name: "Касса",
+      currency: "KZT",
+      custodianMemberId: owner.memberId,
+    });
+    await createContribution({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromMemberId: owner.memberId,
+      toAssetId: cash.id,
+      amount: "100.00",
+    });
+
+    // Alice (custodian) hands cash to Bob — Bob, a connected member, must accept it.
+    const withdrawal = await createWithdrawal({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromAssetId: cash.id,
+      toMemberId: bob.member.memberId,
+      amount: "40.00",
+    });
+    expect(withdrawal.status).toBe("pending");
+
+    await expect(
+      confirmWithdrawal(room.roomId, withdrawal.id, owner.memberId),
+    ).rejects.toThrow("not_withdrawal_recipient");
+
+    const confirmed = await confirmWithdrawal(room.roomId, withdrawal.id, bob.member.memberId);
+    expect(confirmed.status).toBe("confirmed");
+    expect(confirmed.confirmedBy).toBe(bob.member.memberId);
+  });
+
+  it("withdrawal to a local member is auto-confirmed", async () => {
+    const { room, owner } = await createSplitRoom({ name: "Trip", ownerName: "Alice", baseCurrency: "KZT" });
+    const kid = await addLocalParticipant({ roomId: room.roomId, displayName: "Kid" });
+
+    const cash = await createAsset({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      name: "Касса",
+      currency: "KZT",
+      custodianMemberId: owner.memberId,
+    });
+    await createContribution({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromMemberId: owner.memberId,
+      toAssetId: cash.id,
+      amount: "100.00",
+    });
+
+    const withdrawal = await createWithdrawal({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromAssetId: cash.id,
+      toMemberId: kid.memberId,
+      amount: "20.00",
+    });
+    expect(withdrawal.status).toBe("confirmed");
+    expect(withdrawal.confirmedBy).toBe(owner.memberId);
+  });
+
+  it("getSplitReport aggregates category totals, contributions, withdrawals and settlements per member", async () => {
+    const { room, owner } = await createSplitRoom({ name: "Trip", ownerName: "Alice", baseCurrency: "KZT" });
+    const invite = await createInvitation({ roomId: room.roomId, createdBy: owner.memberId });
+    const bob = await joinRoom({ token: invite.token, displayName: "Bob" });
+
+    await createExpense({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      description: "Dinner",
+      amountOriginal: "40.00",
+      currencyOriginal: "KZT",
+      categoryId: "food",
+      paidByMemberId: owner.memberId,
+      splitMethod: "equal",
+      participants: [{ memberId: owner.memberId }, { memberId: bob.member.memberId }],
+    });
+
+    const cash = await createAsset({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      name: "Касса",
+      currency: "KZT",
+      custodianMemberId: owner.memberId,
+    });
+    await createContribution({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromMemberId: owner.memberId,
+      toAssetId: cash.id,
+      amount: "100.00",
+    });
+    await createExpenseFromAsset({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      description: "Museum",
+      amountOriginal: "20.00",
+      currencyOriginal: "KZT",
+      categoryId: "fun",
+      assetId: cash.id,
+      splitMethod: "equal",
+      participants: [{ memberId: owner.memberId }, { memberId: bob.member.memberId }],
+    });
+    // Pending: Bob, a connected member, hasn't confirmed receipt yet.
+    await createWithdrawal({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromAssetId: cash.id,
+      toMemberId: bob.member.memberId,
+      amount: "10.00",
+    });
+    // Pending: recorded by Bob (fromMemberId), Alice (toMemberId) hasn't confirmed yet.
+    await createSettlement({
+      roomId: room.roomId,
+      actorMemberId: bob.member.memberId,
+      fromMemberId: bob.member.memberId,
+      toMemberId: owner.memberId,
+      amountBase: "5.00",
+    });
+
+    const report = await getSplitReport(room.roomId);
+    expect(report.totalExpensesBase).toBe("60.00");
+    expect(report.byCategory).toEqual(
+      expect.arrayContaining([
+        { categoryId: "food", totalBase: "40.00" },
+        { categoryId: "fun", totalBase: "20.00" },
+      ]),
+    );
+    expect(report.totalAssetsBase).toBe("70.00");
+
+    const aliceReport = report.members.find((m) => m.memberId === owner.memberId)!;
+    const bobReport = report.members.find((m) => m.memberId === bob.member.memberId)!;
+    expect(aliceReport.contributedBase).toBe("100.00");
+    expect(bobReport.withdrawnBase).toBe("10.00");
+    expect(bobReport.pendingWithdrawalsIn).toBe(1);
+    expect(bobReport.pendingSettlementsOut).toBe(1);
+    expect(aliceReport.pendingSettlementsIn).toBe(1);
+    expect(aliceReport.settledInBase).toBe("0.00");
   });
 });

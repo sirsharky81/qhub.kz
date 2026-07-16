@@ -168,6 +168,7 @@ describe("FX and balances", () => {
         date: "2026-07-14",
         createdBy: "b",
         createdAt: 1,
+        status: "confirmed",
       },
     ];
     const balances = computeBalances(["a", "b"], expenses, settlements);
@@ -238,6 +239,7 @@ describe("suggestSettlements greedy", () => {
       date: "2026-07-14",
       createdBy: s.fromMemberId,
       createdAt: i,
+      status: "confirmed",
     }));
     expect(areBalancesSettled(computeBalances(["a", "b", "c"], expenses, after))).toBe(true);
   });

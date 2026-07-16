@@ -55,6 +55,7 @@ describe("ledger fold — v3.3 regression", () => {
         date: "2026-07-15",
         createdBy: "b",
         createdAt: 20,
+        status: "confirmed",
       },
     ];
 
@@ -211,6 +212,7 @@ describe("ledger fold — assets + custodian", () => {
         amount: "10.00",
         currency: "KZT",
         amountBase: "10.00",
+        status: "confirmed",
       },
       {
         id: "h1",

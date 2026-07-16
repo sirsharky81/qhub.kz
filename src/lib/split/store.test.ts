@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addLocalParticipant,
+  confirmSettlement,
   createExpense,
   createInvitation,
   createSettlement,
@@ -144,6 +145,104 @@ describe("split store flow", () => {
         deviceKey: "unknown-device",
       }),
     ).rejects.toThrow("device_not_whitelisted");
+  });
+
+  it("settlement to a connected recipient is pending until they confirm receipt", async () => {
+    const { room, owner } = await createSplitRoom({ ownerName: "Alice", baseCurrency: "KZT" });
+    const invite = await createInvitation({ roomId: room.roomId, createdBy: owner.memberId });
+    const bob = await joinRoom({ token: invite.token, displayName: "Bob" });
+
+    await createExpense({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      description: "Dinner",
+      amountOriginal: "20.00",
+      currencyOriginal: "KZT",
+      paidByMemberId: owner.memberId,
+      splitMethod: "equal",
+      participants: [{ memberId: owner.memberId }, { memberId: bob.member.memberId }],
+    });
+
+    // Bob (debtor) reports he paid Alice back — Alice, a connected member, hasn't
+    // acknowledged it yet, so the record starts out "pending".
+    const settlement = await createSettlement({
+      roomId: room.roomId,
+      actorMemberId: bob.member.memberId,
+      fromMemberId: bob.member.memberId,
+      toMemberId: owner.memberId,
+      amountBase: "10.00",
+    });
+    expect(settlement.status).toBe("pending");
+    expect(settlement.confirmedBy).toBeFalsy();
+
+    // Only the recipient (Alice) may confirm — Bob confirming his own payment is rejected.
+    await expect(
+      confirmSettlement(room.roomId, settlement.id, bob.member.memberId),
+    ).rejects.toThrow("not_settlement_recipient");
+
+    const confirmed = await confirmSettlement(room.roomId, settlement.id, owner.memberId);
+    expect(confirmed.status).toBe("confirmed");
+    expect(confirmed.confirmedBy).toBe(owner.memberId);
+    expect(confirmed.confirmedAt).toBeTruthy();
+
+    // Idempotent: confirming an already-confirmed settlement is a no-op, not an error.
+    const again = await confirmSettlement(room.roomId, settlement.id, owner.memberId);
+    expect(again.status).toBe("confirmed");
+  });
+
+  it("settlement to a local recipient is auto-confirmed (they can never confirm themselves)", async () => {
+    const { room, owner } = await createSplitRoom({ ownerName: "Boris", baseCurrency: "KZT" });
+    const kid = await addLocalParticipant({ roomId: room.roomId, displayName: "Kid" });
+
+    await createExpense({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      description: "Toys",
+      amountOriginal: "10.00",
+      currencyOriginal: "KZT",
+      paidByMemberId: kid.memberId,
+      splitMethod: "equal",
+      participants: [{ memberId: owner.memberId }, { memberId: kid.memberId }],
+    });
+
+    const settlement = await createSettlement({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromMemberId: owner.memberId,
+      toMemberId: kid.memberId,
+      amountBase: "5.00",
+    });
+    expect(settlement.status).toBe("confirmed");
+    expect(settlement.confirmedBy).toBe(owner.memberId);
+  });
+
+  it("settlement where the recipient reports it themselves is auto-confirmed", async () => {
+    const { room, owner } = await createSplitRoom({ ownerName: "Alice", baseCurrency: "KZT" });
+    const invite = await createInvitation({ roomId: room.roomId, createdBy: owner.memberId });
+    const bob = await joinRoom({ token: invite.token, displayName: "Bob" });
+
+    await createExpense({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      description: "Dinner",
+      amountOriginal: "10.00",
+      currencyOriginal: "KZT",
+      paidByMemberId: owner.memberId,
+      splitMethod: "equal",
+      participants: [{ memberId: owner.memberId }, { memberId: bob.member.memberId }],
+    });
+
+    // Alice (the creditor / recipient) records that Bob paid her — she's confirming
+    // in the same action, no separate accept needed.
+    const settlement = await createSettlement({
+      roomId: room.roomId,
+      actorMemberId: owner.memberId,
+      fromMemberId: bob.member.memberId,
+      toMemberId: owner.memberId,
+      amountBase: "5.00",
+    });
+    expect(settlement.status).toBe("confirmed");
+    expect(settlement.confirmedBy).toBe(owner.memberId);
   });
 
   it("can transfer ownership to a local participant", async () => {
