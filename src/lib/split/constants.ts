@@ -39,8 +39,13 @@ export const SUPPORTED_CURRENCIES = ["KZT", "USD", "EUR", "RUB", "TRY", "AED"] a
 
 /** User-facing product name (RU). URL slug stays `/tools/split`. */
 export const SPLIT_PRODUCT_NAME = "Общий счёт";
-export const SPLIT_PRODUCT_TAGLINE = "Кто кому сколько должен";
+export const SPLIT_PRODUCT_TAGLINE =
+  "Учёт расходов на событие и деление общего счёта";
 export const SPLIT_PRODUCT_DESCRIPTION =
-  "Учёт общих трат и расчёт долгов между участниками. Без переводов.";
+  "Поездка, отдых или компания: общий счёт для участников, семьи или нескольких семей. Деление и учёт долгов.";
+export const SPLIT_PRODUCT_LONG_DESCRIPTION =
+  "Создайте комнату для поездки, отпуска или другого события. Вносите траты — личные и общие. Делите счёт между участниками, в семье или пропорционально составу нескольких семей. Сервис ведёт общий счёт и считает, кто кому должен — без переводов в приложении.";
+export const SPLIT_PRODUCT_HOME_INTRO =
+  "Комната — ваше событие: поездка, отдых или совместные траты. Вносите расходы, делите общий счёт — сервис посчитает, кто кому должен. Курсы валют задаёт владелец.";
 export const SPLIT_BRANDED_NAME = "QHub · Общий счёт";
 export const SPLIT_PWA_SHORT_NAME = "Счёт";

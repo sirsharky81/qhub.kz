@@ -1,7 +1,7 @@
 {
   "name": "QHub · Общий счёт",
   "short_name": "Счёт",
-  "description": "Кто кому сколько должен — учёт общих трат без переводов",
+  "description": "Учёт расходов на поездку и отдых — общий счёт для участников, семьи или семей",
   "start_url": "/tools/split",
   "scope": "/tools/split",
   "display": "standalone",

@@ -1,5 +1,6 @@
 import {
   SPLIT_PRODUCT_DESCRIPTION,
+  SPLIT_PRODUCT_LONG_DESCRIPTION,
   SPLIT_PRODUCT_NAME,
 } from "@/lib/split/constants";
 
@@ -326,8 +327,7 @@ export const apps: App[] = [
     id: "split",
     title: SPLIT_PRODUCT_NAME,
     description: SPLIT_PRODUCT_DESCRIPTION,
-    longDescription:
-      "Комната для поездки, семьи или компании. Каждый вносит траты — сервис считает, кто кому должен. Погашения фиксируются без переводов денег в приложении.",
+    longDescription: SPLIT_PRODUCT_LONG_DESCRIPTION,
     href: "/tools/split",
     tags: ["finance", "tools", "lifestyle"],
     icon: "÷",

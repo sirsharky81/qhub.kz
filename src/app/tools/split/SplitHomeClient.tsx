@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { apiCreateRoom } from "@/lib/split/client";
 import {
+  SPLIT_PRODUCT_HOME_INTRO,
   SPLIT_PRODUCT_NAME,
   SPLIT_PRODUCT_TAGLINE,
   SUPPORTED_CURRENCIES,
@@ -25,17 +26,17 @@ const ROOM_TYPE_OPTIONS: Array<{ value: SplitRoomType; label: string; hint: stri
   {
     value: "individual",
     label: "Отдельные участники",
-    hint: "Каждый сам за себя — классический сплит расходов на компанию.",
+    hint: "Компания или друзья — поездка, отдых. Каждый вносит траты, счёт делится между участниками.",
   },
   {
     value: "own_family",
     label: "Своя семья",
-    hint: "Один дом (например, муж и жена) — удобно вести личные расходы без деления.",
+    hint: "Одна семья — поездка или быт. Личные и общие расходы в одном месте.",
   },
   {
     value: "multi_family",
     label: "Несколько семей",
-    hint: "Можно сгруппировать участников по семьям и делить общие расходы пропорционально составу семьи.",
+    hint: "Несколько семей на совместном отдыхе — общий счёт с делением пропорционально составу семьи.",
   },
 ];
 
@@ -119,10 +120,7 @@ export default function SplitHomeClient() {
           </button>
         ) : (
           <section className="space-y-3">
-            <p className="text-sm text-emerald-950/70 leading-relaxed">
-              Создайте комнату, пригласите участников и считайте, кто кому должен. Курсы задаёт
-              владелец. После погашения расходы блокируются.
-            </p>
+            <p className="text-sm text-emerald-950/70 leading-relaxed">{SPLIT_PRODUCT_HOME_INTRO}</p>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-emerald-950/70">Название</span>
               <input
