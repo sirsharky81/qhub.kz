@@ -4,21 +4,25 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation";
 import {
   apiArchiveRoom,
+  apiConfirmSettlement,
   apiCreateExpense,
   apiCreateInvite,
   apiCreateSettlement,
   apiDeleteExpense,
   apiExportCsv,
   apiGetLedger,
+  apiGetReport,
   apiGetSnapshot,
   apiSetRates,
 } from "@/lib/split/client";
 import { DEFAULT_CATEGORIES, SUPPORTED_CURRENCIES } from "@/lib/split/constants";
+import type { SplitReport } from "@/lib/split/report";
 import { clearSplitSession, loadSplitSession } from "@/lib/split/session";
 import type { SplitLedgerResponse, SplitMethod, SplitRoomSnapshot, SplitSession } from "@/lib/split/types";
 import { SplitShell } from "../components/SplitShell";
 import { SplitAdvancedPanel } from "./SplitAdvancedPanel";
 import { SplitParticipantsPanel } from "./SplitParticipantsPanel";
+import { SplitReportPanel } from "./SplitReportPanel";
 
 function memberName(snapshot: SplitRoomSnapshot, id: string): string {
   return snapshot.members.find((m) => m.memberId === id)?.displayName ?? id.slice(0, 6);
@@ -30,6 +34,8 @@ export default function SplitRoomClient() {
   const [snapshot, setSnapshot] = useState<SplitRoomSnapshot | null>(null);
   const [ledger, setLedger] = useState<SplitLedgerResponse | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [report, setReport] = useState<SplitReport | null>(null);
+  const [showReport, setShowReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -45,7 +51,10 @@ export default function SplitRoomClient() {
   const [fxCurrency, setFxCurrency] = useState("USD");
   const [fxRate, setFxRate] = useState("");
 
-  const refresh = useCallback(async (s: SplitSession, opts?: { withLedger?: boolean }) => {
+  const refresh = useCallback(async (
+    s: SplitSession,
+    opts?: { withLedger?: boolean; withReport?: boolean },
+  ) => {
     const next = await apiGetSnapshot(s);
     setSnapshot(next);
     setCurrency(next.room.baseCurrency);
@@ -67,7 +76,11 @@ export default function SplitRoomClient() {
     } else {
       setLedger(null);
     }
-  }, [selectedIds.length, paidByMemberId]);
+    const needReport = opts?.withReport ?? showReport;
+    if (needReport) {
+      setReport(await apiGetReport(s));
+    }
+  }, [selectedIds.length, paidByMemberId, showReport]);
 
   useEffect(() => {
     if (!session) {
@@ -259,6 +272,62 @@ export default function SplitRoomClient() {
                   )}
                 </li>
               ))}
+            </ul>
+          </section>
+        )}
+
+        {snapshot && snapshot.settlements.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
+              История погашений
+            </h2>
+            <ul className="space-y-2">
+              {[...snapshot.settlements]
+                .sort((a, b) => b.createdAt - a.createdAt)
+                .map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex items-center justify-between gap-2 text-sm border-b border-emerald-900/5 py-1.5"
+                  >
+                    <div>
+                      <div>
+                        {memberName(snapshot, s.fromMemberId)} → {memberName(snapshot, s.toMemberId)}:{" "}
+                        <strong>
+                          {s.amountBase} {snapshot.room.baseCurrency}
+                        </strong>
+                      </div>
+                      <div className="text-xs text-emerald-950/45">
+                        {s.status === "confirmed" ? (
+                          <span className="text-teal-800">Подтверждено получателем</span>
+                        ) : (
+                          <span className="text-amber-800">
+                            Ожидает подтверждения от {memberName(snapshot, s.toMemberId)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {s.status === "pending" && s.toMemberId === session.memberId && (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        className="shrink-0 rounded-lg bg-teal-800 text-white px-2.5 py-1.5 text-xs"
+                        onClick={() => {
+                          setError(null);
+                          startTransition(async () => {
+                            try {
+                              await apiConfirmSettlement(session, s.id);
+                              await refresh(session);
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "Ошибка");
+                            }
+                          });
+                        }}
+                      >
+                        Подтвердить получение
+                      </button>
+                    )}
+                  </li>
+                ))}
             </ul>
           </section>
         )}
@@ -490,6 +559,47 @@ export default function SplitRoomClient() {
             )}
             {showAdvanced && !ledger && (
               <p className="text-sm text-emerald-950/45">Загрузка журнала…</p>
+            )}
+          </section>
+        )}
+
+        {snapshot && (
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
+                Отчёты
+              </h2>
+              <label className="flex items-center gap-2 text-sm text-emerald-950/70 shrink-0">
+                <span className="text-xs">{showReport ? "Вкл" : "Выкл"}</span>
+                <input
+                  type="checkbox"
+                  checked={showReport}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setShowReport(on);
+                    if (on && session) {
+                      setError(null);
+                      startTransition(async () => {
+                        try {
+                          setReport(await apiGetReport(session));
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Ошибка загрузки");
+                        }
+                      });
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            {!showReport && (
+              <p className="text-xs text-emerald-950/50">
+                Общие траты по категориям, кто сколько внёс и кто сколько должен — сводно и по
+                каждому участнику.
+              </p>
+            )}
+            {showReport && report && <SplitReportPanel snapshot={snapshot} report={report} />}
+            {showReport && !report && (
+              <p className="text-sm text-emerald-950/45">Загрузка отчёта…</p>
             )}
           </section>
         )}

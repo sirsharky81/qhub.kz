@@ -37,9 +37,11 @@ export function exportSnapshotCsv(snapshot: SplitRoomSnapshot): string {
     );
   }
   lines.push("");
-  lines.push("settlements,id,from,to,amountBase,date");
+  lines.push("settlements,id,from,to,amountBase,date,status");
   for (const s of snapshot.settlements) {
-    lines.push(["settlement", s.id, s.fromMemberId, s.toMemberId, s.amountBase, s.date].join(","));
+    lines.push(
+      ["settlement", s.id, s.fromMemberId, s.toMemberId, s.amountBase, s.date, s.status].join(","),
+    );
   }
   lines.push("");
   lines.push("suggestions,from,to,amountBase");

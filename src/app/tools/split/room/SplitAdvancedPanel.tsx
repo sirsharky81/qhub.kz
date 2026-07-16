@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  apiConfirmWithdrawal,
   apiCreateAsset,
   apiCreateOperation,
 } from "@/lib/split/client";
@@ -124,6 +125,10 @@ export function SplitAdvancedPanel({
   const [contribAmount, setContribAmount] = useState("");
   const [contribFrom, setContribFrom] = useState(session.memberId);
 
+  const [withdrawAssetId, setWithdrawAssetId] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawTo, setWithdrawTo] = useState(session.memberId);
+
   const [expAssetId, setExpAssetId] = useState("");
   const [expDescription, setExpDescription] = useState("");
   const [expAmount, setExpAmount] = useState("");
@@ -137,6 +142,14 @@ export function SplitAdvancedPanel({
   const effectiveContribAsset = contribAssetId || assets[0]?.assetId || "";
   const effectiveExpAsset = expAssetId || assets[0]?.assetId || "";
   const expAsset = assets.find((a) => a.assetId === effectiveExpAsset);
+
+  // Only whoever physically holds the cash may record it leaving — the room owner
+  // can additionally do so on behalf of a custodian without a session (a local
+  // participant). The server enforces the real rule regardless of this filter.
+  const withdrawableAssets =
+    session.role === "owner" ? assets : assets.filter((a) => a.custodianMemberId === session.memberId);
+  const effectiveWithdrawAsset = withdrawAssetId || withdrawableAssets[0]?.assetId || "";
+  const withdrawAsset = assets.find((a) => a.assetId === effectiveWithdrawAsset);
 
   const sortedOps = useMemo(
     () => [...ledger.operations].sort((a, b) => b.createdAt - a.createdAt),
@@ -439,6 +452,87 @@ export function SplitAdvancedPanel({
                   Списать из кассы
                 </button>
               </section>
+
+              <section className="space-y-3 rounded-xl border border-emerald-900/10 bg-white/60 p-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-emerald-900/50">
+                  Снятие излишков с кассы
+                </h3>
+                <p className="text-xs text-emerald-950/50">
+                  Проводку делает тот, у кого физически деньги (держатель кассы) или владелец
+                  комнаты. Если получатель — сетевой участник, он должен подтвердить получение.
+                </p>
+                {withdrawableAssets.length === 0 ? (
+                  <p className="text-xs text-amber-800">
+                    Вы не держатель ни одной кассы — снять может только держатель или владелец
+                  </p>
+                ) : (
+                  <>
+                    <select
+                      className="w-full rounded-xl border border-emerald-900/15 bg-white px-3 py-2 text-sm"
+                      value={effectiveWithdrawAsset}
+                      onChange={(e) => setWithdrawAssetId(e.target.value)}
+                    >
+                      {withdrawableAssets.map((a) => (
+                        <option key={a.assetId} value={a.assetId}>
+                          {a.name} — {a.balanceNative} {a.currency}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        placeholder="Сумма"
+                        inputMode="decimal"
+                        className="rounded-xl border border-emerald-900/15 bg-white px-3 py-2 text-sm"
+                        value={withdrawAmount}
+                        onChange={(e) => setWithdrawAmount(e.target.value)}
+                      />
+                      <select
+                        className="rounded-xl border border-emerald-900/15 bg-white px-3 py-2 text-sm"
+                        value={withdrawTo}
+                        onChange={(e) => setWithdrawTo(e.target.value)}
+                      >
+                        {snapshot.members.map((m) => (
+                          <option key={m.memberId} value={m.memberId}>
+                            {m.displayName}
+                            {m.status === "local" ? " (лок.)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {withdrawAsset && Number(withdrawAmount) > Number(withdrawAsset.balanceNative) && (
+                      <p className="text-xs text-amber-800">
+                        Сумма больше остатка ({withdrawAsset.balanceNative} {withdrawAsset.currency})
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      disabled={pending || !withdrawAmount || !effectiveWithdrawAsset}
+                      className="w-full rounded-xl bg-teal-800 text-white py-2.5 text-sm disabled:opacity-60"
+                      onClick={() => {
+                        onError(null);
+                        startAction(async () => {
+                          try {
+                            await apiCreateOperation(session, {
+                              type: "withdrawal",
+                              fromAssetId: effectiveWithdrawAsset,
+                              toMemberId: withdrawTo,
+                              amount: Number(withdrawAmount).toFixed(2),
+                              currency: withdrawAsset?.currency,
+                              clientMutationId: crypto.randomUUID(),
+                            });
+                            setWithdrawAmount("");
+                            await onRefresh();
+                          } catch (err) {
+                            onError(err instanceof Error ? err.message : "Ошибка");
+                          }
+                        });
+                      }}
+                    >
+                      Снять с кассы
+                    </button>
+                  </>
+                )}
+              </section>
             </>
           )}
         </>
@@ -452,21 +546,54 @@ export function SplitAdvancedPanel({
           <p className="text-sm text-emerald-950/45">Пока пусто</p>
         )}
         <ul className="space-y-2">
-          {sortedOps.map((op) => (
-            <li key={op.id} className="text-sm border-b border-emerald-900/5 py-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="text-[10px] uppercase tracking-wide text-emerald-900/40 mr-1.5">
-                    {OP_TYPE_LABEL[op.type]}
-                  </span>
-                  <span className="font-medium">{formatOpSummary(op, snapshot, ledger)}</span>
-                  <div className="text-xs text-emerald-950/45 mt-0.5">
-                    {new Date(op.createdAt).toLocaleString("ru-RU")}
+          {sortedOps.map((op) => {
+            const isPendingWithdrawal = op.type === "withdrawal" && op.status === "pending";
+            const canConfirmWithdrawal = isPendingWithdrawal && op.toMemberId === session.memberId;
+            return (
+              <li key={op.id} className="text-sm border-b border-emerald-900/5 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wide text-emerald-900/40 mr-1.5">
+                      {OP_TYPE_LABEL[op.type]}
+                    </span>
+                    <span className="font-medium">{formatOpSummary(op, snapshot, ledger)}</span>
+                    <div className="text-xs text-emerald-950/45 mt-0.5">
+                      {new Date(op.createdAt).toLocaleString("ru-RU")}
+                    </div>
+                    {(op.type === "withdrawal" || op.type === "settlement") && (
+                      <div className="text-xs mt-0.5">
+                        {op.status === "confirmed" ? (
+                          <span className="text-teal-800">Подтверждено</span>
+                        ) : (
+                          <span className="text-amber-800">Ожидает подтверждения получателя</span>
+                        )}
+                      </div>
+                    )}
                   </div>
+                  {canConfirmWithdrawal && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      className="shrink-0 rounded-lg bg-teal-800 text-white px-2.5 py-1.5 text-xs"
+                      onClick={() => {
+                        onError(null);
+                        startAction(async () => {
+                          try {
+                            await apiConfirmWithdrawal(session, op.id);
+                            await onRefresh();
+                          } catch (err) {
+                            onError(err instanceof Error ? err.message : "Ошибка");
+                          }
+                        });
+                      }}
+                    >
+                      Подтвердить получение
+                    </button>
+                  )}
                 </div>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </section>
     </div>
