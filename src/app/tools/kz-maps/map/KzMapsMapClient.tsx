@@ -7,6 +7,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { PlacePin } from "../components/KzMapView";
 import { KZ_PLACE_CATEGORY_LABELS } from "@/lib/kz-maps/constants";
 import { getCurrentPosition, startGeoWatch } from "@/lib/family/geo";
+import { PlatformLocation } from "@/lib/platform/location";
 import {
   buildGpx,
   downloadGpx,
@@ -15,12 +16,19 @@ import {
   lineFeatureCollection,
   parseGpx,
   pointsToLineGeoJson,
+  shareGpx,
   trackDistanceM,
+  trackEndpoints,
   type RouteProfile,
+  type RouteResult,
+  type RouteSegment,
   type TrackPoint,
 } from "@/lib/kz-maps/gpx";
 import { getAllKzPlaces, getKzPlaceById, getKzPlacesIndex } from "@/lib/kz-maps/places";
+import { getAllCachedPlaces, getOfflinePmtilesUrl, listOfflineRegions } from "@/lib/kz-maps/offline-storage";
 import { fetchRoute } from "@/lib/kz-maps/route-client";
+import { snapTrackToRoads } from "@/lib/kz-maps/route-snap";
+import { isTrackSynced, syncTrackToServer } from "@/lib/kz-maps/tracks-sync";
 import {
   deleteStoredTrack,
   listStoredTracks,
@@ -28,7 +36,7 @@ import {
   saveStoredTrack,
 } from "@/lib/kz-maps/tracks-storage";
 import type { StoredTrack } from "@/lib/kz-maps/gpx";
-import type { KzPlaceCategory } from "@/lib/kz-maps/types";
+import type { KzPlace, KzPlaceCategory } from "@/lib/kz-maps/types";
 
 const KzMapView = dynamic(() => import("../components/KzMapView").then((m) => m.KzMapView), {
   ssr: false,
@@ -41,6 +49,30 @@ const KzMapView = dynamic(() => import("../components/KzMapView").then((m) => m.
 
 const MIN_STEP_M = 8;
 type PanelTab = "places" | "tracks" | "route";
+
+const ROUTE_PROFILE_LABELS: Record<RouteProfile, string> = {
+  foot: "пешком",
+  car: "авто",
+  bike: "вело",
+};
+
+function routeResultToLines(result: RouteResult): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+  const segments = result.segments ?? [
+    {
+      profile: result.profile,
+      distanceM: result.distanceM,
+      durationSec: result.durationSec,
+      coordinates: result.coordinates,
+    },
+  ];
+  return lineFeatureCollection(
+    segments.map((seg) => ({
+      type: "Feature" as const,
+      properties: { profile: seg.profile },
+      geometry: { type: "LineString" as const, coordinates: seg.coordinates },
+    })),
+  );
+}
 
 function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371000;
@@ -78,17 +110,59 @@ function KzMapsMapInner() {
 
   const [routeProfile, setRouteProfile] = useState<RouteProfile>("foot");
   const [routeDestId, setRouteDestId] = useState(routeToId ?? focusPlaceId ?? "");
-  const [routeLine, setRouteLine] = useState<GeoJSON.Feature<GeoJSON.LineString> | null>(null);
-  const [routeInfo, setRouteInfo] = useState<{ distanceM: number; durationSec: number } | null>(
+  const [routeDestPoint, setRouteDestPoint] = useState<{
+    lat: number;
+    lng: number;
+    label: string;
+  } | null>(null);
+  const [pickDestMode, setPickDestMode] = useState(false);
+  const [routeLines, setRouteLines] = useState<GeoJSON.FeatureCollection<GeoJSON.LineString> | null>(
     null,
   );
+  const [routeInfo, setRouteInfo] = useState<{
+    distanceM: number;
+    durationSec: number;
+    segments?: RouteSegment[];
+  } | null>(null);
+  const [routeFootNote, setRouteFootNote] = useState<string | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const [routeWarning, setRouteWarning] = useState<string | null>(null);
+  const [communityPlaces, setCommunityPlaces] = useState<KzPlace[]>([]);
+  const [offlinePmtilesUrl, setOfflinePmtilesUrl] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
+  const [snapLoadingId, setSnapLoadingId] = useState<string | null>(null);
+  const [trackActionMsg, setTrackActionMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    setStoredTracks(listStoredTracks());
-    setVisibleTrackIds(new Set(listStoredTracks().map((t) => t.id)));
+    const update = () => setIsOffline(typeof navigator !== "undefined" && !navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
   }, []);
+
+  useEffect(() => {
+    void fetch("/api/kz-maps/places")
+      .then((r) => r.json())
+      .then((d: { places?: KzPlace[] }) => {
+        const seedIds = new Set(allPlaces.map((p) => p.id));
+        setCommunityPlaces((d.places ?? []).filter((p) => !seedIds.has(p.id)));
+      })
+      .catch(() => {});
+
+    const readyRegion = listOfflineRegions().find((r) => r.pmtilesReady);
+    if (readyRegion?.pmtilesLocalUrl) {
+      setOfflinePmtilesUrl(readyRegion.pmtilesLocalUrl);
+    } else if (readyRegion) {
+      void getOfflinePmtilesUrl(readyRegion.id).then((url) => {
+        if (url) setOfflinePmtilesUrl(url);
+      });
+    }
+  }, [allPlaces]);
 
   useEffect(() => {
     if (routeToId) {
@@ -98,12 +172,25 @@ function KzMapsMapInner() {
     }
   }, [routeToId]);
 
+  useEffect(() => {
+    setStoredTracks(listStoredTracks());
+    setVisibleTrackIds(new Set(listStoredTracks().map((t) => t.id)));
+  }, []);
+
+  const mergedPlaces = useMemo(() => {
+    const map = new Map<string, KzPlace>();
+    for (const p of [...allPlaces, ...communityPlaces, ...getAllCachedPlaces()]) {
+      map.set(p.id, p);
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [allPlaces, communityPlaces]);
+
   const filteredPlaces = useMemo(() => {
-    let list = allPlaces;
+    let list = mergedPlaces;
     if (region) list = list.filter((p) => p.region === region);
     if (category) list = list.filter((p) => p.category === category);
     return list;
-  }, [allPlaces, region, category]);
+  }, [mergedPlaces, region, category]);
 
   const trackLines = useMemo(() => {
     const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
@@ -190,35 +277,150 @@ function KzMapsMapInner() {
     setPanelOpen(true);
   }
 
+  async function resolveRouteOrigin(): Promise<{ lat: number; lng: number }> {
+    const platform = await PlatformLocation.getCurrentPosition();
+    if (platform.ok) {
+      return { lat: platform.value.lat, lng: platform.value.lng };
+    }
+    try {
+      return await getCurrentPosition();
+    } catch (err) {
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? (err as GeolocationPositionError).code
+          : null;
+      if (code === 1) {
+        throw new Error("Разрешите доступ к геолокации для построения маршрута");
+      }
+      if (code === 3) {
+        throw new Error("Не удалось определить местоположение — попробуйте ещё раз");
+      }
+      throw new Error(platform.message ?? "Не удалось определить ваше местоположение");
+    }
+  }
+
   async function buildRoute(dest?: { lat: number; lng: number }) {
     setRouteError(null);
+    setRouteWarning(null);
+    setRouteFootNote(null);
     setRouteLoading(true);
     try {
-      const place = getKzPlaceById(routeDestId);
-      const to = dest ?? (place ? { lat: place.lat, lng: place.lng } : null);
-      if (!to) throw new Error("Выберите пункт назначения");
+      const place = routeDestId
+        ? (getKzPlaceById(routeDestId) ?? mergedPlaces.find((p) => p.id === routeDestId) ?? null)
+        : null;
+      const to =
+        dest ??
+        (routeDestPoint ? { lat: routeDestPoint.lat, lng: routeDestPoint.lng } : null) ??
+        (place ? { lat: place.lat, lng: place.lng } : null);
+      if (!to) throw new Error("Выберите пункт назначения или укажите точку на карте");
 
-      const from = await getCurrentPosition();
+      const from = await resolveRouteOrigin();
       const result = await fetchRoute(from, to, routeProfile);
-      setRouteLine({
-        type: "Feature",
-        properties: { profile: routeProfile },
-        geometry: { type: "LineString", coordinates: result.coordinates },
+      setRouteLines(routeResultToLines(result));
+      setRouteInfo({
+        distanceM: result.distanceM,
+        durationSec: result.durationSec,
+        segments: result.segments,
       });
-      setRouteInfo({ distanceM: result.distanceM, durationSec: result.durationSec });
+      setRouteFootNote(result.footTransferNote ?? null);
+      setRouteWarning(
+        result.warning ??
+          (result.viaKzCorridor
+            ? "Маршрут проложен через крупные города РК (Астана, Актау и др.) — без объезда через соседние страны."
+            : null),
+      );
+      setPickDestMode(false);
       setPanelTab("route");
       setPanelOpen(true);
     } catch (e) {
       setRouteError(e instanceof Error ? e.message : "Ошибка маршрута");
-      setRouteLine(null);
+      setRouteLines(null);
       setRouteInfo(null);
+      setRouteFootNote(null);
+      setRouteWarning(null);
     } finally {
       setRouteLoading(false);
     }
   }
 
-  function handleRouteToPlace(place: PlacePin) {
+  function routeToTrackPoint(
+    track: StoredTrack,
+    which: "start" | "end",
+  ) {
+    const endpoints = trackEndpoints(track.gpx);
+    if (!endpoints) {
+      setTrackActionMsg("Не удалось прочитать точки трека");
+      return;
+    }
+    const point = which === "start" ? endpoints.start : endpoints.end;
+    const label =
+      which === "start"
+        ? `Начало: ${track.name}`
+        : `Конец: ${track.name}`;
+    setRouteDestId("");
+    setRouteDestPoint({ lat: point.lat, lng: point.lng, label });
+    setPickDestMode(false);
+    setPanelTab("route");
+    setPanelOpen(true);
+    void buildRoute({ lat: point.lat, lng: point.lng });
+  }
+
+  function handleMapPick(coords: { lat: number; lng: number }) {
+    setRouteDestId("");
+    setRouteDestPoint({
+      lat: coords.lat,
+      lng: coords.lng,
+      label: `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`,
+    });
+    setPickDestMode(false);
+    setPanelTab("route");
+    setPanelOpen(true);
+  }
+
+  async function snapTrack(track: StoredTrack) {
+    setTrackActionMsg(null);
+    setSnapLoadingId(track.id);
+    try {
+      const parsed = parseGpx(track.gpx);
+      const coords = parsed.points.map((p) => [p.lng, p.lat] as [number, number]);
+      const snapped = await snapTrackToRoads(coords, "foot");
+      const snappedPoints = snapped.coordinates.map(([lng, lat], i) => ({
+        lat,
+        lng,
+        ts: parsed.points[Math.min(i, parsed.points.length - 1)]?.ts ?? Date.now(),
+      }));
+      const gpx = buildGpx(`${track.name} (snap)`, snappedPoints);
+      const updated: StoredTrack = {
+        ...track,
+        name: `${track.name} (snap)`,
+        gpx,
+        distanceM: snapped.distanceM,
+      };
+      saveStoredTrack(updated);
+      setStoredTracks(listStoredTracks());
+      setVisibleTrackIds((s) => new Set(s).add(updated.id));
+      setTrackActionMsg("Трек привязан к дорогам");
+    } catch (e) {
+      setTrackActionMsg(e instanceof Error ? e.message : "Ошибка snap");
+    } finally {
+      setSnapLoadingId(null);
+    }
+  }
+
+  async function syncTrack(track: StoredTrack) {
+    setTrackActionMsg(null);
+    try {
+      await syncTrackToServer(track);
+      setTrackActionMsg("Трек отправлен на синхронизацию");
+    } catch (e) {
+      setTrackActionMsg(e instanceof Error ? e.message : "Ошибка синхронизации");
+    }
+  }
+
+  function handleRouteToPlace(place: PlacePin | KzPlace) {
     setRouteDestId(place.id);
+    setRouteDestPoint(null);
+    setPickDestMode(false);
     setPanelTab("route");
     setPanelOpen(true);
     void buildRoute({ lat: place.lat, lng: place.lng });
@@ -271,11 +473,22 @@ function KzMapsMapInner() {
           places={filteredPlaces}
           focusPlaceId={focusPlaceId}
           trackLines={trackLines}
-          routeLine={routeLine}
+          routeLines={routeLines}
           liveTrackPoints={livePoints}
           onRouteToPlace={handleRouteToPlace}
+          offlinePmtilesUrl={isOffline ? offlinePmtilesUrl : null}
+          pickDestMode={pickDestMode}
+          destMarker={routeDestPoint}
+          onMapPick={handleMapPick}
           className="absolute inset-0"
         />
+
+        {isOffline && (
+          <div className="absolute top-3 left-3 right-3 z-10 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+            Офлайн-режим: места и треки доступны
+            {offlinePmtilesUrl ? " · карта региона загружена" : " · скачайте регион в «Офлайн-карты»"}
+          </div>
+        )}
 
         {recording && livePoints.length > 0 && (
           <div className="absolute top-3 left-3 z-10 rounded-xl bg-red-600 text-white px-3 py-2 text-xs font-medium shadow">
@@ -404,13 +617,17 @@ function KzMapsMapInner() {
                   </p>
                 )}
 
+                {trackActionMsg && (
+                  <p className="text-xs text-gray-700 bg-gray-50 rounded-lg px-3 py-2">{trackActionMsg}</p>
+                )}
+
                 <ul className="space-y-2">
                   {storedTracks.map((t) => (
                     <li
                       key={t.id}
-                      className="rounded-xl border border-gray-200 px-3 py-2.5 flex items-center gap-2"
+                      className="rounded-xl border border-gray-200 px-3 py-2.5 space-y-2"
                     >
-                      <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                      <label className="flex items-center gap-2 min-w-0 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={visibleTrackIds.has(t.id)}
@@ -424,35 +641,78 @@ function KzMapsMapInner() {
                           }}
                           className="shrink-0"
                         />
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate">{t.name}</p>
                           <p className="text-[11px] text-gray-500">
                             {formatDistance(t.distanceM)} · {formatDuration(t.durationSec)}
+                            {isTrackSynced(t.id) ? " · ☁" : ""}
                           </p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteStoredTrack(t.id);
+                            setStoredTracks(listStoredTracks());
+                            setVisibleTrackIds((s) => {
+                              const next = new Set(s);
+                              next.delete(t.id);
+                              return next;
+                            });
+                          }}
+                          className="shrink-0 text-[11px] text-red-600"
+                        >
+                          ✕
+                        </button>
                       </label>
+                      <div className="flex flex-wrap gap-x-2 gap-y-1 pl-6">
+                      <button
+                        type="button"
+                        disabled={snapLoadingId === t.id}
+                        onClick={() => void snapTrack(t)}
+                        className="shrink-0 text-[10px] text-violet-700 font-medium"
+                      >
+                        Snap
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => routeToTrackPoint(t, "start")}
+                        className="shrink-0 text-[10px] text-sky-700 font-medium"
+                        title="Маршрут к началу трека"
+                      >
+                        К началу
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => routeToTrackPoint(t, "end")}
+                        className="shrink-0 text-[10px] text-sky-700 font-medium"
+                        title="Маршрут к концу трека"
+                      >
+                        К концу
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void syncTrack(t)}
+                        className="shrink-0 text-[10px] text-emerald-700 font-medium"
+                      >
+                        Sync
+                      </button>
                       <button
                         type="button"
                         onClick={() => downloadGpx(t.name, t.gpx)}
-                        className="shrink-0 text-[11px] text-sky-700 font-medium"
+                        className="shrink-0 text-[10px] text-gray-700 font-medium"
+                        title="Скачать GPX"
                       >
-                        GPX
+                        Скачать
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          deleteStoredTrack(t.id);
-                          setStoredTracks(listStoredTracks());
-                          setVisibleTrackIds((s) => {
-                            const next = new Set(s);
-                            next.delete(t.id);
-                            return next;
-                          });
-                        }}
-                        className="shrink-0 text-[11px] text-red-600"
+                        onClick={() => shareGpx(t.name, t.gpx)}
+                        className="shrink-0 text-[10px] text-sky-700 font-medium"
+                        title="Поделиться GPX"
                       >
-                        ✕
+                        Поделиться
                       </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -462,20 +722,40 @@ function KzMapsMapInner() {
             {panelTab === "route" && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <p className="text-xs text-gray-600">
-                  Маршрут от вашей геолокации до выбранного места (OSM / OSRM).
+                  Маршрут от вашей геолокации до места из каталога, точки на карте или начала/конца
+                  трека (OSRM + обход через хабы РК).
                 </p>
                 <select
                   value={routeDestId}
-                  onChange={(e) => setRouteDestId(e.target.value)}
+                  onChange={(e) => {
+                    setRouteDestId(e.target.value);
+                    setRouteDestPoint(null);
+                  }}
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
                 >
-                  <option value="">Куда едем?</option>
-                  {allPlaces.map((p) => (
+                  <option value="">Место из каталога…</option>
+                  {mergedPlaces.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={() => setPickDestMode((v) => !v)}
+                  className={`w-full rounded-xl py-2.5 text-sm font-semibold ${
+                    pickDestMode
+                      ? "bg-sky-600 text-white"
+                      : "border border-dashed border-sky-300 text-sky-700 bg-sky-50"
+                  }`}
+                >
+                  {pickDestMode ? "Отмена выбора на карте" : "Указать точку на карте"}
+                </button>
+                {routeDestPoint && (
+                  <p className="text-xs text-sky-800 bg-sky-50 rounded-lg px-3 py-2">
+                    Точка: {routeDestPoint.label}
+                  </p>
+                )}
                 <div className="flex gap-2">
                   {(
                     [
@@ -500,7 +780,7 @@ function KzMapsMapInner() {
                 </div>
                 <button
                   type="button"
-                  disabled={!routeDestId || routeLoading}
+                  disabled={(!routeDestId && !routeDestPoint) || routeLoading}
                   onClick={() => void buildRoute()}
                   className="w-full rounded-xl bg-sky-600 text-white py-2.5 text-sm font-semibold disabled:opacity-50"
                 >
@@ -510,8 +790,30 @@ function KzMapsMapInner() {
                   <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{routeError}</p>
                 )}
                 {routeInfo && (
-                  <p className="text-sm text-gray-800 bg-sky-50 rounded-xl px-3 py-2">
-                    {formatDistance(routeInfo.distanceM)} · ~{formatDuration(routeInfo.durationSec)}
+                  <div className="text-sm text-gray-800 bg-sky-50 rounded-xl px-3 py-2 space-y-1">
+                    <p>
+                      {formatDistance(routeInfo.distanceM)} · ~{formatDuration(routeInfo.durationSec)}
+                    </p>
+                    {routeInfo.segments && routeInfo.segments.length > 1 && (
+                      <p className="text-xs text-gray-600">
+                        {routeInfo.segments
+                          .map(
+                            (seg) =>
+                              `${formatDistance(seg.distanceM)} ${ROUTE_PROFILE_LABELS[seg.profile]}`,
+                          )
+                          .join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {routeFootNote && (
+                  <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                    {routeFootNote}
+                  </p>
+                )}
+                {routeWarning && (
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    {routeWarning}
                   </p>
                 )}
               </div>

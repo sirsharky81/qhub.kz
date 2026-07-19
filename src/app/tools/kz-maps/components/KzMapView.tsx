@@ -15,6 +15,7 @@ import {
 } from "@/lib/kz-maps/map-config";
 import { lineFeatureCollection, pointsToLineGeoJson, type TrackPoint } from "@/lib/kz-maps/gpx";
 import { placesToGeoJson } from "@/lib/kz-maps/places-geojson";
+import { ensurePmtilesProtocol, offlinePmtilesStyle } from "@/lib/kz-maps/pmtiles-protocol";
 import { KZ_PLACE_CATEGORY_LABELS } from "@/lib/kz-maps/constants";
 import type { KzPlace } from "@/lib/kz-maps/types";
 
@@ -26,7 +27,15 @@ const TRACKS_LAYER = "kz-tracks-line";
 const LIVE_TRACK_SOURCE = "kz-live-track";
 const LIVE_TRACK_LAYER = "kz-live-track-line";
 const ROUTE_SOURCE = "kz-route";
-const ROUTE_LAYER = "kz-route-line";
+const ROUTE_LAYER = "kz-route-vehicle";
+const ROUTE_FOOT_LAYER = "kz-route-foot";
+const DEST_SOURCE = "kz-route-dest";
+const DEST_LAYER = "kz-route-dest-pin";
+
+const EMPTY_POINTS: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+  type: "FeatureCollection",
+  features: [],
+};
 
 const EMPTY_LINES: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
   type: "FeatureCollection",
@@ -65,9 +74,13 @@ interface Props {
   focusPlaceId?: string;
   className?: string;
   trackLines?: GeoJSON.FeatureCollection<GeoJSON.LineString>;
-  routeLine?: GeoJSON.Feature<GeoJSON.LineString> | null;
+  routeLines?: GeoJSON.FeatureCollection<GeoJSON.LineString> | null;
   liveTrackPoints?: TrackPoint[];
   onRouteToPlace?: (place: PlacePin) => void;
+  offlinePmtilesUrl?: string | null;
+  pickDestMode?: boolean;
+  destMarker?: { lat: number; lng: number } | null;
+  onMapPick?: (coords: { lat: number; lng: number }) => void;
 }
 
 export function KzMapView({
@@ -75,29 +88,43 @@ export function KzMapView({
   focusPlaceId,
   className = "",
   trackLines,
-  routeLine,
+  routeLines,
   liveTrackPoints = [],
   onRouteToPlace,
+  offlinePmtilesUrl = null,
+  pickDestMode = false,
+  destMarker = null,
+  onMapPick,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const placesRef = useRef(places);
   const onRouteRef = useRef(onRouteToPlace);
+  const onMapPickRef = useRef(onMapPick);
+  const pickModeRef = useRef(pickDestMode);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   placesRef.current = places;
   onRouteRef.current = onRouteToPlace;
+  onMapPickRef.current = onMapPick;
+  pickModeRef.current = pickDestMode;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
     let cancelled = false;
+    ensurePmtilesProtocol();
+
+    const useOffline =
+      offlinePmtilesUrl &&
+      typeof navigator !== "undefined" &&
+      !navigator.onLine;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: KZ_MAP_STYLE_URL,
+      style: useOffline ? offlinePmtilesStyle(offlinePmtilesUrl) : KZ_MAP_STYLE_URL,
       center: KZ_MAP_DEFAULT_CENTER,
       zoom: KZ_MAP_DEFAULT_ZOOM,
       attributionControl: false,
@@ -166,16 +193,6 @@ export function KzMapView({
       });
 
       map.addSource(ROUTE_SOURCE, { type: "geojson", data: EMPTY_LINES });
-      map.addLayer({
-        id: ROUTE_LAYER,
-        type: "line",
-        source: ROUTE_SOURCE,
-        paint: {
-          "line-color": "#2563eb",
-          "line-width": 5,
-          "line-opacity": 0.9,
-        },
-      });
 
       map.addSource(PLACES_SOURCE, {
         type: "geojson",
@@ -213,7 +230,66 @@ export function KzMapView({
         },
       });
 
+      map.addLayer({
+        id: ROUTE_LAYER,
+        type: "line",
+        source: ROUTE_SOURCE,
+        filter: ["!=", ["get", "profile"], "foot"],
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "profile"],
+            "car",
+            "#2563eb",
+            "bike",
+            "#7c3aed",
+            "#2563eb",
+          ],
+          "line-width": 6,
+          "line-opacity": 0.95,
+        },
+      });
+
+      map.addLayer({
+        id: ROUTE_FOOT_LAYER,
+        type: "line",
+        source: ROUTE_SOURCE,
+        filter: ["==", ["get", "profile"], "foot"],
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": "#059669",
+          "line-width": 5,
+          "line-opacity": 0.95,
+          "line-dasharray": [2, 1.5],
+        },
+      });
+
+      map.addSource(DEST_SOURCE, { type: "geojson", data: EMPTY_POINTS });
+      map.addLayer({
+        id: DEST_LAYER,
+        type: "circle",
+        source: DEST_SOURCE,
+        paint: {
+          "circle-radius": 9,
+          "circle-color": "#2563eb",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
+      map.on("click", (e) => {
+        if (!pickModeRef.current) return;
+        onMapPickRef.current?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      });
       map.on("click", PLACES_LAYER, (e) => {
+        if (pickModeRef.current) return;
         const feature = e.features?.[0];
         if (!feature || feature.geometry.type !== "Point") return;
         const props = feature.properties;
@@ -304,11 +380,21 @@ export function KzMapView({
     const map = mapRef.current;
     if (!map || !ready) return;
     const source = map.getSource(ROUTE_SOURCE) as GeoJSONSource | undefined;
-    const data = routeLine
-      ? lineFeatureCollection([routeLine])
-      : EMPTY_LINES;
-    source?.setData(data);
-  }, [routeLine, ready]);
+    source?.setData(routeLines ?? EMPTY_LINES);
+
+    const features = routeLines?.features ?? [];
+    if (features.length === 0) return;
+
+    const bounds = new maplibregl.LngLatBounds();
+    for (const feature of features) {
+      for (const coord of feature.geometry.coordinates) {
+        bounds.extend(coord as [number, number]);
+      }
+    }
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 64, maxZoom: 12, duration: 800 });
+    }
+  }, [routeLines, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -323,6 +409,35 @@ export function KzMapView({
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !ready) return;
+    const source = map.getSource(DEST_SOURCE) as GeoJSONSource | undefined;
+    if (!destMarker) {
+      source?.setData(EMPTY_POINTS);
+      return;
+    }
+    source?.setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "Point",
+            coordinates: [destMarker.lng, destMarker.lat],
+          },
+        },
+      ],
+    });
+  }, [destMarker, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.getCanvas().style.cursor = pickDestMode ? "crosshair" : "";
+  }, [pickDestMode, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !ready || !focusPlaceId) return;
     const focus = places.find((p) => p.id === focusPlaceId);
     if (!focus) return;
@@ -332,6 +447,11 @@ export function KzMapView({
   return (
     <div className={`relative h-full w-full ${className}`}>
       <div ref={containerRef} className="h-full w-full" />
+      {pickDestMode && (
+        <div className="absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-xl bg-sky-600 text-white px-4 py-2 text-xs font-medium shadow-lg pointer-events-none">
+          Нажмите на карту — куда строить маршрут
+        </div>
+      )}
       {!ready && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 text-sm text-gray-500">
           Загрузка карты…

@@ -23,6 +23,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:family": { requests: 120, window: "1 m" },
   "qhub:family-loc-req-notify": { requests: 1, window: "45 s" },
   "qhub:family-loc-req-silent": { requests: 1, window: "10 s" },
+  "qhub:kz-maps-suggest": { requests: 5, window: "15 m" },
 };
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;
@@ -203,4 +204,10 @@ export async function checkFamilyLocationRequestRateLimit(
   const prefix =
     mode === "silent" ? "qhub:family-loc-req-silent" : "qhub:family-loc-req-notify";
   return checkRateLimit(prefix, `${parentMemberId}:${targetMemberId}`);
+}
+
+export async function checkKzMapsSuggestRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:kz-maps-suggest", identifier);
 }

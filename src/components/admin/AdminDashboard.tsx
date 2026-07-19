@@ -8,6 +8,7 @@ import { MessengerWhitelistSection } from "@/components/admin/MessengerWhitelist
 import { MessengerHealthSection } from "@/components/admin/MessengerHealthSection";
 import { MessengerStorageHygieneSection } from "@/components/admin/MessengerStorageHygieneSection";
 import { MessengerPushDiagnosticsSection } from "@/components/admin/MessengerPushDiagnosticsSection";
+import { KzMapsModerationSection } from "@/components/admin/KzMapsModerationSection";
 
 interface AdminAppRow {
   id: string;
@@ -27,7 +28,7 @@ export function AdminDashboard() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [pwdLoading, setPwdLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"apps" | "messenger" | "push">("apps");
+  const [activeTab, setActiveTab] = useState<"apps" | "messenger" | "push" | "kzmaps">("apps");
 
   const loadApps = useCallback(async () => {
     setLoading(true);
@@ -105,6 +106,7 @@ export function AdminDashboard() {
             {activeTab === "apps" && "Скрытые карточки не видны на главной. Админ видит все. Удаление недоступно."}
             {activeTab === "messenger" && "Разделы управления и мониторинга Messenger."}
             {activeTab === "push" && "Отдельная вкладка диагностики push-уведомлений Messenger."}
+            {activeTab === "kzmaps" && "Модерация предложенных мест KZ Maps."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -158,6 +160,15 @@ export function AdminDashboard() {
         >
           Push Diagnostics
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("kzmaps")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "kzmaps" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          KZ Maps
+        </button>
       </div>
 
       {activeTab === "apps" && (
@@ -207,6 +218,8 @@ export function AdminDashboard() {
       )}
 
       {activeTab === "push" && <MessengerPushDiagnosticsSection />}
+
+      {activeTab === "kzmaps" && <KzMapsModerationSection />}
 
       {activeTab === "apps" && (
       <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">

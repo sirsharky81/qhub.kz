@@ -68,6 +68,11 @@ async function saveNative(blob: Blob, filename: string): Promise<void> {
   }
 }
 
+/** Browser download only — no share sheet. */
+export function downloadBlobDirect(blob: Blob, filename: string): void {
+  downloadViaAnchor(blob, filename);
+}
+
 /**
  * Save or share a blob — works in browser, PWA, and Capacitor WebView.
  * On native opens the system share sheet (Save to Files, Drive, etc.).

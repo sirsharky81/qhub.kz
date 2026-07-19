@@ -7,6 +7,13 @@ export interface TrackPoint {
 
 export type RouteProfile = "foot" | "car" | "bike";
 
+export interface RouteSegment {
+  profile: RouteProfile;
+  distanceM: number;
+  durationSec: number;
+  coordinates: [number, number][];
+}
+
 export interface ParsedGpxTrack {
   name: string;
   points: TrackPoint[];
@@ -28,6 +35,10 @@ export interface RouteResult {
   distanceM: number;
   durationSec: number;
   coordinates: [number, number][];
+  segments?: RouteSegment[];
+  viaKzCorridor?: boolean;
+  warning?: string;
+  footTransferNote?: string;
 }
 
 const EARTH_R = 6371000;
@@ -143,12 +154,30 @@ export function parseGpx(xml: string): ParsedGpxTrack {
 
 export function downloadGpx(filename: string, gpx: string): void {
   const blob = new Blob([gpx], { type: "application/gpx+xml" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename.endsWith(".gpx") ? filename : `${filename}.gpx`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const safe = filename.endsWith(".gpx") ? filename : `${filename}.gpx`;
+  void import("@/lib/platform/save-file").then(({ downloadBlobDirect }) =>
+    downloadBlobDirect(blob, safe),
+  );
+}
+
+export function shareGpx(filename: string, gpx: string): void {
+  const blob = new Blob([gpx], { type: "application/gpx+xml" });
+  const safe = filename.endsWith(".gpx") ? filename : `${filename}.gpx`;
+  void import("@/lib/platform/save-file").then(({ saveBlobToDevice }) =>
+    saveBlobToDevice(blob, safe),
+  );
+}
+
+export function trackEndpoints(
+  gpx: string,
+): { start: TrackPoint; end: TrackPoint } | null {
+  try {
+    const { points } = parseGpx(gpx);
+    if (points.length === 0) return null;
+    return { start: points[0]!, end: points[points.length - 1]! };
+  } catch {
+    return null;
+  }
 }
 
 export function pointsToLineGeoJson(

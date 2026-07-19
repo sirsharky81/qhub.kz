@@ -20,3 +20,5 @@ export const KZ_PLACE_CATEGORY_LABELS: Record<KzPlaceCategory, string> = {
 export const REDIS_KZ_MAPS_PLACE_PREFIX = "qhub:kz-maps:place:";
 export const REDIS_KZ_MAPS_REGION_PLACES_PREFIX = "qhub:kz-maps:region:";
 export const REDIS_KZ_MAPS_PENDING_PREFIX = "qhub:kz-maps:pending:";
+export const REDIS_KZ_MAPS_PENDING_LIST = "qhub:kz-maps:pending:ids";
+export const REDIS_KZ_MAPS_TRACK_PREFIX = "qhub:kz-maps:track:";

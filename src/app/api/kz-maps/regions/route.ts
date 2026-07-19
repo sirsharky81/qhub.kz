@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withCors } from "@/lib/api/cors";
-import { getKzPlacesIndex } from "@/lib/kz-maps/places";
+import { getKzRegionBundles } from "@/lib/kz-maps/regions";
 
 export async function GET(request: Request) {
-  return withCors(NextResponse.json(getKzPlacesIndex()), request);
+  return withCors(NextResponse.json({ bundles: getKzRegionBundles() }), request);
 }

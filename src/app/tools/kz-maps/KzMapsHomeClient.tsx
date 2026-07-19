@@ -83,8 +83,7 @@ export function KzMapsHomeClient() {
           <section className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
             <p className="font-medium">Карта, треки и маршруты</p>
             <p className="text-xs mt-1 text-emerald-800/90 leading-relaxed">
-              Запись и импорт GPX, построение маршрута до достопримечательностей. Треки хранятся на
-              этом устройстве.
+              Запись и импорт GPX, построение маршрута, офлайн-регионы и предложения мест.
             </p>
           </section>
 
@@ -92,6 +91,12 @@ export function KzMapsHomeClient() {
             <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Карта</p>
             <Link href="/tools/kz-maps/map" className={btnPrimary}>
               Открыть карту
+            </Link>
+            <Link href="/tools/kz-maps/maps" className={btnSecondary}>
+              Скачать офлайн-карты
+            </Link>
+            <Link href="/tools/kz-maps/places/suggest" className={btnSecondary}>
+              Предложить место
             </Link>
             <Link href="/tools/kz-maps/map?routeTo=charyn-canyon" className={btnSecondary}>
               Пример маршрута (Чарын)

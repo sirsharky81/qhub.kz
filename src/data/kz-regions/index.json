@@ -1,0 +1,37 @@
+{
+  "bundles": [
+    {
+      "id": "almaty-city",
+      "name": "Алматы (город)",
+      "bbox": [[43.1, 76.7], [43.45, 77.15]],
+      "pmtilesBytes": 85000000,
+      "placesCount": 2,
+      "updatedAt": "2026-01-01"
+    },
+    {
+      "id": "almaty-oblast",
+      "name": "Алматинская область",
+      "bbox": [[42.5, 74.5], [45.5, 80.5]],
+      "pmtilesBytes": 220000000,
+      "placesCount": 7,
+      "updatedAt": "2026-01-01"
+    },
+    {
+      "id": "turkestan",
+      "name": "Туркестанская область",
+      "bbox": [[41.0, 67.0], [44.5, 72.0]],
+      "pmtilesBytes": 180000000,
+      "placesCount": 1,
+      "updatedAt": "2026-01-01"
+    },
+    {
+      "id": "mangystau",
+      "name": "Мангистауская область",
+      "bbox": [[42.0, 50.0], [46.0, 56.0]],
+      "pmtilesBytes": 95000000,
+      "placesCount": 1,
+      "updatedAt": "2026-01-01"
+    }
+  ],
+  "updatedAt": 1739390400000
+}
