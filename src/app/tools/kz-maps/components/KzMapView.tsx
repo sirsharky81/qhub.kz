@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   KZ_MAP_ATTRIBUTION,
   KZ_MAP_DEFAULT_CENTER,
@@ -83,7 +83,7 @@ interface Props {
   onMapPick?: (coords: { lat: number; lng: number }) => void;
 }
 
-export function KzMapView({
+function KzMapViewInner({
   places,
   focusPlaceId,
   className = "",
@@ -362,9 +362,14 @@ export function KzMapView({
     };
   }, []);
 
+  const placesDataKeyRef = useRef("");
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    const dataKey = places.map((p) => p.id).join("\0");
+    if (dataKey === placesDataKeyRef.current) return;
+    placesDataKeyRef.current = dataKey;
     const source = map.getSource(PLACES_SOURCE) as GeoJSONSource | undefined;
     source?.setData(placesToGeoJson(places));
   }, [places, ready]);
@@ -469,3 +474,5 @@ export function KzMapView({
     </div>
   );
 }
+
+export const KzMapView = memo(KzMapViewInner);
