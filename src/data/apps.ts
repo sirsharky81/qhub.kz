@@ -40,6 +40,8 @@ export interface App {
   beta?: boolean;
   /** Доступен только на localhost (скрыт на production для обычных пользователей) */
   devOnly?: boolean;
+  /** Карточка видна только при выполнении условия (см. getCatalogForViewer) */
+  gatedBy?: "vpn";
   /** Порядок на главной: меньше = раньше запущен. «Скоро» — в конце */
   sortOrder: number;
 }
@@ -321,6 +323,7 @@ export const apps: App[] = [
     color: "from-violet-500/10 to-violet-600/5",
     author: "QHub",
     authorType: "qhub",
+    gatedBy: "vpn",
     sortOrder: 52,
   },
   {

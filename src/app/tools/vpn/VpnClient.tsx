@@ -152,9 +152,10 @@ export function VpnClient() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full rounded-2xl border border-gray-200 bg-white p-6 space-y-4 text-center">
-          <h1 className="text-lg font-bold text-gray-900">QHub VPN</h1>
+          <h1 className="text-lg font-bold text-gray-900">Доступ по приглашению</h1>
           <p className="text-sm text-gray-600">
-            Войдите через мессенджер — VPN доступен только приглашённым пользователям.
+            Этот раздел доступен только пользователям, которым администратор выдал доступ. Войдите
+            через мессенджер — если VPN для вашего номера включён, здесь появятся настройки.
           </p>
           <button
             type="button"
@@ -207,14 +208,49 @@ export function VpnClient() {
         </header>
 
         <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-900">Как подключить</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Приложение WireGuard (бесплатно)</h2>
+          <p className="text-sm text-gray-600">
+            VPN работает через официальное бесплатное приложение WireGuard — QHub выдаёт конфиг,
+            туннель поднимает WireGuard на вашем устройстве.
+          </p>
           <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
-            <li>Установите WireGuard на телефон или компьютер.</li>
-            <li>Добавьте устройство ниже и скачайте `.conf` или отсканируйте QR.</li>
-            <li>Включите туннель в приложении WireGuard.</li>
+            <li>Установите WireGuard (ссылки ниже).</li>
+            <li>Добавьте устройство на этой странице — скачайте `.conf` или отсканируйте QR.</li>
+            <li>Импортируйте конфиг в WireGuard и включите туннель.</li>
           </ol>
-          <p className="text-xs text-gray-400">
-            Android / iOS: WireGuard в App Store / Google Play. Windows / macOS: wireguard.com
+          <div className="flex flex-wrap gap-2 text-xs">
+            <a
+              href="https://apps.apple.com/app/wireguard/id1441195209"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
+            >
+              App Store (iOS)
+            </a>
+            <a
+              href="https://play.google.com/store/apps/details?id=com.wireguard.android"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
+            >
+              Google Play (Android)
+            </a>
+            <a
+              href="https://www.wireguard.com/install/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
+            >
+              Windows / macOS / Linux
+            </a>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-violet-100 bg-violet-50/50 p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-violet-900">Скоро: VPN в приложении QHub</h2>
+          <p className="text-xs text-violet-800">
+            В будущем переключатель VPN появится прямо в приложении QHub — без WireGuard. Сейчас
+            используйте бесплатный WireGuard: это самый быстрый и надёжный вариант.
           </p>
         </section>
 
