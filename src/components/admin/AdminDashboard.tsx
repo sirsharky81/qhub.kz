@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
 import { MessengerWhitelistSection } from "@/components/admin/MessengerWhitelistSection";
+import { VpnAdminSection } from "@/components/admin/VpnAdminSection";
 import { MessengerHealthSection } from "@/components/admin/MessengerHealthSection";
 import { MessengerStorageHygieneSection } from "@/components/admin/MessengerStorageHygieneSection";
 import { MessengerPushDiagnosticsSection } from "@/components/admin/MessengerPushDiagnosticsSection";
@@ -211,6 +212,7 @@ export function AdminDashboard() {
 
       {activeTab === "messenger" && (
         <>
+          <VpnAdminSection />
           <MessengerWhitelistSection />
           <MessengerHealthSection />
           <MessengerStorageHygieneSection />

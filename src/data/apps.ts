@@ -310,6 +310,20 @@ export const apps: App[] = [
     sortOrder: 50,
   },
   {
+    id: "vpn",
+    title: "QHub VPN",
+    description: "Личный VPN через ваш сервер — только для приглашённых.",
+    longDescription:
+      "WireGuard-туннель для обхода блокировок и безопасного доступа в интернет. Доступ выдаётся администратором по номеру телефона.",
+    href: "/tools/vpn",
+    tags: ["tools"],
+    icon: "🛡️",
+    color: "from-violet-500/10 to-violet-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 52,
+  },
+  {
     id: "family",
     title: "Семья",
     description: "Геолокация детей и SOS: режим родителя и участника.",

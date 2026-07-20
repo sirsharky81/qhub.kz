@@ -5,6 +5,7 @@ import type { WhitelistEntry } from "@/lib/messenger/types";
 import { maskPhone } from "@/lib/messenger/phone-format";
 
 const MESSENGER_ENTRY_PATH = "/tools/messenger";
+const VPN_ENTRY_PATH = "/tools/vpn";
 
 function messengerInviteUrl(): string {
   if (typeof window === "undefined") return `https://qhub.kz${MESSENGER_ENTRY_PATH}`;
@@ -77,6 +78,37 @@ export function MessengerWhitelistSection() {
     await load();
   }
 
+  async function setVpnEnabled(entryPhone: string, vpnEnabled: boolean) {
+    setMsg(null);
+    setError(null);
+    const res = await fetch("/api/admin/messenger/whitelist", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: entryPhone, vpnEnabled }),
+    });
+    if (!res.ok) {
+      const data = (await res.json()) as { error?: string };
+      setError(data.error ?? "Ошибка");
+      return;
+    }
+    setMsg(vpnEnabled ? "VPN включён" : "VPN отключён");
+    await load();
+  }
+
+  async function handleCopyVpnLink() {
+    setMsg(null);
+    setError(null);
+    try {
+      const url =
+        typeof window === "undefined"
+          ? `https://qhub.kz${VPN_ENTRY_PATH}`
+          : `${window.location.origin}${VPN_ENTRY_PATH}`;
+      await navigator.clipboard.writeText(url);
+      setMsg("Ссылка на VPN скопирована");
+    } catch {
+      setError("Не удалось скопировать ссылку");
+    }
+  }
   async function handleResetPin(entryPhone: string) {
     setMsg(null);
     setError(null);
@@ -121,7 +153,14 @@ export function MessengerWhitelistSection() {
         >
           Скопировать ссылку для пользователей
         </button>
-        <p className="text-[10px] text-gray-400 mt-1.5 font-mono truncate">{inviteUrl}</p>
+        <button
+          type="button"
+          onClick={() => void handleCopyVpnLink()}
+          className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-800 font-medium hover:bg-violet-100"
+        >
+          Скопировать ссылку на VPN
+        </button>
+        <p className="text-[10px] text-gray-400 mt-1.5 font-mono truncate">{inviteUrl.replace(MESSENGER_ENTRY_PATH, VPN_ENTRY_PATH)}</p>
       </div>
 
       <form onSubmit={handleAdd} className="p-4 flex flex-col sm:flex-row gap-2 border-b border-gray-100">
@@ -171,6 +210,7 @@ export function MessengerWhitelistSection() {
                 <p className="text-sm font-semibold text-gray-900">{maskPhone(entry.phone)}</p>
                 <p className="text-xs text-gray-400">
                   {entry.status === "active" ? "активен" : "отозван"} ·{" "}
+                  {entry.vpnEnabled ? "VPN ✓" : "VPN —"} ·{" "}
                   {new Date(entry.addedAt).toLocaleDateString("ru-RU")}
                 </p>
               </div>
@@ -190,6 +230,19 @@ export function MessengerWhitelistSection() {
                     className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
                   >
                     Активировать
+                  </button>
+                )}
+                {entry.status === "active" && (
+                  <button
+                    type="button"
+                    onClick={() => setVpnEnabled(entry.phone, !entry.vpnEnabled)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border ${
+                      entry.vpnEnabled
+                        ? "border-violet-300 bg-violet-50 text-violet-800"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {entry.vpnEnabled ? "VPN вкл." : "VPN выкл."}
                   </button>
                 )}
                 <button

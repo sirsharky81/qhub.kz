@@ -5,6 +5,8 @@ export interface WhitelistEntry {
   addedBy: string;
   addedAt: number;
   status: WhitelistStatus;
+  /** Разрешён доступ к VPN (WireGuard) через портал */
+  vpnEnabled?: boolean;
 }
 
 export interface MessengerAuthRecord {
