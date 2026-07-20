@@ -14,7 +14,7 @@ import {
 } from "react";
 import type { PlacePin } from "../components/KzMapView";
 import { KZ_PLACE_CATEGORY_LABELS } from "@/lib/kz-maps/constants";
-import { getCurrentPosition, startGeoWatch } from "@/lib/family/geo";
+import { getCurrentPosition } from "@/lib/family/geo";
 import { PlatformLocation } from "@/lib/platform/location";
 import {
   buildGpx,
@@ -43,6 +43,12 @@ import {
   newTrackId,
   saveStoredTrack,
 } from "@/lib/kz-maps/tracks-storage";
+import {
+  getTrackRecordingCapabilities,
+  startTrackRecording,
+  type TrackRecordingCapabilities,
+} from "@/lib/kz-maps/track-recording";
+import { readRecordingBuffer } from "@/lib/kz-maps/track-recording-buffer";
 import type { StoredTrack } from "@/lib/kz-maps/gpx";
 import type { KzPlace, KzPlaceCategory } from "@/lib/kz-maps/types";
 
@@ -55,7 +61,6 @@ const KzMapView = dynamic(() => import("../components/KzMapView").then((m) => m.
   ),
 });
 
-const MIN_STEP_M = 8;
 const SEED_PLACES = getAllKzPlaces();
 const SEED_PLACE_IDS = new Set(SEED_PLACES.map((p) => p.id));
 const PLACES_INDEX = getKzPlacesIndex();
@@ -86,18 +91,6 @@ function routeResultToLines(result: RouteResult): GeoJSON.FeatureCollection<GeoJ
   );
 }
 
-function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
 function KzMapsMapInner() {
   const searchParams = useSearchParams();
   const urlPlaceId = searchParams.get("place") ?? undefined;
@@ -114,7 +107,11 @@ function KzMapsMapInner() {
 
   const [recording, setRecording] = useState(false);
   const [livePoints, setLivePoints] = useState<TrackPoint[]>([]);
-  const stopWatchRef = useRef<(() => void) | null>(null);
+  const [recordingCaps, setRecordingCaps] = useState<TrackRecordingCapabilities | null>(
+    null,
+  );
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const stopTrackRecordingRef = useRef<(() => TrackPoint[]) | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [routeProfile, setRouteProfile] = useState<RouteProfile>("foot");
@@ -270,53 +267,64 @@ function KzMapsMapInner() {
     startTransition(() => setPickDestMode((v) => !v));
   }, []);
 
-  const appendLivePoint = useCallback((pos: { lat: number; lng: number }) => {
-    setLivePoints((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && haversineM(last, pos) < MIN_STEP_M) return prev;
-      return [...prev, { lat: pos.lat, lng: pos.lng, ts: Date.now() }];
-    });
-  }, []);
-
   const startRecording = useCallback(() => {
     setLivePoints([]);
+    setRecordingError(null);
+    setRecordingCaps(getTrackRecordingCapabilities());
     setRecording(true);
     startTransition(() => {
       setPanelTab("tracks");
       setPanelOpen(true);
     });
-    stopWatchRef.current = startGeoWatch(appendLivePoint);
-  }, [appendLivePoint]);
-
-  const stopRecording = useCallback(() => {
-    stopWatchRef.current?.();
-    stopWatchRef.current = null;
-    setRecording(false);
-
-    setLivePoints((pts) => {
-      if (pts.length >= 2) {
-        const name = `Трек ${new Date().toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`;
-        const gpx = buildGpx(name, pts);
-        const parsed = parseGpx(gpx);
-        const stored: StoredTrack = {
-          id: newTrackId(),
-          name,
-          createdAt: Date.now(),
-          distanceM: parsed.distanceM,
-          durationSec: parsed.durationSec,
-          gpx,
-        };
-        saveStoredTrack(stored);
-        setStoredTracks(listStoredTracks());
-        setVisibleTrackIds((s) => new Set(s).add(stored.id));
-      }
-      return [];
+    stopTrackRecordingRef.current = startTrackRecording({
+      onPoint: () => {
+        setLivePoints(readRecordingBuffer());
+      },
+      onError: (message) => setRecordingError(message),
     });
   }, []);
 
+  const stopRecording = useCallback(() => {
+    const pts = stopTrackRecordingRef.current?.() ?? readRecordingBuffer();
+    stopTrackRecordingRef.current = null;
+    setRecording(false);
+    setRecordingCaps(null);
+    setRecordingError(null);
+    setLivePoints([]);
+
+    if (pts.length >= 2) {
+      const name = `Трек ${new Date().toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`;
+      const gpx = buildGpx(name, pts);
+      const parsed = parseGpx(gpx);
+      const stored: StoredTrack = {
+        id: newTrackId(),
+        name,
+        createdAt: Date.now(),
+        distanceM: parsed.distanceM,
+        durationSec: parsed.durationSec,
+        gpx,
+      };
+      saveStoredTrack(stored);
+      setStoredTracks(listStoredTracks());
+      setVisibleTrackIds((s) => new Set(s).add(stored.id));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!recording) return;
+    const syncFromBuffer = () => {
+      if (document.visibilityState === "visible") {
+        setLivePoints(readRecordingBuffer());
+      }
+    };
+    document.addEventListener("visibilitychange", syncFromBuffer);
+    return () => document.removeEventListener("visibilitychange", syncFromBuffer);
+  }, [recording]);
+
   useEffect(() => {
     return () => {
-      stopWatchRef.current?.();
+      stopTrackRecordingRef.current?.();
+      stopTrackRecordingRef.current = null;
     };
   }, []);
 
@@ -512,7 +520,9 @@ function KzMapsMapInner() {
         <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold text-gray-900 truncate">Карта KZ</h1>
           <p className="text-[11px] text-gray-500">
-            {recording ? "Запись трека…" : `${filteredPlaces.length} мест`}
+            {recording
+              ? `${recordingCaps?.label ?? "Запись"} · ${livePoints.length} точек`
+              : `${filteredPlaces.length} мест`}
           </p>
         </div>
         {!recording ? (
@@ -563,9 +573,27 @@ function KzMapsMapInner() {
           </div>
         )}
 
-        {recording && livePoints.length > 0 && (
-          <div className="absolute top-3 left-3 z-10 rounded-xl bg-red-600 text-white px-3 py-2 text-xs font-medium shadow">
-            {formatDistance(trackDistanceM(livePoints))} · {livePoints.length} точек
+        {recording && recordingCaps?.warning && (
+          <div className="absolute top-3 left-3 right-3 z-10 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+            {recordingCaps.warning}
+          </div>
+        )}
+
+        {recording && (
+          <div
+            className={`absolute left-3 z-10 rounded-xl bg-red-600 text-white px-3 py-2 text-xs font-medium shadow ${
+              recordingCaps?.warning ? "top-20" : "top-3"
+            }`}
+          >
+            {livePoints.length > 0
+              ? `${formatDistance(trackDistanceM(livePoints))} · ${livePoints.length} точек`
+              : `Ожидание GPS… · ${livePoints.length} точек`}
+          </div>
+        )}
+
+        {recordingError && (
+          <div className="absolute top-3 right-3 z-10 max-w-[60%] rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+            {recordingError}
           </div>
         )}
 
@@ -655,6 +683,12 @@ function KzMapsMapInner() {
 
             {panelTab === "tracks" && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {recording && recordingCaps && (
+                  <p className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">
+                    {recordingCaps.label}. Точки: {livePoints.length}. На подъёме учитывается высота и
+                    интервал до 12 сек.
+                  </p>
+                )}
                 <div className="flex gap-2">
                   <button
                     type="button"
