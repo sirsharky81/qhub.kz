@@ -3,9 +3,10 @@
  * Sync active VPN peers from Redis into WireGuard interface.
  * Run on VPS as root (or via sudo): node --env-file=.env.production scripts/vpn/wg-sync.mjs
  */
-import { readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, writeFileSync, existsSync, chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import Redis from "ioredis";
 
 const REDIS_VPN_PEERS_KEY = "qhub:vpn:peers";
@@ -82,6 +83,40 @@ function buildServerConfig(activePeers, serverPrivateKey, publicInterface) {
   return lines.join("\n");
 }
 
+function isInterfaceUp(name) {
+  try {
+    execFileSync("wg", ["show", name], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function applyWireGuardConfig(configPath, iface, config) {
+  writeFileSync(configPath, config, { mode: 0o600 });
+  chmodSync(configPath, 0o600);
+
+  if (isInterfaceUp(iface)) {
+    const stripped = execFileSync("wg-quick", ["strip", configPath], { encoding: "utf8" });
+    const tmpDir = mkdtempSync(join(tmpdir(), "qhub-wg-"));
+    const strippedPath = join(tmpDir, `${iface}.conf`);
+    try {
+      writeFileSync(strippedPath, stripped, { mode: 0o600 });
+      execFileSync("wg", ["syncconf", iface, strippedPath], { stdio: "inherit" });
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+    return;
+  }
+
+  try {
+    execFileSync("wg-quick", ["down", iface], { stdio: "ignore" });
+  } catch {
+    // not running yet
+  }
+  execFileSync("wg-quick", ["up", iface], { stdio: "inherit" });
+}
+
 async function main() {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
@@ -105,15 +140,7 @@ async function main() {
   const publicInterface = detectPublicInterface();
   const config = buildServerConfig(activePeers, serverPrivateKey, publicInterface);
 
-  writeFileSync(WG_CONF, config, { mode: 0o600 });
-  chmodSync(WG_CONF, 0o600);
-
-  try {
-    execFileSync("wg-quick", ["down", WG_INTERFACE], { stdio: "ignore" });
-  } catch {
-    // interface may not exist yet
-  }
-  execFileSync("wg-quick", ["up", WG_INTERFACE], { stdio: "inherit" });
+  applyWireGuardConfig(WG_CONF, WG_INTERFACE, config);
 
   console.log(`[vpn-sync] ${activePeers.length} active peer(s) synced to ${WG_INTERFACE}`);
 }

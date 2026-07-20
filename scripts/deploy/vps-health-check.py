@@ -303,6 +303,28 @@ def check_site() -> dict:
         return fail("Site HTTPS", str(exc))
 
 
+def check_wireguard(env: dict[str, str]) -> dict:
+    if env.get("VPN_ENABLED", "").strip() not in ("1", "true", "TRUE"):
+        return skip("WireGuard VPN", "VPN_ENABLED is off")
+
+    try:
+        show = subprocess.run(["wg", "show", "wg0"], capture_output=True, text=True, timeout=5, check=False)
+        if show.returncode != 0:
+            detail = show.stderr.strip() or "wg0 not running"
+            return fail("WireGuard VPN", detail)
+        peers = [line for line in show.stdout.splitlines() if line.strip().startswith("peer:")]
+        listen = subprocess.run(["ss", "-ulnp"], capture_output=True, text=True, timeout=5, check=False)
+        port_open = ":51820" in listen.stdout
+        detail = f"{len(peers)} peer(s) on wg0"
+        if not port_open:
+            return fail("WireGuard VPN", f"{detail}; UDP 51820 not listening")
+        return ok("WireGuard VPN", detail)
+    except FileNotFoundError:
+        return fail("WireGuard VPN", "wg command missing")
+    except Exception as exc:
+        return fail("WireGuard VPN", str(exc))
+
+
 def main() -> int:
     if not ENV_PATH.exists():
         print(json.dumps({"error": "env file missing"}, ensure_ascii=False))
@@ -317,6 +339,7 @@ def main() -> int:
         check_vapid(env),
         check_firebase(env),
         check_turn(env),
+        check_wireguard(env),
         *check_secrets(env),
     ]
     passed = sum(1 for r in results if r["status"] == "ok")

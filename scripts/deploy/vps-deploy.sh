@@ -46,6 +46,11 @@ else
   pm2 start npm --name qhub-ws -- run start:ws
 fi
 
+if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.production ]; then
+  echo "==> Syncing WireGuard VPN peers"
+  node --env-file=.env.production scripts/vpn/wg-sync.mjs || echo "==> Warning: WireGuard peer sync failed"
+fi
+
 echo "==> Health check"
 if [ -f scripts/deploy/vps-health-check.py ]; then
   python3 scripts/deploy/vps-health-check.py || echo "==> Health check reported issues (deploy still completed)"
