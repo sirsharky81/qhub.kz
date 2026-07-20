@@ -93,7 +93,7 @@ export function KzMapsHomeClient() {
               Открыть карту
             </Link>
             <Link href="/tools/kz-maps/maps" className={btnSecondary}>
-              Скачать офлайн-карты
+              Офлайн-карты · хранилище
             </Link>
             <Link href="/tools/kz-maps/places/suggest" className={btnSecondary}>
               Предложить место

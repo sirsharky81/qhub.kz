@@ -57,6 +57,32 @@ export function isTrackSynced(id: string): boolean {
   return readSynced().has(id);
 }
 
+export function clearTrackSync(id: string): void {
+  const synced = readSynced();
+  if (!synced.delete(id)) return;
+  writeSynced(synced);
+}
+
+export function clearAllTrackSync(): void {
+  writeSynced(new Set());
+}
+
+export async function deleteTrackFromServer(trackId: string): Promise<boolean> {
+  const deviceId = getKzMapsDeviceId();
+  try {
+    const res = await fetch(
+      `/api/kz-maps/my/tracks?id=${encodeURIComponent(trackId)}`,
+      {
+        method: "DELETE",
+        headers: { "X-Kz-Maps-Device-Id": deviceId },
+      },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchPublicTracks(): Promise<
   Array<{ id: string; name: string; distanceM: number; region?: string }>
 > {

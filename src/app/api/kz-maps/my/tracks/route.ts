@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { withCors } from "@/lib/api/cors";
 import { REDIS_KZ_MAPS_TRACK_PREFIX } from "@/lib/kz-maps/constants";
 import { isRedisConfigured } from "@/lib/redis/env";
-import { redisGetJson, redisKeys, redisSet } from "@/lib/redis/commands";
+import { redisGetJson, redisKeys, redisDel, redisSet } from "@/lib/redis/commands";
 import type { UserTrackMeta } from "@/lib/kz-maps/types";
 
 function trackKey(deviceId: string, trackId: string): string {
@@ -106,4 +106,24 @@ export async function POST(request: Request) {
   } catch {
     return withCors(NextResponse.json({ error: "Ошибка сохранения" }, { status: 500 }), request);
   }
+}
+
+export async function DELETE(request: Request) {
+  const deviceId = request.headers.get("x-kz-maps-device-id")?.trim();
+  if (!deviceId) {
+    return withCors(NextResponse.json({ error: "device id required" }, { status: 400 }), request);
+  }
+
+  if (!isRedisConfigured()) {
+    return withCors(NextResponse.json({ ok: true }), request);
+  }
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id")?.trim();
+  if (!id) {
+    return withCors(NextResponse.json({ error: "track id required" }, { status: 400 }), request);
+  }
+
+  await redisDel(trackKey(deviceId, id));
+  return withCors(NextResponse.json({ ok: true }), request);
 }

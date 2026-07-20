@@ -11,14 +11,45 @@ const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>(
   "BackgroundGeolocation",
 );
 
-let running = false;
-let stopFn: (() => void) | null = null;
+export interface TrackLocationSample {
+  lat: number;
+  lng: number;
+  accuracy: number;
+  timestamp?: number;
+  ele?: number;
+}
+
+export interface TrackLocationCallbacks {
+  onLocation: (coords: TrackLocationSample) => void;
+  onError: (error: Error) => void;
+}
+
+let familyRunning = false;
+let familyStopFn: (() => void) | null = null;
+let trackStopFn: (() => void) | null = null;
+
+function locationToCoords(location: Location): TrackLocationSample {
+  return {
+    lat: location.latitude,
+    lng: location.longitude,
+    accuracy: location.accuracy ?? 0,
+    timestamp: location.time ?? Date.now(),
+    ele:
+      location.altitude != null && Number.isFinite(location.altitude)
+        ? location.altitude
+        : undefined,
+  };
+}
 
 export const BackgroundGeolocationNative = {
   async start(callbacks: PlatformLocationCallbacks): Promise<void> {
-    if (stopFn) {
-      stopFn();
-      stopFn = null;
+    return BackgroundGeolocationNative.startFamily(callbacks);
+  },
+
+  async startFamily(callbacks: PlatformLocationCallbacks): Promise<void> {
+    if (familyStopFn) {
+      familyStopFn();
+      familyStopFn = null;
     }
 
     const watcherId = await BackgroundGeolocation.addWatcher(
@@ -35,31 +66,69 @@ export const BackgroundGeolocationNative = {
           return;
         }
         if (!location) return;
-        const coords = {
+        callbacks.onLocation({
           lat: location.latitude,
           lng: location.longitude,
           accuracy: location.accuracy ?? 0,
-        };
-        callbacks.onLocation(coords);
+        });
       },
     );
 
-    running = true;
-    stopFn = () => {
+    familyRunning = true;
+    familyStopFn = () => {
       void BackgroundGeolocation.removeWatcher({ id: watcherId });
     };
-    PlatformLogger.info("Background geolocation started");
+    PlatformLogger.info("Background geolocation started (family)");
+  },
+
+  async startTrack(callbacks: TrackLocationCallbacks): Promise<void> {
+    if (trackStopFn) {
+      trackStopFn();
+      trackStopFn = null;
+    }
+
+    const watcherId = await BackgroundGeolocation.addWatcher(
+      {
+        backgroundMessage: "QHub записывает GPS-трек. Экран можно выключить.",
+        backgroundTitle: "QHub — запись трека",
+        requestPermissions: true,
+        stale: false,
+        distanceFilter: 5,
+      },
+      (location?: Location, error?: CallbackError) => {
+        if (error) {
+          callbacks.onError(new Error(error.message ?? "Background geolocation error"));
+          return;
+        }
+        if (!location) return;
+        callbacks.onLocation(locationToCoords(location));
+      },
+    );
+
+    trackStopFn = () => {
+      void BackgroundGeolocation.removeWatcher({ id: watcherId });
+    };
+    PlatformLogger.info("Background geolocation started (track)");
   },
 
   async stop(): Promise<void> {
-    stopFn?.();
-    stopFn = null;
-    running = false;
+    await BackgroundGeolocationNative.stopFamily();
+  },
+
+  async stopFamily(): Promise<void> {
+    familyStopFn?.();
+    familyStopFn = null;
+    familyRunning = false;
+  },
+
+  async stopTrack(): Promise<void> {
+    trackStopFn?.();
+    trackStopFn = null;
   },
 
   async ensureRunning(callbacks: PlatformLocationCallbacks): Promise<void> {
-    if (!running) {
-      await BackgroundGeolocationNative.start(callbacks);
+    if (!familyRunning) {
+      await BackgroundGeolocationNative.startFamily(callbacks);
     }
   },
 };

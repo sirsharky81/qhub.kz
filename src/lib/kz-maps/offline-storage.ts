@@ -43,6 +43,34 @@ export function listOfflineRegions(): OfflineRegionMeta[] {
   return readMeta().sort((a, b) => b.downloadedAt - a.downloadedAt);
 }
 
+export interface OfflineStorageSummary {
+  regionCount: number;
+  placesCount: number;
+  pmtilesReadyCount: number;
+  estimatedBytes: number;
+}
+
+export function getOfflineStorageSummary(): OfflineStorageSummary {
+  const regions = listOfflineRegions();
+  return {
+    regionCount: regions.length,
+    placesCount: regions.reduce((sum, r) => sum + r.placesCount, 0),
+    pmtilesReadyCount: regions.filter((r) => r.pmtilesReady).length,
+    estimatedBytes: regions.reduce((sum, r) => sum + (r.pmtilesBytes ?? 0), 0),
+  };
+}
+
+function revokePmtilesLocalUrl(url: string | undefined): void {
+  if (!url || typeof URL === "undefined") return;
+  if (url.startsWith("blob:")) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export function getOfflineRegion(id: string): OfflineRegionMeta | null {
   return readMeta().find((r) => r.id === id) ?? null;
 }
@@ -124,7 +152,14 @@ async function downloadPmtilesBrowser(
   onProgress: (percent: number) => void,
 ): Promise<string | null> {
   const res = await fetch(url);
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("json")) {
+      const data = (await res.json()) as { message?: string };
+      throw new Error(data.message ?? `Ошибка загрузки карты (${res.status})`);
+    }
+    return null;
+  }
 
   const total = Number(res.headers.get("content-length") ?? 0);
   const reader = res.body?.getReader();
@@ -242,8 +277,8 @@ export async function downloadRegionBundle(
         pmtilesLocalUrl = localUrl;
         pmtilesReady = true;
       }
-    } catch {
-      /* PMTiles optional until hosted on VPS */
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("Не удалось загрузить карту региона");
     }
   }
 
@@ -263,11 +298,14 @@ export async function downloadRegionBundle(
     percent: 100,
     message: pmtilesReady
       ? "Регион готов к офлайн-использованию"
-      : "Места сохранены (карта будет доступна после публикации на сервере)",
+      : "Места сохранены. Карта не загрузилась — проверьте pmtiles CLI на сервере или повторите позже.",
   });
 }
 
 export async function deleteOfflineRegion(id: string): Promise<void> {
+  const existing = getOfflineRegion(id);
+  revokePmtilesLocalUrl(existing?.pmtilesLocalUrl);
+
   writeMeta(readMeta().filter((r) => r.id !== id));
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(`${PLACES_PREFIX}${id}`);
@@ -296,5 +334,12 @@ export async function deleteOfflineRegion(id: string): Promise<void> {
     } catch {
       /* ignore */
     }
+  }
+}
+
+export async function deleteAllOfflineRegions(): Promise<void> {
+  const ids = listOfflineRegions().map((r) => r.id);
+  for (const id of ids) {
+    await deleteOfflineRegion(id);
   }
 }

@@ -37,6 +37,10 @@ export function deleteStoredTrack(id: string): void {
   writeAll(readAll().filter((t) => t.id !== id));
 }
 
+export function deleteAllStoredTracks(): void {
+  writeAll([]);
+}
+
 export function newTrackId(): string {
   return `trk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }

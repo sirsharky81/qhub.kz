@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import {
+  Suspense,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PlacePin } from "../components/KzMapView";
 import { KZ_PLACE_CATEGORY_LABELS } from "@/lib/kz-maps/constants";
-import { getCurrentPosition, startGeoWatch } from "@/lib/family/geo";
+import { getCurrentPosition } from "@/lib/family/geo";
 import { PlatformLocation } from "@/lib/platform/location";
 import {
   buildGpx,
@@ -19,6 +27,7 @@ import {
   shareGpx,
   trackDistanceM,
   trackEndpoints,
+  trackBoundsLngLat,
   type RouteProfile,
   type RouteResult,
   type RouteSegment,
@@ -28,13 +37,20 @@ import { getAllKzPlaces, getKzPlaceById, getKzPlacesIndex } from "@/lib/kz-maps/
 import { getAllCachedPlaces, getOfflinePmtilesUrl, listOfflineRegions } from "@/lib/kz-maps/offline-storage";
 import { fetchRoute } from "@/lib/kz-maps/route-client";
 import { snapTrackToRoads } from "@/lib/kz-maps/route-snap";
-import { isTrackSynced, syncTrackToServer } from "@/lib/kz-maps/tracks-sync";
+import { isTrackSynced, syncTrackToServer, clearTrackSync, clearAllTrackSync, deleteTrackFromServer } from "@/lib/kz-maps/tracks-sync";
 import {
+  deleteAllStoredTracks,
   deleteStoredTrack,
   listStoredTracks,
   newTrackId,
   saveStoredTrack,
 } from "@/lib/kz-maps/tracks-storage";
+import {
+  getTrackRecordingCapabilities,
+  startTrackRecording,
+  type TrackRecordingCapabilities,
+} from "@/lib/kz-maps/track-recording";
+import { readRecordingBuffer } from "@/lib/kz-maps/track-recording-buffer";
 import type { StoredTrack } from "@/lib/kz-maps/gpx";
 import type { KzPlace, KzPlaceCategory } from "@/lib/kz-maps/types";
 
@@ -47,7 +63,10 @@ const KzMapView = dynamic(() => import("../components/KzMapView").then((m) => m.
   ),
 });
 
-const MIN_STEP_M = 8;
+const SEED_PLACES = getAllKzPlaces();
+const SEED_PLACE_IDS = new Set(SEED_PLACES.map((p) => p.id));
+const PLACES_INDEX = getKzPlacesIndex();
+
 type PanelTab = "places" | "tracks" | "route";
 
 const ROUTE_PROFILE_LABELS: Record<RouteProfile, string> = {
@@ -74,27 +93,14 @@ function routeResultToLines(result: RouteResult): GeoJSON.FeatureCollection<GeoJ
   );
 }
 
-function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
 function KzMapsMapInner() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const focusPlaceId = searchParams.get("place") ?? undefined;
+  const urlPlaceId = searchParams.get("place") ?? undefined;
   const routeToId = searchParams.get("routeTo") ?? undefined;
 
-  const index = getKzPlacesIndex();
-  const allPlaces = getAllKzPlaces();
-
+  const [focusPlaceId, setFocusPlaceId] = useState<string | undefined>(urlPlaceId);
+  const [focusTrackId, setFocusTrackId] = useState<string | null>(null);
+  const [focusTrackGeneration, setFocusTrackGeneration] = useState(0);
   const [region, setRegion] = useState("");
   const [category, setCategory] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
@@ -105,7 +111,11 @@ function KzMapsMapInner() {
 
   const [recording, setRecording] = useState(false);
   const [livePoints, setLivePoints] = useState<TrackPoint[]>([]);
-  const stopWatchRef = useRef<(() => void) | null>(null);
+  const [recordingCaps, setRecordingCaps] = useState<TrackRecordingCapabilities | null>(
+    null,
+  );
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const stopTrackRecordingRef = useRef<(() => TrackPoint[]) | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [routeProfile, setRouteProfile] = useState<RouteProfile>("foot");
@@ -129,7 +139,11 @@ function KzMapsMapInner() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [routeWarning, setRouteWarning] = useState<string | null>(null);
   const [communityPlaces, setCommunityPlaces] = useState<KzPlace[]>([]);
+  const [cachedPlaces, setCachedPlaces] = useState<KzPlace[]>([]);
   const [offlinePmtilesUrl, setOfflinePmtilesUrl] = useState<string | null>(null);
+  const trackLineCacheRef = useRef(
+    new Map<string, GeoJSON.Feature<GeoJSON.LineString>>(),
+  );
   const [isOffline, setIsOffline] = useState(false);
   const [snapLoadingId, setSnapLoadingId] = useState<string | null>(null);
   const [trackActionMsg, setTrackActionMsg] = useState<string | null>(null);
@@ -149,10 +163,11 @@ function KzMapsMapInner() {
     void fetch("/api/kz-maps/places")
       .then((r) => r.json())
       .then((d: { places?: KzPlace[] }) => {
-        const seedIds = new Set(allPlaces.map((p) => p.id));
-        setCommunityPlaces((d.places ?? []).filter((p) => !seedIds.has(p.id)));
+        setCommunityPlaces((d.places ?? []).filter((p) => !SEED_PLACE_IDS.has(p.id)));
       })
       .catch(() => {});
+
+    setCachedPlaces(getAllCachedPlaces());
 
     const readyRegion = listOfflineRegions().find((r) => r.pmtilesReady);
     if (readyRegion?.pmtilesLocalUrl) {
@@ -162,13 +177,19 @@ function KzMapsMapInner() {
         if (url) setOfflinePmtilesUrl(url);
       });
     }
-  }, [allPlaces]);
+  }, []);
+
+  useEffect(() => {
+    if (urlPlaceId) setFocusPlaceId(urlPlaceId);
+  }, [urlPlaceId]);
 
   useEffect(() => {
     if (routeToId) {
-      setRouteDestId(routeToId);
-      setPanelTab("route");
-      setPanelOpen(true);
+      startTransition(() => {
+        setRouteDestId(routeToId);
+        setPanelTab("route");
+        setPanelOpen(true);
+      });
     }
   }, [routeToId]);
 
@@ -179,11 +200,11 @@ function KzMapsMapInner() {
 
   const mergedPlaces = useMemo(() => {
     const map = new Map<string, KzPlace>();
-    for (const p of [...allPlaces, ...communityPlaces, ...getAllCachedPlaces()]) {
+    for (const p of [...SEED_PLACES, ...communityPlaces, ...cachedPlaces]) {
       map.set(p.id, p);
     }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [allPlaces, communityPlaces]);
+  }, [communityPlaces, cachedPlaces]);
 
   const filteredPlaces = useMemo(() => {
     let list = mergedPlaces;
@@ -193,68 +214,135 @@ function KzMapsMapInner() {
   }, [mergedPlaces, region, category]);
 
   const trackLines = useMemo(() => {
+    const cache = trackLineCacheRef.current;
+    const activeTrackIds = new Set(storedTracks.map((t) => t.id));
+    for (const id of cache.keys()) {
+      if (!activeTrackIds.has(id)) cache.delete(id);
+    }
+
     const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
     for (const t of storedTracks) {
       if (!visibleTrackIds.has(t.id)) continue;
-      try {
-        const parsed = parseGpx(t.gpx);
-        features.push(pointsToLineGeoJson(parsed.points, { id: t.id, name: t.name }));
-      } catch {
-        // skip broken
+      let feature = cache.get(t.id);
+      if (!feature) {
+        try {
+          const parsed = parseGpx(t.gpx);
+          feature = pointsToLineGeoJson(parsed.points, { id: t.id, name: t.name });
+          cache.set(t.id, feature);
+        } catch {
+          continue;
+        }
       }
+      features.push(feature);
     }
     return lineFeatureCollection(features);
   }, [storedTracks, visibleTrackIds]);
 
-  function focusPlace(id: string) {
-    router.replace(`/tools/kz-maps/map?place=${encodeURIComponent(id)}`);
-  }
+  const focusTrackBounds = useMemo(() => {
+    if (!focusTrackId) return null;
+    const track = storedTracks.find((t) => t.id === focusTrackId);
+    if (!track) return null;
+    return trackBoundsLngLat(track.gpx);
+  }, [focusTrackId, storedTracks]);
 
-  const appendLivePoint = useCallback((pos: { lat: number; lng: number }) => {
-    setLivePoints((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && haversineM(last, pos) < MIN_STEP_M) return prev;
-      return [...prev, { lat: pos.lat, lng: pos.lng, ts: Date.now() }];
-    });
+  const focusPlace = useCallback((id: string) => {
+    setFocusPlaceId(id);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("place", id);
+      window.history.replaceState(null, "", url);
+    }
+  }, []);
+
+  const focusTrack = useCallback((id: string) => {
+    setFocusTrackId(id);
+    setFocusTrackGeneration((n) => n + 1);
+    setVisibleTrackIds((s) => new Set(s).add(id));
+    startTransition(() => setPanelTab("tracks"));
+  }, []);
+
+  const togglePanel = useCallback(() => {
+    startTransition(() => setPanelOpen((v) => !v));
+  }, []);
+
+  const selectPanelTab = useCallback((tab: PanelTab) => {
+    startTransition(() => setPanelTab(tab));
+  }, []);
+
+  const selectRegion = useCallback((value: string) => {
+    startTransition(() => setRegion(value));
+  }, []);
+
+  const selectCategory = useCallback((value: string) => {
+    startTransition(() => setCategory(value));
+  }, []);
+
+  const selectRouteProfile = useCallback((profile: RouteProfile) => {
+    startTransition(() => setRouteProfile(profile));
+  }, []);
+
+  const togglePickDestMode = useCallback(() => {
+    startTransition(() => setPickDestMode((v) => !v));
   }, []);
 
   const startRecording = useCallback(() => {
     setLivePoints([]);
+    setRecordingError(null);
+    setRecordingCaps(getTrackRecordingCapabilities());
     setRecording(true);
-    setPanelTab("tracks");
-    setPanelOpen(true);
-    stopWatchRef.current = startGeoWatch(appendLivePoint);
-  }, [appendLivePoint]);
-
-  const stopRecording = useCallback(() => {
-    stopWatchRef.current?.();
-    stopWatchRef.current = null;
-    setRecording(false);
-
-    setLivePoints((pts) => {
-      if (pts.length >= 2) {
-        const name = `Трек ${new Date().toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`;
-        const gpx = buildGpx(name, pts);
-        const parsed = parseGpx(gpx);
-        const stored: StoredTrack = {
-          id: newTrackId(),
-          name,
-          createdAt: Date.now(),
-          distanceM: parsed.distanceM,
-          durationSec: parsed.durationSec,
-          gpx,
-        };
-        saveStoredTrack(stored);
-        setStoredTracks(listStoredTracks());
-        setVisibleTrackIds((s) => new Set(s).add(stored.id));
-      }
-      return [];
+    startTransition(() => {
+      setPanelTab("tracks");
+      setPanelOpen(true);
+    });
+    stopTrackRecordingRef.current = startTrackRecording({
+      onPoint: () => {
+        setLivePoints(readRecordingBuffer());
+      },
+      onError: (message) => setRecordingError(message),
     });
   }, []);
 
+  const stopRecording = useCallback(() => {
+    const pts = stopTrackRecordingRef.current?.() ?? readRecordingBuffer();
+    stopTrackRecordingRef.current = null;
+    setRecording(false);
+    setRecordingCaps(null);
+    setRecordingError(null);
+    setLivePoints([]);
+
+    if (pts.length >= 2) {
+      const name = `Трек ${new Date().toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`;
+      const gpx = buildGpx(name, pts);
+      const parsed = parseGpx(gpx);
+      const stored: StoredTrack = {
+        id: newTrackId(),
+        name,
+        createdAt: Date.now(),
+        distanceM: parsed.distanceM,
+        durationSec: parsed.durationSec,
+        gpx,
+      };
+      saveStoredTrack(stored);
+      setStoredTracks(listStoredTracks());
+      setVisibleTrackIds((s) => new Set(s).add(stored.id));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!recording) return;
+    const syncFromBuffer = () => {
+      if (document.visibilityState === "visible") {
+        setLivePoints(readRecordingBuffer());
+      }
+    };
+    document.addEventListener("visibilitychange", syncFromBuffer);
+    return () => document.removeEventListener("visibilitychange", syncFromBuffer);
+  }, [recording]);
+
   useEffect(() => {
     return () => {
-      stopWatchRef.current?.();
+      stopTrackRecordingRef.current?.();
+      stopTrackRecordingRef.current = null;
     };
   }, []);
 
@@ -273,8 +361,10 @@ function KzMapsMapInner() {
     saveStoredTrack(stored);
     setStoredTracks(listStoredTracks());
     setVisibleTrackIds((s) => new Set(s).add(stored.id));
-    setPanelTab("tracks");
-    setPanelOpen(true);
+    startTransition(() => {
+      setPanelTab("tracks");
+      setPanelOpen(true);
+    });
   }
 
   async function resolveRouteOrigin(): Promise<{ lat: number; lng: number }> {
@@ -299,7 +389,7 @@ function KzMapsMapInner() {
     }
   }
 
-  async function buildRoute(dest?: { lat: number; lng: number }) {
+  const buildRoute = useCallback(async (dest?: { lat: number; lng: number }) => {
     setRouteError(null);
     setRouteWarning(null);
     setRouteFootNote(null);
@@ -330,8 +420,10 @@ function KzMapsMapInner() {
             : null),
       );
       setPickDestMode(false);
-      setPanelTab("route");
-      setPanelOpen(true);
+      startTransition(() => {
+        setPanelTab("route");
+        setPanelOpen(true);
+      });
     } catch (e) {
       setRouteError(e instanceof Error ? e.message : "Ошибка маршрута");
       setRouteLines(null);
@@ -341,12 +433,12 @@ function KzMapsMapInner() {
     } finally {
       setRouteLoading(false);
     }
-  }
+  }, [mergedPlaces, routeDestId, routeDestPoint, routeProfile]);
 
-  function routeToTrackPoint(
+  const routeToTrackPoint = useCallback((
     track: StoredTrack,
     which: "start" | "end",
-  ) {
+  ) => {
     const endpoints = trackEndpoints(track.gpx);
     if (!endpoints) {
       setTrackActionMsg("Не удалось прочитать точки трека");
@@ -360,12 +452,14 @@ function KzMapsMapInner() {
     setRouteDestId("");
     setRouteDestPoint({ lat: point.lat, lng: point.lng, label });
     setPickDestMode(false);
-    setPanelTab("route");
-    setPanelOpen(true);
+    startTransition(() => {
+      setPanelTab("route");
+      setPanelOpen(true);
+    });
     void buildRoute({ lat: point.lat, lng: point.lng });
-  }
+  }, [buildRoute]);
 
-  function handleMapPick(coords: { lat: number; lng: number }) {
+  const handleMapPick = useCallback((coords: { lat: number; lng: number }) => {
     setRouteDestId("");
     setRouteDestPoint({
       lat: coords.lat,
@@ -373,9 +467,11 @@ function KzMapsMapInner() {
       label: `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`,
     });
     setPickDestMode(false);
-    setPanelTab("route");
-    setPanelOpen(true);
-  }
+    startTransition(() => {
+      setPanelTab("route");
+      setPanelOpen(true);
+    });
+  }, []);
 
   async function snapTrack(track: StoredTrack) {
     setTrackActionMsg(null);
@@ -397,6 +493,7 @@ function KzMapsMapInner() {
         distanceM: snapped.distanceM,
       };
       saveStoredTrack(updated);
+      trackLineCacheRef.current.delete(track.id);
       setStoredTracks(listStoredTracks());
       setVisibleTrackIds((s) => new Set(s).add(updated.id));
       setTrackActionMsg("Трек привязан к дорогам");
@@ -417,14 +514,65 @@ function KzMapsMapInner() {
     }
   }
 
-  function handleRouteToPlace(place: PlacePin | KzPlace) {
+  async function removeTrack(track: StoredTrack) {
+    const syncedNote = isTrackSynced(track.id) ? "\n\nТрек также будет удалён из облачной синхронизации." : "";
+    const ok = window.confirm(
+      `Удалить «${track.name}» с этого устройства?${syncedNote}\n\n${formatDistance(track.distanceM)} · ${formatDuration(track.durationSec)}`,
+    );
+    if (!ok) return;
+
+    if (isTrackSynced(track.id)) {
+      await deleteTrackFromServer(track.id);
+      clearTrackSync(track.id);
+    }
+
+    deleteStoredTrack(track.id);
+    if (focusTrackId === track.id) setFocusTrackId(null);
+    trackLineCacheRef.current.delete(track.id);
+    setStoredTracks(listStoredTracks());
+    setVisibleTrackIds((s) => {
+      const next = new Set(s);
+      next.delete(track.id);
+      return next;
+    });
+    setTrackActionMsg("Трек удалён");
+  }
+
+  async function removeAllTracks() {
+    if (storedTracks.length === 0) return;
+    const syncedCount = storedTracks.filter((t) => isTrackSynced(t.id)).length;
+    const syncedNote =
+      syncedCount > 0 ? `\n\n${syncedCount} трек(ов) также будут удалены из облака.` : "";
+    const ok = window.confirm(
+      `Удалить все треки (${storedTracks.length}) с этого устройства?${syncedNote}`,
+    );
+    if (!ok) return;
+
+    for (const track of storedTracks) {
+      if (isTrackSynced(track.id)) {
+        await deleteTrackFromServer(track.id);
+      }
+    }
+
+    deleteAllStoredTracks();
+    clearAllTrackSync();
+    trackLineCacheRef.current.clear();
+    setStoredTracks([]);
+    setVisibleTrackIds(new Set());
+    setFocusTrackId(null);
+    setTrackActionMsg("Все треки удалены");
+  }
+
+  const handleRouteToPlace = useCallback((place: PlacePin | KzPlace) => {
     setRouteDestId(place.id);
     setRouteDestPoint(null);
     setPickDestMode(false);
-    setPanelTab("route");
-    setPanelOpen(true);
+    startTransition(() => {
+      setPanelTab("route");
+      setPanelOpen(true);
+    });
     void buildRoute({ lat: place.lat, lng: place.lng });
-  }
+  }, [buildRoute]);
 
   return (
     <div className="fixed inset-0 flex flex-col bg-white">
@@ -439,7 +587,9 @@ function KzMapsMapInner() {
         <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold text-gray-900 truncate">Карта KZ</h1>
           <p className="text-[11px] text-gray-500">
-            {recording ? "Запись трека…" : `${filteredPlaces.length} мест`}
+            {recording
+              ? `${recordingCaps?.label ?? "Запись"} · ${livePoints.length} точек`
+              : `${filteredPlaces.length} мест`}
           </p>
         </div>
         {!recording ? (
@@ -461,7 +611,7 @@ function KzMapsMapInner() {
         )}
         <button
           type="button"
-          onClick={() => setPanelOpen((v) => !v)}
+          onClick={togglePanel}
           className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 shrink-0"
         >
           {panelOpen ? "Скрыть" : "Панель"}
@@ -472,6 +622,8 @@ function KzMapsMapInner() {
         <KzMapView
           places={filteredPlaces}
           focusPlaceId={focusPlaceId}
+          focusTrackBounds={focusTrackBounds}
+          focusTrackGeneration={focusTrackGeneration}
           trackLines={trackLines}
           routeLines={routeLines}
           liveTrackPoints={livePoints}
@@ -490,9 +642,27 @@ function KzMapsMapInner() {
           </div>
         )}
 
-        {recording && livePoints.length > 0 && (
-          <div className="absolute top-3 left-3 z-10 rounded-xl bg-red-600 text-white px-3 py-2 text-xs font-medium shadow">
-            {formatDistance(trackDistanceM(livePoints))} · {livePoints.length} точек
+        {recording && recordingCaps?.warning && (
+          <div className="absolute top-3 left-3 right-3 z-10 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+            {recordingCaps.warning}
+          </div>
+        )}
+
+        {recording && (
+          <div
+            className={`absolute left-3 z-10 rounded-xl bg-red-600 text-white px-3 py-2 text-xs font-medium shadow ${
+              recordingCaps?.warning ? "top-20" : "top-3"
+            }`}
+          >
+            {livePoints.length > 0
+              ? `${formatDistance(trackDistanceM(livePoints))} · ${livePoints.length} точек`
+              : `Ожидание GPS… · ${livePoints.length} точек`}
+          </div>
+        )}
+
+        {recordingError && (
+          <div className="absolute top-3 right-3 z-10 max-w-[60%] rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+            {recordingError}
           </div>
         )}
 
@@ -512,7 +682,7 @@ function KzMapsMapInner() {
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setPanelTab(id)}
+                  onClick={() => selectPanelTab(id)}
                   className={`flex-1 py-2.5 text-xs font-semibold ${
                     panelTab === id
                       ? "text-emerald-800 border-b-2 border-emerald-600"
@@ -529,11 +699,11 @@ function KzMapsMapInner() {
                 <div className="shrink-0 px-3 pt-2 pb-2 flex gap-2">
                   <select
                     value={region}
-                    onChange={(e) => setRegion(e.target.value)}
+                    onChange={(e) => selectRegion(e.target.value)}
                     className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs"
                   >
                     <option value="">Все регионы</option>
-                    {index.regions.map((r) => (
+                    {PLACES_INDEX.regions.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.name}
                       </option>
@@ -541,7 +711,7 @@ function KzMapsMapInner() {
                   </select>
                   <select
                     value={category}
-                    onChange={(e) => setCategory(e.target.value)}
+                    onChange={(e) => selectCategory(e.target.value)}
                     className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs"
                   >
                     <option value="">Все категории</option>
@@ -582,6 +752,12 @@ function KzMapsMapInner() {
 
             {panelTab === "tracks" && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {recording && recordingCaps && (
+                  <p className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">
+                    {recordingCaps.label}. Точки: {livePoints.length}. На подъёме учитывается высота и
+                    интервал до 12 сек.
+                  </p>
+                )}
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -617,6 +793,21 @@ function KzMapsMapInner() {
                   </p>
                 )}
 
+                {storedTracks.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                    <p className="text-xs text-gray-600">
+                      {storedTracks.length} трек(ов) на устройстве
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void removeAllTracks()}
+                      className="text-[11px] font-semibold text-red-700"
+                    >
+                      Удалить все
+                    </button>
+                  </div>
+                )}
+
                 {trackActionMsg && (
                   <p className="text-xs text-gray-700 bg-gray-50 rounded-lg px-3 py-2">{trackActionMsg}</p>
                 )}
@@ -625,45 +816,59 @@ function KzMapsMapInner() {
                   {storedTracks.map((t) => (
                     <li
                       key={t.id}
-                      className="rounded-xl border border-gray-200 px-3 py-2.5 space-y-2"
+                      className={`rounded-xl border px-3 py-2.5 space-y-2 ${
+                        focusTrackId === t.id
+                          ? "border-orange-400 bg-orange-50/50"
+                          : "border-gray-200"
+                      }`}
                     >
-                      <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                      <div className="flex items-center gap-2 min-w-0">
                         <input
                           type="checkbox"
                           checked={visibleTrackIds.has(t.id)}
                           onChange={(e) => {
+                            const checked = e.target.checked;
                             setVisibleTrackIds((s) => {
                               const next = new Set(s);
-                              if (e.target.checked) next.add(t.id);
+                              if (checked) next.add(t.id);
                               else next.delete(t.id);
                               return next;
                             });
+                            if (checked) {
+                              focusTrack(t.id);
+                            } else if (focusTrackId === t.id) {
+                              setFocusTrackId(null);
+                            }
                           }}
                           className="shrink-0"
+                          aria-label={`Показать ${t.name} на карте`}
                         />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{t.name}</p>
+                        <button
+                          type="button"
+                          onClick={() => focusTrack(t.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <p
+                            className={`text-sm font-medium truncate ${
+                              focusTrackId === t.id ? "text-orange-900" : ""
+                            }`}
+                          >
+                            {t.name}
+                          </p>
                           <p className="text-[11px] text-gray-500">
                             {formatDistance(t.distanceM)} · {formatDuration(t.durationSec)}
                             {isTrackSynced(t.id) ? " · ☁" : ""}
                           </p>
-                        </div>
+                        </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            deleteStoredTrack(t.id);
-                            setStoredTracks(listStoredTracks());
-                            setVisibleTrackIds((s) => {
-                              const next = new Set(s);
-                              next.delete(t.id);
-                              return next;
-                            });
-                          }}
-                          className="shrink-0 text-[11px] text-red-600"
+                          onClick={() => void removeTrack(t)}
+                          className="shrink-0 rounded-md border border-red-200 px-2 py-1 text-[10px] font-semibold text-red-700"
+                          title="Удалить трек с устройства"
                         >
-                          ✕
+                          Удалить
                         </button>
-                      </label>
+                      </div>
                       <div className="flex flex-wrap gap-x-2 gap-y-1 pl-6">
                       <button
                         type="button"
@@ -742,7 +947,7 @@ function KzMapsMapInner() {
                 </select>
                 <button
                   type="button"
-                  onClick={() => setPickDestMode((v) => !v)}
+                  onClick={togglePickDestMode}
                   className={`w-full rounded-xl py-2.5 text-sm font-semibold ${
                     pickDestMode
                       ? "bg-sky-600 text-white"
@@ -767,7 +972,7 @@ function KzMapsMapInner() {
                     <button
                       key={id}
                       type="button"
-                      onClick={() => setRouteProfile(id)}
+                      onClick={() => selectRouteProfile(id)}
                       className={`flex-1 rounded-xl py-2 text-xs font-semibold ${
                         routeProfile === id
                           ? "bg-sky-600 text-white"

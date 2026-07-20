@@ -1,5 +1,6 @@
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
+import { getOfflineMapAttributionHtml } from "./offline-map-source";
 
 let protocolReady = false;
 
@@ -15,19 +16,33 @@ export function toPmtilesUrl(localOrRemote: string): string {
   return `pmtiles://${localOrRemote}`;
 }
 
-/** Minimal vector style for offline PMTiles (OpenMapTiles-like layer names). */
+/** Minimal vector style for offline Protomaps v4 PMTiles (earth / water / roads). */
 export function offlinePmtilesStyle(pmtilesUrl: string): maplibregl.StyleSpecification {
   const src = toPmtilesUrl(pmtilesUrl);
   return {
     version: 8,
     sources: {
-      offline: { type: "vector", url: src },
+      offline: { type: "vector", url: src, attribution: getOfflineMapAttributionHtml() },
     },
     layers: [
       {
         id: "background",
         type: "background",
         paint: { "background-color": "#eef2f6" },
+      },
+      {
+        id: "earth",
+        type: "fill",
+        source: "offline",
+        "source-layer": "earth",
+        paint: { "fill-color": "#e8ecef" },
+      },
+      {
+        id: "landuse",
+        type: "fill",
+        source: "offline",
+        "source-layer": "landuse",
+        paint: { "fill-color": "#e2e8e4", "fill-opacity": 0.6 },
       },
       {
         id: "water",
@@ -40,7 +55,7 @@ export function offlinePmtilesStyle(pmtilesUrl: string): maplibregl.StyleSpecifi
         id: "roads",
         type: "line",
         source: "offline",
-        "source-layer": "transportation",
+        "source-layer": "roads",
         paint: { "line-color": "#ffffff", "line-width": 1.5 },
       },
     ],

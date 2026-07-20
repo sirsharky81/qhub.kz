@@ -79,4 +79,6 @@ export interface KzMapRegionBundle {
   placesBundleUrl?: string;
   placesCount: number;
   updatedAt: string;
+  /** Human-readable data source for offline map tiles. */
+  mapDataSource?: string;
 }

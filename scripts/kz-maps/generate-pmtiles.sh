@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Generate regional PMTiles for KZ Maps (run on VPS with osmium/tilemaker/planetiler).
-# Usage: ./scripts/kz-maps/generate-pmtiles.sh /path/to/kazakhstan-latest.osm.pbf
+# DEPRECATED — do not use for production offline bundles.
+# Use on-demand Protomaps extract instead: scripts/kz-maps/extract-region-pmtiles.sh
+# To remove old VPS files: scripts/kz-maps/cleanup-vps-legacy-bundles.sh
+# Docs: https://docs.protomaps.com/basemaps/downloads
 set -euo pipefail
 
 OSM_PBF="${1:-}"

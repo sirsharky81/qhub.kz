@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   KZ_MAP_ATTRIBUTION,
   KZ_MAP_DEFAULT_CENTER,
@@ -72,6 +72,8 @@ export interface PlacePin {
 interface Props {
   places: KzPlace[];
   focusPlaceId?: string;
+  focusTrackBounds?: [[number, number], [number, number]] | null;
+  focusTrackGeneration?: number;
   className?: string;
   trackLines?: GeoJSON.FeatureCollection<GeoJSON.LineString>;
   routeLines?: GeoJSON.FeatureCollection<GeoJSON.LineString> | null;
@@ -83,9 +85,11 @@ interface Props {
   onMapPick?: (coords: { lat: number; lng: number }) => void;
 }
 
-export function KzMapView({
+function KzMapViewInner({
   places,
   focusPlaceId,
+  focusTrackBounds = null,
+  focusTrackGeneration = 0,
   className = "",
   trackLines,
   routeLines,
@@ -362,9 +366,14 @@ export function KzMapView({
     };
   }, []);
 
+  const placesDataKeyRef = useRef("");
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    const dataKey = places.map((p) => p.id).join("\0");
+    if (dataKey === placesDataKeyRef.current) return;
+    placesDataKeyRef.current = dataKey;
     const source = map.getSource(PLACES_SOURCE) as GeoJSONSource | undefined;
     source?.setData(placesToGeoJson(places));
   }, [places, ready]);
@@ -444,6 +453,13 @@ export function KzMapView({
     map.flyTo({ center: [focus.lng, focus.lat], zoom: KZ_MAP_PLACE_ZOOM, duration: 800 });
   }, [focusPlaceId, places, ready]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !focusTrackBounds || focusTrackGeneration === 0) return;
+    const bounds = new maplibregl.LngLatBounds(focusTrackBounds[0], focusTrackBounds[1]);
+    map.fitBounds(bounds, { padding: 72, maxZoom: 14, duration: 800 });
+  }, [focusTrackBounds, focusTrackGeneration, ready]);
+
   return (
     <div className={`relative h-full w-full ${className}`}>
       <div ref={containerRef} className="h-full w-full" />
@@ -469,3 +485,5 @@ export function KzMapView({
     </div>
   );
 }
+
+export const KzMapView = memo(KzMapViewInner);

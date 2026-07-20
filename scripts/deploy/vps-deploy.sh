@@ -18,6 +18,11 @@ npm ci
 echo "==> Building"
 npm run build
 
+if [ -f scripts/kz-maps/cleanup-vps-legacy-bundles.sh ]; then
+  echo "==> Cleaning legacy offline map bundles (if any)"
+  bash scripts/kz-maps/cleanup-vps-legacy-bundles.sh || true
+fi
+
 echo "==> Restarting PM2"
 pm2 restart qhub
 if pm2 describe qhub-ws >/dev/null 2>&1; then

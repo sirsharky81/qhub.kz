@@ -1,9 +1,6 @@
 import bundlesJson from "@/data/kz-regions/index.json";
 import type { KzMapRegionBundle } from "./types";
-
-const BUNDLES_BASE =
-  process.env.NEXT_PUBLIC_KZ_MAPS_BUNDLES_BASE?.trim().replace(/\/$/, "") ||
-  "/kz-maps/bundles";
+import { getRegionPmtilesDownloadUrl } from "./offline-map-source";
 
 export function getKzRegionBundles(): KzMapRegionBundle[] {
   const raw = bundlesJson.bundles as Omit<
@@ -13,8 +10,9 @@ export function getKzRegionBundles(): KzMapRegionBundle[] {
 
   return raw.map((b) => ({
     ...b,
-    pmtilesUrl: `${BUNDLES_BASE}/${b.id}.pmtiles`,
+    pmtilesUrl: getRegionPmtilesDownloadUrl(b.id),
     placesBundleUrl: `/api/kz-maps/bundles/${encodeURIComponent(b.id)}/places`,
+    mapDataSource: "Protomaps / OpenStreetMap (ODbL)",
   }));
 }
 
