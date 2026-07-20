@@ -23,6 +23,8 @@
         │
         ├──► Redis 8 (127.0.0.1:6379, пароль, только localhost)
         │
+        ├──► WireGuard VPN (wg0, UDP :51820) — личный VPN для whitelist
+        │
         └──► Внешние API:
              Cloudflare Turnstile, Telegram, OpenAI,
              Firebase FCM, Web Push (VAPID), Metered TURN
