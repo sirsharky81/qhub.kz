@@ -334,12 +334,36 @@ tail -f /var/log/nginx/error.log
 
 ---
 
+## VPN (WireGuard)
+
+Устанавливается **автоматически** при первом деплое после merge VPN-кода (`vps-deploy.sh` → `vpn-bootstrap.sh`).
+
+| Параметр | Значение |
+|----------|----------|
+| Интерфейс | `wg0` |
+| Порт | UDP `51820` |
+| Портал | `/tools/vpn` (доступ по whitelist + `vpnEnabled`) |
+| Синхронизация peers | `VPN_SYNC_COMMAND` в `.env.production` |
+
+Подробно: `docs/vpn.md`. Проверка на сервере:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_qhub root@65.108.215.248
+wg show
+grep '^VPN_' /var/www/qhub.kz/.env.production
+```
+
+---
+
 ## Связанные файлы в репозитории
 
 | Файл | Назначение |
 |------|------------|
 | `scripts/deploy/vps-bootstrap.sh` | Первичная установка на Ubuntu |
 | `scripts/deploy/vps-deploy.sh` | Деплой: pull, build, pm2 restart, health-check |
+| `scripts/deploy/vpn-bootstrap.sh` | WireGuard VPN (первый деплой) |
+| `scripts/vpn/wg-sync.mjs` | Синхронизация VPN peers Redis → wg0 |
+| `docs/vpn.md` | Настройка и выдача доступа пользователям |
 | `scripts/deploy/vps-health-check.py` | Проверка интеграций на сервере |
 | `scripts/migrate-upstash-to-redis.mjs` | Перенос ключей Upstash → VPS Redis |
 | `src/lib/redis/` | Выбор бэкенда и команды Redis |

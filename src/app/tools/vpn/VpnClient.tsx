@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { VpnPeerPublic } from "@/lib/vpn/types";
 import { maskPhone } from "@/lib/messenger/phone-format";
+import { platformFetch } from "@/lib/platform/api-client";
 
 interface AccessState {
   allowed: boolean;
@@ -28,7 +29,7 @@ export function VpnClient() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/vpn/access-check");
+      const res = await platformFetch("/api/vpn/access-check");
       const data = (await res.json()) as AccessState & { error?: string };
       setState({
         allowed: Boolean(data.allowed),
@@ -53,7 +54,7 @@ export function VpnClient() {
     e.preventDefault();
     setMsg(null);
     setError(null);
-    const res = await fetch("/api/vpn/peers", {
+    const res = await platformFetch("/api/vpn/peers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ label: label.trim() || "Устройство" }),
@@ -73,7 +74,7 @@ export function VpnClient() {
     setError(null);
     setBusyPeerId(peerId);
     try {
-      const res = await fetch(`/api/vpn/peers/${peerId}`, { method: "DELETE" });
+      const res = await platformFetch(`/api/vpn/peers/${peerId}`, { method: "DELETE" });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
         setError(data.error ?? "Не удалось отключить");
@@ -94,7 +95,7 @@ export function VpnClient() {
   async function handleDownload(peerId: string) {
     setMsg(null);
     setError(null);
-    const res = await fetch(`/api/vpn/peers/${peerId}/config`);
+    const res = await platformFetch(`/api/vpn/peers/${peerId}/config`);
     const data = (await res.json()) as { config?: string; filename?: string; error?: string };
     if (!res.ok || !data.config) {
       setError(data.error ?? "Не удалось получить конфиг");
@@ -120,7 +121,7 @@ export function VpnClient() {
     }
     setMsg(null);
     setError(null);
-    const res = await fetch(`/api/vpn/peers/${peerId}/qr`);
+    const res = await platformFetch(`/api/vpn/peers/${peerId}/qr`);
     const data = (await res.json()) as { qrDataUrl?: string; error?: string };
     if (!res.ok || !data.qrDataUrl) {
       setError(data.error ?? "Не удалось создать QR");
@@ -130,7 +131,7 @@ export function VpnClient() {
   }
 
   async function handleCopyConfig(peerId: string) {
-    const res = await fetch(`/api/vpn/peers/${peerId}/config`);
+    const res = await platformFetch(`/api/vpn/peers/${peerId}/config`);
     const data = (await res.json()) as { config?: string; error?: string };
     if (!res.ok || !data.config) {
       setError(data.error ?? "Не удалось скопировать");

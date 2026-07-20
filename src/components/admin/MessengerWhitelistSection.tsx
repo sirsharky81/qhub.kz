@@ -125,6 +125,35 @@ export function MessengerWhitelistSection() {
     setMsg(`PIN сброшен для ${maskPhone(entryPhone)}`);
   }
 
+  async function handleCreateVpnConfig(entryPhone: string) {
+    setMsg(null);
+    setError(null);
+    const label = window.prompt("Название устройства", "iPhone")?.trim() || "Устройство";
+    const res = await fetch("/api/admin/vpn/peers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: entryPhone, label }),
+    });
+    const data = (await res.json()) as { error?: string; config?: string; filename?: string };
+    if (!res.ok || !data.config) {
+      setError(data.error ?? "Не удалось создать конфиг");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(data.config);
+      setMsg(`Конфиг VPN для ${maskPhone(entryPhone)} скопирован в буфер — отправьте родным в мессенджер/Telegram`);
+    } catch {
+      const blob = new Blob([data.config], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename ?? "qhub-vpn.conf";
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg(`Файл VPN для ${maskPhone(entryPhone)} скачан — отправьте родным`);
+    }
+  }
+
   async function handleCopyInviteLink() {
     setMsg(null);
     setError(null);
@@ -243,6 +272,15 @@ export function MessengerWhitelistSection() {
                     }`}
                   >
                     {entry.vpnEnabled ? "VPN вкл." : "VPN выкл."}
+                  </button>
+                )}
+                {entry.status === "active" && entry.vpnEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCreateVpnConfig(entry.phone)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-violet-200 text-violet-800 hover:bg-violet-50"
+                  >
+                    Конфиг VPN
                   </button>
                 )}
                 <button

@@ -35,8 +35,9 @@ export function VpnAdminSection() {
       <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
         <h2 className="text-xs font-mono uppercase tracking-wider text-gray-500">VPN (WireGuard)</h2>
         <p className="text-xs text-gray-400 mt-1">
-          Включайте VPN для номеров в whitelist ниже. Пользователи получают конфиг на{" "}
-          <span className="font-mono">/tools/vpn</span>.
+          Включайте VPN для номеров в whitelist ниже. Если у родных не открывается{" "}
+          <span className="font-mono">/tools/vpn</span> (блокировка сети), нажмите «Конфиг VPN» и
+          отправьте файл или текст конфига вручную.
         </p>
       </div>
       <div className="p-4 space-y-2 text-sm text-gray-700">
