@@ -43,6 +43,34 @@ export function listOfflineRegions(): OfflineRegionMeta[] {
   return readMeta().sort((a, b) => b.downloadedAt - a.downloadedAt);
 }
 
+export interface OfflineStorageSummary {
+  regionCount: number;
+  placesCount: number;
+  pmtilesReadyCount: number;
+  estimatedBytes: number;
+}
+
+export function getOfflineStorageSummary(): OfflineStorageSummary {
+  const regions = listOfflineRegions();
+  return {
+    regionCount: regions.length,
+    placesCount: regions.reduce((sum, r) => sum + r.placesCount, 0),
+    pmtilesReadyCount: regions.filter((r) => r.pmtilesReady).length,
+    estimatedBytes: regions.reduce((sum, r) => sum + (r.pmtilesBytes ?? 0), 0),
+  };
+}
+
+function revokePmtilesLocalUrl(url: string | undefined): void {
+  if (!url || typeof URL === "undefined") return;
+  if (url.startsWith("blob:")) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export function getOfflineRegion(id: string): OfflineRegionMeta | null {
   return readMeta().find((r) => r.id === id) ?? null;
 }
@@ -275,6 +303,9 @@ export async function downloadRegionBundle(
 }
 
 export async function deleteOfflineRegion(id: string): Promise<void> {
+  const existing = getOfflineRegion(id);
+  revokePmtilesLocalUrl(existing?.pmtilesLocalUrl);
+
   writeMeta(readMeta().filter((r) => r.id !== id));
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(`${PLACES_PREFIX}${id}`);
@@ -303,5 +334,12 @@ export async function deleteOfflineRegion(id: string): Promise<void> {
     } catch {
       /* ignore */
     }
+  }
+}
+
+export async function deleteAllOfflineRegions(): Promise<void> {
+  const ids = listOfflineRegions().map((r) => r.id);
+  for (const id of ids) {
+    await deleteOfflineRegion(id);
   }
 }

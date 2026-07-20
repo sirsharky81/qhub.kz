@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Legacy VPS tile generation — prefer Protomaps/OpenStreetMap extract for offline bundles.
-# See: scripts/kz-maps/extract-region-pmtiles.sh
+# DEPRECATED — do not use for production offline bundles.
+# Use on-demand Protomaps extract instead: scripts/kz-maps/extract-region-pmtiles.sh
+# To remove old VPS files: scripts/kz-maps/cleanup-vps-legacy-bundles.sh
 # Docs: https://docs.protomaps.com/basemaps/downloads
 set -euo pipefail
 

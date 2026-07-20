@@ -37,8 +37,9 @@ import { getAllKzPlaces, getKzPlaceById, getKzPlacesIndex } from "@/lib/kz-maps/
 import { getAllCachedPlaces, getOfflinePmtilesUrl, listOfflineRegions } from "@/lib/kz-maps/offline-storage";
 import { fetchRoute } from "@/lib/kz-maps/route-client";
 import { snapTrackToRoads } from "@/lib/kz-maps/route-snap";
-import { isTrackSynced, syncTrackToServer } from "@/lib/kz-maps/tracks-sync";
+import { isTrackSynced, syncTrackToServer, clearTrackSync, clearAllTrackSync, deleteTrackFromServer } from "@/lib/kz-maps/tracks-sync";
 import {
+  deleteAllStoredTracks,
   deleteStoredTrack,
   listStoredTracks,
   newTrackId,
@@ -513,6 +514,55 @@ function KzMapsMapInner() {
     }
   }
 
+  async function removeTrack(track: StoredTrack) {
+    const syncedNote = isTrackSynced(track.id) ? "\n\nТрек также будет удалён из облачной синхронизации." : "";
+    const ok = window.confirm(
+      `Удалить «${track.name}» с этого устройства?${syncedNote}\n\n${formatDistance(track.distanceM)} · ${formatDuration(track.durationSec)}`,
+    );
+    if (!ok) return;
+
+    if (isTrackSynced(track.id)) {
+      await deleteTrackFromServer(track.id);
+      clearTrackSync(track.id);
+    }
+
+    deleteStoredTrack(track.id);
+    if (focusTrackId === track.id) setFocusTrackId(null);
+    trackLineCacheRef.current.delete(track.id);
+    setStoredTracks(listStoredTracks());
+    setVisibleTrackIds((s) => {
+      const next = new Set(s);
+      next.delete(track.id);
+      return next;
+    });
+    setTrackActionMsg("Трек удалён");
+  }
+
+  async function removeAllTracks() {
+    if (storedTracks.length === 0) return;
+    const syncedCount = storedTracks.filter((t) => isTrackSynced(t.id)).length;
+    const syncedNote =
+      syncedCount > 0 ? `\n\n${syncedCount} трек(ов) также будут удалены из облака.` : "";
+    const ok = window.confirm(
+      `Удалить все треки (${storedTracks.length}) с этого устройства?${syncedNote}`,
+    );
+    if (!ok) return;
+
+    for (const track of storedTracks) {
+      if (isTrackSynced(track.id)) {
+        await deleteTrackFromServer(track.id);
+      }
+    }
+
+    deleteAllStoredTracks();
+    clearAllTrackSync();
+    trackLineCacheRef.current.clear();
+    setStoredTracks([]);
+    setVisibleTrackIds(new Set());
+    setFocusTrackId(null);
+    setTrackActionMsg("Все треки удалены");
+  }
+
   const handleRouteToPlace = useCallback((place: PlacePin | KzPlace) => {
     setRouteDestId(place.id);
     setRouteDestPoint(null);
@@ -743,6 +793,21 @@ function KzMapsMapInner() {
                   </p>
                 )}
 
+                {storedTracks.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                    <p className="text-xs text-gray-600">
+                      {storedTracks.length} трек(ов) на устройстве
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void removeAllTracks()}
+                      className="text-[11px] font-semibold text-red-700"
+                    >
+                      Удалить все
+                    </button>
+                  </div>
+                )}
+
                 {trackActionMsg && (
                   <p className="text-xs text-gray-700 bg-gray-50 rounded-lg px-3 py-2">{trackActionMsg}</p>
                 )}
@@ -797,20 +862,11 @@ function KzMapsMapInner() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            deleteStoredTrack(t.id);
-                            if (focusTrackId === t.id) setFocusTrackId(null);
-                            trackLineCacheRef.current.delete(t.id);
-                            setStoredTracks(listStoredTracks());
-                            setVisibleTrackIds((s) => {
-                              const next = new Set(s);
-                              next.delete(t.id);
-                              return next;
-                            });
-                          }}
-                          className="shrink-0 text-[11px] text-red-600"
+                          onClick={() => void removeTrack(t)}
+                          className="shrink-0 rounded-md border border-red-200 px-2 py-1 text-[10px] font-semibold text-red-700"
+                          title="Удалить трек с устройства"
                         >
-                          ✕
+                          Удалить
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-x-2 gap-y-1 pl-6">
