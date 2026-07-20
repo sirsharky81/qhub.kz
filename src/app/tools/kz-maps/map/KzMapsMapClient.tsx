@@ -27,6 +27,7 @@ import {
   shareGpx,
   trackDistanceM,
   trackEndpoints,
+  trackBoundsLngLat,
   type RouteProfile,
   type RouteResult,
   type RouteSegment,
@@ -97,6 +98,8 @@ function KzMapsMapInner() {
   const routeToId = searchParams.get("routeTo") ?? undefined;
 
   const [focusPlaceId, setFocusPlaceId] = useState<string | undefined>(urlPlaceId);
+  const [focusTrackId, setFocusTrackId] = useState<string | null>(null);
+  const [focusTrackGeneration, setFocusTrackGeneration] = useState(0);
   const [region, setRegion] = useState("");
   const [category, setCategory] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
@@ -234,6 +237,13 @@ function KzMapsMapInner() {
     return lineFeatureCollection(features);
   }, [storedTracks, visibleTrackIds]);
 
+  const focusTrackBounds = useMemo(() => {
+    if (!focusTrackId) return null;
+    const track = storedTracks.find((t) => t.id === focusTrackId);
+    if (!track) return null;
+    return trackBoundsLngLat(track.gpx);
+  }, [focusTrackId, storedTracks]);
+
   const focusPlace = useCallback((id: string) => {
     setFocusPlaceId(id);
     if (typeof window !== "undefined") {
@@ -241,6 +251,13 @@ function KzMapsMapInner() {
       url.searchParams.set("place", id);
       window.history.replaceState(null, "", url);
     }
+  }, []);
+
+  const focusTrack = useCallback((id: string) => {
+    setFocusTrackId(id);
+    setFocusTrackGeneration((n) => n + 1);
+    setVisibleTrackIds((s) => new Set(s).add(id));
+    startTransition(() => setPanelTab("tracks"));
   }, []);
 
   const togglePanel = useCallback(() => {
@@ -555,6 +572,8 @@ function KzMapsMapInner() {
         <KzMapView
           places={filteredPlaces}
           focusPlaceId={focusPlaceId}
+          focusTrackBounds={focusTrackBounds}
+          focusTrackGeneration={focusTrackGeneration}
           trackLines={trackLines}
           routeLines={routeLines}
           liveTrackPoints={livePoints}
@@ -732,33 +751,56 @@ function KzMapsMapInner() {
                   {storedTracks.map((t) => (
                     <li
                       key={t.id}
-                      className="rounded-xl border border-gray-200 px-3 py-2.5 space-y-2"
+                      className={`rounded-xl border px-3 py-2.5 space-y-2 ${
+                        focusTrackId === t.id
+                          ? "border-orange-400 bg-orange-50/50"
+                          : "border-gray-200"
+                      }`}
                     >
-                      <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                      <div className="flex items-center gap-2 min-w-0">
                         <input
                           type="checkbox"
                           checked={visibleTrackIds.has(t.id)}
                           onChange={(e) => {
+                            const checked = e.target.checked;
                             setVisibleTrackIds((s) => {
                               const next = new Set(s);
-                              if (e.target.checked) next.add(t.id);
+                              if (checked) next.add(t.id);
                               else next.delete(t.id);
                               return next;
                             });
+                            if (checked) {
+                              focusTrack(t.id);
+                            } else if (focusTrackId === t.id) {
+                              setFocusTrackId(null);
+                            }
                           }}
                           className="shrink-0"
+                          aria-label={`Показать ${t.name} на карте`}
                         />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{t.name}</p>
+                        <button
+                          type="button"
+                          onClick={() => focusTrack(t.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <p
+                            className={`text-sm font-medium truncate ${
+                              focusTrackId === t.id ? "text-orange-900" : ""
+                            }`}
+                          >
+                            {t.name}
+                          </p>
                           <p className="text-[11px] text-gray-500">
                             {formatDistance(t.distanceM)} · {formatDuration(t.durationSec)}
                             {isTrackSynced(t.id) ? " · ☁" : ""}
                           </p>
-                        </div>
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
                             deleteStoredTrack(t.id);
+                            if (focusTrackId === t.id) setFocusTrackId(null);
+                            trackLineCacheRef.current.delete(t.id);
                             setStoredTracks(listStoredTracks());
                             setVisibleTrackIds((s) => {
                               const next = new Set(s);
@@ -770,7 +812,7 @@ function KzMapsMapInner() {
                         >
                           ✕
                         </button>
-                      </label>
+                      </div>
                       <div className="flex flex-wrap gap-x-2 gap-y-1 pl-6">
                       <button
                         type="button"

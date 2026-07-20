@@ -180,6 +180,32 @@ export function trackEndpoints(
   }
 }
 
+/** SW and NE corners for fitBounds, or null if GPX is invalid/empty. */
+export function trackBoundsLngLat(
+  gpx: string,
+): [[number, number], [number, number]] | null {
+  try {
+    const { points } = parseGpx(gpx);
+    if (points.length === 0) return null;
+    let minLng = points[0]!.lng;
+    let maxLng = points[0]!.lng;
+    let minLat = points[0]!.lat;
+    let maxLat = points[0]!.lat;
+    for (const p of points) {
+      minLng = Math.min(minLng, p.lng);
+      maxLng = Math.max(maxLng, p.lng);
+      minLat = Math.min(minLat, p.lat);
+      maxLat = Math.max(maxLat, p.lat);
+    }
+    return [
+      [minLng, minLat],
+      [maxLng, maxLat],
+    ];
+  } catch {
+    return null;
+  }
+}
+
 export function pointsToLineGeoJson(
   points: TrackPoint[],
   props: Record<string, string | number> = {},

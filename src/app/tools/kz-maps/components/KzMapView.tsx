@@ -72,6 +72,8 @@ export interface PlacePin {
 interface Props {
   places: KzPlace[];
   focusPlaceId?: string;
+  focusTrackBounds?: [[number, number], [number, number]] | null;
+  focusTrackGeneration?: number;
   className?: string;
   trackLines?: GeoJSON.FeatureCollection<GeoJSON.LineString>;
   routeLines?: GeoJSON.FeatureCollection<GeoJSON.LineString> | null;
@@ -86,6 +88,8 @@ interface Props {
 function KzMapViewInner({
   places,
   focusPlaceId,
+  focusTrackBounds = null,
+  focusTrackGeneration = 0,
   className = "",
   trackLines,
   routeLines,
@@ -448,6 +452,13 @@ function KzMapViewInner({
     if (!focus) return;
     map.flyTo({ center: [focus.lng, focus.lat], zoom: KZ_MAP_PLACE_ZOOM, duration: 800 });
   }, [focusPlaceId, places, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !focusTrackBounds || focusTrackGeneration === 0) return;
+    const bounds = new maplibregl.LngLatBounds(focusTrackBounds[0], focusTrackBounds[1]);
+    map.fitBounds(bounds, { padding: 72, maxZoom: 14, duration: 800 });
+  }, [focusTrackBounds, focusTrackGeneration, ready]);
 
   return (
     <div className={`relative h-full w-full ${className}`}>
