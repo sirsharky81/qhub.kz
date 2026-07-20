@@ -16,6 +16,11 @@ import { getKzRegionBundle } from "@/lib/kz-maps/regions";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+const PMTILES_BIN =
+  process.env.PMTILES_CLI_PATH?.trim() ||
+  process.env.KZ_MAPS_PMTILES_CLI?.trim() ||
+  "pmtiles";
+
 function runPmtilesExtract(
   planetUrl: string,
   outputPath: string,
@@ -23,7 +28,7 @@ function runPmtilesExtract(
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      "pmtiles",
+      PMTILES_BIN,
       [
         "extract",
         planetUrl,
@@ -118,12 +123,14 @@ export async function GET(
     await rm(tmpDir, { recursive: true, force: true });
     const message = e instanceof Error ? e.message : "extract_error";
     const missingCli =
-      message.includes("ENOENT") || message.includes("spawn pmtiles");
+      message.includes("ENOENT") ||
+      message.includes("spawn pmtiles") ||
+      message.includes(`spawn ${PMTILES_BIN}`);
     return extractErrorResponse(request, {
       error: missingCli ? "pmtiles_cli_missing" : "extract_error",
       message: missingCli
-        ? "Установите pmtiles CLI: https://docs.protomaps.com/pmtiles/cli"
-        : message,
+        ? "Сервис подготовки офлайн-карт временно недоступен. Попробуйте позже."
+        : "Не удалось подготовить офлайн-карту региона. Попробуйте позже.",
       source: PROTOMAPS_PLANET_URL,
       bbox: bboxArg,
       attribution: PROTOMAPS_ATTRIBUTION_HTML,

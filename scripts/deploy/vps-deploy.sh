@@ -12,6 +12,11 @@ echo "==> Fetching origin/$BRANCH"
 git fetch origin "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
+if [ -f scripts/kz-maps/install-pmtiles-cli.sh ]; then
+  echo "==> Ensuring pmtiles CLI (offline map extracts)"
+  bash scripts/kz-maps/install-pmtiles-cli.sh || echo "==> Warning: pmtiles CLI install failed"
+fi
+
 echo "==> Installing dependencies"
 npm ci
 

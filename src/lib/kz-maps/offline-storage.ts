@@ -155,7 +155,12 @@ async function downloadPmtilesBrowser(
   if (!res.ok) {
     const ct = res.headers.get("content-type") ?? "";
     if (ct.includes("json")) {
-      const data = (await res.json()) as { message?: string };
+      const data = (await res.json()) as { error?: string; message?: string };
+      if (data.error === "pmtiles_cli_missing") {
+        throw new Error(
+          "Сервис подготовки офлайн-карт временно недоступен. Попробуйте через несколько минут.",
+        );
+      }
       throw new Error(data.message ?? `Ошибка загрузки карты (${res.status})`);
     }
     return null;

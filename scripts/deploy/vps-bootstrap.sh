@@ -27,6 +27,9 @@ else
 fi
 
 cd "$APP_DIR"
+if [ -f scripts/kz-maps/install-pmtiles-cli.sh ]; then
+  bash scripts/kz-maps/install-pmtiles-cli.sh || true
+fi
 npm ci
 npm run build
 
