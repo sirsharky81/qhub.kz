@@ -7,7 +7,7 @@ PMTILES_VERSION="${PMTILES_VERSION:-1.31.1}"
 INSTALL_DIR="${PMTILES_INSTALL_DIR:-/usr/local/bin}"
 
 if command -v pmtiles >/dev/null 2>&1; then
-  echo "pmtiles already installed: $(pmtiles --version 2>&1 || echo ok)"
+  echo "pmtiles already installed ($(command -v pmtiles))"
   exit 0
 fi
 
@@ -36,4 +36,3 @@ fi
 
 install -m 755 "$TMP/pmtiles" "$INSTALL_DIR/pmtiles"
 echo "Installed pmtiles -> $INSTALL_DIR/pmtiles"
-pmtiles --version
