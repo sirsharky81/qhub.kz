@@ -17,6 +17,16 @@ if [ -f scripts/kz-maps/install-pmtiles-cli.sh ]; then
   bash scripts/kz-maps/install-pmtiles-cli.sh || echo "==> Warning: pmtiles CLI install failed"
 fi
 
+if [ -f scripts/deploy/vpn-bootstrap.sh ]; then
+  if ! command -v wg >/dev/null 2>&1; then
+    echo "==> Installing WireGuard VPN (first deploy)"
+    bash scripts/deploy/vpn-bootstrap.sh || echo "==> Warning: VPN bootstrap failed"
+  elif [ -f .env.production ] && ! grep -q '^VPN_ENABLED=1' .env.production 2>/dev/null; then
+    echo "==> Enabling WireGuard VPN in .env.production"
+    bash scripts/deploy/vpn-bootstrap.sh || echo "==> Warning: VPN bootstrap failed"
+  fi
+fi
+
 echo "==> Installing dependencies"
 npm ci
 
