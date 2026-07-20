@@ -1,0 +1,124 @@
+#!/usr/bin/env node
+/**
+ * Sync active VPN peers from Redis into WireGuard interface.
+ * Run on VPS as root (or via sudo): node --env-file=.env.production scripts/vpn/wg-sync.mjs
+ */
+import { readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
+import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import Redis from "ioredis";
+
+const REDIS_VPN_PEERS_KEY = "qhub:vpn:peers";
+const WG_INTERFACE = process.env.VPN_INTERFACE || "wg0";
+const WG_CONF = process.env.VPN_WG_CONF || `/etc/wireguard/${WG_INTERFACE}.conf`;
+const SERVER_PRIVATE_KEY_FILE =
+  process.env.VPN_SERVER_PRIVATE_KEY_FILE || `/etc/wireguard/${WG_INTERFACE}.server.key`;
+
+function loadEnvFile(relativePath) {
+  const path = resolve(process.cwd(), relativePath);
+  if (!existsSync(path)) return;
+  const content = readFileSync(path, "utf8");
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+if (!process.env.REDIS_URL) {
+  loadEnvFile(".env.production");
+  loadEnvFile(".env.local");
+  loadEnvFile(".env");
+}
+
+function detectPublicInterface() {
+  if (process.env.VPN_PUBLIC_INTERFACE) return process.env.VPN_PUBLIC_INTERFACE;
+  try {
+    const out = execFileSync("ip", ["route", "get", "1.1.1.1"], { encoding: "utf8" });
+    const match = out.match(/\bdev\s+(\S+)/);
+    return match?.[1] ?? "eth0";
+  } catch {
+    return "eth0";
+  }
+}
+
+function readServerPrivateKey() {
+  if (process.env.VPN_SERVER_PRIVATE_KEY) return process.env.VPN_SERVER_PRIVATE_KEY.trim();
+  if (existsSync(SERVER_PRIVATE_KEY_FILE)) {
+    return readFileSync(SERVER_PRIVATE_KEY_FILE, "utf8").trim();
+  }
+  throw new Error(`Server private key not found (${SERVER_PRIVATE_KEY_FILE})`);
+}
+
+function buildServerConfig(activePeers, serverPrivateKey, publicInterface) {
+  const listenPort = process.env.VPN_LISTEN_PORT || "51820";
+  const lines = [
+    "[Interface]",
+    `Address = ${process.env.VPN_SERVER_ADDRESS || "10.8.0.1/24"}`,
+    `ListenPort = ${listenPort}`,
+    `PrivateKey = ${serverPrivateKey}`,
+    `PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o ${publicInterface} -j MASQUERADE`,
+    `PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o ${publicInterface} -j MASQUERADE`,
+    "",
+  ];
+
+  for (const peer of activePeers) {
+    lines.push("[Peer]");
+    lines.push(`PublicKey = ${peer.publicKey}`);
+    lines.push(`AllowedIPs = ${peer.address}/32`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+async function main() {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    console.error("[vpn-sync] REDIS_URL is required");
+    process.exit(1);
+  }
+
+  const redis = new Redis(redisUrl, { maxRetriesPerRequest: 2, lazyConnect: true });
+  await redis.connect();
+
+  let index = {};
+  try {
+    const raw = await redis.get(REDIS_VPN_PEERS_KEY);
+    index = raw ? JSON.parse(raw) : {};
+  } finally {
+    await redis.quit();
+  }
+
+  const activePeers = Object.values(index).filter((peer) => peer?.status === "active");
+  const serverPrivateKey = readServerPrivateKey();
+  const publicInterface = detectPublicInterface();
+  const config = buildServerConfig(activePeers, serverPrivateKey, publicInterface);
+
+  writeFileSync(WG_CONF, config, { mode: 0o600 });
+  chmodSync(WG_CONF, 0o600);
+
+  try {
+    execFileSync("wg-quick", ["down", WG_INTERFACE], { stdio: "ignore" });
+  } catch {
+    // interface may not exist yet
+  }
+  execFileSync("wg-quick", ["up", WG_INTERFACE], { stdio: "inherit" });
+
+  console.log(`[vpn-sync] ${activePeers.length} active peer(s) synced to ${WG_INTERFACE}`);
+}
+
+main().catch((error) => {
+  console.error("[vpn-sync] failed:", error);
+  process.exit(1);
+});

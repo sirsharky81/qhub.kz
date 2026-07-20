@@ -17,7 +17,9 @@ interface CatalogBootstrapProps {
 }
 
 export function CatalogBootstrap({ children }: CatalogBootstrapProps) {
-  const [visibleApps, setVisibleApps] = useState<App[]>(apps);
+  const [visibleApps, setVisibleApps] = useState<App[]>(() =>
+    apps.filter((app) => app.gatedBy !== "vpn"),
+  );
   const [isAdmin, setIsAdmin] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);

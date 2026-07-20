@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/admin/session";
 import { getAdminEmail } from "@/lib/admin/session";
 import { isValidKzPhone, normalizeKzPhone } from "@/lib/messenger/phone";
-import { loadWhitelist, resetAuthPin, saveWhitelist } from "@/lib/messenger/store";
+import { loadWhitelist, saveWhitelist } from "@/lib/messenger/store";
 import type { WhitelistEntry, WhitelistStatus } from "@/lib/messenger/types";
+import { revokeAllPeersForPhone } from "@/lib/vpn/store";
+import { triggerVpnSync } from "@/lib/vpn/sync";
 
 async function requireAdmin(): Promise<NextResponse | null> {
   const ok = await isAdminAuthenticated();
@@ -24,7 +26,7 @@ export async function PATCH(request: Request) {
   const denied = await requireAdmin();
   if (denied) return denied;
 
-  let body: { phone?: string; status?: WhitelistStatus };
+  let body: { phone?: string; status?: WhitelistStatus; vpnEnabled?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -43,8 +45,10 @@ export async function PATCH(request: Request) {
     if (!existing) {
       return NextResponse.json({ error: "Номер не найден" }, { status: 404 });
     }
-    whitelist[phone] = { ...existing, status: "revoked" };
+    whitelist[phone] = { ...existing, status: "revoked", vpnEnabled: false };
     await saveWhitelist(whitelist);
+    await revokeAllPeersForPhone(phone);
+    void triggerVpnSync();
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
   }
 
@@ -56,6 +60,23 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Используйте POST для добавления" }, { status: 400 });
     }
     await saveWhitelist(whitelist);
+    return NextResponse.json({ ok: true, entry: whitelist[phone] });
+  }
+
+  if (typeof body.vpnEnabled === "boolean") {
+    const existing = whitelist[phone];
+    if (!existing) {
+      return NextResponse.json({ error: "Номер не найден" }, { status: 404 });
+    }
+    if (existing.status !== "active") {
+      return NextResponse.json({ error: "Сначала активируйте номер в whitelist" }, { status: 400 });
+    }
+    whitelist[phone] = { ...existing, vpnEnabled: body.vpnEnabled };
+    await saveWhitelist(whitelist);
+    if (!body.vpnEnabled) {
+      await revokeAllPeersForPhone(phone);
+      void triggerVpnSync();
+    }
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
   }
 
