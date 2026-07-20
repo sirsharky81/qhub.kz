@@ -124,7 +124,14 @@ async function downloadPmtilesBrowser(
   onProgress: (percent: number) => void,
 ): Promise<string | null> {
   const res = await fetch(url);
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("json")) {
+      const data = (await res.json()) as { message?: string };
+      throw new Error(data.message ?? `Ошибка загрузки карты (${res.status})`);
+    }
+    return null;
+  }
 
   const total = Number(res.headers.get("content-length") ?? 0);
   const reader = res.body?.getReader();
@@ -242,8 +249,8 @@ export async function downloadRegionBundle(
         pmtilesLocalUrl = localUrl;
         pmtilesReady = true;
       }
-    } catch {
-      /* PMTiles optional until hosted on VPS */
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("Не удалось загрузить карту региона");
     }
   }
 
@@ -263,7 +270,7 @@ export async function downloadRegionBundle(
     percent: 100,
     message: pmtilesReady
       ? "Регион готов к офлайн-использованию"
-      : "Места сохранены (карта будет доступна после публикации на сервере)",
+      : "Места сохранены. Карта не загрузилась — проверьте pmtiles CLI на сервере или повторите позже.",
   });
 }
 

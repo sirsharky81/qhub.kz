@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { KzMapRegionBundle } from "@/lib/kz-maps/types";
 import { formatBytes } from "@/lib/kz-maps/regions";
 import {
+  PROTOMAPS_ATTRIBUTION_HTML,
+  PROTOMAPS_LICENSE_NOTE,
+} from "@/lib/kz-maps/offline-map-source";
+import {
   deleteOfflineRegion,
   downloadRegionBundle,
   listOfflineRegions,
@@ -62,8 +66,17 @@ export function KzMapsDownloadClient() {
       </header>
 
       <main className="flex-1 overflow-y-auto mx-auto max-w-lg w-full p-4 space-y-4 pb-8">
-        <section className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900 leading-relaxed">
-          Места региона сохраняются локально сразу. Файлы карт (PMTiles) появятся после публикации на сервере qhub.kz.
+        <section className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900 leading-relaxed space-y-2">
+          <p>
+            Карта региона вырезается из открытого архива{" "}
+            <strong>Protomaps / OpenStreetMap</strong> (лицензия ODbL) — не с собственного tile-сервера
+            qhub.kz.
+          </p>
+          <p>
+            На карте обязательна attribution:{" "}
+            <span dangerouslySetInnerHTML={{ __html: PROTOMAPS_ATTRIBUTION_HTML }} />.
+          </p>
+          <p className="text-sky-800">{PROTOMAPS_LICENSE_NOTE}</p>
         </section>
 
         {error && (
@@ -93,11 +106,12 @@ export function KzMapsDownloadClient() {
                     <p className="text-xs text-gray-500 mt-0.5">
                       {b.placesCount} мест
                       {b.pmtilesBytes ? ` · ~${formatBytes(b.pmtilesBytes)} карта` : ""}
+                      {b.mapDataSource ? ` · ${b.mapDataSource}` : ""}
                     </p>
                     {local && (
                       <p className="text-[11px] text-emerald-700 mt-1">
                         Скачано · мест: {local.placesCount}
-                        {local.pmtilesReady ? " · карта ✓" : " · карта ожидает сервер"}
+                        {local.pmtilesReady ? " · карта ✓" : " · карта не загружена"}
                       </p>
                     )}
                   </div>
