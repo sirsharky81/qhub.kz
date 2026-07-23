@@ -303,6 +303,58 @@ def check_site() -> dict:
         return fail("Site HTTPS", str(exc))
 
 
+def check_mail() -> list[dict]:
+    """Self-hosted mail (docker-mailserver) — optional until mail-bootstrap.sh is run."""
+    mail_dir = Path("/opt/mailserver")
+    results: list[dict] = []
+
+    try:
+        ps = subprocess.run(
+            ["docker", "ps", "--filter", "name=^mailserver$", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        if ps.returncode != 0 or "mailserver" not in ps.stdout:
+            return [skip("Mailserver container", "mailserver not running (see docs/mail.md)")]
+        results.append(ok("Mailserver container", "docker mailserver up"))
+    except FileNotFoundError:
+        return [skip("Mailserver container", "docker not installed")]
+
+    for port, label in [(25, "SMTP"), (587, "Submission"), (993, "IMAPS")]:
+        try:
+            ss = subprocess.run(["ss", "-tln"], capture_output=True, text=True, timeout=5, check=False)
+            if f":{port} " in ss.stdout:
+                results.append(ok(f"Mail {label}", f"TCP {port} listening"))
+            else:
+                results.append(fail(f"Mail {label}", f"TCP {port} not listening"))
+        except Exception as exc:
+            results.append(fail(f"Mail {label}", str(exc)))
+
+    try:
+        mx = subprocess.run(["dig", "+short", "MX", "qhub.kz"], capture_output=True, text=True, timeout=8, check=False)
+        mx_lines = [line.strip() for line in mx.stdout.splitlines() if line.strip()]
+        if not mx_lines:
+            results.append(fail("Mail MX DNS", "no MX for qhub.kz"))
+        elif any("mail.qhub.kz" in line for line in mx_lines):
+            results.append(ok("Mail MX DNS", mx_lines[0]))
+        else:
+            results.append(fail("Mail MX DNS", f"unexpected: {mx_lines[0]}"))
+    except FileNotFoundError:
+        results.append(skip("Mail MX DNS", "dig not installed"))
+    except Exception as exc:
+        results.append(fail("Mail MX DNS", str(exc)))
+
+    dkim = mail_dir / "docker-data/dms/config/opendkim/keys/qhub.kz/mail.txt"
+    if dkim.is_file():
+        results.append(ok("Mail DKIM key", "mail._domainkey generated on server"))
+    else:
+        results.append(skip("Mail DKIM key", "run mail-bootstrap.sh or setup config dkim"))
+
+    return results
+
+
 def check_wireguard(env: dict[str, str]) -> dict:
     if env.get("VPN_ENABLED", "").strip() not in ("1", "true", "TRUE"):
         return skip("WireGuard VPN", "VPN_ENABLED is off")
@@ -340,6 +392,7 @@ def main() -> int:
         check_firebase(env),
         check_turn(env),
         check_wireguard(env),
+        *check_mail(),
         *check_secrets(env),
     ]
     passed = sum(1 for r in results if r["status"] == "ok")
