@@ -365,6 +365,8 @@ grep '^VPN_' /var/www/qhub.kz/.env.production
 | `scripts/vpn/wg-sync.mjs` | Синхронизация VPN peers Redis → wg0 |
 | `docs/vpn.md` | Настройка и выдача доступа пользователям |
 | `scripts/deploy/vps-health-check.py` | Проверка интеграций на сервере |
+| `scripts/deploy/mail-bootstrap.sh` | Корпоративная почта `@qhub.kz` (docker-mailserver) |
+| `docs/mail.md` | Runbook: DNS Ps.kz, DKIM, Hilton, откат |
 | `scripts/migrate-upstash-to-redis.mjs` | Перенос ключей Upstash → VPS Redis |
 | `src/lib/redis/` | Выбор бэкенда и команды Redis |
 | `scripts/realtime/ws-server.mjs` | Messenger WebSocket server |
