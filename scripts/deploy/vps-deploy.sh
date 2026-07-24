@@ -27,6 +27,15 @@ if [ -f scripts/deploy/vpn-bootstrap.sh ]; then
   fi
 fi
 
+if [ -f scripts/deploy/mail-bootstrap.sh ]; then
+  if ! command -v postfix >/dev/null 2>&1; then
+    echo "==> Installing mail stack (first deploy)"
+    bash scripts/deploy/mail-bootstrap.sh || echo "==> Warning: mail bootstrap failed"
+  elif [ -f .env.production ] && ! grep -q '^MAIL_ENABLED=1' .env.production 2>/dev/null; then
+    echo "==> Mail stack present; set MAIL_ENABLED=1 in .env.production after DNS/TLS"
+  fi
+fi
+
 echo "==> Installing dependencies"
 npm ci
 

@@ -24,6 +24,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:family-loc-req-notify": { requests: 1, window: "45 s" },
   "qhub:family-loc-req-silent": { requests: 1, window: "10 s" },
   "qhub:kz-maps-suggest": { requests: 5, window: "15 m" },
+  "qhub:mail-passwd": { requests: 10, window: "1 h" },
 };
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;

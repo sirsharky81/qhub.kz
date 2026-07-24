@@ -325,6 +325,25 @@ def check_wireguard(env: dict[str, str]) -> dict:
         return fail("WireGuard VPN", str(exc))
 
 
+def check_mail(env: dict[str, str]) -> dict:
+    if env.get("MAIL_ENABLED", "").strip() not in ("1", "true", "TRUE"):
+        return skip("Mail", "MAIL_ENABLED is off")
+
+    try:
+        postfix = subprocess.run(["systemctl", "is-active", "postfix"], capture_output=True, text=True, timeout=5, check=False)
+        dovecot = subprocess.run(["systemctl", "is-active", "dovecot"], capture_output=True, text=True, timeout=5, check=False)
+        dkim = subprocess.run(["systemctl", "is-active", "opendkim"], capture_output=True, text=True, timeout=5, check=False)
+        if postfix.stdout.strip() != "active":
+            return fail("Mail", "postfix is not active")
+        if dovecot.stdout.strip() != "active":
+            return fail("Mail", "dovecot is not active")
+        if dkim.stdout.strip() != "active":
+            return fail("Mail", "opendkim is not active")
+        return ok("Mail", "postfix, dovecot, opendkim active")
+    except Exception as exc:
+        return fail("Mail", str(exc))
+
+
 def main() -> int:
     if not ENV_PATH.exists():
         print(json.dumps({"error": "env file missing"}, ensure_ascii=False))
@@ -340,6 +359,7 @@ def main() -> int:
         check_firebase(env),
         check_turn(env),
         check_wireguard(env),
+        check_mail(env),
         *check_secrets(env),
     ]
     passed = sum(1 for r in results if r["status"] == "ok")
