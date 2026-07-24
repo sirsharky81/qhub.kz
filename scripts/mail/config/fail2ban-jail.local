@@ -19,11 +19,3 @@ filter = dovecot
 logpath = /var/log/mail.log
 maxretry = 3
 bantime = 2h
-
-[postfix]
-enabled = true
-port = smtp,465,submission
-filter = postfix[mode=auth]
-logpath = /var/log/mail.log
-maxretry = 5
-bantime = 1h
