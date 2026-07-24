@@ -367,6 +367,9 @@ grep '^VPN_' /var/www/qhub.kz/.env.production
 | Сервер | `mail.qhub.kz` |
 | IMAP | `:993` (SSL) |
 | SMTP | `:587` (STARTTLS) |
+| Антиспам | Rspamd (Spamhaus RBL, Bayes, SPF/DMARC check) |
+| Защита | Fail2Ban (Postfix SASL + Dovecot) |
+| Квота | 1G/ящик по умолчанию (`MAIL_DEFAULT_QUOTA`) |
 | Ящики | `/var/mail/vhosts/qhub.kz/` |
 | Админка | Messenger → «Почта @qhub.kz» |
 | Смена пароля | `/tools/mail/password` |

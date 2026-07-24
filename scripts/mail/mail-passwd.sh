@@ -54,9 +54,8 @@ if [ "$VERIFY" -eq 1 ]; then
 fi
 
 HASH="$(mail_hash_password "$NEW")"
-EXISTING="$(grep -i "^${EMAIL}:" "$DOVECOT_USERS" | head -n1)"
-HOME_DIR="$(printf '%s' "$EXISTING" | awk -F: '{print $6}')"
-mail_replace_user "$EMAIL" "$(printf '%s:%s:%s:%s::%s:\n' "$EMAIL" "$HASH" "$VMUID" "$VMGID" "$HOME_DIR")"
+mail_parse_user_fields "$EMAIL"
+mail_replace_user "$EMAIL" "$(mail_user_line "$EMAIL" "$HASH" "$QUOTA")"
 systemctl reload dovecot
 
 echo "Password updated for $EMAIL"

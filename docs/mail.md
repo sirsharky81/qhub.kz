@@ -1,25 +1,28 @@
 # QHub Mail (@qhub.kz)
 
-Self-hosted почта на том же VPS, что и **qhub.kz**: Postfix (SMTP), Dovecot (IMAP), OpenDKIM (подпись исходящих писем).
+Self-hosted почта на том же VPS, что и **qhub.kz**.
+
+**Стек:** Postfix (SMTP) + Dovecot (IMAP) + OpenDKIM (подпись) + **Rspamd** (антиспам с первого дня) + **Fail2Ban** + **квоты** на ящик.
 
 ---
 
 ## Как это работает
 
 ```
-Пользователь (Gmail app, Apple Mail, Thunderbird, …)
+Клиент (Thunderbird, Apple Mail, …)
         │
         ├── IMAP 993  ──► Dovecot ──► /var/mail/vhosts/qhub.kz/user/
         │
-        └── SMTP 587  ──► Postfix ──► интернет (+ OpenDKIM)
+        └── SMTP 587  ──► Postfix ──► Rspamd ──► OpenDKIM ──► интернет
 
-Админ создаёт ящик:
-  Админка → Messenger → «Почта @qhub.kz»
-  или SSH: scripts/mail/mail-add.sh
+Входящая почта (порт 25):
+  Postfix → Rspamd (Spamhaus RBL, SPF/DMARC check, Bayes) → Dovecot LMTP
 
-Пользователь меняет пароль:
-  https://www.qhub.kz/tools/mail/password
-  или SSH: scripts/mail/mail-passwd.sh --verify …
+Исходящая (порт 587, auth):
+  Postfix → Rspamd → OpenDKIM (подпись) → интернет
+
+Brute-force:
+  Fail2Ban следит за /var/log/mail.log (Postfix SASL + Dovecot auth)
 ```
 
 **Домен:** `@qhub.kz`  
@@ -36,46 +39,125 @@ git pull origin main
 bash scripts/deploy/mail-bootstrap.sh
 ```
 
-Скрипт:
-- ставит Postfix, Dovecot, OpenDKIM;
-- создаёт виртуальные ящики в `/var/mail/vhosts/qhub.kz/`;
-- открывает порты 25, 587, 993 в UFW;
-- дописывает переменные в `.env.production`.
-
-После установки нужен TLS-сертификат для `mail.qhub.kz`:
-
-```bash
-certbot certonly --standalone -d mail.qhub.kz \
-  --pre-hook 'systemctl stop postfix dovecot' \
-  --post-hook 'systemctl start postfix dovecot opendkim'
-systemctl restart postfix dovecot opendkim
-pm2 restart qhub
-```
-
-При следующих деплоях `vps-deploy.sh` проверит, установлена ли почта, и при необходимости запустит bootstrap.
+Скрипт ставит Postfix, Dovecot, OpenDKIM, **Rspamd**, **Fail2Ban**, квоты Dovecot (по умолчанию **1G**/ящик), открывает порты 25/587/993.
 
 ---
 
-## DNS (обязательно до приёма писем)
+## DNS + PTR — обязательно до отправки почты
+
+### 1. DNS-записи (регистратор / Cloudflare)
+
+Bootstrap выведет точные значения. Шаблон:
 
 | Запись | Тип | Значение |
 |--------|-----|----------|
 | `mail.qhub.kz` | A | `65.108.215.248` |
 | `qhub.kz` | MX | `10 mail.qhub.kz.` |
-| `qhub.kz` | TXT | `v=spf1 mx a:mail.qhub.kz ~all` |
-| `default._domainkey.qhub.kz` | TXT | из вывода `mail-bootstrap.sh` |
-| `_dmarc.qhub.kz` | TXT | `v=DMARC1; p=quarantine; rua=mailto:postmaster@qhub.kz` |
+| `qhub.kz` | TXT (SPF) | `v=spf1 mx a:mail.qhub.kz ip4:65.108.215.248 -all` |
+| `default._domainkey.qhub.kz` | TXT | из вывода bootstrap (DKIM) |
+| `_dmarc.qhub.kz` | TXT | `v=DMARC1; p=quarantine; adkim=s; aspf=s; rua=mailto:postmaster@qhub.kz; pct=100` |
 
-Проверка DKIM после отправки тестового письма: заголовок `DKIM-Signature` и [mail-tester.com](https://www.mail-tester.com).
+**SPF `-all`** — жёсткий запрет отправки не с нашего сервера.  
+**DMARC `p=quarantine`** — письма без DKIM/SPF попадают в спам у получателя.
+
+### 2. PTR / reverse DNS (Hetzner)
+
+**Без PTR Gmail и Yandex часто отклоняют исходящую почту.**
+
+Hetzner Cloud → ваш сервер → **Networking** → Primary IP → **Reverse DNS (rDNS)**:
+
+```
+65.108.215.248  →  mail.qhub.kz
+```
+
+### 3. Проверка
+
+```bash
+bash /var/www/qhub.kz/scripts/mail/mail-dns-check.sh
+```
+
+Скрипт проверяет MX, A, SPF, DKIM, DMARC, PTR и выводит OK/WARN/FAIL.
 
 ---
 
-## Hetzner: порт 25
+## TLS-сертификат
 
-Hetzner иногда **блокирует исходящий SMTP на порт 25** для новых серверов. Симптом: входящая почта работает, исходящая — нет.
+После A-записи `mail.qhub.kz`:
 
-1. Hetzner Cloud → Support → запрос на разблокировку порта 25 для VPS.
-2. В облачном **Firewall** Hetzner открыть TCP 25, 587, 993 (UFW на VPS недостаточно, если есть cloud firewall).
+```bash
+certbot certonly --standalone -d mail.qhub.kz \
+  --pre-hook 'systemctl stop postfix dovecot rspamd' \
+  --post-hook 'systemctl start postfix dovecot opendkim rspamd fail2ban'
+systemctl restart postfix dovecot opendkim rspamd fail2ban
+```
+
+В `.env.production`: `MAIL_ENABLED=1` → `pm2 restart qhub`.
+
+---
+
+## Rspamd (антиспам)
+
+Устанавливается **сразу**, не «на потом».
+
+| Что делает | Как |
+|------------|-----|
+| RBL (Spamhaus ZEN) | Блокирует IP из чёрных списков на входе |
+| SPF / DKIM / DMARC | Проверяет входящие письма |
+| Bayes | Обучается на спам/хам (автоматически) |
+| Порог reject | Score ≥ 15 → отклонить |
+| Порог заголовка | Score ≥ 6 → `X-Spam: Yes` |
+
+Проверка:
+
+```bash
+systemctl status rspamd
+rspamc stat
+tail -f /var/log/mail.log | grep -i rspamd
+```
+
+**Важно:** если IP уже в Spamhaus (например, из-за старых арендаторов Hetzner), входящая/исходящая почта может страдать. Проверить: [check.spamhaus.org](https://check.spamhaus.org).
+
+---
+
+## Fail2Ban
+
+Защита от перебора паролей IMAP/SMTP:
+
+| Jail | Что блокирует |
+|------|---------------|
+| `postfix-sasl` | Brute-force SMTP auth |
+| `dovecot` | Brute-force IMAP auth |
+
+```bash
+fail2ban-client status
+fail2ban-client status dovecot
+fail2ban-client status postfix-sasl
+```
+
+Бан: 2 часа после 3 неудачных попыток за 10 минут.
+
+---
+
+## Квоты
+
+По умолчанию: **1G на ящик** (`MAIL_DEFAULT_QUOTA=1G`).
+
+```bash
+# Изменить квоту
+bash /var/www/qhub.kz/scripts/mail/mail-quota.sh user@qhub.kz 2G
+
+# Посмотреть использование (на сервере)
+doveadm quota get -u user@qhub.kz
+```
+
+Новые ящики получают квоту из `MAIL_DEFAULT_QUOTA` автоматически.
+
+---
+
+## Hetzner: порт 25 и firewall
+
+1. **Разблокировка порта 25** — через support Hetzner (если исходящая почта не уходит).
+2. **Cloud Firewall** — TCP 25, 587, 993 (UFW недостаточно, если есть облачный firewall).
 
 ---
 
@@ -85,59 +167,36 @@ Hetzner иногда **блокирует исходящий SMTP на порт 
 MAIL_ENABLED=1
 MAIL_DOMAIN=qhub.kz
 MAIL_HOST=mail.qhub.kz
+MAIL_VPS_IP=65.108.215.248
+MAIL_DEFAULT_QUOTA=1G
 MAIL_ADD_COMMAND=bash /var/www/qhub.kz/scripts/mail/mail-add.sh
 MAIL_PASSWD_COMMAND=bash /var/www/qhub.kz/scripts/mail/mail-passwd.sh
 MAIL_LIST_COMMAND=bash /var/www/qhub.kz/scripts/mail/mail-list.sh
 MAIL_REMOVE_COMMAND=bash /var/www/qhub.kz/scripts/mail/mail-remove.sh
+MAIL_QUOTA_COMMAND=bash /var/www/qhub.kz/scripts/mail/mail-quota.sh
+MAIL_DNS_CHECK_COMMAND=bash /var/www/qhub.kz/scripts/mail/mail-dns-check.sh
 ```
-
-`mail-bootstrap.sh` дописывает их в `.env.production` автоматически.
 
 ---
 
-## Создание нового ящика
+## Создание ящика
 
-### Через админку (рекомендуется)
+**Админка:** `/qhub-ctrl-7k2m` → Messenger → «Почта @qhub.kz»
 
-1. **https://www.qhub.kz/qhub-ctrl-7k2m** → вкладка **Messenger**
-2. Блок **«Почта @qhub.kz»** → email + начальный пароль → **Создать ящик**
-3. Отправить пользователю:
-   - адрес `user@qhub.kz`
-   - пароль
-   - ссылку на смену пароля: **https://www.qhub.kz/tools/mail/password**
-   - настройки клиента (ниже)
-
-### Через SSH
-
+**SSH:**
 ```bash
 bash /var/www/qhub.kz/scripts/mail/mail-add.sh user@qhub.kz 'InitialPassword123'
-bash /var/www/qhub.kz/scripts/mail/mail-list.sh
 ```
 
 ---
 
-## Смена пароля пользователем
+## Смена пароля
 
-### Через сайт
+**Пользователь:** https://www.qhub.kz/tools/mail/password
 
-**https://www.qhub.kz/tools/mail/password**
-
-- email `@qhub.kz`
-- текущий пароль
-- новый пароль (мин. 8 символов)
-
-Rate limit: 10 попыток в час с одного IP.
-
-### Через SSH (админ, без текущего пароля)
-
+**Админ (сброс):**
 ```bash
 bash /var/www/qhub.kz/scripts/mail/mail-passwd.sh user@qhub.kz 'NewPassword123'
-```
-
-### Через SSH (с проверкой текущего)
-
-```bash
-bash /var/www/qhub.kz/scripts/mail/mail-passwd.sh --verify user@qhub.kz 'OldPass' 'NewPass'
 ```
 
 ---
@@ -146,27 +205,28 @@ bash /var/www/qhub.kz/scripts/mail/mail-passwd.sh --verify user@qhub.kz 'OldPass
 
 | Параметр | Значение |
 |----------|----------|
-| IMAP-сервер | `mail.qhub.kz` |
-| IMAP-порт | `993` |
-| IMAP-безопасность | SSL/TLS |
-| SMTP-сервер | `mail.qhub.kz` |
-| SMTP-порт | `587` |
-| SMTP-безопасность | STARTTLS |
-| Логин | полный email `user@qhub.kz` |
-| Пароль | пароль ящика |
+| IMAP | `mail.qhub.kz:993` (SSL) |
+| SMTP | `mail.qhub.kz:587` (STARTTLS) |
+| Логин | `user@qhub.kz` |
 
 ---
 
-## Удаление ящика
-
-**Админка** → список ящиков → **Удалить**
-
-Или SSH:
+## Проверка перед production
 
 ```bash
-bash /var/www/qhub.kz/scripts/mail/mail-remove.sh user@qhub.kz
-# с удалением файлов писем:
-bash /var/www/qhub.kz/scripts/mail/mail-remove.sh user@qhub.kz --purge
+# Службы
+systemctl status postfix dovecot opendkim rspamd fail2ban
+
+# DNS + PTR
+bash /var/www/qhub.kz/scripts/mail/mail-dns-check.sh
+
+# Auth
+doveadm auth test user@qhub.kz 'password'
+
+# Отправить тест → mail-tester.com, проверить score ≥ 9/10
+
+# Health-check
+python3 /var/www/qhub.kz/scripts/deploy/vps-health-check.py
 ```
 
 ---
@@ -175,29 +235,11 @@ bash /var/www/qhub.kz/scripts/mail/mail-remove.sh user@qhub.kz --purge
 
 | Путь | Назначение |
 |------|------------|
-| `/var/mail/vhosts/qhub.kz/` | Maildir пользователей |
-| `/etc/dovecot/users` | Хеши паролей (SHA512-CRYPT) |
-| `/etc/postfix/virtual_mailboxes` | Карта ящиков Postfix |
+| `/var/mail/vhosts/qhub.kz/` | Maildir |
+| `/etc/dovecot/users` | Пароли + квоты |
+| `/etc/rspamd/local.d/qhub.conf` | Пороги антиспама |
+| `/etc/fail2ban/jail.d/qhub-mail.local` | Jail'ы |
 | `/etc/opendkim/keys/qhub.kz/` | DKIM-ключи |
-
----
-
-## Проверка и логи
-
-```bash
-# Службы
-systemctl status postfix dovecot opendkim
-
-# Тест авторизации
-doveadm auth test user@qhub.kz 'password'
-
-# Логи
-tail -f /var/log/mail.log
-journalctl -u postfix -f
-
-# Health-check всего VPS
-python3 /var/www/qhub.kz/scripts/deploy/vps-health-check.py
-```
 
 ---
 
@@ -205,12 +247,9 @@ python3 /var/www/qhub.kz/scripts/deploy/vps-health-check.py
 
 | Файл | Назначение |
 |------|------------|
-| `scripts/deploy/mail-bootstrap.sh` | Первичная установка |
+| `scripts/deploy/mail-bootstrap.sh` | Установка всего стека |
+| `scripts/mail/config/*` | Rspamd, Fail2Ban, квоты |
+| `scripts/mail/mail-dns-check.sh` | Проверка SPF/DKIM/DMARC/PTR |
+| `scripts/mail/mail-quota.sh` | Изменить квоту |
 | `scripts/mail/mail-add.sh` | Создать ящик |
-| `scripts/mail/mail-passwd.sh` | Сменить пароль |
-| `scripts/mail/mail-list.sh` | Список ящиков (JSON) |
-| `scripts/mail/mail-remove.sh` | Удалить ящик |
-| `src/app/api/admin/mail/*` | API для админки |
-| `src/app/api/mail/change-password` | Self-service смена пароля |
-| `src/app/tools/mail/password` | Страница смены пароля |
 | `docs/vps.md` | Общая схема VPS |

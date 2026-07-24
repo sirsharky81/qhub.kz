@@ -330,16 +330,27 @@ def check_mail(env: dict[str, str]) -> dict:
         return skip("Mail", "MAIL_ENABLED is off")
 
     try:
-        postfix = subprocess.run(["systemctl", "is-active", "postfix"], capture_output=True, text=True, timeout=5, check=False)
-        dovecot = subprocess.run(["systemctl", "is-active", "dovecot"], capture_output=True, text=True, timeout=5, check=False)
-        dkim = subprocess.run(["systemctl", "is-active", "opendkim"], capture_output=True, text=True, timeout=5, check=False)
-        if postfix.stdout.strip() != "active":
-            return fail("Mail", "postfix is not active")
-        if dovecot.stdout.strip() != "active":
-            return fail("Mail", "dovecot is not active")
-        if dkim.stdout.strip() != "active":
-            return fail("Mail", "opendkim is not active")
-        return ok("Mail", "postfix, dovecot, opendkim active")
+        services = {
+            "postfix": "postfix",
+            "dovecot": "dovecot",
+            "opendkim": "opendkim",
+            "rspamd": "rspamd",
+            "fail2ban": "fail2ban",
+        }
+        inactive = []
+        for name, unit in services.items():
+            proc = subprocess.run(
+                ["systemctl", "is-active", unit],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if proc.stdout.strip() != "active":
+                inactive.append(name)
+        if inactive:
+            return fail("Mail", f"inactive: {', '.join(inactive)}")
+        return ok("Mail", "postfix, dovecot, opendkim, rspamd, fail2ban active")
     except Exception as exc:
         return fail("Mail", str(exc))
 

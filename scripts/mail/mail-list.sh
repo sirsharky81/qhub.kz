@@ -26,9 +26,14 @@ if users_file.exists():
         email = parts[0]
         if not email.endswith("@" + domain):
             continue
+        extra = parts[6] if len(parts) > 6 else ""
+        quota = None
+        if "storage=" in extra:
+            quota = extra.split("storage=", 1)[1].split(",", 1)[0].strip()
         entries.append({
             "email": email,
             "maildir": parts[5] or None,
+            "quota": quota,
         })
 
 entries.sort(key=lambda item: item["email"])

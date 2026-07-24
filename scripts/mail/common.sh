@@ -9,6 +9,8 @@ POSTFIX_VIRTUAL="${POSTFIX_VIRTUAL:-/etc/postfix/virtual_mailboxes}"
 POSTFIX_DOMAINS="${POSTFIX_DOMAINS:-/etc/postfix/virtual_mailbox_domains}"
 VMUID="${MAIL_VMUID:-5000}"
 VMGID="${MAIL_VMGID:-5000}"
+MAIL_DEFAULT_QUOTA="${MAIL_DEFAULT_QUOTA:-1G}"
+MAIL_VPS_IP="${MAIL_VPS_IP:-65.108.215.248}"
 
 mail_local_part() {
   local email="$1"
@@ -65,9 +67,26 @@ mail_ensure_runtime() {
 mail_user_line() {
   local email="$1"
   local hash="$2"
+  local quota="${3:-$MAIL_DEFAULT_QUOTA}"
   local home
   home="$(mail_home_dir "$email")"
-  printf '%s:%s:%s:%s::%s:\n' "$email" "$hash" "$VMUID" "$VMGID" "$home"
+  printf '%s:%s:%s:%s::%s:quota_rule=*:storage=%s\n' "$email" "$hash" "$VMUID" "$VMGID" "$home" "$quota"
+}
+
+mail_parse_user_fields() {
+  local email="${1,,}"
+  local line
+  line="$(grep -i "^${email}:" "$DOVECOT_USERS" | head -n1 || true)"
+  if [ -z "$line" ]; then
+    return 1
+  fi
+  HOME_DIR="$(printf '%s' "$line" | awk -F: '{print $6}')"
+  EXTRA="$(printf '%s' "$line" | awk -F: '{print $7}')"
+  if [[ "$EXTRA" =~ storage=([^[:space:]]+) ]]; then
+    QUOTA="${BASH_REMATCH[1]}"
+  else
+    QUOTA="$MAIL_DEFAULT_QUOTA"
+  fi
 }
 
 mail_replace_user() {
