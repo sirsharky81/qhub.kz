@@ -25,6 +25,8 @@
         │
         ├──► WireGuard VPN (wg0, UDP :51820) — личный VPN для whitelist
         │
+        ├──► Postfix + Dovecot (mail.qhub.kz) — почта @qhub.kz
+        │
         └──► Внешние API:
              Cloudflare Turnstile, Telegram, OpenAI,
              Firebase FCM, Web Push (VAPID), Metered TURN
@@ -355,6 +357,34 @@ grep '^VPN_' /var/www/qhub.kz/.env.production
 
 ---
 
+## Почта (@qhub.kz)
+
+Устанавливается **вручную один раз** (`scripts/deploy/mail-bootstrap.sh`) или при деплое, если Postfix ещё не установлен.
+
+| Параметр | Значение |
+|----------|----------|
+| Домен | `qhub.kz` |
+| Сервер | `mail.qhub.kz` |
+| IMAP | `:993` (SSL) |
+| SMTP | `:587` (STARTTLS) |
+| Антиспам | Rspamd (Spamhaus RBL, Bayes, SPF/DMARC check) |
+| Защита | Fail2Ban (Postfix SASL + Dovecot) |
+| Квота | 1G/ящик по умолчанию (`MAIL_DEFAULT_QUOTA`) |
+| Ящики | `/var/mail/vhosts/qhub.kz/` |
+| Админка | Messenger → «Почта @qhub.kz» |
+| Смена пароля | `/tools/mail/password` |
+
+Подробно: `docs/mail.md`. Быстрая проверка:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_qhub root@65.108.215.248
+systemctl status postfix dovecot opendkim
+bash /var/www/qhub.kz/scripts/mail/mail-list.sh
+grep '^MAIL_' /var/www/qhub.kz/.env.production
+```
+
+---
+
 ## Связанные файлы в репозитории
 
 | Файл | Назначение |
@@ -364,6 +394,9 @@ grep '^VPN_' /var/www/qhub.kz/.env.production
 | `scripts/deploy/vpn-bootstrap.sh` | WireGuard VPN (первый деплой) |
 | `scripts/vpn/wg-sync.mjs` | Синхронизация VPN peers Redis → wg0 |
 | `docs/vpn.md` | Настройка и выдача доступа пользователям |
+| `scripts/deploy/mail-bootstrap.sh` | Postfix + Dovecot + OpenDKIM |
+| `scripts/mail/mail-*.sh` | Создание ящиков, смена пароля |
+| `docs/mail.md` | Почта @qhub.kz: DNS, клиенты, self-service |
 | `scripts/deploy/vps-health-check.py` | Проверка интеграций на сервере |
 | `scripts/migrate-upstash-to-redis.mjs` | Перенос ключей Upstash → VPS Redis |
 | `src/lib/redis/` | Выбор бэкенда и команды Redis |

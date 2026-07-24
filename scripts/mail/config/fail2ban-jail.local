@@ -1,0 +1,21 @@
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+backend = systemd
+
+[postfix-sasl]
+enabled = true
+port = smtp,465,submission
+filter = postfix[mode=auth]
+logpath = /var/log/mail.log
+maxretry = 3
+bantime = 2h
+
+[dovecot]
+enabled = true
+port = imap,imaps,pop3,pop3s
+filter = dovecot
+logpath = /var/log/mail.log
+maxretry = 3
+bantime = 2h
