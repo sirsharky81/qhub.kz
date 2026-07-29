@@ -61,7 +61,10 @@ if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.
   SYNC_SCRIPT="${APP_DIR}/scripts/vpn/run-wg-sync.sh"
   if [ ! -f /etc/sudoers.d/qhub-vpn-sync ] && command -v sudo >/dev/null 2>&1; then
     echo "==> Ensuring WireGuard sync sudoers"
-    echo "ALL ALL=(root) NOPASSWD: ${SYNC_SCRIPT}" | sudo tee /etc/sudoers.d/qhub-vpn-sync >/dev/null
+    cat <<EOF | sudo tee /etc/sudoers.d/qhub-vpn-sync >/dev/null
+# QHub: allow deploy user to sync WireGuard peers
+ALL ALL=(root) NOPASSWD: ${SYNC_SCRIPT}, /usr/bin/wg, /usr/bin/wg-quick
+EOF
     sudo chmod 440 /etc/sudoers.d/qhub-vpn-sync
   fi
   if grep -q '^VPN_SYNC_COMMAND=node ' .env.production 2>/dev/null; then
