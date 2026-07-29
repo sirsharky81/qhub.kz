@@ -316,6 +316,25 @@ def check_wireguard(env: dict[str, str]) -> dict:
         listen = subprocess.run(["ss", "-ulnp"], capture_output=True, text=True, timeout=5, check=False)
         port_open = ":51820" in listen.stdout
         detail = f"{len(peers)} peer(s) on wg0"
+
+        redis_active = None
+        cmd = redis_cli_cmd("GET", "qhub:vpn:peers")
+        if cmd:
+            raw = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
+            if raw.returncode == 0 and raw.stdout.strip():
+                try:
+                    index = json.loads(raw.stdout.strip())
+                    if isinstance(index, dict):
+                        redis_active = sum(
+                            1 for peer in index.values() if isinstance(peer, dict) and peer.get("status") == "active"
+                        )
+                except json.JSONDecodeError:
+                    pass
+        if redis_active is not None:
+            detail += f", redis={redis_active} active"
+            if redis_active != len(peers):
+                return fail("WireGuard VPN", f"{detail} — run wg-sync (peers out of sync)")
+
         if not port_open:
             return fail("WireGuard VPN", f"{detail}; UDP 51820 not listening")
         return ok("WireGuard VPN", detail)

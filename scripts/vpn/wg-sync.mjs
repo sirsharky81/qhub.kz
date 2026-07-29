@@ -92,29 +92,38 @@ function isInterfaceUp(name) {
   }
 }
 
+function reloadWireGuardInterface(configPath, iface) {
+  try {
+    execFileSync("wg-quick", ["down", iface], { stdio: "ignore" });
+  } catch {
+    // interface may already be down
+  }
+  execFileSync("wg-quick", ["up", configPath], { stdio: "inherit" });
+}
+
 function applyWireGuardConfig(configPath, iface, config) {
   writeFileSync(configPath, config, { mode: 0o600 });
   chmodSync(configPath, 0o600);
 
   if (isInterfaceUp(iface)) {
-    const stripped = execFileSync("wg-quick", ["strip", configPath], { encoding: "utf8" });
-    const tmpDir = mkdtempSync(join(tmpdir(), "qhub-wg-"));
-    const strippedPath = join(tmpDir, `${iface}.conf`);
     try {
-      writeFileSync(strippedPath, stripped, { mode: 0o600 });
-      execFileSync("wg", ["syncconf", iface, strippedPath], { stdio: "inherit" });
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      const stripped = execFileSync("wg-quick", ["strip", configPath], { encoding: "utf8" });
+      const tmpDir = mkdtempSync(join(tmpdir(), "qhub-wg-"));
+      const strippedPath = join(tmpDir, `${iface}.conf`);
+      try {
+        writeFileSync(strippedPath, stripped, { mode: 0o600 });
+        execFileSync("wg", ["syncconf", iface, strippedPath], { stdio: "pipe" });
+        return;
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`[vpn-sync] syncconf failed (${detail}), restarting ${iface} via wg-quick`);
     }
-    return;
   }
 
-  try {
-    execFileSync("wg-quick", ["down", iface], { stdio: "ignore" });
-  } catch {
-    // not running yet
-  }
-  execFileSync("wg-quick", ["up", iface], { stdio: "inherit" });
+  reloadWireGuardInterface(configPath, iface);
 }
 
 async function main() {
