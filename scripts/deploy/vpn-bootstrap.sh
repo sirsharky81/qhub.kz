@@ -53,12 +53,24 @@ systemctl enable "wg-quick@${WG_INTERFACE}" || true
 wg-quick down "$WG_INTERFACE" 2>/dev/null || true
 wg-quick up "$WG_INTERFACE"
 
+chmod +x "${APP_DIR}/scripts/vpn/run-wg-sync.sh" 2>/dev/null || true
+
+SYNC_CMD="${APP_DIR}/scripts/vpn/run-wg-sync.sh"
+SUDOERS_FILE="/etc/sudoers.d/qhub-vpn-sync"
+if [ ! -f "$SUDOERS_FILE" ]; then
+  cat > "$SUDOERS_FILE" <<EOF
+# Allow PM2 / deploy user to sync WireGuard peers without password
+ALL ALL=(root) NOPASSWD: ${SYNC_CMD}
+EOF
+  chmod 440 "$SUDOERS_FILE"
+fi
+
 ENV_FILE="${APP_DIR}/.env.production"
 if [ -f "$ENV_FILE" ]; then
   grep -q '^VPN_ENABLED=' "$ENV_FILE" || echo 'VPN_ENABLED=1' >> "$ENV_FILE"
   grep -q '^VPN_SERVER_PUBLIC_KEY=' "$ENV_FILE" || echo "VPN_SERVER_PUBLIC_KEY=${SERVER_PUBLIC}" >> "$ENV_FILE"
   grep -q '^VPN_SERVER_ENDPOINT=' "$ENV_FILE" || echo "VPN_SERVER_ENDPOINT=${PUBLIC_IP}:${LISTEN_PORT}" >> "$ENV_FILE"
-  grep -q '^VPN_SYNC_COMMAND=' "$ENV_FILE" || echo "VPN_SYNC_COMMAND=node ${APP_DIR}/scripts/vpn/wg-sync.mjs" >> "$ENV_FILE"
+  grep -q '^VPN_SYNC_COMMAND=' "$ENV_FILE" || echo "VPN_SYNC_COMMAND=${SYNC_CMD}" >> "$ENV_FILE"
   grep -q '^VPN_INTERFACE=' "$ENV_FILE" || echo "VPN_INTERFACE=${WG_INTERFACE}" >> "$ENV_FILE"
 fi
 
@@ -71,7 +83,7 @@ echo "Add to ${ENV_FILE}:"
 echo "VPN_ENABLED=1"
 echo "VPN_SERVER_PUBLIC_KEY=${SERVER_PUBLIC}"
 echo "VPN_SERVER_ENDPOINT=${PUBLIC_IP}:${LISTEN_PORT}"
-echo "VPN_SYNC_COMMAND=node ${APP_DIR}/scripts/vpn/wg-sync.mjs"
+echo "VPN_SYNC_COMMAND=${SYNC_CMD}"
 echo ""
 echo "Then: pm2 restart qhub"
 echo "Enable VPN per phone in admin panel → Messenger → VPN toggle"

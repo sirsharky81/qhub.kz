@@ -48,7 +48,7 @@ export async function PATCH(request: Request) {
     whitelist[phone] = { ...existing, status: "revoked", vpnEnabled: false };
     await saveWhitelist(whitelist);
     await revokeAllPeersForPhone(phone);
-    void triggerVpnSync();
+    await triggerVpnSync();
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
   }
 
@@ -75,7 +75,7 @@ export async function PATCH(request: Request) {
     await saveWhitelist(whitelist);
     if (!body.vpnEnabled) {
       await revokeAllPeersForPhone(phone);
-      void triggerVpnSync();
+      await triggerVpnSync();
     }
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
   }

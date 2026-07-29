@@ -14,7 +14,7 @@ export async function DELETE(
     if (!peer) {
       return NextResponse.json({ error: "Устройство не найдено" }, { status: 404 });
     }
-    void triggerVpnSync();
+    await triggerVpnSync();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return vpnErrorResponse(error);

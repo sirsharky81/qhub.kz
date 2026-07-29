@@ -134,14 +134,24 @@ export function MessengerWhitelistSection() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ phone: entryPhone, label }),
     });
-    const data = (await res.json()) as { error?: string; config?: string; filename?: string };
+    const data = (await res.json()) as {
+      error?: string;
+      config?: string;
+      filename?: string;
+      syncOk?: boolean;
+      syncError?: string;
+    };
     if (!res.ok || !data.config) {
       setError(data.error ?? "Не удалось создать конфиг");
       return;
     }
+    const syncWarning =
+      data.syncOk === false
+        ? " ⚠️ WireGuard на сервере не обновился — нажмите «Синхронизировать WireGuard» в блоке VPN выше."
+        : "";
     try {
       await navigator.clipboard.writeText(data.config);
-      setMsg(`Конфиг VPN для ${maskPhone(entryPhone)} скопирован в буфер — отправьте родным в мессенджер/Telegram`);
+      setMsg(`Конфиг VPN для ${maskPhone(entryPhone)} скопирован в буфер — отправьте родным в мессенджер/Telegram${syncWarning}`);
     } catch {
       const blob = new Blob([data.config], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -150,7 +160,7 @@ export function MessengerWhitelistSection() {
       a.download = data.filename ?? "qhub-vpn.conf";
       a.click();
       URL.revokeObjectURL(url);
-      setMsg(`Файл VPN для ${maskPhone(entryPhone)} скачан — отправьте родным`);
+      setMsg(`Файл VPN для ${maskPhone(entryPhone)} скачан — отправьте родным${syncWarning}`);
     }
   }
 

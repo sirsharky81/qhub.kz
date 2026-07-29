@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     }
     const label = typeof body.label === "string" ? body.label : "Устройство";
     const peer = await createPeer({ phone, label });
-    void triggerVpnSync();
+    const sync = await triggerVpnSync();
     return NextResponse.json({
       ok: true,
       peer: {
@@ -34,6 +34,8 @@ export async function POST(request: Request) {
         createdAt: peer.createdAt,
         status: peer.status,
       },
+      syncOk: sync.ok,
+      syncWarning: sync.ok ? undefined : sync.error,
     });
   } catch (error) {
     if (error instanceof Error && error.message === "vpn_peer_limit_reached") {
