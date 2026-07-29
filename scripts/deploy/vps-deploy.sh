@@ -57,7 +57,11 @@ fi
 
 if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.production ]; then
   echo "==> Syncing WireGuard VPN peers"
-  node --env-file=.env.production scripts/vpn/wg-sync.mjs || echo "==> Warning: WireGuard peer sync failed"
+  if [ -x scripts/vpn/run-wg-sync.sh ]; then
+    bash scripts/vpn/run-wg-sync.sh || echo "==> Warning: WireGuard peer sync failed"
+  else
+    node --env-file=.env.production scripts/vpn/wg-sync.mjs || echo "==> Warning: WireGuard peer sync failed"
+  fi
 fi
 
 echo "==> Health check"

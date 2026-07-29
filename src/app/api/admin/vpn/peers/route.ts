@@ -58,7 +58,7 @@ export async function POST(request: Request) {
   const label = typeof body.label === "string" ? body.label : "Устройство";
   try {
     const peer = await createPeer({ phone, label });
-    void triggerVpnSync();
+    const sync = await triggerVpnSync();
 
     const server = getVpnServerConfig();
     const config = buildClientConfig({
@@ -80,6 +80,8 @@ export async function POST(request: Request) {
       },
       config,
       filename: `qhub-vpn-${peer.label.replace(/\s+/g, "-").toLowerCase()}.conf`,
+      syncOk: sync.ok,
+      syncError: sync.ok ? undefined : sync.error,
     });
   } catch (error) {
     if (error instanceof Error && error.message === "vpn_peer_limit_reached") {

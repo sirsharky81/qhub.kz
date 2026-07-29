@@ -68,10 +68,10 @@ VPN_ENABLED=1
 VPN_SERVER_PUBLIC_KEY=<из вывода vpn-bootstrap.sh>
 VPN_SERVER_ENDPOINT=65.108.215.248:51820
 VPN_DNS=1.1.1.1, 8.8.8.8
-VPN_SYNC_COMMAND=node /var/www/qhub.kz/scripts/vpn/wg-sync.mjs
+VPN_SYNC_COMMAND=/var/www/qhub.kz/scripts/vpn/run-wg-sync.sh
 ```
 
-При создании/отключении устройства портал вызывает `VPN_SYNC_COMMAND` и обновляет peers на сервере.
+При создании/отключении устройства портал вызывает `VPN_SYNC_COMMAND` и обновляет peers на сервере. Если новый конфиг **не делает handshake**, а старый работает — peer не попал на WireGuard: нажмите **«Синхронизировать WireGuard»** в админке или выполните команду ниже.
 
 Ручная синхронизация:
 

@@ -14,6 +14,8 @@ interface VpnStatus {
 export function VpnAdminSection() {
   const [status, setStatus] = useState<VpnStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -29,6 +31,26 @@ export function VpnAdminSection() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function handleSync() {
+    setSyncing(true);
+    setMsg(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/vpn/sync", { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; error?: string; activePeers?: number };
+      if (!res.ok || !data.ok) {
+        setError(data.error ?? "Синхронизация не удалась");
+        return;
+      }
+      setMsg(`WireGuard обновлён: ${data.activePeers ?? "?"} активных устройств в Redis`);
+      await load();
+    } catch {
+      setError("Не удалось синхронизировать WireGuard");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   return (
     <section className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
@@ -66,6 +88,15 @@ export function VpnAdminSection() {
                 синхронизировать вручную.
               </p>
             )}
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={() => void handleSync()}
+              className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-800 font-medium hover:bg-violet-100 disabled:opacity-50"
+            >
+              {syncing ? "Синхронизация…" : "Синхронизировать WireGuard"}
+            </button>
+            {msg && <p className="text-xs text-emerald-700">{msg}</p>}
           </>
         )}
       </div>
