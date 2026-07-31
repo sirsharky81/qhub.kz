@@ -13,13 +13,16 @@ import {
   parseCookieToken,
   verifyMessengerSessionToken,
 } from "./session-verify.mjs";
+import { verifyShareParticipant } from "./share-session-verify.mjs";
 
 const PORT = Number(process.env.MESSENGER_WS_PORT ?? "3001");
 const WS_PATH = "/ws/messenger";
+const SHARE_WS_PATH = "/ws/share";
 const PING_INTERVAL_MS = 30_000;
 const PONG_TIMEOUT_MS = 65_000;
 
 const REALTIME_USER_PREFIX = "qhub:realtime:user:";
+const SHARE_PARTICIPANT_PREFIX = "qhub:room-core:share:participant:";
 const PRESENCE_PREFIX = "qhub:messenger:presence:";
 const TYPING_PREFIX = "qhub:messenger:typing:";
 const PRESENCE_TTL_SEC = 45;
@@ -146,11 +149,51 @@ if (!redisUrl) {
   process.exit(1);
 }
 
+/** @typedef {{ ws: import('ws').WebSocket, participantId: string, roomId: string, authed: boolean, lastPong: number }} ShareClientState */
+
+/** @type {Map<string, Set<ShareClientState>>} */
+const shareClientsByParticipant = new Map();
+
+function addShareClient(state) {
+  let set = shareClientsByParticipant.get(state.participantId);
+  if (!set) {
+    set = new Set();
+    shareClientsByParticipant.set(state.participantId, set);
+  }
+  set.add(state);
+}
+
+function removeShareClient(state) {
+  const set = shareClientsByParticipant.get(state.participantId);
+  if (!set) return;
+  set.delete(state);
+  if (set.size === 0) shareClientsByParticipant.delete(state.participantId);
+}
+
 const redisPub = new Redis(redisUrl, { maxRetriesPerRequest: 2 });
 const redisSub = new Redis(redisUrl, { maxRetriesPerRequest: 2 });
 const redisData = new Redis(redisUrl, { maxRetriesPerRequest: 2 });
 
+void redisSub.psubscribe(`${REALTIME_USER_PREFIX}*`);
+void redisSub.psubscribe(`${SHARE_PARTICIPANT_PREFIX}*`);
+
 redisSub.on("pmessage", (_pattern, channel, message) => {
+  if (channel.startsWith(SHARE_PARTICIPANT_PREFIX)) {
+    const participantId = channel.slice(SHARE_PARTICIPANT_PREFIX.length);
+    let event;
+    try {
+      event = JSON.parse(message);
+    } catch {
+      return;
+    }
+    const set = shareClientsByParticipant.get(participantId);
+    if (!set) return;
+    for (const client of set) {
+      sendJson(client.ws, event);
+    }
+    return;
+  }
+
   const phone = channel.startsWith(REALTIME_USER_PREFIX)
     ? channel.slice(REALTIME_USER_PREFIX.length)
     : null;
@@ -195,21 +238,58 @@ redisSub.on("pmessage", (_pattern, channel, message) => {
   }
 });
 
-void redisSub.psubscribe(`${REALTIME_USER_PREFIX}*`);
-
 function shouldReceiveChannelEvent(client, channel) {
   return client.channels.has(channel) || client.channels.has("*");
 }
 
 const httpServer = createServer((_req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("qhub messenger websocket\n");
+  res.end("qhub realtime websocket (messenger + share)\n");
 });
 
 const wss = new WebSocketServer({ noServer: true });
+const shareWss = new WebSocketServer({ noServer: true });
 
 httpServer.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+  if (url.pathname === SHARE_WS_PATH) {
+    const participantId = url.searchParams.get("participantId") ?? "";
+    const accessToken = url.searchParams.get("accessToken") ?? "";
+
+    shareWss.handleUpgrade(req, socket, head, (ws) => {
+      void (async () => {
+        const session = await verifyShareParticipant(participantId, accessToken);
+        if (!session) {
+          ws.close(4401, "auth_failed");
+          socket.destroy();
+          return;
+        }
+
+        /** @type {ShareClientState} */
+        const state = {
+          ws,
+          participantId: session.participantId,
+          roomId: session.roomId,
+          authed: true,
+          lastPong: Date.now(),
+        };
+
+        addShareClient(state);
+        sendJson(ws, { type: "connected", participantId: state.participantId });
+
+        ws.on("pong", () => {
+          state.lastPong = Date.now();
+        });
+
+        ws.on("close", () => {
+          removeShareClient(state);
+        });
+      })();
+    });
+    return;
+  }
+
   if (url.pathname !== WS_PATH) {
     socket.destroy();
     return;
@@ -352,14 +432,27 @@ setInterval(() => {
       }
     }
   }
+  for (const set of shareClientsByParticipant.values()) {
+    for (const client of set) {
+      if (now - client.lastPong > PONG_TIMEOUT_MS) {
+        client.ws.terminate();
+        removeShareClient(client);
+        continue;
+      }
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.ping();
+      }
+    }
+  }
 }, PING_INTERVAL_MS);
 
 httpServer.listen(PORT, "127.0.0.1", () => {
-  console.log(`[messenger-ws] listening on 127.0.0.1:${PORT}${WS_PATH}`);
+  console.log(`[realtime-ws] listening on 127.0.0.1:${PORT}${WS_PATH} and ${SHARE_WS_PATH}`);
 });
 
 process.on("SIGINT", () => {
   wss.close();
+  shareWss.close();
   httpServer.close();
   void redisSub.quit();
   void redisPub.quit();
