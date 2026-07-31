@@ -20,12 +20,12 @@ function purgeExpiredMemory(): void {
   }
 }
 
-function useRedis(): boolean {
+function hasRedisBackend(): boolean {
   return getRedisBackend() !== null;
 }
 
 export function getShareRedis(): { kind: "configured" } | null {
-  return useRedis() ? { kind: "configured" } : null;
+  return hasRedisBackend() ? { kind: "configured" } : null;
 }
 
 export function assertAllowedRedisKey(key: string): void {
@@ -43,7 +43,7 @@ export { parseRedisJsonValue };
 
 export async function shareRedisGet(key: string): Promise<string | null> {
   assertAllowedRedisKey(key);
-  if (useRedis()) return core.redisGet(key);
+  if (hasRedisBackend()) return core.redisGet(key);
   purgeExpiredMemory();
   const entry = memoryStore().get(key);
   if (!entry) return null;
@@ -61,7 +61,7 @@ export async function shareRedisGetJson<T>(key: string): Promise<T | null> {
 
 export async function shareRedisSet(key: string, value: string, exSeconds?: number): Promise<void> {
   assertAllowedRedisKey(key);
-  if (useRedis()) {
+  if (hasRedisBackend()) {
     await core.redisSet(key, value, exSeconds);
     return;
   }
@@ -73,7 +73,7 @@ export async function shareRedisSet(key: string, value: string, exSeconds?: numb
 
 export async function shareRedisDel(...keys: string[]): Promise<void> {
   for (const key of keys) assertAllowedRedisKey(key);
-  if (useRedis()) {
+  if (hasRedisBackend()) {
     if (keys.length) await core.redisDel(...keys);
     return;
   }
@@ -82,7 +82,7 @@ export async function shareRedisDel(...keys: string[]): Promise<void> {
 
 export async function shareRedisIncr(key: string): Promise<number> {
   assertAllowedRedisKey(key);
-  if (useRedis()) return core.redisIncr(key);
+  if (hasRedisBackend()) return core.redisIncr(key);
   const current = Number((await shareRedisGet(key)) ?? "0");
   const next = current + 1;
   await shareRedisSet(key, String(next));
@@ -91,7 +91,7 @@ export async function shareRedisIncr(key: string): Promise<number> {
 
 export async function shareRedisLpush(key: string, value: string): Promise<void> {
   assertAllowedRedisKey(key);
-  if (useRedis()) {
+  if (hasRedisBackend()) {
     await core.redisLpush(key, value);
     return;
   }
@@ -109,7 +109,7 @@ export async function shareRedisLpush(key: string, value: string): Promise<void>
 
 export async function shareRedisLrange(key: string, start: number, stop: number): Promise<string[]> {
   assertAllowedRedisKey(key);
-  if (useRedis()) return core.redisLrange(key, start, stop);
+  if (hasRedisBackend()) return core.redisLrange(key, start, stop);
   const raw = await shareRedisGet(key);
   if (!raw) return [];
   try {

@@ -13,6 +13,8 @@ import {
 import {
   formatPendingTextAsBody,
   parseShareTargetParams,
+  peekPendingFilesCount,
+  peekPendingText,
   stashPendingFiles,
   stashPendingText,
   takePendingFiles,
@@ -36,6 +38,21 @@ import { RoomInvitePanel } from "../components/RoomInvitePanel";
 import { ShareShell } from "../components/ShareShell";
 import { TextTransferPanel } from "../components/TextTransferPanel";
 
+function buildPendingBanner(): string | null {
+  const fileCount = peekPendingFilesCount();
+  const text = peekPendingText();
+  if (fileCount > 0 && text) {
+    return `Готово к отправке: ${fileCount} файл(ов) и текст из «Поделиться»`;
+  }
+  if (fileCount > 0) {
+    return `Добавлено ${fileCount} файл(ов) из «Поделиться»`;
+  }
+  if (text) {
+    return "Текст из «Поделиться» готов к отправке";
+  }
+  return null;
+}
+
 export function ShareRoomClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -47,11 +64,14 @@ export function ShareRoomClient() {
   const [inboundOffers, setInboundOffers] = useState<IncomingTransferOffer[]>([]);
   const [inboundQueues, setInboundQueues] = useState<Map<string, TransferQueueItem[]>>(new Map());
   const [textMessages, setTextMessages] = useState<ShareTextMessage[]>([]);
-  const [textDraft, setTextDraft] = useState("");
+  const [textDraft, setTextDraft] = useState(() => {
+    const text = peekPendingText();
+    return text ? formatPendingTextAsBody(text) : "";
+  });
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [diagnostics, setDiagnostics] = useState<ConnectionDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pendingBanner, setPendingBanner] = useState<string | null>(null);
+  const [pendingBanner, setPendingBanner] = useState<string | null>(() => buildPendingBanner());
 
   const peerRef = useRef<SharePeerConnection | null>(null);
   const transferRef = useRef<ShareTransferManager | null>(null);
@@ -92,8 +112,7 @@ export function ShareRoomClient() {
       return;
     }
 
-    setTextDraft(formatPendingTextAsBody(payload));
-    setPendingBanner("Текст из «Поделиться» готов к отправке");
+    stashPendingText(payload);
     router.replace("/share/room");
   }, [searchParams, router]);
 
@@ -103,7 +122,7 @@ export function ShareRoomClient() {
       router.replace("/share");
       return;
     }
-    setSession(loaded);
+    queueMicrotask(() => setSession(loaded));
   }, [router]);
 
   useEffect(() => {
@@ -162,13 +181,18 @@ export function ShareRoomClient() {
     const files = takePendingFiles();
     if (files?.length) {
       transferRef.current?.setFiles(filesFromFileList(files));
-      setPendingBanner(`Добавлено ${files.length} файл(ов) из «Поделиться»`);
     }
 
     const textPayload = takePendingText();
     if (textPayload) {
-      setTextDraft(formatPendingTextAsBody(textPayload));
-      setPendingBanner("Текст из «Поделиться» готов к отправке");
+      queueMicrotask(() => {
+        setTextDraft(formatPendingTextAsBody(textPayload));
+        setPendingBanner(buildPendingBanner() ?? "Текст из «Поделиться» готов к отправке");
+      });
+    } else if (files?.length) {
+      queueMicrotask(() => {
+        setPendingBanner(`Добавлено ${files.length} файл(ов) из «Поделиться»`);
+      });
     }
   }, [session]);
 

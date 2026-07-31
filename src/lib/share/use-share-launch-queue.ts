@@ -5,7 +5,10 @@ import { claimPrimaryShareLaunchWindow } from "./launch-coordinator";
 
 export function useShareLaunchQueue(onFilesReceived: (files: File[]) => void | Promise<void>): void {
   const handlerRef = useRef(onFilesReceived);
-  handlerRef.current = onFilesReceived;
+
+  useEffect(() => {
+    handlerRef.current = onFilesReceived;
+  });
 
   useEffect(() => {
     if (typeof window === "undefined" || !("launchQueue" in window)) return;

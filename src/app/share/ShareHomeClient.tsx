@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
 import {
   createShareRoomApi,
@@ -25,20 +25,21 @@ export function ShareHomeClient() {
   const [error, setError] = useState<string | null>(null);
   const [nearby, setNearby] = useState<Awaited<ReturnType<typeof fetchNearbyShareRoomsApi>>>([]);
   const [nearbyLoading, setNearbyLoading] = useState(true);
-  const [pendingHint, setPendingHint] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (searchParams.get("pending") === "1" || hasPendingSharePayload()) {
-      const fileCount = peekPendingFilesCount();
-      const text = peekPendingText();
-      if (fileCount > 0 && text) {
-        setPendingHint(`Готово к отправке: ${fileCount} файл(ов) и текст. Создайте или войдите в комнату.`);
-      } else if (fileCount > 0) {
-        setPendingHint(`Готово к отправке: ${fileCount} файл(ов). Создайте или войдите в комнату.`);
-      } else if (text) {
-        setPendingHint("Готово к отправке: текст или ссылка. Создайте или войдите в комнату.");
-      }
+  const pendingHint = useMemo(() => {
+    if (searchParams.get("pending") !== "1" && !hasPendingSharePayload()) return null;
+    const fileCount = peekPendingFilesCount();
+    const text = peekPendingText();
+    if (fileCount > 0 && text) {
+      return `Готово к отправке: ${fileCount} файл(ов) и текст. Создайте или войдите в комнату.`;
     }
+    if (fileCount > 0) {
+      return `Готово к отправке: ${fileCount} файл(ов). Создайте или войдите в комнату.`;
+    }
+    if (text) {
+      return "Готово к отправке: текст или ссылка. Создайте или войдите в комнату.";
+    }
+    return null;
   }, [searchParams]);
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export function ShareHomeClient() {
   useEffect(() => {
     const token = searchParams.get("t");
     if (token) {
-      void autoJoin(token);
+      queueMicrotask(() => void autoJoin(token));
       return;
     }
 
@@ -64,8 +65,10 @@ export function ShareHomeClient() {
       if (raw) {
         const invite = isShareInviteUrl(raw) ? parseShareInviteFromUrl(raw) : raw.trim();
         if (invite) {
-          setJoinInput(invite);
-          void autoJoin(invite);
+          queueMicrotask(() => {
+            setJoinInput(invite);
+            void autoJoin(invite);
+          });
         }
       }
     }

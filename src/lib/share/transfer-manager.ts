@@ -544,6 +544,7 @@ export class ShareTransferManager {
     bytesTotal: number,
     startedAt: number,
   ): void {
+    void startedAt;
     const now = Date.now();
     this.speedSamples.push({ at: now, bytes: bytesSent });
     this.speedSamples = this.speedSamples.filter((s) => now - s.at < 3000);

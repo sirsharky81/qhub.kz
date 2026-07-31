@@ -5,7 +5,7 @@ import {
   REDIS_SIGNALS_PREFIX,
   ROOM_TTL_SEC,
 } from "./constants";
-import { shareRedisDel, shareRedisGetJson, shareRedisIncr, shareRedisLpush, shareRedisLrange, shareRedisSet } from "./redis";
+import { shareRedisIncr, shareRedisLpush, shareRedisLrange, shareRedisSet } from "./redis";
 import { publishShareSignal } from "./publish";
 import type {
   ShareParticipant,

@@ -23,7 +23,7 @@ export function createRoomCoreRedis(redisPrefix: string) {
     if (!key.startsWith(redisPrefix)) throw new Error("invalid_key_prefix");
   }
 
-  function useRedis(): boolean {
+  function hasRedisBackend(): boolean {
     return getRedisBackend() !== null;
   }
 
@@ -32,7 +32,7 @@ export function createRoomCoreRedis(redisPrefix: string) {
   return {
     async get(key: string): Promise<string | null> {
       assertKey(key);
-      if (useRedis()) return core.redisGet(key);
+      if (hasRedisBackend()) return core.redisGet(key);
       purgeExpiredMemory(mem);
       const entry = mem.get(key);
       if (!entry) return null;
@@ -50,7 +50,7 @@ export function createRoomCoreRedis(redisPrefix: string) {
 
     async set(key: string, value: string, exSeconds?: number): Promise<void> {
       assertKey(key);
-      if (useRedis()) {
+      if (hasRedisBackend()) {
         await core.redisSet(key, value, exSeconds);
         return;
       }
@@ -59,7 +59,7 @@ export function createRoomCoreRedis(redisPrefix: string) {
 
     async del(...keys: string[]): Promise<void> {
       for (const k of keys) assertKey(k);
-      if (useRedis()) {
+      if (hasRedisBackend()) {
         if (keys.length) await core.redisDel(...keys);
         return;
       }
@@ -68,7 +68,7 @@ export function createRoomCoreRedis(redisPrefix: string) {
 
     async incr(key: string): Promise<number> {
       assertKey(key);
-      if (useRedis()) return core.redisIncr(key);
+      if (hasRedisBackend()) return core.redisIncr(key);
       const current = Number((await this.get(key)) ?? "0");
       const next = current + 1;
       await this.set(key, String(next));
