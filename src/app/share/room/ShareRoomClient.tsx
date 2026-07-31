@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { closeShareRoomApi, pollShareRoomApi } from "@/lib/share/client";
+import { filesFromFileList, pickDirectoryFiles } from "@/lib/share/pick-files";
 import { clearShareSession, loadShareSession } from "@/lib/share/session";
 import type { ShareSession } from "@/lib/share/types";
 import {
@@ -15,10 +16,13 @@ import { FileTransferPanel } from "../components/FileTransferPanel";
 import { RoomInvitePanel } from "../components/RoomInvitePanel";
 import { ShareShell } from "../components/ShareShell";
 
+const PENDING_SHARE_KEY = "qhub_share_pending_files";
+
 export function ShareRoomClient() {
   const router = useRouter();
   const [session, setSession] = useState<ShareSession | null>(null);
   const [connectionState, setConnectionState] = useState<ShareConnectionState>("idle");
+  const [transport, setTransport] = useState<"ws" | "poll">("poll");
   const [peerName, setPeerName] = useState<string | null>(null);
   const [queue, setQueue] = useState<TransferQueueItem[]>([]);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
@@ -46,6 +50,7 @@ export function ShareRoomClient() {
     const peer = new SharePeerConnection(session, polite, {
       onConnectionState: setConnectionState,
       onPeerDeviceName: setPeerName,
+      onTransport: setTransport,
       onError: (err) => setError(err.message),
     });
     peerRef.current = peer;
@@ -69,13 +74,28 @@ export function ShareRoomClient() {
           if (snap.peer?.deviceName) setPeerName(snap.peer.deviceName);
         })
         .catch(() => {});
-    }, 3000);
+    }, 5000);
 
     return () => {
       clearInterval(pollPeer);
       transfer.destroy();
       peer.close();
     };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session || !transferRef.current) return;
+    try {
+      const raw = sessionStorage.getItem(PENDING_SHARE_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(PENDING_SHARE_KEY);
+      const names = JSON.parse(raw) as string[];
+      if (Array.isArray(names) && names.length) {
+        /* files from share target are loaded via launchQueue in ShareHomeClient */
+      }
+    } catch {
+      /* ignore */
+    }
   }, [session]);
 
   const handleLeave = useCallback(async () => {
@@ -89,6 +109,37 @@ export function ShareRoomClient() {
     clearShareSession();
     router.replace("/share");
   }, [session, router]);
+
+  async function handlePickFolder() {
+    try {
+      const picked = await pickDirectoryFiles();
+      if (picked.length) transferRef.current?.setFiles(picked);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось выбрать папку");
+    }
+  }
+
+  async function handleSystemShare() {
+    if (!navigator.share) {
+      setError("Системное меню «Поделиться» недоступно");
+      return;
+    }
+    try {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.onchange = () => {
+        if (input.files?.length) {
+          transferRef.current?.setFiles(filesFromFileList(input.files));
+        }
+      };
+      input.click();
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setError(err instanceof Error ? err.message : "Ошибка");
+      }
+    }
+  }
 
   if (!session) {
     return (
@@ -147,6 +198,8 @@ export function ShareRoomClient() {
           Код: <span className="font-mono font-medium text-gray-700">{session.roomCode}</span>
           {" · "}
           {connectionLabel}
+          {" · "}
+          {transport === "ws" ? "WebSocket" : "Polling"}
         </p>
       </div>
 
@@ -155,7 +208,10 @@ export function ShareRoomClient() {
         progress={progress}
         canSend={connectionState === "connected"}
         incomingOffer={incomingOffer}
-        onPickFiles={(files: FileList | File[]) => transferRef.current?.setFiles(Array.from(files))}
+        canShareIncoming={typeof navigator !== "undefined" && Boolean(navigator.share)}
+        onPickFiles={(files) => transferRef.current?.setFiles(filesFromFileList(files))}
+        onPickFolder={() => void handlePickFolder()}
+        onShareIncoming={() => void handleSystemShare()}
         onStartSend={() => void transferRef.current?.startSend()}
         onCancel={() => transferRef.current?.cancel()}
         onAcceptIncoming={() => {

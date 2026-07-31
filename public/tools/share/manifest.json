@@ -9,6 +9,23 @@
   "background_color": "#0ea5e9",
   "theme_color": "#0ea5e9",
   "lang": "ru",
+  "share_target": {
+    "action": "/share/room",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "/share/room",
+      "accept": {
+        "*/*": [".*"]
+      }
+    }
+  ],
   "icons": [
     {
       "src": "/tools/share/icon-192.png",

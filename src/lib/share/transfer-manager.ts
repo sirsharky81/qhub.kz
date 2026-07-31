@@ -1,4 +1,7 @@
 import { MAX_SESSION_BYTES } from "./constants";
+import type { PickedShareFile } from "./pick-files";
+import { hasFolderStructure } from "./pick-files";
+import { saveFilesAsZip, saveReceivedFile } from "./save-received";
 import { sha256Hex } from "./sha256";
 import {
   CHUNK_SIZE,
@@ -24,6 +27,7 @@ export interface TransferProgress {
 export interface TransferQueueItem {
   id: string;
   file: File;
+  relativePath: string;
   status: "pending" | "transferring" | "done" | "error" | "cancelled";
   progress: number;
   error?: string;
@@ -42,7 +46,11 @@ export class ShareTransferManager {
   private cancelled = false;
   private activeTransferId: string | null = null;
   private pendingOffer: { transferId: string; files: ShareFileMeta[] } | null = null;
-  private receiveBuffers = new Map<string, { name: string; size: number; sha256: string; parts: Map<number, ArrayBuffer> }>();
+  private receiveBuffers = new Map<
+    string,
+    { relativePath: string; size: number; sha256: string; parts: Map<number, ArrayBuffer> }
+  >();
+  private receivedForZip: Array<{ name: string; blob: Blob }> = [];
   private speedSamples: { at: number; bytes: number }[] = [];
 
   constructor(
@@ -56,15 +64,16 @@ export class ShareTransferManager {
 
   private unsub: (() => void) | null = null;
 
-  setFiles(files: File[]): void {
-    const total = files.reduce((sum, f) => sum + f.size, 0);
+  setFiles(picked: PickedShareFile[]): void {
+    const total = picked.reduce((sum, f) => sum + f.file.size, 0);
     if (total > MAX_SESSION_BYTES) {
       this.callbacks.onError?.(new Error("Суммарный размер файлов превышает 1 ГБ"));
       return;
     }
-    this.queue = files.map((file) => ({
+    this.queue = picked.map(({ file, relativePath }) => ({
       id: crypto.randomUUID(),
       file,
+      relativePath,
       status: "pending" as const,
       progress: 0,
     }));
@@ -85,11 +94,10 @@ export class ShareTransferManager {
       name: item.file.name,
       size: item.file.size,
       type: item.file.type || "application/octet-stream",
+      relativePath: item.relativePath !== item.file.name ? item.relativePath : undefined,
     }));
 
-    this.peer.send(
-      encodeControlMessage({ t: "transfer-offer", transferId, files }),
-    );
+    this.peer.send(encodeControlMessage({ t: "transfer-offer", transferId, files }));
   }
 
   acceptIncoming(): void {
@@ -123,6 +131,7 @@ export class ShareTransferManager {
     }
     this.callbacks.onQueueUpdate?.([...this.queue]);
     this.receiveBuffers.clear();
+    this.receivedForZip = [];
   }
 
   private async handleMessage(raw: string): Promise<void> {
@@ -148,10 +157,11 @@ export class ShareTransferManager {
       case "transfer-cancel":
         this.cancelled = true;
         this.receiveBuffers.clear();
+        this.receivedForZip = [];
         break;
       case "file-start":
         this.receiveBuffers.set(msg.fileId, {
-          name: msg.name,
+          relativePath: msg.name,
           size: msg.size,
           sha256: msg.sha256,
           parts: new Map(),
@@ -164,6 +174,7 @@ export class ShareTransferManager {
             this.queue.push({
               id: msg.fileId,
               file: new File([], msg.name),
+              relativePath: msg.name,
               status: "transferring",
               progress: 0,
             });
@@ -192,12 +203,13 @@ export class ShareTransferManager {
       this.callbacks.onQueueUpdate?.([...this.queue]);
 
       const sha256 = await sha256Hex(item.file);
+      const pathName = item.relativePath;
       this.peer.send(
         encodeControlMessage({
           t: "file-start",
           transferId,
           fileId: item.id,
-          name: item.file.name,
+          name: pathName,
           size: item.file.size,
           sha256,
         }),
@@ -220,7 +232,7 @@ export class ShareTransferManager {
         offset += buffer.byteLength;
         item.progress = Math.round((offset / item.file.size) * 100);
         this.callbacks.onQueueUpdate?.([...this.queue]);
-        this.emitProgress(transferId, item.id, item.file.name, offset, item.file.size, started);
+        this.emitProgress(transferId, item.id, pathName, offset, item.file.size, started);
         await new Promise((r) => setTimeout(r, 0));
       }
 
@@ -240,10 +252,12 @@ export class ShareTransferManager {
     this.callbacks.onTransferComplete?.();
   }
 
-  private async receiveTransfer(transferId: string, files: ShareFileMeta[]): Promise<void> {
+  private async receiveTransfer(_transferId: string, files: ShareFileMeta[]): Promise<void> {
+    this.receivedForZip = [];
     for (const meta of files) {
+      const path = meta.relativePath ?? meta.name;
       this.receiveBuffers.set(meta.id, {
-        name: meta.name,
+        relativePath: path,
         size: meta.size,
         sha256: "",
         parts: new Map(),
@@ -252,6 +266,7 @@ export class ShareTransferManager {
     this.queue = files.map((meta) => ({
       id: meta.id,
       file: new File([], meta.name, { type: meta.type }),
+      relativePath: meta.relativePath ?? meta.name,
       status: "pending" as const,
       progress: 0,
     }));
@@ -269,7 +284,7 @@ export class ShareTransferManager {
       item.progress = Math.round((received / buf.size) * 100);
       this.callbacks.onQueueUpdate?.([...this.queue]);
     }
-    this.emitProgress(msg.transferId, msg.fileId, buf.name, received, buf.size, Date.now());
+    this.emitProgress(msg.transferId, msg.fileId, buf.relativePath, received, buf.size, Date.now());
   }
 
   private async handleFileDone(msg: Extract<ShareControlMessage, { t: "file-done" }>): Promise<void> {
@@ -289,14 +304,14 @@ export class ShareTransferManager {
         item.status = "error";
         item.error = "SHA-256 не совпадает";
       }
-      this.callbacks.onError?.(new Error(`Файл ${buf.name}: контрольная сумма не совпадает`));
+      this.callbacks.onError?.(new Error(`Файл ${buf.relativePath}: контрольная сумма не совпадает`));
       this.receiveBuffers.delete(msg.fileId);
       this.callbacks.onQueueUpdate?.([...this.queue]);
       return;
     }
 
-    const { saveBlobToDevice } = await import("@/lib/platform/save-file");
-    await saveBlobToDevice(blob, buf.name);
+    this.receivedForZip.push({ name: buf.relativePath, blob });
+
     if (item) {
       item.status = "done";
       item.progress = 100;
@@ -304,9 +319,31 @@ export class ShareTransferManager {
     this.receiveBuffers.delete(msg.fileId);
     this.callbacks.onQueueUpdate?.([...this.queue]);
 
-    if (this.queue.every((q) => q.status === "done" || q.status === "error")) {
+    const allDone = this.queue.every((q) => q.status === "done" || q.status === "error");
+    if (allDone) {
+      await this.finalizeReceivedFiles();
       this.callbacks.onTransferComplete?.();
     }
+  }
+
+  private async finalizeReceivedFiles(): Promise<void> {
+    if (this.receivedForZip.length === 0) return;
+
+    const asFolder = hasFolderStructure(
+      this.receivedForZip.map((f) => ({ file: new File([], f.name), relativePath: f.name })),
+    );
+
+    if (asFolder && this.receivedForZip.length > 1) {
+      const root = this.receivedForZip[0]!.name.split("/")[0] ?? "qhub-share";
+      await saveFilesAsZip(this.receivedForZip, `${root}.zip`);
+    } else if (this.receivedForZip.length === 1) {
+      await saveReceivedFile(this.receivedForZip[0]!.blob, this.receivedForZip[0]!.name);
+    } else {
+      for (const f of this.receivedForZip) {
+        await saveReceivedFile(f.blob, f.name);
+      }
+    }
+    this.receivedForZip = [];
   }
 
   private emitProgress(

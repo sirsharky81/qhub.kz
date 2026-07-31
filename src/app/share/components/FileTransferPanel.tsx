@@ -22,6 +22,9 @@ interface Props {
   queue: TransferQueueItem[];
   progress: TransferProgress | null;
   onPickFiles: (files: FileList | File[]) => void;
+  onPickFolder: () => void;
+  onShareIncoming?: () => void;
+  canShareIncoming?: boolean;
   onStartSend: () => void;
   onCancel: () => void;
   canSend: boolean;
@@ -34,6 +37,9 @@ export function FileTransferPanel({
   queue,
   progress,
   onPickFiles,
+  onPickFolder,
+  onShareIncoming,
+  canShareIncoming,
   onStartSend,
   onCancel,
   canSend,
@@ -68,19 +74,40 @@ export function FileTransferPanel({
         </div>
       )}
 
-      <label className="block rounded-xl border-2 border-dashed border-gray-300 p-6 text-center cursor-pointer hover:border-sky-400 hover:bg-sky-50/30 transition-colors">
-        <input
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files?.length) onPickFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        <p className="text-sm font-medium text-gray-700">Выберите файлы</p>
-        <p className="text-xs text-gray-500 mt-1">или перетащите сюда · до 1 ГБ за сессию</p>
-      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block rounded-xl border-2 border-dashed border-gray-300 p-4 text-center cursor-pointer hover:border-sky-400 hover:bg-sky-50/30 transition-colors col-span-2 sm:col-span-1">
+          <input
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) onPickFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <p className="text-sm font-medium text-gray-700">Файлы</p>
+          <p className="text-[11px] text-gray-500 mt-1">или drag & drop</p>
+        </label>
+
+        <button
+          type="button"
+          onClick={onPickFolder}
+          className="rounded-xl border-2 border-dashed border-gray-300 p-4 text-center hover:border-sky-400 hover:bg-sky-50/30 transition-colors"
+        >
+          <p className="text-sm font-medium text-gray-700">Папка</p>
+          <p className="text-[11px] text-gray-500 mt-1">если поддерживается</p>
+        </button>
+      </div>
+
+      {canShareIncoming && onShareIncoming && (
+        <button
+          type="button"
+          onClick={onShareIncoming}
+          className="w-full rounded-xl border border-sky-200 bg-sky-50 py-2.5 text-sm font-medium text-sky-800"
+        >
+          Поделиться через системное меню
+        </button>
+      )}
 
       <div
         className="rounded-xl border border-gray-200 p-3 min-h-[80px]"
@@ -97,7 +124,7 @@ export function FileTransferPanel({
           <ul className="space-y-1.5">
             {queue.map((item) => (
               <li key={item.id} className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate min-w-0">{item.file.name || "Файл"}</span>
+                <span className="truncate min-w-0 font-mono text-xs">{item.relativePath}</span>
                 <span className="shrink-0 text-xs text-gray-500">
                   {item.status === "transferring" ? `${item.progress}%` : item.status}
                 </span>

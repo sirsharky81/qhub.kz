@@ -1,4 +1,6 @@
 import { fetchShareIceServers, pollShareRoomApi, sendShareSignalApi } from "./client";
+import { ShareRealtimeClient } from "./realtime/client";
+import { isShareWsEnabled } from "./realtime/config";
 import type { ShareSession, ShareSignal } from "./types";
 
 export type ShareConnectionState = "idle" | "connecting" | "connected" | "failed" | "closed";
@@ -8,12 +10,15 @@ export interface SharePeerCallbacks {
   onPeerDeviceName?: (name: string) => void;
   onDataMessage?: (raw: string) => void;
   onError?: (err: Error) => void;
+  onTransport?: (mode: "ws" | "poll") => void;
 }
 
 export class SharePeerConnection {
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private realtime: ShareRealtimeClient | null = null;
+  private wsActive = false;
   private lastSeq = 0;
   private makingOffer = false;
   private ignoreOffer = false;
@@ -71,7 +76,35 @@ export class SharePeerConnection {
       void this.handleNegotiationNeeded();
     };
 
-    this.startPolling();
+    this.startTransport();
+  }
+
+  private startTransport(): void {
+    if (isShareWsEnabled()) {
+      this.realtime = new ShareRealtimeClient(this.session, {
+        onSignal: (signal) => {
+          void this.handleSignal(signal);
+        },
+        onRoomEvent: (event) => {
+          if (event.type === "member_joined" && event.displayName) {
+            this.callbacks.onPeerDeviceName?.(event.displayName);
+          }
+        },
+        onConnected: () => {
+          this.wsActive = true;
+          this.callbacks.onTransport?.("ws");
+        },
+        onDisconnected: () => {
+          this.wsActive = false;
+          this.callbacks.onTransport?.("poll");
+        },
+        onError: (err) => this.callbacks.onError?.(err),
+      });
+      const started = this.realtime.start();
+      if (!started) this.wsActive = false;
+    }
+
+    this.startPolling(this.wsActive ? 3000 : 1200);
   }
 
   private setupDataChannel(channel: RTCDataChannel): void {
@@ -108,24 +141,29 @@ export class SharePeerConnection {
     }
   }
 
-  private startPolling(): void {
-    if (this.pollTimer) return;
+  private startPolling(intervalMs: number): void {
+    if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = setInterval(() => {
       void this.pollOnce();
-    }, 1200);
+    }, intervalMs);
     void this.pollOnce();
+    if (!this.wsActive) this.callbacks.onTransport?.("poll");
   }
 
   private async pollOnce(): Promise<void> {
     if (this.closed || !this.pc) return;
     try {
-      const snapshot = await pollShareRoomApi(this.session, this.lastSeq);
-      this.lastSeq = snapshot.latestSeq;
-      for (const signal of snapshot.signals) {
-        await this.handleSignal(signal);
+      const snapshot = await pollShareRoomApi(this.session, this.wsActive ? this.lastSeq : this.lastSeq);
+      if (!this.wsActive) {
+        for (const signal of snapshot.signals) {
+          await this.handleSignal(signal);
+        }
+        this.lastSeq = snapshot.latestSeq;
+      } else if (snapshot.signals.length) {
+        this.lastSeq = snapshot.latestSeq;
       }
-      if (snapshot.peer && !this.pc.currentRemoteDescription && this.session.role === "host") {
-        // Guest joined — negotiation will happen via onnegotiationneeded
+      if (snapshot.peer?.deviceName) {
+        this.callbacks.onPeerDeviceName?.(snapshot.peer.deviceName);
       }
     } catch (err) {
       this.callbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
@@ -134,6 +172,8 @@ export class SharePeerConnection {
 
   private async handleSignal(signal: ShareSignal): Promise<void> {
     if (!this.pc || signal.fromParticipantId === this.session.participantId) return;
+    if (signal.seq <= this.lastSeq) return;
+    this.lastSeq = Math.max(this.lastSeq, signal.seq);
 
     if (signal.type === "offer" && signal.payload) {
       const offerCollision = this.makingOffer || this.pc.signalingState !== "stable";
@@ -178,6 +218,7 @@ export class SharePeerConnection {
 
   close(): void {
     this.closed = true;
+    this.realtime?.close();
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;

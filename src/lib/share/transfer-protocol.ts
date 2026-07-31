@@ -14,6 +14,8 @@ export interface ShareFileMeta {
   name: string;
   size: number;
   type: string;
+  /** Path inside a folder transfer, e.g. photos/vacation/img.jpg */
+  relativePath?: string;
 }
 
 export const CHUNK_SIZE = 768 * 1024;
