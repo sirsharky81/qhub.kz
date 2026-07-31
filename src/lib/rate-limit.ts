@@ -21,6 +21,9 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:messenger-call-poll": { requests: 900, window: "1 m" },
   "qhub:messenger-identify-phone": { requests: 10, window: "15 m" },
   "qhub:family": { requests: 120, window: "1 m" },
+  "qhub:share": { requests: 60, window: "1 m" },
+  "qhub:share-signal": { requests: 800, window: "1 m" },
+  "qhub:share-poll": { requests: 900, window: "1 m" },
   "qhub:family-loc-req-notify": { requests: 1, window: "45 s" },
   "qhub:family-loc-req-silent": { requests: 1, window: "10 s" },
   "qhub:kz-maps-suggest": { requests: 5, window: "15 m" },
@@ -195,6 +198,24 @@ export async function checkSplitRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:split", identifier);
+}
+
+export async function checkShareRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:share", identifier);
+}
+
+export async function checkShareSignalRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:share-signal", identifier);
+}
+
+export async function checkSharePollRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:share-poll", identifier);
 }
 
 export async function checkFamilyLocationRequestRateLimit(

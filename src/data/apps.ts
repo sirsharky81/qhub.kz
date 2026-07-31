@@ -327,6 +327,20 @@ export const apps: App[] = [
     sortOrder: 52,
   },
   {
+    id: "share",
+    title: "QHub Share",
+    description: "Мгновенный обмен файлами между устройствами без регистрации.",
+    longDescription:
+      "Передача файлов напрямую через WebRTC без хранения на сервере. QR-код, код комнаты или ссылка-приглашение. До 1 ГБ за сессию, SHA-256 контроль целостности.",
+    href: "/share",
+    tags: ["tools", "productivity"],
+    icon: "📤",
+    color: "from-sky-500/10 to-sky-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 50,
+  },
+  {
     id: "family",
     title: "Семья",
     description: "Геолокация детей и SOS: режим родителя и участника.",

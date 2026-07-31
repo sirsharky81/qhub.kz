@@ -18,6 +18,11 @@ const sharedConfig: NextConfig = {
     if (isCapacitorBuild) return [];
     return [
       {
+        source: "/tools/share",
+        destination: "/share",
+        permanent: true,
+      },
+      {
         source: "/random-picker",
         destination: "/tools/random-picker",
         permanent: true,
