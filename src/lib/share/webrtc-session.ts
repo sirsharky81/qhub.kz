@@ -212,6 +212,39 @@ export class SharePeerConnection {
     }
   }
 
+  /** Send with backpressure — waits until the SCTP send buffer has space. */
+  async sendReliable(raw: string): Promise<void> {
+    const dc = this.dc;
+    if (!dc || dc.readyState !== "open") {
+      throw new Error("data_channel_not_open");
+    }
+    await this.waitForSendBuffer(dc);
+    dc.send(raw);
+  }
+
+  private waitForSendBuffer(dc: RTCDataChannel): Promise<void> {
+    const lowWatermark = 128 * 1024;
+    if (dc.bufferedAmount <= lowWatermark) return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        dc.removeEventListener("bufferedamountlow", onLow);
+        reject(new Error("send_buffer_timeout"));
+      }, 90_000);
+
+      const onLow = () => {
+        if (dc.bufferedAmount <= lowWatermark) {
+          window.clearTimeout(timeout);
+          dc.removeEventListener("bufferedamountlow", onLow);
+          resolve();
+        }
+      };
+
+      dc.bufferedAmountLowThreshold = lowWatermark;
+      dc.addEventListener("bufferedamountlow", onLow);
+    });
+  }
+
   isConnected(): boolean {
     return this.dc?.readyState === "open";
   }
