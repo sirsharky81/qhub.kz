@@ -9,6 +9,7 @@ import {
   joinShareRoomApi,
 } from "@/lib/share/client";
 import { getDeviceName } from "@/lib/share/device-name";
+import { hasPendingSharePayload, peekPendingText, peekPendingFilesCount } from "@/lib/share/pending-payload";
 import { saveShareSession } from "@/lib/share/session";
 import { isShareInviteUrl, parseShareInviteFromUrl } from "@/lib/share/urls";
 import { NearbyRoomsPanel } from "./components/NearbyRoomsPanel";
@@ -24,6 +25,21 @@ export function ShareHomeClient() {
   const [error, setError] = useState<string | null>(null);
   const [nearby, setNearby] = useState<Awaited<ReturnType<typeof fetchNearbyShareRoomsApi>>>([]);
   const [nearbyLoading, setNearbyLoading] = useState(true);
+  const [pendingHint, setPendingHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get("pending") === "1" || hasPendingSharePayload()) {
+      const fileCount = peekPendingFilesCount();
+      const text = peekPendingText();
+      if (fileCount > 0 && text) {
+        setPendingHint(`Готово к отправке: ${fileCount} файл(ов) и текст. Создайте или войдите в комнату.`);
+      } else if (fileCount > 0) {
+        setPendingHint(`Готово к отправке: ${fileCount} файл(ов). Создайте или войдите в комнату.`);
+      } else if (text) {
+        setPendingHint("Готово к отправке: текст или ссылка. Создайте или войдите в комнату.");
+      }
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     void fetchNearbyShareRoomsApi()
@@ -107,6 +123,12 @@ export function ShareHomeClient() {
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
             {error}
+          </div>
+        )}
+
+        {pendingHint && (
+          <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+            {pendingHint}
           </div>
         )}
 

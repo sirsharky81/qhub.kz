@@ -19,6 +19,15 @@ import {
   type ShareFileMeta,
 } from "./transfer-protocol";
 import type { SharePeerConnection } from "./webrtc-session";
+import { detectTextKind, MAX_TEXT_BYTES, type ShareTextKind, utf8ByteLength } from "./text-utils";
+
+export interface ShareTextMessage {
+  id: string;
+  body: string;
+  direction: "out" | "in";
+  sentAt: number;
+  kind: ShareTextKind;
+}
 
 export interface TransferProgress {
   transferId: string;
@@ -53,6 +62,7 @@ export type TransferCallbacks = {
   onIncomingOffers?: (offers: IncomingTransferOffer[]) => void;
   onProgress?: (progress: TransferProgress) => void;
   onTransferComplete?: (direction: "out" | "in", transferId: string) => void;
+  onTextUpdate?: (messages: ShareTextMessage[]) => void;
   onError?: (err: Error) => void;
 };
 
@@ -73,6 +83,7 @@ export class ShareTransferManager {
   private receivedByTransfer = new Map<string, Array<{ name: string; blob: Blob }>>();
   private speedSamples: { at: number; bytes: number }[] = [];
   private resumeOffsets = new Map<string, number>();
+  private textMessages: ShareTextMessage[] = [];
 
   constructor(
     private peer: SharePeerConnection,
@@ -184,6 +195,37 @@ export class ShareTransferManager {
     return new Map(this.inboundQueues);
   }
 
+  getTextMessages(): ShareTextMessage[] {
+    return [...this.textMessages];
+  }
+
+  sendText(body: string): void {
+    if (!this.peer.isConnected()) {
+      this.callbacks.onError?.(new Error("Нет соединения с собеседником"));
+      return;
+    }
+
+    const trimmed = body.trim();
+    if (!trimmed) return;
+
+    if (utf8ByteLength(trimmed) > MAX_TEXT_BYTES) {
+      this.callbacks.onError?.(new Error("Текст слишком длинный (макс. 64 КБ)"));
+      return;
+    }
+
+    const messageId = crypto.randomUUID();
+    const kind = detectTextKind(trimmed);
+    this.peer.send(encodeControlMessage({ t: "text-send", messageId, body: trimmed, kind }));
+    this.textMessages.push({
+      id: messageId,
+      body: trimmed,
+      direction: "out",
+      sentAt: Date.now(),
+      kind,
+    });
+    this.callbacks.onTextUpdate?.([...this.textMessages]);
+  }
+
   private async prepareInbound(offer: IncomingTransferOffer): Promise<void> {
     this.receivedByTransfer.set(offer.transferId, []);
     const items: TransferQueueItem[] = offer.files.map((meta) => ({
@@ -251,6 +293,17 @@ export class ShareTransferManager {
         break;
       case "file-error":
         this.callbacks.onError?.(new Error(msg.reason));
+        break;
+      case "text-send":
+        if (this.textMessages.some((m) => m.id === msg.messageId)) break;
+        this.textMessages.push({
+          id: msg.messageId,
+          body: msg.body,
+          direction: "in",
+          sentAt: Date.now(),
+          kind: msg.kind ?? detectTextKind(msg.body),
+        });
+        this.callbacks.onTextUpdate?.([...this.textMessages]);
         break;
       default:
         break;

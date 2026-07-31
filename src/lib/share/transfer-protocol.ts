@@ -8,7 +8,8 @@ export type ShareControlMessage =
   | { t: "file-resume"; transferId: string; fileId: string; offset: number }
   | { t: "file-chunk"; transferId: string; fileId: string; offset: number; data: string }
   | { t: "file-done"; transferId: string; fileId: string; sha256: string }
-  | { t: "file-error"; transferId: string; fileId: string; reason: string };
+  | { t: "file-error"; transferId: string; fileId: string; reason: string }
+  | { t: "text-send"; messageId: string; body: string; kind?: "text" | "link" };
 
 export interface ShareFileMeta {
   id: string;

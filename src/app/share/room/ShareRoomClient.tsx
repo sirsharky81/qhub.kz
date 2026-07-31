@@ -1,33 +1,44 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   closeShareRoomApi,
-  pollShareRoomApi,
   registerShareBeaconApi,
 } from "@/lib/share/client";
 import {
   collectConnectionDiagnostics,
   type ConnectionDiagnostics,
 } from "@/lib/share/connection-diagnostics";
+import {
+  formatPendingTextAsBody,
+  parseShareTargetParams,
+  stashPendingFiles,
+  stashPendingText,
+  takePendingFiles,
+  takePendingText,
+} from "@/lib/share/pending-payload";
 import { filesFromFileList, pickDirectoryFiles } from "@/lib/share/pick-files";
 import { clearShareSession, loadShareSession } from "@/lib/share/session";
 import type { ShareSession } from "@/lib/share/types";
 import {
   ShareTransferManager,
   type IncomingTransferOffer,
+  type ShareTextMessage,
   type TransferProgress,
   type TransferQueueItem,
 } from "@/lib/share/transfer-manager";
+import { useShareLaunchQueue } from "@/lib/share/use-share-launch-queue";
 import { SharePeerConnection, type ShareConnectionState } from "@/lib/share/webrtc-session";
 import { ConnectionDiagnosticsPanel } from "../components/ConnectionDiagnosticsPanel";
 import { FileTransferPanel } from "../components/FileTransferPanel";
 import { RoomInvitePanel } from "../components/RoomInvitePanel";
 import { ShareShell } from "../components/ShareShell";
+import { TextTransferPanel } from "../components/TextTransferPanel";
 
 export function ShareRoomClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [session, setSession] = useState<ShareSession | null>(null);
   const [connectionState, setConnectionState] = useState<ShareConnectionState>("idle");
   const [transport, setTransport] = useState<"ws" | "poll">("poll");
@@ -35,12 +46,56 @@ export function ShareRoomClient() {
   const [outboundQueue, setOutboundQueue] = useState<TransferQueueItem[]>([]);
   const [inboundOffers, setInboundOffers] = useState<IncomingTransferOffer[]>([]);
   const [inboundQueues, setInboundQueues] = useState<Map<string, TransferQueueItem[]>>(new Map());
+  const [textMessages, setTextMessages] = useState<ShareTextMessage[]>([]);
+  const [textDraft, setTextDraft] = useState("");
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [diagnostics, setDiagnostics] = useState<ConnectionDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingBanner, setPendingBanner] = useState<string | null>(null);
 
   const peerRef = useRef<SharePeerConnection | null>(null);
   const transferRef = useRef<ShareTransferManager | null>(null);
+  const shareTargetHandledRef = useRef(false);
+  const pendingConsumedRef = useRef(false);
+
+  const handleLaunchFiles = useCallback(
+    (files: File[]) => {
+      const activeSession = loadShareSession();
+      if (!activeSession) {
+        stashPendingFiles(files);
+        router.replace("/share?pending=1");
+        return;
+      }
+      transferRef.current?.setFiles(filesFromFileList(files));
+      setPendingBanner(`Добавлено ${files.length} файл(ов) из «Поделиться»`);
+    },
+    [router],
+  );
+
+  useShareLaunchQueue(handleLaunchFiles);
+
+  useEffect(() => {
+    if (shareTargetHandledRef.current) return;
+
+    const payload = parseShareTargetParams({
+      title: searchParams.get("title"),
+      text: searchParams.get("text"),
+      url: searchParams.get("url"),
+    });
+    if (!payload) return;
+
+    shareTargetHandledRef.current = true;
+    const activeSession = loadShareSession();
+    if (!activeSession) {
+      stashPendingText(payload);
+      router.replace("/share?pending=1");
+      return;
+    }
+
+    setTextDraft(formatPendingTextAsBody(payload));
+    setPendingBanner("Текст из «Поделиться» готов к отправке");
+    router.replace("/share/room");
+  }, [searchParams, router]);
 
   useEffect(() => {
     const loaded = loadShareSession();
@@ -75,6 +130,7 @@ export function ShareRoomClient() {
       onIncomingOffers: setInboundOffers,
       onProgress: setProgress,
       onTransferComplete: () => setProgress(null),
+      onTextUpdate: setTextMessages,
       onError: (err) => setError(err.message),
     });
     transferRef.current = transfer;
@@ -97,6 +153,23 @@ export function ShareRoomClient() {
       transfer.destroy();
       peer.close();
     };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session || pendingConsumedRef.current) return;
+    pendingConsumedRef.current = true;
+
+    const files = takePendingFiles();
+    if (files?.length) {
+      transferRef.current?.setFiles(filesFromFileList(files));
+      setPendingBanner(`Добавлено ${files.length} файл(ов) из «Поделиться»`);
+    }
+
+    const textPayload = takePendingText();
+    if (textPayload) {
+      setTextDraft(formatPendingTextAsBody(textPayload));
+      setPendingBanner("Текст из «Поделиться» готов к отправке");
+    }
   }, [session]);
 
   useEffect(() => {
@@ -127,6 +200,11 @@ export function ShareRoomClient() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось выбрать папку");
     }
+  }
+
+  function handleSendText() {
+    transferRef.current?.sendText(textDraft);
+    setTextDraft("");
   }
 
   if (!session) {
@@ -173,6 +251,12 @@ export function ShareRoomClient() {
         </div>
       )}
 
+      {pendingBanner && (
+        <div className="mx-4 mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          {pendingBanner}
+        </div>
+      )}
+
       {session.role === "host" && session.inviteToken && (
         <RoomInvitePanel
           roomCode={session.roomCode}
@@ -188,12 +272,18 @@ export function ShareRoomClient() {
           {connectionLabel}
           {" · "}
           {transport === "ws" ? "WebSocket" : "Polling"}
-          {" · "}
-          Двунаправленная передача
         </p>
       </div>
 
       <ConnectionDiagnosticsPanel diagnostics={diagnostics} />
+
+      <TextTransferPanel
+        messages={textMessages}
+        draft={textDraft}
+        canSend={connectionState === "connected"}
+        onDraftChange={setTextDraft}
+        onSend={handleSendText}
+      />
 
       <FileTransferPanel
         outboundQueue={outboundQueue}

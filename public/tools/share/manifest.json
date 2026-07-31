@@ -23,9 +23,25 @@
       "action": "/share/room",
       "accept": {
         "*/*": [".*"]
-      }
+      },
+      "launch_type": "single-client",
+      "icons": [
+        {
+          "src": "/tools/share/icon-512.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        },
+        {
+          "src": "/tools/share/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ],
+  "launch_handler": {
+    "client_mode": ["focus-existing", "navigate-existing"]
+  },
   "icons": [
     {
       "src": "/tools/share/icon-192.png",
