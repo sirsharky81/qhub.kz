@@ -216,6 +216,10 @@ export class SharePeerConnection {
     return this.dc?.readyState === "open";
   }
 
+  getPeerConnection(): RTCPeerConnection | null {
+    return this.pc;
+  }
+
   close(): void {
     this.closed = true;
     this.realtime?.close();

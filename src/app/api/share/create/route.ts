@@ -17,14 +17,17 @@ export async function POST(request: Request) {
       );
     }
 
-    let body: { deviceName?: string };
+    let body: { deviceName?: string; pin?: string };
     try {
       body = await request.json();
     } catch {
       body = {};
     }
 
-    const { room, participant, accessToken, inviteToken } = await createShareRoom(body.deviceName ?? "Устройство");
+    const { room, participant, accessToken, inviteToken } = await createShareRoom(
+      body.deviceName ?? "Устройство",
+      body.pin,
+    );
     const origin = new URL(request.url).origin;
 
     return withCors(
@@ -38,6 +41,7 @@ export async function POST(request: Request) {
         inviteToken,
         inviteUrl: buildShareInviteUrl(inviteToken, origin),
         expiresAt: room.expiresAt,
+        hasPin: Boolean(room.pinHash),
       }),
       request,
     );

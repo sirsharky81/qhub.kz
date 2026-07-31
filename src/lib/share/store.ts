@@ -63,6 +63,7 @@ function toShareRoom(room: {
   memberIds: string[];
   closed: boolean;
   version: number;
+  pinHash?: string | null;
 }): ShareRoom {
   const guestId = room.memberIds.find((id) => id !== room.ownerMemberId) ?? null;
   return {
@@ -75,6 +76,7 @@ function toShareRoom(room: {
     guestParticipantId: guestId,
     closed: room.closed,
     version: room.version,
+    pinHash: room.pinHash ?? null,
   };
 }
 
@@ -101,13 +103,13 @@ export async function resolveRoomByJoinInput(input: string): Promise<ShareRoom |
   return room ? toShareRoom(room) : null;
 }
 
-export async function createShareRoom(deviceName: string): Promise<{
+export async function createShareRoom(deviceName: string, pin?: string | null): Promise<{
   room: ShareRoom;
   participant: ShareParticipant;
   accessToken: string;
   inviteToken: string;
 }> {
-  const result = await getEngine().createRoom(deviceName);
+  const result = await getEngine().createRoom(deviceName, pin);
   return {
     room: toShareRoom(result.room),
     participant: toShareParticipant(result.member),
@@ -116,12 +118,12 @@ export async function createShareRoom(deviceName: string): Promise<{
   };
 }
 
-export async function joinShareRoom(joinInput: string, deviceName: string): Promise<{
+export async function joinShareRoom(joinInput: string, deviceName: string, pin?: string | null): Promise<{
   room: ShareRoom;
   participant: ShareParticipant;
   accessToken: string;
 }> {
-  const result = await getEngine().joinRoom(joinInput, deviceName);
+  const result = await getEngine().joinRoom(joinInput, deviceName, pin);
   return {
     room: toShareRoom(result.room),
     participant: toShareParticipant(result.member),
@@ -190,6 +192,7 @@ export async function buildRoomPublic(room: ShareRoom): Promise<ShareRoomPublic>
     closed: room.closed,
     expiresAt: room.expiresAt,
     version: room.version,
+    hasPin: Boolean(room.pinHash),
   };
 }
 

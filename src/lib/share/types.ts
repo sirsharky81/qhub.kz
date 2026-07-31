@@ -12,6 +12,7 @@ export interface ShareRoom {
   guestParticipantId?: string | null;
   closed: boolean;
   version: number;
+  pinHash?: string | null;
 }
 
 export interface ShareParticipant {
@@ -52,6 +53,7 @@ export interface ShareRoomPublic {
   closed: boolean;
   expiresAt: number;
   version: number;
+  hasPin: boolean;
 }
 
 export interface SharePollResponse {

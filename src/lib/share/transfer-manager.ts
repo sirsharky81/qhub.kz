@@ -4,6 +4,12 @@ import { hasFolderStructure } from "./pick-files";
 import { saveFilesAsZip, saveReceivedFile } from "./save-received";
 import { sha256Hex } from "./sha256";
 import {
+  clearResumeState,
+  loadResumeState,
+  loadSavedChunks,
+  persistReceiveProgress,
+} from "./transfer-resume";
+import {
   CHUNK_SIZE,
   arrayBufferToBase64,
   base64ToArrayBuffer,
@@ -18,6 +24,7 @@ export interface TransferProgress {
   transferId: string;
   fileId: string;
   fileName: string;
+  direction: "out" | "in";
   bytesSent: number;
   bytesTotal: number;
   speedBps: number;
@@ -30,31 +37,46 @@ export interface TransferQueueItem {
   relativePath: string;
   status: "pending" | "transferring" | "done" | "error" | "cancelled";
   progress: number;
+  previewUrl?: string | null;
   error?: string;
+  transferId?: string;
+}
+
+export interface IncomingTransferOffer {
+  transferId: string;
+  files: ShareFileMeta[];
 }
 
 export type TransferCallbacks = {
-  onQueueUpdate?: (items: TransferQueueItem[]) => void;
+  onOutboundUpdate?: (items: TransferQueueItem[]) => void;
+  onInboundUpdate?: (transferId: string, items: TransferQueueItem[]) => void;
+  onIncomingOffers?: (offers: IncomingTransferOffer[]) => void;
   onProgress?: (progress: TransferProgress) => void;
-  onIncomingOffer?: (transferId: string, files: ShareFileMeta[]) => void;
-  onTransferComplete?: () => void;
+  onTransferComplete?: (direction: "out" | "in", transferId: string) => void;
   onError?: (err: Error) => void;
 };
 
+interface ReceiveBuffer {
+  relativePath: string;
+  size: number;
+  sha256: string;
+  parts: Map<number, ArrayBuffer>;
+}
+
 export class ShareTransferManager {
-  private queue: TransferQueueItem[] = [];
-  private cancelled = false;
-  private activeTransferId: string | null = null;
-  private pendingOffer: { transferId: string; files: ShareFileMeta[] } | null = null;
-  private receiveBuffers = new Map<
-    string,
-    { relativePath: string; size: number; sha256: string; parts: Map<number, ArrayBuffer> }
-  >();
-  private receivedForZip: Array<{ name: string; blob: Blob }> = [];
+  private outboundQueue: TransferQueueItem[] = [];
+  private inboundQueues = new Map<string, TransferQueueItem[]>();
+  private pendingOffers: IncomingTransferOffer[] = [];
+  private cancelledTransfers = new Set<string>();
+  private sendingTransfers = new Set<string>();
+  private receiveBuffers = new Map<string, ReceiveBuffer>();
+  private receivedByTransfer = new Map<string, Array<{ name: string; blob: Blob }>>();
   private speedSamples: { at: number; bytes: number }[] = [];
+  private resumeOffsets = new Map<string, number>();
 
   constructor(
     private peer: SharePeerConnection,
+    private roomId: string,
     private callbacks: TransferCallbacks,
   ) {
     this.unsub = peer.onMessage((raw) => {
@@ -70,14 +92,16 @@ export class ShareTransferManager {
       this.callbacks.onError?.(new Error("Суммарный размер файлов превышает 1 ГБ"));
       return;
     }
-    this.queue = picked.map(({ file, relativePath }) => ({
+    const newItems = picked.map(({ file, relativePath }) => ({
       id: crypto.randomUUID(),
       file,
       relativePath,
       status: "pending" as const,
       progress: 0,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
     }));
-    this.callbacks.onQueueUpdate?.(this.queue);
+    this.outboundQueue = [...this.outboundQueue.filter((q) => q.status === "transferring"), ...newItems];
+    this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
   }
 
   async startSend(): Promise<void> {
@@ -85,11 +109,18 @@ export class ShareTransferManager {
       this.callbacks.onError?.(new Error("Нет соединения с собеседником"));
       return;
     }
-    const transferId = crypto.randomUUID();
-    this.activeTransferId = transferId;
-    this.cancelled = false;
+    const pending = this.outboundQueue.filter((q) => q.status === "pending");
+    if (!pending.length) return;
 
-    const files: ShareFileMeta[] = this.queue.map((item) => ({
+    const transferId = crypto.randomUUID();
+    this.sendingTransfers.add(transferId);
+    this.cancelledTransfers.delete(transferId);
+
+    for (const item of pending) {
+      item.transferId = transferId;
+    }
+
+    const files: ShareFileMeta[] = pending.map((item) => ({
       id: item.id,
       name: item.file.name,
       size: item.file.size,
@@ -100,38 +131,85 @@ export class ShareTransferManager {
     this.peer.send(encodeControlMessage({ t: "transfer-offer", transferId, files }));
   }
 
-  acceptIncoming(): void {
-    if (!this.pendingOffer) return;
-    this.peer.send(
-      encodeControlMessage({ t: "transfer-accept", transferId: this.pendingOffer.transferId }),
-    );
-    void this.receiveTransfer(this.pendingOffer.transferId, this.pendingOffer.files);
-    this.pendingOffer = null;
+  acceptIncoming(transferId: string): void {
+    const offer = this.pendingOffers.find((o) => o.transferId === transferId);
+    if (!offer) return;
+    this.peer.send(encodeControlMessage({ t: "transfer-accept", transferId }));
+    void this.prepareInbound(offer);
+    this.pendingOffers = this.pendingOffers.filter((o) => o.transferId !== transferId);
+    this.callbacks.onIncomingOffers?.([...this.pendingOffers]);
   }
 
-  rejectIncoming(): void {
-    if (!this.pendingOffer) return;
-    this.peer.send(
-      encodeControlMessage({ t: "transfer-reject", transferId: this.pendingOffer.transferId }),
-    );
-    this.pendingOffer = null;
+  rejectIncoming(transferId: string): void {
+    this.peer.send(encodeControlMessage({ t: "transfer-reject", transferId }));
+    this.pendingOffers = this.pendingOffers.filter((o) => o.transferId !== transferId);
+    this.callbacks.onIncomingOffers?.([...this.pendingOffers]);
   }
 
-  cancel(): void {
-    this.cancelled = true;
-    if (this.activeTransferId) {
-      this.peer.send(
-        encodeControlMessage({ t: "transfer-cancel", transferId: this.activeTransferId }),
-      );
+  cancelOutbound(): void {
+    for (const transferId of this.sendingTransfers) {
+      this.cancelledTransfers.add(transferId);
+      this.peer.send(encodeControlMessage({ t: "transfer-cancel", transferId }));
     }
-    for (const item of this.queue) {
+    for (const item of this.outboundQueue) {
       if (item.status === "pending" || item.status === "transferring") {
         item.status = "cancelled";
       }
     }
-    this.callbacks.onQueueUpdate?.([...this.queue]);
-    this.receiveBuffers.clear();
-    this.receivedForZip = [];
+    this.sendingTransfers.clear();
+    this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
+  }
+
+  cancelInbound(transferId: string): void {
+    this.cancelledTransfers.add(transferId);
+    this.peer.send(encodeControlMessage({ t: "transfer-cancel", transferId }));
+    this.inboundQueues.delete(transferId);
+    this.receivedByTransfer.delete(transferId);
+    this.callbacks.onInboundUpdate?.(transferId, []);
+  }
+
+  getPendingOffers(): IncomingTransferOffer[] {
+    return [...this.pendingOffers];
+  }
+
+  getOutboundQueue(): TransferQueueItem[] {
+    return [...this.outboundQueue];
+  }
+
+  getInboundQueue(transferId: string): TransferQueueItem[] {
+    return [...(this.inboundQueues.get(transferId) ?? [])];
+  }
+
+  getAllInboundQueues(): Map<string, TransferQueueItem[]> {
+    return new Map(this.inboundQueues);
+  }
+
+  private async prepareInbound(offer: IncomingTransferOffer): Promise<void> {
+    this.receivedByTransfer.set(offer.transferId, []);
+    const items: TransferQueueItem[] = offer.files.map((meta) => ({
+      id: meta.id,
+      file: new File([], meta.name, { type: meta.type }),
+      relativePath: meta.relativePath ?? meta.name,
+      status: "pending",
+      progress: 0,
+    }));
+    this.inboundQueues.set(offer.transferId, items);
+    this.callbacks.onInboundUpdate?.(offer.transferId, items);
+
+    for (const meta of offer.files) {
+      const saved = await loadResumeState(this.roomId, meta.id);
+      if (saved && saved.sha256) {
+        this.resumeOffsets.set(`${offer.transferId}:${meta.id}`, saved.contiguousOffset);
+        this.peer.send(
+          encodeControlMessage({
+            t: "file-resume",
+            transferId: offer.transferId,
+            fileId: meta.id,
+            offset: saved.contiguousOffset,
+          }),
+        );
+      }
+    }
   }
 
   private async handleMessage(raw: string): Promise<void> {
@@ -140,50 +218,33 @@ export class ShareTransferManager {
 
     switch (msg.t) {
       case "transfer-offer":
-        this.pendingOffer = { transferId: msg.transferId, files: msg.files };
-        this.callbacks.onIncomingOffer?.(msg.transferId, msg.files);
+        if (!this.pendingOffers.some((o) => o.transferId === msg.transferId)) {
+          this.pendingOffers.push({ transferId: msg.transferId, files: msg.files });
+          this.callbacks.onIncomingOffers?.([...this.pendingOffers]);
+        }
         break;
       case "transfer-accept":
-        if (msg.transferId === this.activeTransferId) {
+        if (this.sendingTransfers.has(msg.transferId)) {
           await this.sendTransfer(msg.transferId);
         }
         break;
       case "transfer-reject":
-        if (msg.transferId === this.activeTransferId) {
-          this.callbacks.onError?.(new Error("Получатель отклонил передачу"));
-          this.activeTransferId = null;
-        }
+        this.sendingTransfers.delete(msg.transferId);
+        this.callbacks.onError?.(new Error("Получатель отклонил передачу"));
         break;
       case "transfer-cancel":
-        this.cancelled = true;
-        this.receiveBuffers.clear();
-        this.receivedForZip = [];
+        this.cancelledTransfers.add(msg.transferId);
+        this.sendingTransfers.delete(msg.transferId);
+        this.inboundQueues.delete(msg.transferId);
+        break;
+      case "file-resume":
+        this.resumeOffsets.set(`${msg.transferId}:${msg.fileId}`, msg.offset);
         break;
       case "file-start":
-        this.receiveBuffers.set(msg.fileId, {
-          relativePath: msg.name,
-          size: msg.size,
-          sha256: msg.sha256,
-          parts: new Map(),
-        });
-        {
-          const existing = this.queue.find((q) => q.id === msg.fileId);
-          if (existing) {
-            existing.status = "transferring";
-          } else {
-            this.queue.push({
-              id: msg.fileId,
-              file: new File([], msg.name),
-              relativePath: msg.name,
-              status: "transferring",
-              progress: 0,
-            });
-          }
-          this.callbacks.onQueueUpdate?.([...this.queue]);
-        }
+        await this.handleFileStart(msg);
         break;
       case "file-chunk":
-        this.handleChunk(msg);
+        await this.handleChunk(msg);
         break;
       case "file-done":
         await this.handleFileDone(msg);
@@ -197,10 +258,15 @@ export class ShareTransferManager {
   }
 
   private async sendTransfer(transferId: string): Promise<void> {
-    for (const item of this.queue) {
-      if (this.cancelled) break;
+    const items = this.outboundQueue.filter(
+      (q) =>
+        q.transferId === transferId &&
+        (q.status === "pending" || q.status === "transferring"),
+    );
+    for (const item of items) {
+      if (this.cancelledTransfers.has(transferId)) break;
       item.status = "transferring";
-      this.callbacks.onQueueUpdate?.([...this.queue]);
+      this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
 
       const sha256 = await sha256Hex(item.file);
       const pathName = item.relativePath;
@@ -215,9 +281,9 @@ export class ShareTransferManager {
         }),
       );
 
-      let offset = 0;
+      let offset = await this.waitForResumeOffset(transferId, item.id);
       const started = Date.now();
-      while (offset < item.file.size && !this.cancelled) {
+      while (offset < item.file.size && !this.cancelledTransfers.has(transferId)) {
         const chunk = item.file.slice(offset, offset + CHUNK_SIZE);
         const buffer = await chunk.arrayBuffer();
         this.peer.send(
@@ -231,12 +297,12 @@ export class ShareTransferManager {
         );
         offset += buffer.byteLength;
         item.progress = Math.round((offset / item.file.size) * 100);
-        this.callbacks.onQueueUpdate?.([...this.queue]);
-        this.emitProgress(transferId, item.id, pathName, offset, item.file.size, started);
+        this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
+        this.emitProgress(transferId, item.id, pathName, "out", offset, item.file.size, started);
         await new Promise((r) => setTimeout(r, 0));
       }
 
-      if (this.cancelled) {
+      if (this.cancelledTransfers.has(transferId)) {
         item.status = "cancelled";
         break;
       }
@@ -246,45 +312,107 @@ export class ShareTransferManager {
       );
       item.status = "done";
       item.progress = 100;
-      this.callbacks.onQueueUpdate?.([...this.queue]);
+      this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
     }
-    this.activeTransferId = null;
-    this.callbacks.onTransferComplete?.();
+    this.sendingTransfers.delete(transferId);
+    this.callbacks.onTransferComplete?.("out", transferId);
   }
 
-  private async receiveTransfer(_transferId: string, files: ShareFileMeta[]): Promise<void> {
-    this.receivedForZip = [];
-    for (const meta of files) {
-      const path = meta.relativePath ?? meta.name;
-      this.receiveBuffers.set(meta.id, {
-        relativePath: path,
-        size: meta.size,
-        sha256: "",
-        parts: new Map(),
-      });
+  private async handleFileStart(msg: Extract<ShareControlMessage, { t: "file-start" }>): Promise<void> {
+    if (this.cancelledTransfers.has(msg.transferId)) return;
+
+    const saved = await loadResumeState(this.roomId, msg.fileId);
+    let parts = new Map<number, ArrayBuffer>();
+    if (saved && saved.sha256 === msg.sha256 && saved.contiguousOffset > 0) {
+      parts = await loadSavedChunks(this.roomId, msg.fileId, saved.chunkKeys);
+      this.resumeOffsets.set(`${msg.transferId}:${msg.fileId}`, saved.contiguousOffset);
+      this.peer.send(
+        encodeControlMessage({
+          t: "file-resume",
+          transferId: msg.transferId,
+          fileId: msg.fileId,
+          offset: saved.contiguousOffset,
+        }),
+      );
     }
-    this.queue = files.map((meta) => ({
-      id: meta.id,
-      file: new File([], meta.name, { type: meta.type }),
-      relativePath: meta.relativePath ?? meta.name,
-      status: "pending" as const,
-      progress: 0,
-    }));
-    this.callbacks.onQueueUpdate?.([...this.queue]);
+
+    this.receiveBuffers.set(msg.fileId, {
+      relativePath: msg.name,
+      size: msg.size,
+      sha256: msg.sha256,
+      parts,
+    });
+
+    const queue = this.inboundQueues.get(msg.transferId) ?? [];
+    let item = queue.find((q) => q.id === msg.fileId);
+    if (!item) {
+      item = {
+        id: msg.fileId,
+        file: new File([], msg.name),
+        relativePath: msg.name,
+        status: "transferring",
+        progress: 0,
+      };
+      queue.push(item);
+      this.inboundQueues.set(msg.transferId, queue);
+    } else {
+      item.status = "transferring";
+    }
+    if (parts.size > 0) {
+      const received = [...parts.values()].reduce((s, p) => s + p.byteLength, 0);
+      item.progress = Math.round((received / msg.size) * 100);
+    }
+    this.callbacks.onInboundUpdate?.(msg.transferId, [...queue]);
   }
 
-  private handleChunk(msg: Extract<ShareControlMessage, { t: "file-chunk" }>): void {
+  private waitForResumeOffset(transferId: string, fileId: string, timeoutMs = 400): Promise<number> {
+    const key = `${transferId}:${fileId}`;
+    const existing = this.resumeOffsets.get(key);
+    if (existing !== undefined) return Promise.resolve(existing);
+
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        const offset = this.resumeOffsets.get(key);
+        if (offset !== undefined) {
+          clearInterval(timer);
+          resolve(offset);
+        } else if (Date.now() - started >= timeoutMs) {
+          clearInterval(timer);
+          resolve(0);
+        }
+      }, 50);
+    });
+  }
+
+  private async handleChunk(msg: Extract<ShareControlMessage, { t: "file-chunk" }>): Promise<void> {
+    if (this.cancelledTransfers.has(msg.transferId)) return;
     const buf = this.receiveBuffers.get(msg.fileId);
     if (!buf) return;
     buf.parts.set(msg.offset, base64ToArrayBuffer(msg.data));
+
     const received = [...buf.parts.values()].reduce((s, p) => s + p.byteLength, 0);
-    const item = this.queue.find((q) => q.id === msg.fileId);
+    const queue = this.inboundQueues.get(msg.transferId) ?? [];
+    const item = queue.find((q) => q.id === msg.fileId);
     if (item) {
       item.status = "transferring";
       item.progress = Math.round((received / buf.size) * 100);
-      this.callbacks.onQueueUpdate?.([...this.queue]);
+      this.callbacks.onInboundUpdate?.(msg.transferId, [...queue]);
     }
-    this.emitProgress(msg.transferId, msg.fileId, buf.relativePath, received, buf.size, Date.now());
+
+    await persistReceiveProgress({
+      roomId: this.roomId,
+      transferId: msg.transferId,
+      fileId: msg.fileId,
+      relativePath: buf.relativePath,
+      size: buf.size,
+      sha256: buf.sha256,
+      parts: buf.parts,
+      latestOffset: msg.offset,
+      latestData: base64ToArrayBuffer(msg.data),
+    });
+
+    this.emitProgress(msg.transferId, msg.fileId, buf.relativePath, "in", received, buf.size, Date.now());
   }
 
   private async handleFileDone(msg: Extract<ShareControlMessage, { t: "file-done" }>): Promise<void> {
@@ -297,7 +425,8 @@ export class ShareTransferManager {
     }
     const blob = new Blob([merged]);
     const hash = await sha256Hex(blob);
-    const item = this.queue.find((q) => q.id === msg.fileId);
+    const queue = this.inboundQueues.get(msg.transferId) ?? [];
+    const item = queue.find((q) => q.id === msg.fileId);
 
     if (hash !== msg.sha256) {
       if (item) {
@@ -306,50 +435,58 @@ export class ShareTransferManager {
       }
       this.callbacks.onError?.(new Error(`Файл ${buf.relativePath}: контрольная сумма не совпадает`));
       this.receiveBuffers.delete(msg.fileId);
-      this.callbacks.onQueueUpdate?.([...this.queue]);
+      this.callbacks.onInboundUpdate?.(msg.transferId, [...queue]);
       return;
     }
 
-    this.receivedForZip.push({ name: buf.relativePath, blob });
+    const list = this.receivedByTransfer.get(msg.transferId) ?? [];
+    list.push({ name: buf.relativePath, blob });
+    this.receivedByTransfer.set(msg.transferId, list);
 
     if (item) {
       item.status = "done";
       item.progress = 100;
+      if (blob.type.startsWith("image/")) {
+        item.previewUrl = URL.createObjectURL(blob);
+      }
     }
     this.receiveBuffers.delete(msg.fileId);
-    this.callbacks.onQueueUpdate?.([...this.queue]);
+    await clearResumeState(this.roomId, msg.fileId);
+    this.callbacks.onInboundUpdate?.(msg.transferId, [...queue]);
 
-    const allDone = this.queue.every((q) => q.status === "done" || q.status === "error");
+    const allDone = queue.length > 0 && queue.every((q) => q.status === "done" || q.status === "error");
     if (allDone) {
-      await this.finalizeReceivedFiles();
-      this.callbacks.onTransferComplete?.();
+      await this.finalizeReceivedFiles(msg.transferId);
+      this.callbacks.onTransferComplete?.("in", msg.transferId);
     }
   }
 
-  private async finalizeReceivedFiles(): Promise<void> {
-    if (this.receivedForZip.length === 0) return;
+  private async finalizeReceivedFiles(transferId: string): Promise<void> {
+    const files = this.receivedByTransfer.get(transferId) ?? [];
+    if (!files.length) return;
 
     const asFolder = hasFolderStructure(
-      this.receivedForZip.map((f) => ({ file: new File([], f.name), relativePath: f.name })),
+      files.map((f) => ({ file: new File([], f.name), relativePath: f.name })),
     );
 
-    if (asFolder && this.receivedForZip.length > 1) {
-      const root = this.receivedForZip[0]!.name.split("/")[0] ?? "qhub-share";
-      await saveFilesAsZip(this.receivedForZip, `${root}.zip`);
-    } else if (this.receivedForZip.length === 1) {
-      await saveReceivedFile(this.receivedForZip[0]!.blob, this.receivedForZip[0]!.name);
+    if (asFolder && files.length > 1) {
+      const root = files[0]!.name.split("/")[0] ?? "qhub-share";
+      await saveFilesAsZip(files, `${root}.zip`);
+    } else if (files.length === 1) {
+      await saveReceivedFile(files[0]!.blob, files[0]!.name);
     } else {
-      for (const f of this.receivedForZip) {
+      for (const f of files) {
         await saveReceivedFile(f.blob, f.name);
       }
     }
-    this.receivedForZip = [];
+    this.receivedByTransfer.delete(transferId);
   }
 
   private emitProgress(
     transferId: string,
     fileId: string,
     fileName: string,
+    direction: "out" | "in",
     bytesSent: number,
     bytesTotal: number,
     startedAt: number,
@@ -366,6 +503,7 @@ export class ShareTransferManager {
       transferId,
       fileId,
       fileName,
+      direction,
       bytesSent,
       bytesTotal,
       speedBps,
@@ -373,11 +511,15 @@ export class ShareTransferManager {
     });
   }
 
-  getPendingOffer() {
-    return this.pendingOffer;
-  }
-
   destroy(): void {
     this.unsub?.();
+    for (const item of this.outboundQueue) {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    }
+    for (const queue of this.inboundQueues.values()) {
+      for (const item of queue) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      }
+    }
   }
 }

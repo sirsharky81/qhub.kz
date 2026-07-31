@@ -9,11 +9,14 @@ function authHeaders(session: ShareSession): Record<string, string> {
   };
 }
 
-export async function createShareRoomApi(deviceName: string): Promise<ShareSession> {
+export async function createShareRoomApi(
+  deviceName: string,
+  pin?: string | null,
+): Promise<ShareSession> {
   const res = await platformFetch("/api/share/create", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deviceName }),
+    body: JSON.stringify({ deviceName, pin: pin?.trim() || undefined }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -27,6 +30,7 @@ export async function createShareRoomApi(deviceName: string): Promise<ShareSessi
     deviceName: string;
     roomCode: string;
     inviteToken: string;
+    hasPin?: boolean;
   };
   return {
     roomId: data.roomId,
@@ -39,11 +43,15 @@ export async function createShareRoomApi(deviceName: string): Promise<ShareSessi
   };
 }
 
-export async function joinShareRoomApi(joinInput: string, deviceName: string): Promise<ShareSession> {
+export async function joinShareRoomApi(
+  joinInput: string,
+  deviceName: string,
+  pin?: string | null,
+): Promise<ShareSession> {
   const res = await platformFetch("/api/share/join", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ joinInput, deviceName }),
+    body: JSON.stringify({ joinInput, deviceName, pin: pin?.trim() || undefined }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -52,9 +60,11 @@ export async function joinShareRoomApi(joinInput: string, deviceName: string): P
         ? "Комната уже заполнена"
         : data.error === "room_expired"
           ? "Комната истекла"
-          : data.error === "room_not_found"
-            ? "Комната не найдена"
-            : (data.error ?? "Не удалось подключиться");
+          : data.error === "pin_invalid"
+            ? "Неверный PIN"
+            : data.error === "room_not_found"
+              ? "Комната не найдена"
+              : (data.error ?? "Не удалось подключиться");
     throw new Error(msg);
   }
   const data = (await res.json()) as {
@@ -112,6 +122,26 @@ export async function pollShareRoomApi(session: ShareSession, afterSeq: number):
     throw new Error(data.error ?? "Ошибка опроса");
   }
   return res.json() as Promise<SharePollResponse>;
+}
+
+export async function registerShareBeaconApi(session: ShareSession): Promise<void> {
+  await platformFetch("/api/share/beacon", {
+    method: "POST",
+    headers: authHeaders(session),
+  });
+}
+
+export interface NearbyShareRoom {
+  roomId: string;
+  roomCode: string;
+  deviceName: string;
+}
+
+export async function fetchNearbyShareRoomsApi(): Promise<NearbyShareRoom[]> {
+  const res = await platformFetch("/api/share/nearby");
+  if (!res.ok) return [];
+  const data = (await res.json()) as { rooms?: NearbyShareRoom[] };
+  return data.rooms ?? [];
 }
 
 export async function fetchShareIceServers(): Promise<RTCIceServer[]> {

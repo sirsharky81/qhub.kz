@@ -27,4 +27,22 @@ describe("room-core engine", () => {
     await engine.joinRoom(inviteToken, "B");
     await expect(engine.joinRoom(inviteToken, "C")).rejects.toThrow("room_full");
   });
+
+  it("requires PIN when room is protected", async () => {
+    const created = await engine.createRoom("Host", "1234");
+    expect(created.room.pinHash).toBeTruthy();
+
+    await expect(engine.joinRoom(created.inviteToken, "Guest")).rejects.toThrow("pin_invalid");
+    await expect(engine.joinRoom(created.inviteToken, "Guest", "9999")).rejects.toThrow("pin_invalid");
+
+    const joined = await engine.joinRoom(created.inviteToken, "Guest", "1234");
+    expect(joined.member.displayName).toBe("Guest");
+  });
+
+  it("allows join without PIN when room has none", async () => {
+    const created = await engine.createRoom("Host");
+    expect(created.room.pinHash).toBeNull();
+    const joined = await engine.joinRoom(created.inviteToken, "Guest");
+    expect(joined.member.role).toBe("guest");
+  });
 });

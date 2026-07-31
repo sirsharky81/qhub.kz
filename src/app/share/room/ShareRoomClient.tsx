@@ -2,21 +2,29 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { closeShareRoomApi, pollShareRoomApi } from "@/lib/share/client";
+import {
+  closeShareRoomApi,
+  pollShareRoomApi,
+  registerShareBeaconApi,
+} from "@/lib/share/client";
+import {
+  collectConnectionDiagnostics,
+  type ConnectionDiagnostics,
+} from "@/lib/share/connection-diagnostics";
 import { filesFromFileList, pickDirectoryFiles } from "@/lib/share/pick-files";
 import { clearShareSession, loadShareSession } from "@/lib/share/session";
 import type { ShareSession } from "@/lib/share/types";
 import {
   ShareTransferManager,
+  type IncomingTransferOffer,
   type TransferProgress,
   type TransferQueueItem,
 } from "@/lib/share/transfer-manager";
 import { SharePeerConnection, type ShareConnectionState } from "@/lib/share/webrtc-session";
+import { ConnectionDiagnosticsPanel } from "../components/ConnectionDiagnosticsPanel";
 import { FileTransferPanel } from "../components/FileTransferPanel";
 import { RoomInvitePanel } from "../components/RoomInvitePanel";
 import { ShareShell } from "../components/ShareShell";
-
-const PENDING_SHARE_KEY = "qhub_share_pending_files";
 
 export function ShareRoomClient() {
   const router = useRouter();
@@ -24,11 +32,11 @@ export function ShareRoomClient() {
   const [connectionState, setConnectionState] = useState<ShareConnectionState>("idle");
   const [transport, setTransport] = useState<"ws" | "poll">("poll");
   const [peerName, setPeerName] = useState<string | null>(null);
-  const [queue, setQueue] = useState<TransferQueueItem[]>([]);
+  const [outboundQueue, setOutboundQueue] = useState<TransferQueueItem[]>([]);
+  const [inboundOffers, setInboundOffers] = useState<IncomingTransferOffer[]>([]);
+  const [inboundQueues, setInboundQueues] = useState<Map<string, TransferQueueItem[]>>(new Map());
   const [progress, setProgress] = useState<TransferProgress | null>(null);
-  const [incomingOffer, setIncomingOffer] = useState<{ transferId: string; fileCount: number } | null>(
-    null,
-  );
+  const [diagnostics, setDiagnostics] = useState<ConnectionDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const peerRef = useRef<SharePeerConnection | null>(null);
@@ -55,12 +63,17 @@ export function ShareRoomClient() {
     });
     peerRef.current = peer;
 
-    const transfer = new ShareTransferManager(peer, {
-      onQueueUpdate: setQueue,
-      onProgress: setProgress,
-      onIncomingOffer: (transferId, files) => {
-        setIncomingOffer({ transferId, fileCount: files.length });
+    const transfer = new ShareTransferManager(peer, session.roomId, {
+      onOutboundUpdate: setOutboundQueue,
+      onInboundUpdate: (transferId, items) => {
+        setInboundQueues((prev) => {
+          const next = new Map(prev);
+          next.set(transferId, items);
+          return next;
+        });
       },
+      onIncomingOffers: setInboundOffers,
+      onProgress: setProgress,
       onTransferComplete: () => setProgress(null),
       onError: (err) => setError(err.message),
     });
@@ -68,35 +81,32 @@ export function ShareRoomClient() {
 
     void peer.start();
 
-    const pollPeer = setInterval(() => {
-      void pollShareRoomApi(session, 0)
-        .then((snap) => {
-          if (snap.peer?.deviceName) setPeerName(snap.peer.deviceName);
-        })
-        .catch(() => {});
-    }, 5000);
+    if (session.role === "host") {
+      void registerShareBeaconApi(session).catch(() => {});
+      const beaconTimer = setInterval(() => {
+        void registerShareBeaconApi(session).catch(() => {});
+      }, 20000);
+      return () => {
+        clearInterval(beaconTimer);
+        transfer.destroy();
+        peer.close();
+      };
+    }
 
     return () => {
-      clearInterval(pollPeer);
       transfer.destroy();
       peer.close();
     };
   }, [session]);
 
   useEffect(() => {
-    if (!session || !transferRef.current) return;
-    try {
-      const raw = sessionStorage.getItem(PENDING_SHARE_KEY);
-      if (!raw) return;
-      sessionStorage.removeItem(PENDING_SHARE_KEY);
-      const names = JSON.parse(raw) as string[];
-      if (Array.isArray(names) && names.length) {
-        /* files from share target are loaded via launchQueue in ShareHomeClient */
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [session]);
+    if (connectionState !== "connected") return;
+    const timer = setInterval(() => {
+      const pc = peerRef.current?.getPeerConnection() ?? null;
+      void collectConnectionDiagnostics(pc).then(setDiagnostics);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [connectionState]);
 
   const handleLeave = useCallback(async () => {
     if (session) {
@@ -116,28 +126,6 @@ export function ShareRoomClient() {
       if (picked.length) transferRef.current?.setFiles(picked);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось выбрать папку");
-    }
-  }
-
-  async function handleSystemShare() {
-    if (!navigator.share) {
-      setError("Системное меню «Поделиться» недоступно");
-      return;
-    }
-    try {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.multiple = true;
-      input.onchange = () => {
-        if (input.files?.length) {
-          transferRef.current?.setFiles(filesFromFileList(input.files));
-        }
-      };
-      input.click();
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        setError(err instanceof Error ? err.message : "Ошибка");
-      }
     }
   }
 
@@ -200,28 +188,26 @@ export function ShareRoomClient() {
           {connectionLabel}
           {" · "}
           {transport === "ws" ? "WebSocket" : "Polling"}
+          {" · "}
+          Двунаправленная передача
         </p>
       </div>
 
+      <ConnectionDiagnosticsPanel diagnostics={diagnostics} />
+
       <FileTransferPanel
-        queue={queue}
+        outboundQueue={outboundQueue}
+        inboundOffers={inboundOffers}
+        inboundQueues={inboundQueues}
         progress={progress}
         canSend={connectionState === "connected"}
-        incomingOffer={incomingOffer}
-        canShareIncoming={typeof navigator !== "undefined" && Boolean(navigator.share)}
         onPickFiles={(files) => transferRef.current?.setFiles(filesFromFileList(files))}
         onPickFolder={() => void handlePickFolder()}
-        onShareIncoming={() => void handleSystemShare()}
         onStartSend={() => void transferRef.current?.startSend()}
-        onCancel={() => transferRef.current?.cancel()}
-        onAcceptIncoming={() => {
-          transferRef.current?.acceptIncoming();
-          setIncomingOffer(null);
-        }}
-        onRejectIncoming={() => {
-          transferRef.current?.rejectIncoming();
-          setIncomingOffer(null);
-        }}
+        onCancelOutbound={() => transferRef.current?.cancelOutbound()}
+        onCancelInbound={(id) => transferRef.current?.cancelInbound(id)}
+        onAcceptIncoming={(id) => transferRef.current?.acceptIncoming(id)}
+        onRejectIncoming={(id) => transferRef.current?.rejectIncoming(id)}
       />
     </ShareShell>
   );

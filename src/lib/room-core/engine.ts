@@ -88,7 +88,7 @@ export class RoomCoreEngine {
     throw new Error("code_collision");
   }
 
-  async createRoom(displayName: string): Promise<RoomCoreCreateResult> {
+  async createRoom(displayName: string, pin?: string | null): Promise<RoomCoreCreateResult> {
     const roomId = generateUuidV7();
     const inviteToken = generateInviteToken();
     const roomCode = await this.uniqueRoomCode();
@@ -108,6 +108,7 @@ export class RoomCoreEngine {
       maxMembers: this.config.maxMembers,
       closed: false,
       version: 0,
+      pinHash: pin?.trim() ? hashToken(pin.trim()) : null,
     };
 
     const member: RoomCoreMember = {
@@ -176,11 +177,18 @@ export class RoomCoreEngine {
     return this.getRoom(roomId);
   }
 
-  async joinRoom(joinInput: string, displayName: string): Promise<RoomCoreJoinResult> {
+  async joinRoom(joinInput: string, displayName: string, pin?: string | null): Promise<RoomCoreJoinResult> {
     const room = await this.resolveRoomByJoinInput(joinInput);
     if (!room || room.closed) throw new Error("room_not_found");
     if (Date.now() > room.expiresAt) throw new Error("room_expired");
     if (room.memberIds.length >= room.maxMembers) throw new Error("room_full");
+
+    if (room.pinHash) {
+      const provided = pin?.trim() ?? "";
+      if (!provided || hashToken(provided) !== room.pinHash) {
+        throw new Error("pin_invalid");
+      }
+    }
 
     const memberId = generateMemberId();
     const accessToken = generateAccessToken();

@@ -24,6 +24,8 @@ export interface RoomCoreRoom {
   maxMembers: number;
   closed: boolean;
   version: number;
+  /** SHA-256 hash of optional room PIN (4–8 digits). */
+  pinHash?: string | null;
 }
 
 export interface RoomCoreMember {

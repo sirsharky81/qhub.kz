@@ -4,7 +4,8 @@ export type ShareControlMessage =
   | { t: "transfer-accept"; transferId: string }
   | { t: "transfer-reject"; transferId: string }
   | { t: "transfer-cancel"; transferId: string }
-  | { t: "file-start"; transferId: string; fileId: string; name: string; size: number; sha256: string; offset?: number }
+  | { t: "file-start"; transferId: string; fileId: string; name: string; size: number; sha256: string }
+  | { t: "file-resume"; transferId: string; fileId: string; offset: number }
   | { t: "file-chunk"; transferId: string; fileId: string; offset: number; data: string }
   | { t: "file-done"; transferId: string; fileId: string; sha256: string }
   | { t: "file-error"; transferId: string; fileId: string; reason: string };
@@ -14,7 +15,6 @@ export interface ShareFileMeta {
   name: string;
   size: number;
   type: string;
-  /** Path inside a folder transfer, e.g. photos/vacation/img.jpg */
   relativePath?: string;
 }
 
@@ -50,4 +50,8 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+export function isImageMime(type: string): boolean {
+  return type.startsWith("image/") && !type.includes("svg");
 }

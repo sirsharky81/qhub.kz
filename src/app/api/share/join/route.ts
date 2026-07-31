@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       );
     }
 
-    let body: { joinInput?: string; deviceName?: string };
+    let body: { joinInput?: string; deviceName?: string; pin?: string };
     try {
       body = await request.json();
     } catch {
@@ -29,7 +29,11 @@ export async function POST(request: Request) {
     }
 
     try {
-      const { room, participant, accessToken } = await joinShareRoom(joinInput, body.deviceName ?? "Устройство");
+      const { room, participant, accessToken } = await joinShareRoom(
+        joinInput,
+        body.deviceName ?? "Устройство",
+        body.pin,
+      );
       return withCors(
         Response.json({
           roomId: room.roomId,
@@ -44,7 +48,8 @@ export async function POST(request: Request) {
       );
     } catch (err) {
       const code = err instanceof Error ? err.message : "join_failed";
-      const status = code === "room_full" ? 409 : code === "room_not_found" ? 404 : 410;
+      const status =
+        code === "room_full" ? 409 : code === "pin_invalid" ? 403 : code === "room_not_found" ? 404 : 410;
       return withCors(Response.json({ error: code }, { status }), request);
     }
   } catch (err) {
