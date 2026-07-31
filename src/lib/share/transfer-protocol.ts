@@ -20,8 +20,10 @@ export interface ShareFileMeta {
   relativePath?: string;
 }
 
-/** Raw bytes per chunk. Must stay under WebRTC SCTP max message (~256 KiB after base64+JSON). */
 export const CHUNK_SIZE = 48 * 1024;
+
+/** Larger chunks for direct LAN P2P (still under SCTP ~256 KiB after base64+JSON). */
+export const LAN_CHUNK_SIZE = 128 * 1024;
 
 /** Upper bound for a single DataChannel JSON message (UTF-16 code units, mostly ASCII). */
 export const MAX_DC_JSON_MESSAGE_LENGTH = 240 * 1024;

@@ -42,6 +42,8 @@ export interface ShareSession {
   deviceName: string;
   roomCode: string;
   inviteToken: string;
+  /** Prefer direct Wi‑Fi/LAN path (no TURN relay). */
+  lanPrefer?: boolean;
 }
 
 export interface ShareRoomPublic {

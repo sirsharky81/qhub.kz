@@ -26,6 +26,7 @@ export function ShareHomeClient() {
   const [error, setError] = useState<string | null>(null);
   const [nearby, setNearby] = useState<Awaited<ReturnType<typeof fetchNearbyShareRoomsApi>>>([]);
   const [nearbyLoading, setNearbyLoading] = useState(true);
+  const [lanPrefer, setLanPrefer] = useState(true);
 
   const pendingHint = useMemo(() => {
     if (searchParams.get("pending") !== "1" && !hasPendingSharePayload()) return null;
@@ -44,7 +45,7 @@ export function ShareHomeClient() {
   }, [searchParams]);
 
   const joinRoom = useCallback(
-    async (rawInput: string, pin?: string) => {
+    async (rawInput: string, pin?: string, options?: { lanPrefer?: boolean }) => {
       const resolved = resolveShareJoinInput(rawInput);
       if (!resolved) {
         setError("Введите код комнаты или ссылку");
@@ -56,14 +57,14 @@ export function ShareHomeClient() {
       try {
         const deviceName = await getDeviceName();
         const session = await joinShareRoomApi(resolved, deviceName, pin ?? joinPin);
-        saveShareSession(session);
+        saveShareSession({ ...session, lanPrefer: options?.lanPrefer ?? lanPrefer });
         router.replace("/share/room");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Ошибка подключения");
         setBusy(false);
       }
     },
-    [joinPin, router],
+    [joinPin, lanPrefer, router],
   );
 
   useEffect(() => {
@@ -104,7 +105,7 @@ export function ShareHomeClient() {
     try {
       const deviceName = await getDeviceName();
       const session = await createShareRoomApi(deviceName, pin);
-      saveShareSession(session);
+      saveShareSession({ ...session, lanPrefer });
       router.push("/share/room");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -133,12 +134,14 @@ export function ShareHomeClient() {
           busy={busy}
           nearbyRooms={nearby}
           nearbyLoading={nearbyLoading}
+          lanPrefer={lanPrefer}
+          onLanPreferChange={setLanPrefer}
           onJoinInputChange={setJoinInput}
           onJoinPinChange={setJoinPin}
           onJoin={() => void joinRoom(joinInput)}
           onNearbyJoin={(code) => {
             setJoinInput(code);
-            void joinRoom(code);
+            void joinRoom(code, undefined, { lanPrefer: true });
           }}
         />
 

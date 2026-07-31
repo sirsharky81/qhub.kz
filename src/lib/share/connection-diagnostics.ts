@@ -57,7 +57,26 @@ export async function collectConnectionDiagnostics(
 }
 
 export function diagnosticsLabel(d: ConnectionDiagnostics): string {
-  if (d.mode === "p2p") return "P2P (локальная сеть или прямое соединение)";
-  if (d.mode === "turn") return "TURN relay";
+  if (d.mode === "p2p" && d.candidateType === "host") return "Прямое Wi‑Fi/LAN (быстро)";
+  if (d.mode === "p2p") return "P2P (прямое соединение)";
+  if (d.mode === "turn") return "TURN relay (медленно — часто из‑за VPN)";
   return "Определяется…";
+}
+
+export function diagnosticsTips(d: ConnectionDiagnostics, lanPrefer?: boolean): string[] {
+  const tips: string[] = [];
+  if (d.mode === "turn") {
+    tips.push("Отключите VPN на обоих устройствах для прямой передачи по Wi‑Fi.");
+    tips.push("Подключитесь к одной Wi‑Fi сети и используйте «Рядом в сети».");
+  }
+  if (d.mode === "unknown") {
+    tips.push("Если передача зависла — выйдите и подключитесь снова без VPN.");
+  }
+  if (lanPrefer && d.mode === "turn") {
+    tips.push("Включён локальный режим, но соединение идёт через relay — проверьте VPN.");
+  }
+  if (d.mode === "p2p" && d.candidateType === "host") {
+    tips.push("Оптимальный режим: устройства в одной сети.");
+  }
+  return tips;
 }

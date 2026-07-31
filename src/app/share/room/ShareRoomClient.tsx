@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { pickShareChunkSize } from "@/lib/share/chunk-size";
 import {
   closeShareRoomApi,
   registerShareBeaconApi,
@@ -137,21 +138,26 @@ export function ShareRoomClient() {
     });
     peerRef.current = peer;
 
-    const transfer = new ShareTransferManager(peer, session.roomId, {
-      onOutboundUpdate: setOutboundQueue,
-      onInboundUpdate: (transferId, items) => {
-        setInboundQueues((prev) => {
-          const next = new Map(prev);
-          next.set(transferId, items);
-          return next;
-        });
+    const transfer = new ShareTransferManager(
+      peer,
+      session.roomId,
+      {
+        onOutboundUpdate: setOutboundQueue,
+        onInboundUpdate: (transferId, items) => {
+          setInboundQueues((prev) => {
+            const next = new Map(prev);
+            next.set(transferId, items);
+            return next;
+          });
+        },
+        onIncomingOffers: setInboundOffers,
+        onProgress: setProgress,
+        onTransferComplete: () => setProgress(null),
+        onTextUpdate: setTextMessages,
+        onError: (err) => setError(err.message),
       },
-      onIncomingOffers: setInboundOffers,
-      onProgress: setProgress,
-      onTransferComplete: () => setProgress(null),
-      onTextUpdate: setTextMessages,
-      onError: (err) => setError(err.message),
-    });
+      pickShareChunkSize(session.lanPrefer),
+    );
     transferRef.current = transfer;
 
     void peer.start();
@@ -299,7 +305,11 @@ export function ShareRoomClient() {
         </p>
       </div>
 
-      <ConnectionDiagnosticsPanel diagnostics={diagnostics} />
+      <ConnectionDiagnosticsPanel
+        diagnostics={diagnostics}
+        lanPrefer={session.lanPrefer}
+        connectionState={connectionState}
+      />
 
       <TextTransferPanel
         messages={textMessages}

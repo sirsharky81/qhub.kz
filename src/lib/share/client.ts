@@ -144,9 +144,10 @@ export async function fetchNearbyShareRoomsApi(): Promise<NearbyShareRoom[]> {
   return data.rooms ?? [];
 }
 
-export async function fetchShareIceServers(): Promise<RTCIceServer[]> {
+export async function fetchShareIceServers(lanPrefer = false): Promise<RTCIceServer[]> {
   try {
-    const res = await platformFetch("/api/share/ice-config");
+    const params = lanPrefer ? "?mode=lan" : "";
+    const res = await platformFetch(`/api/share/ice-config${params}`);
     if (!res.ok) return [{ urls: "stun:stun.l.google.com:19302" }];
     const data = (await res.json()) as { iceServers?: RTCIceServer[] };
     return data.iceServers?.length ? data.iceServers : [{ urls: "stun:stun.l.google.com:19302" }];
