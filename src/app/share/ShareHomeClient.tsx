@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { consumeScanResult } from "@/lib/code-scanner/scan-return";
 import {
   createShareRoomApi,
@@ -9,10 +9,12 @@ import {
   joinShareRoomApi,
 } from "@/lib/share/client";
 import { getDeviceName } from "@/lib/share/device-name";
+import { resolveShareJoinInput } from "@/lib/share/join-input";
 import { hasPendingSharePayload, peekPendingText, peekPendingFilesCount } from "@/lib/share/pending-payload";
 import { saveShareSession } from "@/lib/share/session";
 import { isShareInviteUrl, parseShareInviteFromUrl } from "@/lib/share/urls";
-import { NearbyRoomsPanel } from "./components/NearbyRoomsPanel";
+import { ShareCreatePanel } from "./components/ShareCreatePanel";
+import { ShareJoinPanel } from "./components/ShareJoinPanel";
 import { ShareShell } from "./components/ShareShell";
 
 export function ShareHomeClient() {
@@ -21,7 +23,6 @@ export function ShareHomeClient() {
   const [busy, setBusy] = useState(false);
   const [joinInput, setJoinInput] = useState("");
   const [joinPin, setJoinPin] = useState("");
-  const [createPin, setCreatePin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [nearby, setNearby] = useState<Awaited<ReturnType<typeof fetchNearbyShareRoomsApi>>>([]);
   const [nearbyLoading, setNearbyLoading] = useState(true);
@@ -31,16 +32,39 @@ export function ShareHomeClient() {
     const fileCount = peekPendingFilesCount();
     const text = peekPendingText();
     if (fileCount > 0 && text) {
-      return `Готово к отправке: ${fileCount} файл(ов) и текст. Создайте или войдите в комнату.`;
+      return `Готово к отправке: ${fileCount} файл(ов) и текст. Подключитесь к комнате.`;
     }
     if (fileCount > 0) {
-      return `Готово к отправке: ${fileCount} файл(ов). Создайте или войдите в комнату.`;
+      return `Готово к отправке: ${fileCount} файл(ов). Подключитесь к комнате.`;
     }
     if (text) {
-      return "Готово к отправке: текст или ссылка. Создайте или войдите в комнату.";
+      return "Готово к отправке: текст или ссылка. Подключитесь к комнате.";
     }
     return null;
   }, [searchParams]);
+
+  const joinRoom = useCallback(
+    async (rawInput: string, pin?: string) => {
+      const resolved = resolveShareJoinInput(rawInput);
+      if (!resolved) {
+        setError("Введите код комнаты или ссылку");
+        return;
+      }
+
+      setBusy(true);
+      setError(null);
+      try {
+        const deviceName = await getDeviceName();
+        const session = await joinShareRoomApi(resolved, deviceName, pin ?? joinPin);
+        saveShareSession(session);
+        router.replace("/share/room");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Ошибка подключения");
+        setBusy(false);
+      }
+    },
+    [joinPin, router],
+  );
 
   useEffect(() => {
     void fetchNearbyShareRoomsApi()
@@ -55,7 +79,7 @@ export function ShareHomeClient() {
   useEffect(() => {
     const token = searchParams.get("t");
     if (token) {
-      queueMicrotask(() => void autoJoin(token));
+      queueMicrotask(() => void joinRoom(token));
       return;
     }
 
@@ -63,37 +87,23 @@ export function ShareHomeClient() {
     if (scanKey) {
       const raw = consumeScanResult(scanKey);
       if (raw) {
-        const invite = isShareInviteUrl(raw) ? parseShareInviteFromUrl(raw) : raw.trim();
+        const invite = isShareInviteUrl(raw) ? parseShareInviteFromUrl(raw) ?? raw.trim() : raw.trim();
         if (invite) {
           queueMicrotask(() => {
             setJoinInput(invite);
-            void autoJoin(invite);
+            void joinRoom(invite);
           });
         }
       }
     }
-  }, [searchParams]);
+  }, [searchParams, joinRoom]);
 
-  async function autoJoin(input: string, pin?: string) {
+  async function handleCreate(pin?: string) {
     setBusy(true);
     setError(null);
     try {
       const deviceName = await getDeviceName();
-      const session = await joinShareRoomApi(input, deviceName, pin ?? joinPin);
-      saveShareSession(session);
-      router.replace("/share/room");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка подключения");
-      setBusy(false);
-    }
-  }
-
-  async function handleCreate() {
-    setBusy(true);
-    setError(null);
-    try {
-      const deviceName = await getDeviceName();
-      const session = await createShareRoomApi(deviceName, createPin || undefined);
+      const session = await createShareRoomApi(deviceName, pin);
       saveShareSession(session);
       router.push("/share/room");
     } catch (err) {
@@ -102,27 +112,9 @@ export function ShareHomeClient() {
     }
   }
 
-  async function handleJoin(e: React.FormEvent) {
-    e.preventDefault();
-    const input = joinInput.trim();
-    if (!input) return;
-
-    let resolved = input;
-    if (isShareInviteUrl(input)) {
-      const token = parseShareInviteFromUrl(input);
-      if (token) resolved = token;
-    }
-
-    await autoJoin(resolved);
-  }
-
   return (
     <ShareShell title="QHub Share" subtitle="Мгновенный обмен файлами">
       <div className="p-4 space-y-4">
-        <p className="text-sm text-gray-600 leading-relaxed">
-          Двунаправленная передача файлов напрямую между устройствами. Без хранения на сервере.
-        </p>
-
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
             {error}
@@ -135,76 +127,22 @@ export function ShareHomeClient() {
           </div>
         )}
 
-        <NearbyRoomsPanel
-          rooms={nearby}
-          loading={nearbyLoading}
-          onJoin={(code) => {
+        <ShareJoinPanel
+          joinInput={joinInput}
+          joinPin={joinPin}
+          busy={busy}
+          nearbyRooms={nearby}
+          nearbyLoading={nearbyLoading}
+          onJoinInputChange={setJoinInput}
+          onJoinPinChange={setJoinPin}
+          onJoin={() => void joinRoom(joinInput)}
+          onNearbyJoin={(code) => {
             setJoinInput(code);
-            void autoJoin(code);
+            void joinRoom(code);
           }}
         />
 
-        <div className="space-y-2">
-          <label className="block">
-            <span className="text-xs font-medium text-gray-600">PIN комнаты (необязательно)</span>
-            <input
-              value={createPin}
-              onChange={(e) => setCreatePin(e.target.value.replace(/\D/g, "").slice(0, 8))}
-              inputMode="numeric"
-              placeholder="4–8 цифр"
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
-              disabled={busy}
-            />
-          </label>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void handleCreate()}
-            className="w-full rounded-xl bg-sky-600 text-white py-3 text-sm font-semibold disabled:opacity-50"
-          >
-            Создать комнату
-          </button>
-        </div>
-
-        <div className="relative py-2">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200" />
-          </div>
-          <div className="relative flex justify-center">
-            <span className="bg-white px-2 text-xs text-gray-500">или</span>
-          </div>
-        </div>
-
-        <form onSubmit={(e) => void handleJoin(e)} className="space-y-3">
-          <label className="block">
-            <span className="text-xs font-medium text-gray-600">Код или ссылка</span>
-            <input
-              value={joinInput}
-              onChange={(e) => setJoinInput(e.target.value)}
-              placeholder="K8QX-3M7N или ссылка"
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
-              disabled={busy}
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-gray-600">PIN (если требуется)</span>
-            <input
-              value={joinPin}
-              onChange={(e) => setJoinPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
-              inputMode="numeric"
-              placeholder="PIN"
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
-              disabled={busy}
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={busy || !joinInput.trim()}
-            className="w-full rounded-xl border border-gray-900 text-gray-900 py-3 text-sm font-semibold disabled:opacity-50"
-          >
-            Подключиться
-          </button>
-        </form>
+        <ShareCreatePanel busy={busy} onCreate={(pin) => void handleCreate(pin)} />
       </div>
     </ShareShell>
   );
