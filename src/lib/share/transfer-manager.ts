@@ -5,12 +5,14 @@ import { saveFilesAsZip, saveReceivedFile } from "./save-received";
 import { sha256Hex } from "./sha256";
 import {
   clearResumeState,
+  computeContiguousOffset,
   loadResumeState,
   loadSavedChunks,
   persistReceiveProgress,
 } from "./transfer-resume";
 import {
   CHUNK_SIZE,
+  MAX_DC_JSON_MESSAGE_LENGTH,
   arrayBufferToBase64,
   base64ToArrayBuffer,
   decodeControlMessage,
@@ -84,6 +86,7 @@ export class ShareTransferManager {
   private speedSamples: { at: number; bytes: number }[] = [];
   private resumeOffsets = new Map<string, number>();
   private textMessages: ShareTextMessage[] = [];
+  private pendingFileAcks = new Map<string, { resolve: () => void; reject: (err: Error) => void }>();
 
   constructor(
     private peer: SharePeerConnection,
@@ -292,7 +295,12 @@ export class ShareTransferManager {
         await this.handleFileDone(msg);
         break;
       case "file-error":
+        this.rejectFileAck(msg.transferId, msg.fileId, new Error(msg.reason));
+        this.markOutboundError(msg.transferId, msg.fileId, msg.reason);
         this.callbacks.onError?.(new Error(msg.reason));
+        break;
+      case "file-ack":
+        this.resolveFileAck(msg.transferId, msg.fileId);
         break;
       case "text-send":
         if (this.textMessages.some((m) => m.id === msg.messageId)) break;
@@ -318,57 +326,118 @@ export class ShareTransferManager {
     );
     for (const item of items) {
       if (this.cancelledTransfers.has(transferId)) break;
-      item.status = "transferring";
-      this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
 
-      const sha256 = await sha256Hex(item.file);
-      const pathName = item.relativePath;
-      this.peer.send(
-        encodeControlMessage({
+      try {
+        item.status = "transferring";
+        item.progress = 0;
+        item.error = undefined;
+        this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
+
+        const sha256 = await sha256Hex(item.file);
+        const pathName = item.relativePath;
+        await this.sendControlMessage({
           t: "file-start",
           transferId,
           fileId: item.id,
           name: pathName,
           size: item.file.size,
           sha256,
-        }),
-      );
+        });
 
-      let offset = await this.waitForResumeOffset(transferId, item.id);
-      const started = Date.now();
-      while (offset < item.file.size && !this.cancelledTransfers.has(transferId)) {
-        const chunk = item.file.slice(offset, offset + CHUNK_SIZE);
-        const buffer = await chunk.arrayBuffer();
-        this.peer.send(
-          encodeControlMessage({
+        let offset = await this.waitForResumeOffset(transferId, item.id);
+        const started = Date.now();
+        while (offset < item.file.size && !this.cancelledTransfers.has(transferId)) {
+          const chunk = item.file.slice(offset, offset + CHUNK_SIZE);
+          const buffer = await chunk.arrayBuffer();
+          await this.sendControlMessage({
             t: "file-chunk",
             transferId,
             fileId: item.id,
             offset,
             data: arrayBufferToBase64(buffer),
-          }),
-        );
-        offset += buffer.byteLength;
-        item.progress = Math.round((offset / item.file.size) * 100);
-        this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
-        this.emitProgress(transferId, item.id, pathName, "out", offset, item.file.size, started);
-        await new Promise((r) => setTimeout(r, 0));
-      }
+          });
+          offset += buffer.byteLength;
+          item.progress = Math.round((offset / item.file.size) * 100);
+          this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
+          this.emitProgress(transferId, item.id, pathName, "out", offset, item.file.size, started);
+        }
 
-      if (this.cancelledTransfers.has(transferId)) {
-        item.status = "cancelled";
+        if (this.cancelledTransfers.has(transferId)) {
+          item.status = "cancelled";
+          break;
+        }
+
+        await this.sendControlMessage({
+          t: "file-done",
+          transferId,
+          fileId: item.id,
+          sha256,
+        });
+        await this.waitForFileAck(transferId, item.id);
+        item.status = "done";
+        item.progress = 100;
+        this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
+      } catch (err) {
+        item.status = "error";
+        item.error = err instanceof Error ? err.message : "Ошибка отправки";
+        this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
+        this.callbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
         break;
       }
-
-      this.peer.send(
-        encodeControlMessage({ t: "file-done", transferId, fileId: item.id, sha256 }),
-      );
-      item.status = "done";
-      item.progress = 100;
-      this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
     }
     this.sendingTransfers.delete(transferId);
     this.callbacks.onTransferComplete?.("out", transferId);
+  }
+
+  private async sendControlMessage(msg: ShareControlMessage): Promise<void> {
+    const raw = encodeControlMessage(msg);
+    if (raw.length > MAX_DC_JSON_MESSAGE_LENGTH) {
+      throw new Error("chunk_too_large_for_webrtc");
+    }
+    await this.peer.sendReliable(raw);
+  }
+
+  private fileAckKey(transferId: string, fileId: string): string {
+    return `${transferId}:${fileId}`;
+  }
+
+  private waitForFileAck(transferId: string, fileId: string, timeoutMs = 120_000): Promise<void> {
+    const key = this.fileAckKey(transferId, fileId);
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.pendingFileAcks.delete(key);
+        reject(new Error("Получатель не подтвердил файл"));
+      }, timeoutMs);
+      this.pendingFileAcks.set(key, {
+        resolve: () => {
+          window.clearTimeout(timer);
+          this.pendingFileAcks.delete(key);
+          resolve();
+        },
+        reject: (err) => {
+          window.clearTimeout(timer);
+          this.pendingFileAcks.delete(key);
+          reject(err);
+        },
+      });
+    });
+  }
+
+  private resolveFileAck(transferId: string, fileId: string): void {
+    this.pendingFileAcks.get(this.fileAckKey(transferId, fileId))?.resolve();
+  }
+
+  private rejectFileAck(transferId: string, fileId: string, err: Error): void {
+    this.pendingFileAcks.get(this.fileAckKey(transferId, fileId))?.reject(err);
+  }
+
+  private markOutboundError(transferId: string, fileId: string, reason: string): void {
+    const item = this.outboundQueue.find((q) => q.transferId === transferId && q.id === fileId);
+    if (item) {
+      item.status = "error";
+      item.error = reason;
+      this.callbacks.onOutboundUpdate?.([...this.outboundQueue]);
+    }
   }
 
   private async handleFileStart(msg: Extract<ShareControlMessage, { t: "file-start" }>): Promise<void> {
@@ -444,7 +513,7 @@ export class ShareTransferManager {
     if (!buf) return;
     buf.parts.set(msg.offset, base64ToArrayBuffer(msg.data));
 
-    const received = [...buf.parts.values()].reduce((s, p) => s + p.byteLength, 0);
+    const received = computeContiguousOffset(buf.parts, buf.size);
     const queue = this.inboundQueues.get(msg.transferId) ?? [];
     const item = queue.find((q) => q.id === msg.fileId);
     if (item) {
@@ -489,6 +558,14 @@ export class ShareTransferManager {
       this.callbacks.onError?.(new Error(`Файл ${buf.relativePath}: контрольная сумма не совпадает`));
       this.receiveBuffers.delete(msg.fileId);
       this.callbacks.onInboundUpdate?.(msg.transferId, [...queue]);
+      this.peer.send(
+        encodeControlMessage({
+          t: "file-error",
+          transferId: msg.transferId,
+          fileId: msg.fileId,
+          reason: "checksum_mismatch",
+        }),
+      );
       return;
     }
 
@@ -506,6 +583,9 @@ export class ShareTransferManager {
     this.receiveBuffers.delete(msg.fileId);
     await clearResumeState(this.roomId, msg.fileId);
     this.callbacks.onInboundUpdate?.(msg.transferId, [...queue]);
+    this.peer.send(
+      encodeControlMessage({ t: "file-ack", transferId: msg.transferId, fileId: msg.fileId }),
+    );
 
     const allDone = queue.length > 0 && queue.every((q) => q.status === "done" || q.status === "error");
     if (allDone) {

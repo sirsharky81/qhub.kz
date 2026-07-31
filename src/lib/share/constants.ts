@@ -4,7 +4,7 @@ export const ROOM_TTL_SEC = 60 * 60;
 export const MAX_PARTICIPANTS = 2;
 export const MAX_SESSION_BYTES = 1024 * 1024 * 1024;
 export const MAX_SIGNALS = 500;
-export const CHUNK_SIZE_DEFAULT = 768 * 1024;
+export const CHUNK_SIZE_DEFAULT = 48 * 1024;
 
 export const REDIS_ROOM_PREFIX = "share:room:";
 export const REDIS_PARTICIPANT_PREFIX = "share:participant:";

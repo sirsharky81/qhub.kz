@@ -8,6 +8,7 @@ export type ShareControlMessage =
   | { t: "file-resume"; transferId: string; fileId: string; offset: number }
   | { t: "file-chunk"; transferId: string; fileId: string; offset: number; data: string }
   | { t: "file-done"; transferId: string; fileId: string; sha256: string }
+  | { t: "file-ack"; transferId: string; fileId: string }
   | { t: "file-error"; transferId: string; fileId: string; reason: string }
   | { t: "text-send"; messageId: string; body: string; kind?: "text" | "link" };
 
@@ -19,7 +20,11 @@ export interface ShareFileMeta {
   relativePath?: string;
 }
 
-export const CHUNK_SIZE = 768 * 1024;
+/** Raw bytes per chunk. Must stay under WebRTC SCTP max message (~256 KiB after base64+JSON). */
+export const CHUNK_SIZE = 48 * 1024;
+
+/** Upper bound for a single DataChannel JSON message (UTF-16 code units, mostly ASCII). */
+export const MAX_DC_JSON_MESSAGE_LENGTH = 240 * 1024;
 
 export function encodeControlMessage(msg: ShareControlMessage): string {
   return JSON.stringify(msg);
