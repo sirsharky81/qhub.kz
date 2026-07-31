@@ -17,6 +17,13 @@ function sanitizeFilename(filename: string): string {
   return base.replace(/[^\w.\-()+\u0400-\u04FF ]+/g, "_") || "file";
 }
 
+export function isIOSWebShare(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return isIOS;
+}
+
 function downloadViaAnchor(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -30,17 +37,40 @@ function downloadViaAnchor(blob: Blob, filename: string): void {
 }
 
 async function shareFile(blob: Blob, filename: string): Promise<boolean> {
-  const safeName = sanitizeFilename(filename);
-  const file = new File([blob], safeName, { type: blob.type || "application/octet-stream" });
-  if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: safeName });
-      return true;
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return true;
+  return shareMultipleFilesToDevice([new File([blob], sanitizeFilename(filename), { type: blob.type || "application/octet-stream" })]);
+}
+
+/** Share one or many files — iOS «Сохранить в Фото» / «Add to Photos». */
+export async function shareMultipleFilesToDevice(files: File[]): Promise<boolean> {
+  if (!files.length || typeof navigator === "undefined" || !navigator.share) return false;
+
+  const safe = files.map(
+    (f) => new File([f], sanitizeFilename(f.name), { type: f.type || "application/octet-stream" }),
+  );
+
+  if (!navigator.canShare?.({ files: safe })) {
+    if (safe.length === 1 && navigator.canShare?.({ files: [safe[0]!] })) {
+      try {
+        await navigator.share({ files: [safe[0]!], title: safe[0]!.name });
+        return true;
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return true;
+        return false;
+      }
     }
+    return false;
   }
-  return false;
+
+  try {
+    await navigator.share({
+      files: safe,
+      title: safe.length === 1 ? safe[0]!.name : `QHub Share (${safe.length})`,
+    });
+    return true;
+  } catch (err) {
+    if ((err as Error).name === "AbortError") return true;
+    return false;
+  }
 }
 
 async function saveNative(blob: Blob, filename: string): Promise<void> {

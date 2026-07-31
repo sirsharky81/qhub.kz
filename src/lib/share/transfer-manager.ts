@@ -1,7 +1,6 @@
 import { MAX_SESSION_BYTES } from "./constants";
 import type { PickedShareFile } from "./pick-files";
-import { hasFolderStructure } from "./pick-files";
-import { saveFilesAsZip, saveReceivedFile } from "./save-received";
+import { saveShareReceivedFiles, guessShareMime, type ReceivedShareFile } from "./save-received";
 import { sha256Hex } from "./sha256";
 import {
   clearResumeState,
@@ -65,6 +64,10 @@ export type TransferCallbacks = {
   onIncomingOffers?: (offers: IncomingTransferOffer[]) => void;
   onProgress?: (progress: TransferProgress) => void;
   onTransferComplete?: (direction: "out" | "in", transferId: string) => void;
+  onReceivedFilesReady?: (
+    transferId: string,
+    result: { savedCount: number; needsUserAction: boolean; files: ReceivedShareFile[] },
+  ) => void;
   onTextUpdate?: (messages: ShareTextMessage[]) => void;
   onError?: (err: Error) => void;
 };
@@ -88,6 +91,7 @@ export class ShareTransferManager {
   private resumeOffsets = new Map<string, number>();
   private textMessages: ShareTextMessage[] = [];
   private pendingFileAcks = new Map<string, { resolve: () => void; reject: (err: Error) => void }>();
+  private finalizingTransfers = new Set<string>();
 
   constructor(
     private peer: SharePeerConnection,
@@ -547,10 +551,12 @@ export class ShareTransferManager {
     for (const [offset, part] of [...buf.parts.entries()].sort((a, b) => a[0] - b[0])) {
       merged.set(new Uint8Array(part), offset);
     }
-    const blob = new Blob([merged]);
-    const hash = await sha256Hex(blob);
     const queue = this.inboundQueues.get(msg.transferId) ?? [];
     const item = queue.find((q) => q.id === msg.fileId);
+    const blob = new Blob([merged], {
+      type: item?.file.type || guessShareMime(buf.relativePath),
+    });
+    const hash = await sha256Hex(blob);
 
     if (hash !== msg.sha256) {
       if (item) {
@@ -597,24 +603,19 @@ export class ShareTransferManager {
   }
 
   private async finalizeReceivedFiles(transferId: string): Promise<void> {
-    const files = this.receivedByTransfer.get(transferId) ?? [];
-    if (!files.length) return;
+    if (this.finalizingTransfers.has(transferId)) return;
+    this.finalizingTransfers.add(transferId);
 
-    const asFolder = hasFolderStructure(
-      files.map((f) => ({ file: new File([], f.name), relativePath: f.name })),
-    );
+    try {
+      const files = this.receivedByTransfer.get(transferId) ?? [];
+      if (!files.length) return;
 
-    if (asFolder && files.length > 1) {
-      const root = files[0]!.name.split("/")[0] ?? "qhub-share";
-      await saveFilesAsZip(files, `${root}.zip`);
-    } else if (files.length === 1) {
-      await saveReceivedFile(files[0]!.blob, files[0]!.name);
-    } else {
-      for (const f of files) {
-        await saveReceivedFile(f.blob, f.name);
-      }
+      const result = await saveShareReceivedFiles(files);
+      this.receivedByTransfer.delete(transferId);
+      this.callbacks.onReceivedFilesReady?.(transferId, result);
+    } finally {
+      this.finalizingTransfers.delete(transferId);
     }
-    this.receivedByTransfer.delete(transferId);
   }
 
   private emitProgress(
