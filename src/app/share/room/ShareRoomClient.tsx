@@ -22,6 +22,7 @@ import {
   takePendingText,
 } from "@/lib/share/pending-payload";
 import { filesFromFileList, pickDirectoryFiles } from "@/lib/share/pick-files";
+import { saveReceivedFilesToGallery, type ReceivedShareFile } from "@/lib/share/save-received";
 import { clearShareSession, loadShareSession } from "@/lib/share/session";
 import type { ShareSession } from "@/lib/share/types";
 import {
@@ -35,6 +36,7 @@ import { useShareLaunchQueue } from "@/lib/share/use-share-launch-queue";
 import { SharePeerConnection, type ShareConnectionState } from "@/lib/share/webrtc-session";
 import { ConnectionDiagnosticsPanel } from "../components/ConnectionDiagnosticsPanel";
 import { FileTransferPanel } from "../components/FileTransferPanel";
+import { ReceivedFilesSavePanel } from "../components/ReceivedFilesSavePanel";
 import { RoomInvitePanel } from "../components/RoomInvitePanel";
 import { ShareShell } from "../components/ShareShell";
 import { TextTransferPanel } from "../components/TextTransferPanel";
@@ -73,6 +75,8 @@ export function ShareRoomClient() {
   const [diagnostics, setDiagnostics] = useState<ConnectionDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingBanner, setPendingBanner] = useState<string | null>(() => buildPendingBanner());
+  const [pendingGallerySave, setPendingGallerySave] = useState<ReceivedShareFile[] | null>(null);
+  const [gallerySaving, setGallerySaving] = useState(false);
 
   const peerRef = useRef<SharePeerConnection | null>(null);
   const transferRef = useRef<ShareTransferManager | null>(null);
@@ -153,6 +157,15 @@ export function ShareRoomClient() {
         onIncomingOffers: setInboundOffers,
         onProgress: setProgress,
         onTransferComplete: () => setProgress(null),
+        onReceivedFilesReady: (_transferId, result) => {
+          if (result.needsUserAction && result.files.length) {
+            setPendingGallerySave(result.files);
+            return;
+          }
+          if (result.savedCount > 0) {
+            setPendingBanner(`Сохранено ${result.savedCount} файл(ов)`);
+          }
+        },
         onTextUpdate: setTextMessages,
         onError: (err) => setError(err.message),
       },
@@ -237,6 +250,21 @@ export function ShareRoomClient() {
     setTextDraft("");
   }
 
+  async function handleSaveToGallery() {
+    if (!pendingGallerySave?.length) return;
+    setGallerySaving(true);
+    try {
+      const ok = await saveReceivedFilesToGallery(pendingGallerySave);
+      if (ok) {
+        const count = pendingGallerySave.length;
+        setPendingGallerySave(null);
+        setPendingBanner(`Сохранено ${count} файл(ов) — проверьте «Фото»`);
+      }
+    } finally {
+      setGallerySaving(false);
+    }
+  }
+
   if (!session) {
     return (
       <ShareShell title="QHub Share">
@@ -285,6 +313,15 @@ export function ShareRoomClient() {
         <div className="mx-4 mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
           {pendingBanner}
         </div>
+      )}
+
+      {pendingGallerySave && (
+        <ReceivedFilesSavePanel
+          files={pendingGallerySave}
+          saving={gallerySaving}
+          onSave={() => void handleSaveToGallery()}
+          onDismiss={() => setPendingGallerySave(null)}
+        />
       )}
 
       {session.role === "host" && session.inviteToken && (
