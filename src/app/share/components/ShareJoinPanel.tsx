@@ -13,6 +13,8 @@ interface Props {
   busy: boolean;
   nearbyRooms: NearbyShareRoom[];
   nearbyLoading: boolean;
+  lanPrefer: boolean;
+  onLanPreferChange: (value: boolean) => void;
   onJoinInputChange: (value: string) => void;
   onJoinPinChange: (value: string) => void;
   onJoin: () => void;
@@ -27,6 +29,8 @@ export function ShareJoinPanel({
   busy,
   nearbyRooms,
   nearbyLoading,
+  lanPrefer,
+  onLanPreferChange,
   onJoinInputChange,
   onJoinPinChange,
   onJoin,
@@ -129,6 +133,21 @@ export function ShareJoinPanel({
           />
         </label>
       )}
+
+      <label className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={lanPrefer}
+          onChange={(e) => onLanPreferChange(e.target.checked)}
+          disabled={busy}
+          className="mt-0.5"
+        />
+        <span className="text-xs text-emerald-950 leading-snug">
+          <span className="font-semibold">Быстрая локальная передача</span>
+          <br />
+          Одна Wi‑Fi, без VPN. Прямое P2P вместо медленного relay через интернет.
+        </span>
+      </label>
 
       <button
         type="button"

@@ -45,8 +45,11 @@ export class SharePeerConnection {
 
   async start(): Promise<void> {
     this.callbacks.onConnectionState?.("connecting");
-    const iceServers = await fetchShareIceServers();
-    this.pc = new RTCPeerConnection({ iceServers });
+    const iceServers = await fetchShareIceServers(this.session.lanPrefer === true);
+    this.pc = new RTCPeerConnection({
+      iceServers,
+      bundlePolicy: "max-bundle",
+    });
 
     this.pc.onconnectionstatechange = () => {
       const state = this.pc?.connectionState;
@@ -223,20 +226,39 @@ export class SharePeerConnection {
   }
 
   private waitForSendBuffer(dc: RTCDataChannel): Promise<void> {
-    const lowWatermark = 128 * 1024;
+    const lowWatermark = 512 * 1024;
     if (dc.bufferedAmount <= lowWatermark) return Promise.resolve();
 
     return new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
+      const cleanup = (fn: () => void) => {
+        window.clearTimeout(timeout);
+        window.clearInterval(poll);
         dc.removeEventListener("bufferedamountlow", onLow);
-        reject(new Error("send_buffer_timeout"));
-      }, 90_000);
+        fn();
+      };
+
+      const timeout = window.setTimeout(() => {
+        cleanup(() => reject(new Error("send_buffer_timeout")));
+      }, 180_000);
+
+      const poll = window.setInterval(() => {
+        const pcState = this.pc?.connectionState;
+        if (pcState === "failed" || pcState === "closed" || pcState === "disconnected") {
+          cleanup(() => reject(new Error("connection_lost")));
+          return;
+        }
+        if (dc.readyState !== "open") {
+          cleanup(() => reject(new Error("data_channel_not_open")));
+          return;
+        }
+        if (dc.bufferedAmount <= lowWatermark) {
+          cleanup(resolve);
+        }
+      }, 250);
 
       const onLow = () => {
         if (dc.bufferedAmount <= lowWatermark) {
-          window.clearTimeout(timeout);
-          dc.removeEventListener("bufferedamountlow", onLow);
-          resolve();
+          cleanup(resolve);
         }
       };
 

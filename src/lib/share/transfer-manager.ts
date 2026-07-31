@@ -12,6 +12,7 @@ import {
 } from "./transfer-resume";
 import {
   CHUNK_SIZE,
+  LAN_CHUNK_SIZE,
   MAX_DC_JSON_MESSAGE_LENGTH,
   arrayBufferToBase64,
   base64ToArrayBuffer,
@@ -92,6 +93,7 @@ export class ShareTransferManager {
     private peer: SharePeerConnection,
     private roomId: string,
     private callbacks: TransferCallbacks,
+    private chunkSize = CHUNK_SIZE,
   ) {
     this.unsub = peer.onMessage((raw) => {
       void this.handleMessage(raw);
@@ -347,7 +349,7 @@ export class ShareTransferManager {
         let offset = await this.waitForResumeOffset(transferId, item.id);
         const started = Date.now();
         while (offset < item.file.size && !this.cancelledTransfers.has(transferId)) {
-          const chunk = item.file.slice(offset, offset + CHUNK_SIZE);
+          const chunk = item.file.slice(offset, offset + this.chunkSize);
           const buffer = await chunk.arrayBuffer();
           await this.sendControlMessage({
             t: "file-chunk",
