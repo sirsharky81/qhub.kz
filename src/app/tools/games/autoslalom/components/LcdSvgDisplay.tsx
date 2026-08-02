@@ -7,16 +7,12 @@ import {
   allCarSlots,
   FLAG_BR,
   FLAG_TOP,
-  laneDashSlots,
   LCD_COLORS,
   LCD_VIEW,
   LIFE_SLOTS,
   MODE_BADGE,
-  NEAR_L,
-  NEAR_R,
+  RED_TRACK_LINES,
   SCORE_DIGITS,
-  VANISH_L,
-  VANISH_R,
 } from "@/lib/games/autoslalom/lcd-layout";
 import { buildActiveSegmentIds, clockDigitChars, scoreDigitChars } from "@/lib/games/autoslalom/lcd-segments";
 import { LcdSevenDigit } from "./lcd/LcdSevenDigit";
@@ -31,7 +27,6 @@ interface LcdSvgDisplayProps {
 
 const BARRIER_SLOTS = allBarrierSlots();
 const CAR_SLOTS = allCarSlots();
-const DASH_SLOTS = laneDashSlots();
 
 function MaskFlag({ x, y, size }: { x: number; y: number; size: number }) {
   const cell = size / 4;
@@ -116,16 +111,6 @@ export function LcdSvgDisplay({ state, highScore, alarmRinging, now }: LcdSvgDis
                 </g>
               ) : null,
             )}
-            {DASH_SLOTS.map((d, i) => (
-              <rect
-                key={`dash-${i}`}
-                x={-d.w / 2}
-                y={-1}
-                width={d.w}
-                height={2}
-                transform={`translate(${d.x} ${d.y}) rotate(${d.angle})`}
-              />
-            ))}
             {active.has(`mode-${state.mode}`) && (
               <text
                 x={MODE_BADGE.x + MODE_BADGE.size / 2}
@@ -148,15 +133,35 @@ export function LcdSvgDisplay({ state, highScore, alarmRinging, now }: LcdSvgDis
 
       <rect width={LCD_VIEW.w} height={LCD_VIEW.h} fill={bg} />
 
+      {/* Едва заметный контур вытравленных, но выключенных LCD-сегментов. */}
+      <g fill={seg} opacity="0.045">
+        {BARRIER_SLOTS.map((slot) => (
+          <rect
+            key={`ghost-${slot.id}`}
+            x={-slot.w / 2}
+            y={-slot.h / 2}
+            width={slot.w}
+            height={slot.h}
+            transform={`translate(${slot.x} ${slot.y}) rotate(${slot.angle})`}
+          />
+        ))}
+      </g>
+
       <g>
-        <line x1={NEAR_L.x} y1={NEAR_L.y} x2={VANISH_L.x} y2={VANISH_L.y} stroke={LCD_COLORS.track} strokeWidth="3.2" strokeLinecap="square" />
-        <line x1={NEAR_R.x} y1={NEAR_R.y} x2={VANISH_R.x} y2={VANISH_R.y} stroke={LCD_COLORS.track} strokeWidth="3.2" strokeLinecap="square" />
-        <text x="118" y="42" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
-        <text x="168" y="36" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
-        <text x="218" y="30" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
-        <text transform="translate(22, 130) rotate(-78)" fill={seg} fontFamily="Arial, sans-serif" fontSize="9" fontWeight="bold">РАЛЛИ</text>
-        <text transform="translate(16, 158) rotate(-78)" fill={seg} fontFamily="Arial, sans-serif" fontSize="9" fontWeight="bold">РАЛЛИ</text>
-        <text transform="translate(10, 186) rotate(-78)" fill={seg} fontFamily="Arial, sans-serif" fontSize="9" fontWeight="bold">РАЛЛИ</text>
+        {RED_TRACK_LINES.map((line, i) => (
+          <line
+            key={i}
+            {...line}
+            stroke={LCD_COLORS.track}
+            strokeWidth="3.2"
+            strokeLinecap="square"
+          />
+        ))}
+        <text transform="translate(119 92) rotate(-28)" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
+        <text transform="translate(171 64) rotate(-28)" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
+        <text transform="translate(221 37) rotate(-28)" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
+        <text transform="translate(27 149) rotate(-65)" fill={seg} fontFamily="Arial, sans-serif" fontSize="9" fontWeight="bold">РАЛЛИ</text>
+        <text transform="translate(17 179) rotate(-65)" fill={seg} fontFamily="Arial, sans-serif" fontSize="9" fontWeight="bold">РАЛЛИ</text>
         <rect x={MODE_BADGE.x} y={MODE_BADGE.y} width={MODE_BADGE.size} height={MODE_BADGE.size} fill="none" stroke={seg} strokeWidth="1.5" />
       </g>
 
