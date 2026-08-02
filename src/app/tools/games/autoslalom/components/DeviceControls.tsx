@@ -153,10 +153,16 @@ export function DeviceControls({
           Автослалом
         </h1>
         <div
-          className="flex-1 rounded-[6px] p-[clamp(3px,0.8vw,5px)] min-h-[clamp(120px,32vw,180px)] aspect-[1.35/1]"
-          style={{ background: "#9aaa92", boxShadow: "inset 0 2px 6px rgba(0,0,0,0.25)" }}
+          className="flex-1 rounded-[10px] p-[clamp(4px,1vw,7px)] min-h-[clamp(120px,32vw,180px)] aspect-[1.35/1]"
+          style={{
+            background: "linear-gradient(145deg, #a4a79c, #70756e)",
+            boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.38), 0 1px 0 rgba(255,255,255,0.5)",
+          }}
         >
-          <div className="w-full h-full rounded-[3px] overflow-hidden" style={{ background: "#a8b89a" }}>
+          <div
+            className="w-full h-full rounded-[5px] overflow-hidden border border-black/45"
+            style={{ background: "#a8b89a", boxShadow: "inset 0 0 7px rgba(0,0,0,0.45)" }}
+          >
             {screen}
           </div>
         </div>

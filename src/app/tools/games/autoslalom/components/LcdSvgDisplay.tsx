@@ -149,13 +149,22 @@ export function LcdSvgDisplay({ state, highScore, alarmRinging, now }: LcdSvgDis
 
       <g>
         {RED_TRACK_LINES.map((line, i) => (
-          <line
-            key={i}
-            {...line}
-            stroke={LCD_COLORS.track}
-            strokeWidth="3.2"
-            strokeLinecap="square"
-          />
+          <g key={i}>
+            <line
+              {...line}
+              transform={i < 2 ? "translate(0 3)" : "translate(-3 0)"}
+              stroke={seg}
+              strokeOpacity="0.58"
+              strokeWidth="4.8"
+              strokeLinecap="square"
+            />
+            <line
+              {...line}
+              stroke={LCD_COLORS.track}
+              strokeWidth="3.2"
+              strokeLinecap="square"
+            />
+          </g>
         ))}
         <text transform="translate(119 92) rotate(-28)" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
         <text transform="translate(171 64) rotate(-28)" fill={seg} fontFamily="Arial Narrow, Arial, sans-serif" fontSize="11" fontWeight="bold">РАЛЛИ</text>
