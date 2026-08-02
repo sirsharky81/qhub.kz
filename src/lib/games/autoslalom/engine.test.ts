@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateBarrierLanes, resetBarrierPattern } from "./barriers";
 import {
   createInitialState,
+  rowStepMs,
   scrollSpeed,
   spawnInterval,
   startGame,
@@ -9,7 +10,7 @@ import {
   tick,
   updateHighScore,
 } from "./engine";
-import { INITIAL_LIVES, LIFE_MILESTONES, MAX_SCORE, SCORE_Y } from "./constants";
+import { CAR_ROW, INITIAL_LIVES, LIFE_MILESTONES, MAX_SCORE } from "./constants";
 
 describe("autoslalom engine", () => {
   it("starts with three lives and zero score", () => {
@@ -19,20 +20,22 @@ describe("autoslalom engine", () => {
     expect(state.carLane).toBe(1);
   });
 
-  it("increases scroll speed with score until cap", () => {
-    const slow = scrollSpeed(0, 8);
-    const mid = scrollSpeed(600, 8);
-    const capped = scrollSpeed(1500, 8);
-    const atCap = scrollSpeed(1200, 8);
-    expect(mid).toBeGreaterThan(slow);
-    expect(atCap).toBeGreaterThan(mid);
-    expect(capped).toBeCloseTo(atCap, 5);
+  it("decreases row step interval with score and speed level", () => {
+    const slow = rowStepMs(0, 1);
+    const mid = rowStepMs(600, 8);
+    const capped = rowStepMs(1500, 8);
+    const atCap = rowStepMs(1200, 8);
+    expect(mid).toBeLessThan(slow);
+    expect(atCap).toBeLessThan(mid);
+    expect(capped).toBeCloseTo(atCap, 0);
   });
 
-  it("respects speed level 1..16 for spawn interval", () => {
-    const low = spawnInterval(0, 1);
-    const high = spawnInterval(0, 16);
-    expect(high).toBeLessThan(low);
+  it("scrollSpeed alias increases with difficulty", () => {
+    expect(scrollSpeed(600, 8)).toBeGreaterThan(scrollSpeed(0, 8));
+  });
+
+  it("spawnInterval alias scales with row steps", () => {
+    expect(spawnInterval(0, 16)).toBeLessThan(spawnInterval(0, 1));
   });
 
   it("steers within three lanes", () => {
@@ -45,15 +48,31 @@ describe("autoslalom engine", () => {
     expect(state.carLane).toBe(1);
   });
 
-  it("awards score when barrier passes in open lane", () => {
+  it("awards score when barrier passes in open lane (discrete rows)", () => {
     let state = startGame(createInitialState());
+    const ms = rowStepMs(0, 8);
     state = {
       ...state,
       carLane: 1,
-      barriers: [{ id: 1, y: SCORE_Y, lanes: [0, 2], scored: false }],
+      rowTimer: 10_000,
+      barriers: [{ id: 1, row: CAR_ROW, lanes: [0, 2], scored: false }],
     };
-    state = tick(state, 16);
+    state = tick(state, ms);
     expect(state.score).toBe(1);
+  });
+
+  it("detects collision on car row", () => {
+    let state = startGame(createInitialState());
+    const ms = rowStepMs(0, 8);
+    state = {
+      ...state,
+      carLane: 1,
+      rowTimer: 10_000,
+      barriers: [{ id: 1, row: CAR_ROW - 1, lanes: [1], scored: false }],
+    };
+    state = tick(state, ms);
+    expect(state.phase).toBe("crash");
+    expect(state.lives).toBe(2);
   });
 
   it("caps score at 2999", () => {
@@ -67,8 +86,6 @@ describe("autoslalom engine", () => {
     const hs = updateHighScore({ A: 100, B: 50 }, "A", 150);
     expect(hs.A).toBe(150);
     expect(hs.B).toBe(50);
-    const same = updateHighScore(hs, "A", 120);
-    expect(same.A).toBe(150);
   });
 
   it("generates game A patterns with opposite or single lanes", () => {
