@@ -15,39 +15,21 @@ export const LCD_COLORS = {
   track: "#d42030",
 } as const;
 
-/** Горизонт (верхний правый сектор). */
-const VANISH_L = { x: 96, y: 36 };
-const VANISH_R = { x: 306, y: 20 };
-/** Линия автомобиля (низ). */
-const NEAR_L = { x: 8, y: 228 };
-const NEAR_R = { x: 206, y: 220 };
-
-export interface TrackPoint {
-  x: number;
-  y: number;
-  angle: number;
-  laneW: number;
-  barH: number;
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-/** Точка на трассе: row 0 — горизонт, row CAR_ROW — авто; laneFrac 0..1 поперёк трассы. */
-export function trackPoint(row: number, laneFrac: number): TrackPoint {
-  const t = Math.max(0, Math.min(1, row / CAR_ROW));
-  const lx = lerp(VANISH_L.x, NEAR_L.x, t);
-  const ly = lerp(VANISH_L.y, NEAR_L.y, t);
-  const rx = lerp(VANISH_R.x, NEAR_R.x, t);
-  const ry = lerp(VANISH_R.y, NEAR_R.y, t);
-  const x = lerp(lx, rx, laneFrac);
-  const y = lerp(ly, ry, laneFrac);
-  const angle = (Math.atan2(ry - ly, rx - lx) * 180) / Math.PI;
-  const laneW = (Math.hypot(rx - lx, ry - ly) / 3) * 0.84;
-  const barH = 2.8 + t * 5.5;
-  return { x, y, angle, laneW, barH };
-}
+/**
+ * Рядовые позиции были размечены непосредственно по эталонному экрану.
+ * Это не математическая перспектива: настоящий ЖК состоит из заранее
+ * вытравленных сегментов, поэтому координаты намеренно фиксированы.
+ */
+const ROW_SLOTS = [
+  { y: 65, x: [226, 262, 297], width: 13, height: 2.5 },
+  { y: 79, x: [204, 244, 282], width: 15, height: 3 },
+  { y: 96, x: [182, 227, 270], width: 18, height: 3.5 },
+  { y: 116, x: [155, 207, 255], width: 22, height: 4 },
+  { y: 139, x: [128, 187, 242], width: 26, height: 4.5 },
+  { y: 164, x: [102, 166, 225], width: 30, height: 5 },
+  { y: 190, x: [77, 145, 208], width: 35, height: 5.5 },
+  { y: 212, x: [58, 124, 190], width: 39, height: 6 },
+] as const;
 
 export interface BarrierSlot {
   id: string;
@@ -61,17 +43,16 @@ export interface BarrierSlot {
 }
 
 export function barrierSlot(row: number, lane: Lane): BarrierSlot {
-  const frac = (lane * 2 + 1) / 6;
-  const p = trackPoint(row, frac);
+  const slot = ROW_SLOTS[row] ?? ROW_SLOTS[0];
   return {
     id: `b-${row}-${lane}`,
     row,
     lane,
-    x: p.x,
-    y: p.y,
-    w: p.laneW,
-    h: p.barH,
-    angle: p.angle,
+    x: slot.x[lane],
+    y: slot.y,
+    w: slot.width,
+    h: slot.height,
+    angle: -9,
   };
 }
 
@@ -95,31 +76,24 @@ export interface CarSlot {
 }
 
 export function carSlot(lane: Lane): CarSlot {
-  const p = trackPoint(CAR_ROW, (lane * 2 + 1) / 6);
+  const positions = [
+    { x: 62, y: 218, scale: 0.9 },
+    { x: 128, y: 211, scale: 0.82 },
+    { x: 194, y: 204, scale: 0.74 },
+  ] as const;
+  const position = positions[lane];
   return {
     id: `car-${lane}`,
     lane,
-    x: p.x,
-    y: p.y,
-    angle: p.angle,
-    scale: 0.78 + lane * 0.04,
+    x: position.x,
+    y: position.y,
+    angle: -9,
+    scale: position.scale,
   };
 }
 
 export function allCarSlots(): CarSlot[] {
   return ([0, 1, 2] as Lane[]).map(carSlot);
-}
-
-/** Пунктирные делители полос (статичные сегменты ЖК). */
-export function laneDashSlots(): { x: number; y: number; w: number; angle: number }[] {
-  const dashes: { x: number; y: number; w: number; angle: number }[] = [];
-  for (let row = 1; row < CAR_ROW; row++) {
-    for (const frac of [1 / 3, 2 / 3]) {
-      const p = trackPoint(row, frac);
-      dashes.push({ x: p.x, y: p.y, w: p.laneW * 0.38, angle: p.angle });
-    }
-  }
-  return dashes;
 }
 
 /** Координаты семисегментных цифр (4 позиции + пробел). */
@@ -148,4 +122,11 @@ export function barrierId(row: number, lane: Lane): string {
   return `b-${row}-${lane}`;
 }
 
-export { CAR_ROW, LCD_ROW_COUNT, NEAR_L, NEAR_R, VANISH_L, VANISH_R };
+/** Статические красные границы и дорожный баннер, снятые с эталонного кадра. */
+export const RED_TRACK_LINES = [
+  { x1: 2, y1: 133, x2: 242, y2: 3 },
+  { x1: 2, y1: 201, x2: 270, y2: 2 },
+  { x1: 292, y1: 196, x2: 326, y2: 4 },
+] as const;
+
+export { CAR_ROW, LCD_ROW_COUNT };

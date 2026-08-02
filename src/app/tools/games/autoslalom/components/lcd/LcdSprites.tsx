@@ -4,26 +4,25 @@
 export function LcdCarSprite({ color }: { color: string }) {
   return (
     <g fill={color} stroke="none">
-      {/* Корпус */}
-      <rect x="-19" y="-3" width="38" height="7" rx="0.5" />
-      {/* Нос */}
-      <polygon points="10,-6 22,-4 22,1 10,2" />
-      {/* Кокpit / шлем */}
-      <circle cx="-1" cy="-4" r="3.2" />
-      <rect x="-4" y="-5.5" width="6" height="2" rx="0.5" />
-      {/* Заднее крыло */}
-      <rect x="-22" y="-9" width="7" height="2" />
-      <rect x="-22" y="4" width="7" height="2" />
-      {/* Переднее крыло */}
-      <rect x="14" y="-5" width="4" height="8" />
-      {/* Колёса */}
-      <rect x="-14" y="0" width="8" height="7" rx="0.5" />
-      <rect x="7" y="0" width="8" height="7" rx="0.5" />
-      {/* Протектор */}
-      <rect x="-13" y="2" width="6" height="1" fill={color} opacity="0.35" />
-      <rect x="-13" y="5" width="6" height="1" fill={color} opacity="0.35" />
-      <rect x="8" y="2" width="6" height="1" fill={color} opacity="0.35" />
-      <rect x="8" y="5" width="6" height="1" fill={color} opacity="0.35" />
+      {/* Заднее антикрыло и корпус формулы. */}
+      <rect x="-23" y="-10" width="8" height="2" />
+      <rect x="-23" y="5" width="8" height="2" />
+      <rect x="-20" y="-6" width="33" height="11" rx="0.5" />
+      {/* Нос, переднее крыло и стойки. */}
+      <polygon points="11,-6 23,-4 24,0 11,3" />
+      <rect x="18" y="-8" width="3" height="12" />
+      <rect x="21" y="-7" width="5" height="2" />
+      <rect x="21" y="2" width="5" height="2" />
+      {/* Кокпит и шлем пилота. */}
+      <rect x="-6" y="-8" width="10" height="5" rx="1" />
+      <circle cx="-1" cy="-9" r="3.5" />
+      {/* Колёса с дискретными прорезями протектора. */}
+      <rect x="-15" y="-3" width="8" height="10" rx="0.5" />
+      <rect x="7" y="-3" width="8" height="10" rx="0.5" />
+      <rect x="-14" y="0" width="6" height="1.2" fill="#b8c8a8" />
+      <rect x="-14" y="3.5" width="6" height="1.2" fill="#b8c8a8" />
+      <rect x="8" y="0" width="6" height="1.2" fill="#b8c8a8" />
+      <rect x="8" y="3.5" width="6" height="1.2" fill="#b8c8a8" />
       {/* SPORT */}
       <text
         x="0"

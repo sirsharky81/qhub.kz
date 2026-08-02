@@ -16,6 +16,18 @@ export function buildActiveSegmentIds(state: AutoslalomState, blink: boolean): S
     }
   } else if (state.phase === "idle" || state.phase === "gameover") {
     ids.add("car-1");
+    // Экран ожидания повторяет заполненный демонстрационный кадр ИМ-23.
+    [
+      "b-0-2",
+      "b-1-1",
+      "b-2-2",
+      "b-3-0",
+      "b-3-2",
+      "b-4-1",
+      "b-5-0",
+      "b-5-2",
+      "b-6-1",
+    ].forEach((id) => ids.add(id));
   }
 
   for (let i = 0; i < state.maxLives; i++) {

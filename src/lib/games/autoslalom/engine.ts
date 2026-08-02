@@ -222,7 +222,7 @@ function handleCrash(state: AutoslalomState): AutoslalomState {
 }
 
 function advanceLcdRows(state: AutoslalomState, now: number): AutoslalomState {
-  let barriers = state.barriers.map((b) => ({ ...b, row: b.row + 1 }));
+  const barriers = state.barriers.map((b) => ({ ...b, row: b.row + 1 }));
   let rowsSinceSpawn = state.rowsSinceSpawn + 1;
   let nextBarrierId = state.nextBarrierId;
 
