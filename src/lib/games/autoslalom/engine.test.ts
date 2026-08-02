@@ -54,10 +54,11 @@ describe("autoslalom engine", () => {
     state = {
       ...state,
       carLane: 1,
-      rowTimer: 10_000,
+      rowTimer: ms - 1,
+      rowsSinceSpawn: 99,
       barriers: [{ id: 1, row: CAR_ROW, lanes: [0, 2], scored: false }],
     };
-    state = tick(state, ms);
+    state = tick(state, 1);
     expect(state.score).toBe(1);
   });
 

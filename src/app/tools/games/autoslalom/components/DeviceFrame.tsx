@@ -2,7 +2,7 @@
 
 import type { AutoslalomState } from "@/lib/games/autoslalom/types";
 import { DEVICE } from "@/lib/games/autoslalom/constants";
-import { LcdDisplay } from "./LcdDisplay";
+import { LcdSvgDisplay } from "./LcdSvgDisplay";
 import { DeviceControls, type DeviceControlsProps } from "./DeviceControls";
 
 type DeviceFrameProps = Omit<DeviceControlsProps, "phase" | "speedLevel" | "mode" | "screen"> & {
@@ -52,7 +52,7 @@ export function DeviceFrame({
             phase={state.phase}
             speedLevel={state.speedLevel}
             mode={state.mode}
-            screen={<LcdDisplay state={state} highScore={highScore} alarmRinging={alarmRinging} now={now} />}
+            screen={<LcdSvgDisplay state={state} highScore={highScore} alarmRinging={alarmRinging} now={now} />}
             {...controls}
           />
         </div>
