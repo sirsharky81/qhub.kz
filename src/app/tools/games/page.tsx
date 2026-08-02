@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import { PdfToolLayout } from "../_pdf-shared/PdfToolLayout";
 
 export const metadata: Metadata = {
-  title: "QHub Games — карточные игры и лото",
-  description: "Игровой раздел с карточными и настольными играми QHub.",
+  title: "QHub Games — карточные, настольные и «Электроника»",
+  description: "Игровой раздел QHub: карточные и настольные игры, советские карманные «Электроника».",
 };
 
 export default function GamesPage() {
@@ -23,7 +23,7 @@ export default function GamesPage() {
             </p>
             <h1 className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">Игры QHub</h1>
             <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-              Игровой раздел с карточными и настольными играми.
+              Игровой раздел: карточные, настольные и советские карманные игры «Электроника».
             </p>
           </header>
 
@@ -129,6 +129,39 @@ export default function GamesPage() {
                     className="inline-flex whitespace-nowrap rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
                     Присоединиться к игре
+                  </Link>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
+            <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/50">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
+                Электроника
+              </h2>
+            </div>
+            <div className="p-3">
+              <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-stone-100/80 dark:from-gray-900 dark:to-stone-950/30">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      Автослалом (ИМ-23)
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500 leading-relaxed">
+                      Советская карманная игра с ЖК-экраном: три полосы, барьеры, две сложности, часы и будильник.
+                    </p>
+                  </div>
+                  <span className="text-[10px] px-2 py-1 rounded-full bg-stone-200 text-stone-800 dark:bg-stone-800 dark:text-stone-200 shrink-0">
+                    LCD
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <Link
+                    href="/tools/games/autoslalom"
+                    className="inline-flex rounded-lg bg-[#c41e3a] hover:bg-[#a81832] text-white text-xs font-semibold px-3 py-2 touch-manipulation"
+                  >
+                    Играть
                   </Link>
                 </div>
               </article>

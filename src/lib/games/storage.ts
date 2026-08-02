@@ -1,7 +1,10 @@
-const DB_NAME = "qhub-games";
-const DB_VERSION = 2;
+import type { AutoslalomPersisted } from "./autoslalom/types";
+import { DEFAULT_CLOCK } from "./autoslalom/engine";
 
-type StoreName = "hearts_state" | "spider_state" | "settings" | "stats";
+const DB_NAME = "qhub-games";
+const DB_VERSION = 3;
+
+type StoreName = "hearts_state" | "spider_state" | "autoslalom_data" | "settings" | "stats";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -16,6 +19,7 @@ function openDb(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains("hearts_state")) db.createObjectStore("hearts_state");
       if (!db.objectStoreNames.contains("spider_state")) db.createObjectStore("spider_state");
+      if (!db.objectStoreNames.contains("autoslalom_data")) db.createObjectStore("autoslalom_data");
       if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings");
       if (!db.objectStoreNames.contains("stats")) db.createObjectStore("stats");
     };
@@ -141,4 +145,20 @@ export async function saveSpiderStats(stats: SpiderStats): Promise<void> {
 export async function loadSpiderStats(): Promise<SpiderStats> {
   const value = await tx<IDBValidKey>("stats", "readonly", (store) => store.get("spider"));
   return { ...DEFAULT_SPIDER_STATS, ...(((value as unknown) as SpiderStats | undefined) ?? {}) };
+}
+
+export const DEFAULT_AUTOSLOALOM_DATA: AutoslalomPersisted = {
+  highScores: { A: 0, B: 0 },
+  clock: { ...DEFAULT_CLOCK },
+  speedLevel: 8,
+  mode: "A",
+};
+
+export async function saveAutoslalomData(data: AutoslalomPersisted): Promise<void> {
+  await tx("autoslalom_data", "readwrite", (store) => store.put(data, "current"));
+}
+
+export async function loadAutoslalomData(): Promise<AutoslalomPersisted> {
+  const value = await tx<IDBValidKey>("autoslalom_data", "readonly", (store) => store.get("current"));
+  return { ...DEFAULT_AUTOSLOALOM_DATA, ...(((value as unknown) as AutoslalomPersisted | undefined) ?? {}) };
 }
