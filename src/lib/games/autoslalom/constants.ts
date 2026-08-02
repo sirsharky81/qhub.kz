@@ -33,13 +33,24 @@ export const DOUBLE_TAP_MS = 380;
 /** Crash pause before resuming (ms). */
 export const CRASH_PAUSE_MS = 1200;
 
-/** LCD palette matching ИМ-23. */
+/** LCD palette — Электроника ИМ-23 «Автослалом». */
 export const LCD = {
-  bg: "#c8d4c4",
-  bgDark: "#b0bea8",
-  segment: "#1a1a1a",
-  track: "#c41e3a",
-  trackLight: "#d94050",
-  label: "#1a1a1a",
-  title: "#c41e3a",
+  bg: "#b8c8a8",
+  bgDark: "#9fb08a",
+  segment: "#141414",
+  track: "#d42030",
+  trackLight: "#e83845",
+} as const;
+
+/** Корпус приставки. */
+export const DEVICE = {
+  body: "#e6e2d8",
+  bodyEdge: "#c8c2b4",
+  bodyShadow: "#b0aa9c",
+  label: "#1c1c1c",
+  title: "#d42030",
+  button: "#d42030",
+  buttonDark: "#a81828",
+  buttonHighlight: "#e84555",
+  pinhole: "#8a2028",
 } as const;
