@@ -1,20 +1,19 @@
 import { createBarrier, isLaneBlocked, requiresDoubleTap, resetBarrierPattern } from "./barriers";
 import {
-  BASE_SPAWN_MS,
-  CAR_Y,
+  BASE_ROW_STEP_MS,
+  CAR_ROW,
   CRASH_PAUSE_MS,
   DOUBLE_TAP_MS,
-  HIT_BAND,
   INITIAL_LIVES,
   LIFE_MILESTONES,
   MAX_LIVES,
   MAX_SCORE,
   MAX_SPEED_LEVEL,
-  MIN_SPAWN_MS,
+  MIN_ROW_STEP_MS,
   MIN_SPEED_LEVEL,
-  SCORE_Y,
+  PASS_ROW,
+  SPAWN_EVERY_ROWS,
   SPEED_CAP_SCORE,
-  TRACK_DEPTH,
 } from "./constants";
 import type {
   AutoslalomHighScores,
@@ -46,9 +45,9 @@ export function createInitialState(
     carLane: 1,
     speedLevel: clampSpeed(partial?.speedLevel ?? 8),
     barriers: [],
-    distance: 0,
     nextBarrierId: 1,
-    spawnTimer: spawnInterval(0, partial?.speedLevel ?? 8),
+    rowTimer: 0,
+    rowsSinceSpawn: SPAWN_EVERY_ROWS,
     awardedMilestones: [],
     invulnerableMs: 0,
     lastSteerAt: 0,
@@ -68,18 +67,23 @@ function clampLane(lane: number): Lane {
   return Math.max(0, Math.min(2, lane)) as Lane;
 }
 
-/** Effective scroll speed (abstract units per second). */
-export function scrollSpeed(score: number, speedLevel: number): number {
+/** Скорость смещения рядов (мс между шагами ЖК). */
+export function rowStepMs(score: number, speedLevel: number): number {
   const scoreFactor = Math.min(score, SPEED_CAP_SCORE) / SPEED_CAP_SCORE;
   const levelFactor = speedLevel / MAX_SPEED_LEVEL;
-  const base = 0.14 + levelFactor * 0.1;
-  return base + scoreFactor * (0.55 + levelFactor * 0.25);
+  const base = BASE_ROW_STEP_MS - levelFactor * 180;
+  const ms = base - scoreFactor * (base - MIN_ROW_STEP_MS);
+  return Math.max(MIN_ROW_STEP_MS, ms);
 }
 
+/** @deprecated alias for tests */
+export function scrollSpeed(score: number, speedLevel: number): number {
+  return 1000 / rowStepMs(score, speedLevel);
+}
+
+/** @deprecated alias for tests */
 export function spawnInterval(score: number, speedLevel: number): number {
-  const speed = scrollSpeed(score, speedLevel);
-  const ms = BASE_SPAWN_MS / speed;
-  return Math.max(MIN_SPAWN_MS, ms * (16 / speedLevel));
+  return rowStepMs(score, speedLevel) * SPAWN_EVERY_ROWS;
 }
 
 export function startGame(state: AutoslalomState, now = Date.now()): AutoslalomState {
@@ -88,7 +92,7 @@ export function startGame(state: AutoslalomState, now = Date.now()): AutoslalomS
     ...createInitialState({ mode: state.mode, speedLevel: state.speedLevel, clock: state.clock }),
     phase: "playing",
     startedAt: now,
-    spawnTimer: spawnInterval(0, state.speedLevel),
+    rowsSinceSpawn: SPAWN_EVERY_ROWS,
   };
 }
 
@@ -135,14 +139,6 @@ export function adjustClockTime(state: AutoslalomState, deltaMinutes: number): A
   return { ...state, clock };
 }
 
-export function toggleAlarm(state: AutoslalomState): AutoslalomState {
-  if (state.phase !== "clock") return state;
-  return {
-    ...state,
-    clock: { ...state.clock, alarmEnabled: !state.clock.alarmEnabled },
-  };
-}
-
 export function setShowHighScore(state: AutoslalomState, show: boolean): AutoslalomState {
   if (state.phase === "playing") return state;
   return { ...state, showHighScore: show };
@@ -169,55 +165,40 @@ function steerOnce(state: AutoslalomState, dir: SteerDirection): AutoslalomState
   return { ...state, carLane: clampLane(state.carLane + delta) };
 }
 
-export function steer(
-  state: AutoslalomState,
-  dir: SteerDirection,
-  now = Date.now(),
-): AutoslalomState {
+export function steer(state: AutoslalomState, dir: SteerDirection, now = Date.now()): AutoslalomState {
   if (state.phase !== "playing" || state.invulnerableMs > 0) return state;
 
-  let next = state;
+  let next = steerOnce(state, dir);
   const isDouble =
     state.lastSteerDir === dir && now - state.lastSteerAt <= DOUBLE_TAP_MS && state.mode === "B";
+  if (isDouble) next = steerOnce(next, dir);
 
-  next = steerOnce(next, dir);
-  if (isDouble) {
-    next = steerOnce(next, dir);
-  }
-
-  return {
-    ...next,
-    lastSteerAt: now,
-    lastSteerDir: dir,
-  };
+  return { ...next, lastSteerAt: now, lastSteerDir: dir };
 }
 
-function detectCollision(state: AutoslalomState): boolean {
+function checkCollision(state: AutoslalomState, now: number): boolean {
   if (state.invulnerableMs > 0) return false;
   for (const barrier of state.barriers) {
-    if (Math.abs(barrier.y - CAR_Y) > HIT_BAND) continue;
-    if (isLaneBlocked(barrier, state.carLane)) {
-      if (state.mode === "B" && requiresDoubleTap(barrier, state.mode)) {
-        // Adjacent pair — allow if player double-tapped recently at this row.
-        const recent = Date.now() - state.lastSteerAt <= DOUBLE_TAP_MS;
-        if (recent && state.lastSteerDir) continue;
-      }
-      return true;
+    if (barrier.row !== CAR_ROW) continue;
+    if (!isLaneBlocked(barrier, state.carLane)) continue;
+    if (state.mode === "B" && requiresDoubleTap(barrier, state.mode)) {
+      const recent = now - state.lastSteerAt <= DOUBLE_TAP_MS;
+      if (recent && state.lastSteerDir) continue;
     }
+    return true;
   }
   return false;
 }
 
-function processScoring(state: AutoslalomState): AutoslalomState {
+function scorePassedBarriers(state: AutoslalomState): AutoslalomState {
   let score = state.score;
-  const barriers = state.barriers.map((b) => {
-    if (b.scored || b.y < SCORE_Y) return b;
-    if (!isLaneBlocked(b, state.carLane)) {
+  const barriers = state.barriers.filter((b) => {
+    if (b.row < PASS_ROW) return true;
+    if (!b.scored && !isLaneBlocked(b, state.carLane)) {
       score = Math.min(MAX_SCORE, score + 1);
     }
-    return { ...b, scored: true };
+    return false;
   });
-
   let next = { ...state, score, barriers };
   next = applyMilestoneLives(next);
   if (next.score >= MAX_SCORE) {
@@ -236,11 +217,38 @@ function handleCrash(state: AutoslalomState): AutoslalomState {
     lives,
     phase: "crash",
     invulnerableMs: CRASH_PAUSE_MS,
-    barriers: state.barriers.filter((b) => b.y < CAR_Y - 0.15),
+    barriers: state.barriers.filter((b) => b.row < CAR_ROW - 1),
   };
 }
 
-export function tick(state: AutoslalomState, dtMs: number): AutoslalomState {
+function advanceLcdRows(state: AutoslalomState, now: number): AutoslalomState {
+  let barriers = state.barriers.map((b) => ({ ...b, row: b.row + 1 }));
+  let rowsSinceSpawn = state.rowsSinceSpawn + 1;
+  let nextBarrierId = state.nextBarrierId;
+
+  if (rowsSinceSpawn >= SPAWN_EVERY_ROWS) {
+    barriers.push(createBarrier(nextBarrierId, state.mode, 0));
+    nextBarrierId += 1;
+    rowsSinceSpawn = 0;
+  }
+
+  let next: AutoslalomState = {
+    ...state,
+    barriers,
+    rowsSinceSpawn,
+    nextBarrierId,
+    rowTimer: 0,
+  };
+
+  if (checkCollision(next, now)) {
+    return handleCrash(next);
+  }
+
+  next = scorePassedBarriers(next);
+  return next;
+}
+
+export function tick(state: AutoslalomState, dtMs: number, now = Date.now()): AutoslalomState {
   if (state.phase === "crash") {
     const invulnerableMs = Math.max(0, state.invulnerableMs - dtMs);
     if (invulnerableMs <= 0) {
@@ -251,45 +259,19 @@ export function tick(state: AutoslalomState, dtMs: number): AutoslalomState {
 
   if (state.phase !== "playing") return state;
 
-  const dtSec = dtMs / 1000;
-  const speed = scrollSpeed(state.score, state.speedLevel);
-  const invulnerableMs = Math.max(0, state.invulnerableMs - dtMs);
+  const stepMs = rowStepMs(state.score, state.speedLevel);
+  let rowTimer = state.rowTimer + dtMs;
 
-  let barriers = state.barriers
-    .map((b) => ({ ...b, y: b.y + speed * dtSec }))
-    .filter((b) => b.y <= TRACK_DEPTH + 0.1);
+  let next = { ...state, invulnerableMs: Math.max(0, state.invulnerableMs - dtMs) };
 
-  let spawnTimer = state.spawnTimer - dtMs;
-  let nextBarrierId = state.nextBarrierId;
-
-  if (spawnTimer <= 0) {
-    barriers.push(createBarrier(nextBarrierId, state.mode, 0.02));
-    nextBarrierId += 1;
-    spawnTimer = spawnInterval(state.score, state.speedLevel);
+  while (rowTimer >= stepMs) {
+    rowTimer -= stepMs;
+    next = { ...next, rowTimer };
+    next = advanceLcdRows(next, now);
+    if (next.phase !== "playing") return { ...next, rowTimer };
   }
 
-  let next: AutoslalomState = {
-    ...state,
-    barriers,
-    spawnTimer,
-    nextBarrierId,
-    distance: state.distance + speed * dtSec,
-    invulnerableMs,
-  };
-
-  next = processScoring(next);
-
-  if (detectCollision(next)) {
-    next = handleCrash(next);
-  }
-
-  return next;
-}
-
-export function tickClock(state: AutoslalomState, now: Date): AutoslalomState {
-  if (state.phase !== "clock" || state.clockEdit !== "none") return state;
-  const clock = { ...state.clock, hours: now.getHours(), minutes: now.getMinutes() };
-  return { ...state, clock };
+  return { ...next, rowTimer };
 }
 
 export function isAlarmRinging(state: AutoslalomState, now: Date): boolean {

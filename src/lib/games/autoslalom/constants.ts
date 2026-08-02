@@ -9,23 +9,19 @@ export const LIFE_MILESTONES = [200, 500, 1000, 1200, 1500, 2200, 2500, 2999] as
 export const MIN_SPEED_LEVEL = 1;
 export const MAX_SPEED_LEVEL = 16;
 
-/** Base ms between barrier rows at speed level 1 and score 0. */
-export const BASE_SPAWN_MS = 2200;
+/** Дискретные ряды ЖК-экрана: 0 — горизонт (верхний правый), 8 — линия автомобиля. */
+export const LCD_ROW_COUNT = 8;
+export const CAR_ROW = 8;
+export const PASS_ROW = 9;
 
-/** Minimum ms between spawns at max difficulty. */
-export const MIN_SPAWN_MS = 450;
+/** Базовый интервал смещения ряда (мс) на скорости 1 и 0 очков. */
+export const BASE_ROW_STEP_MS = 420;
 
-/** Barrier travel distance in abstract units (0 = horizon, 1 = car line). */
-export const TRACK_DEPTH = 1;
+/** Минимальный интервал смещения ряда. */
+export const MIN_ROW_STEP_MS = 95;
 
-/** Y position of the car (0 top, 1 bottom). */
-export const CAR_Y = 0.88;
-
-/** Collision band half-height. */
-export const HIT_BAND = 0.045;
-
-/** Score line — barrier counted when its center passes below this. */
-export const SCORE_Y = CAR_Y + 0.06;
+/** Новый барьер каждые N смещений рядов. */
+export const SPAWN_EVERY_ROWS = 2;
 
 /** Double-tap window for Game B (ms). */
 export const DOUBLE_TAP_MS = 380;

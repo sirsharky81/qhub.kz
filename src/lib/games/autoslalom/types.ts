@@ -6,7 +6,8 @@ export type Lane = 0 | 1 | 2;
 
 export interface Barrier {
   id: number;
-  y: number;
+  /** Дискретный ряд ЖК (0 = горизонт, CAR_ROW = линия авто). */
+  row: number;
   /** Lanes blocked by this barrier row (1–2 lanes). */
   lanes: Lane[];
   scored: boolean;
@@ -29,10 +30,11 @@ export interface AutoslalomState {
   carLane: Lane;
   speedLevel: number;
   barriers: Barrier[];
-  distance: number;
   nextBarrierId: number;
-  /** Milliseconds until next barrier spawn. */
-  spawnTimer: number;
+  /** Таймер до следующего смещения рядов (мс). */
+  rowTimer: number;
+  /** Счётчик смещений до спавна. */
+  rowsSinceSpawn: number;
   /** Score milestones that already granted an extra life. */
   awardedMilestones: number[];
   /** Brief invulnerability after crash. */

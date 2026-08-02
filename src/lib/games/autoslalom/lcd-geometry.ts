@@ -1,54 +1,91 @@
-/** Perspective helpers for ИМ-23 LCD (y: 0 horizon → 1 bottom). */
+/**
+ * Геометрия ЖК ИМ-23: перспектива сходится к верхнему правому углу.
+ * Ряд 0 — горизонт, ряд CAR_ROW — линия автомобиля (низ-слева).
+ */
 
-export interface TrackPoint {
+import { CAR_ROW, LCD_ROW_COUNT } from "./constants";
+import type { Lane } from "./types";
+
+export interface Point {
   x: number;
   y: number;
 }
 
-export interface TrackLane {
-  left: number;
-  center: number;
-  right: number;
-  y: number;
+export interface RowGeometry {
+  row: number;
+  /** t: 0 horizon → 1 car line */
+  t: number;
+  left: Point;
+  right: Point;
+  laneCenters: [Point, Point, Point];
+  laneWidths: [number, number, number];
 }
 
-const HORIZON_Y = 0.14;
-const BASE_Y = 0.94;
-const TOP_WIDTH = 0.34;
-const BOTTOM_WIDTH = 0.88;
-
-export function trackY(screenY: number, height: number): number {
-  return (screenY / height - HORIZON_Y) / (BASE_Y - HORIZON_Y);
+/** Точка схода — верхний правый угол экрана. */
+function vanish(w: number, h: number): Point {
+  return { x: w * 0.9, y: h * 0.1 };
 }
 
-export function screenY(depth: number, height: number): number {
-  return (HORIZON_Y + depth * (BASE_Y - HORIZON_Y)) * height;
+/** Нижний край трассы (линия автомобиля). */
+function nearLeft(w: number, h: number): Point {
+  return { x: w * 0.05, y: h * 0.9 };
 }
 
-export function laneBounds(depth: number, width: number): TrackLane {
-  const t = Math.max(0, Math.min(1, depth));
-  const trackW = (TOP_WIDTH + (BOTTOM_WIDTH - TOP_WIDTH) * t) * width;
-  const cx = width / 2;
+function nearRight(w: number, h: number): Point {
+  return { x: w * 0.68, y: h * 0.82 };
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function lerpPoint(a: Point, b: Point, t: number): Point {
+  return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) };
+}
+
+export function rowT(row: number): number {
+  return Math.max(0, Math.min(1, row / CAR_ROW));
+}
+
+export function getRowGeometry(row: number, w: number, h: number): RowGeometry {
+  const t = rowT(row);
+  const v = vanish(w, h);
+  const nl = nearLeft(w, h);
+  const nr = nearRight(w, h);
+  const left = lerpPoint(nl, v, t * 0.92);
+  const right = lerpPoint(nr, v, t * 0.92);
+  const laneCenters: [Point, Point, Point] = [
+    lerpPoint(left, right, 1 / 6),
+    lerpPoint(left, right, 3 / 6),
+    lerpPoint(left, right, 5 / 6),
+  ];
+  const trackW = Math.hypot(right.x - left.x, right.y - left.y);
   const laneW = trackW / 3;
   return {
-    left: cx - trackW / 2,
-    center: cx - laneW / 2,
-    right: cx + laneW / 2,
-    y: screenY(t, 1),
+    row,
+    t,
+    left,
+    right,
+    laneCenters,
+    laneWidths: [laneW * 0.82, laneW * 0.82, laneW * 0.82],
   };
 }
 
-export function laneCenterX(lane: 0 | 1 | 2, depth: number, width: number): number {
-  const b = laneBounds(depth, width);
-  const laneW = (b.right - b.left) / 3;
-  return b.left + laneW * (lane + 0.5);
+export function laneCenter(row: number, lane: Lane, w: number, h: number): Point {
+  return getRowGeometry(row, w, h).laneCenters[lane];
 }
 
-export function laneRect(lane: 0 | 1 | 2, depth: number, width: number, barHeight: number) {
-  const b = laneBounds(depth, width);
-  const laneW = (b.right - b.left) / 3;
-  const x = b.left + lane * laneW + laneW * 0.06;
-  const w = laneW * 0.88;
-  const y = screenY(depth, 1) * (width / (width / 1.05)); // normalized
-  return { x, y, w, h: barHeight, laneW };
+export function laneSegmentRect(row: number, lane: Lane, w: number, h: number) {
+  const g = getRowGeometry(row, w, h);
+  const c = g.laneCenters[lane];
+  const lw = g.laneWidths[lane];
+  const bh = Math.max(2, h * (0.014 + g.t * 0.022));
+  const angle = Math.atan2(g.right.y - g.left.y, g.right.x - g.left.x);
+  return { x: c.x, y: c.y, w: lw, h: bh, angle };
 }
+
+export function allRowIndices(): number[] {
+  return Array.from({ length: LCD_ROW_COUNT + 1 }, (_, i) => i);
+}
+
+export { CAR_ROW, LCD_ROW_COUNT };
