@@ -48,8 +48,8 @@ if [ -f scripts/kz-maps/cleanup-vps-legacy-bundles.sh ]; then
 fi
 
 echo "==> Ensure Redis"
-chmod +x scripts/deploy/ensure-redis.sh 2>/dev/null || true
-sudo bash scripts/deploy/ensure-redis.sh || echo "==> Warning: Redis not ready"
+chmod +x scripts/deploy/ensure-redis.sh scripts/deploy/repair-redis.sh 2>/dev/null || true
+sudo bash scripts/deploy/repair-redis.sh || sudo bash scripts/deploy/ensure-redis.sh || echo "==> Warning: Redis not ready"
 
 echo "==> Restarting PM2"
 pm2 restart qhub

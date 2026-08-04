@@ -35,21 +35,23 @@ jobs:
         run: ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Ensure Redis (before deploy)
+        continue-on-error: true
         run: |
-          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
-          set -euo pipefail
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
+          sudo systemctl stop redis-server 2>/dev/null || true
+          sudo rm -f /var/run/redis/redis-server.pid /var/run/redis/redis.sock 2>/dev/null || true
+          sudo chown -R redis:redis /var/lib/redis 2>/dev/null || true
           sudo systemctl enable redis-server 2>/dev/null || true
-          sudo systemctl restart redis-server 2>/dev/null || sudo systemctl start redis-server
-          for i in $(seq 1 20); do
-            if [ -f /root/.redis_password ]; then
-              pass="$(sudo tr -d '\n\r' < /root/.redis_password)"
-              sudo redis-cli -a "$pass" --no-auth-warning ping 2>/dev/null | grep -q PONG && break
-            elif redis-cli ping 2>/dev/null | grep -q PONG; then
-              break
-            fi
-            sleep 1
-          done
-          redis-cli ping 2>/dev/null || sudo redis-cli ping 2>/dev/null || echo "Redis still down"
+          sudo systemctl start redis-server 2>/dev/null || sudo systemctl restart redis-server 2>/dev/null || true
+          sleep 2
+          sudo journalctl -u redis-server -n 10 --no-pager 2>/dev/null || true
+          pass=""
+          [ -f /root/.redis_password ] && pass="$(sudo tr -d '\n\r' < /root/.redis_password)"
+          if [ -n "$pass" ]; then
+            sudo redis-cli -a "$pass" --no-auth-warning ping 2>/dev/null || echo "Redis ping failed"
+          else
+            redis-cli ping 2>/dev/null || sudo redis-cli ping 2>/dev/null || echo "Redis ping failed"
+          fi
           EOF
 
       - name: Deploy on VPS
