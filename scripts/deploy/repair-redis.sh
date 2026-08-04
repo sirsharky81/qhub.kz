@@ -11,6 +11,18 @@ sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
 grep -q '^vm.overcommit_memory' /etc/sysctl.conf 2>/dev/null \
   || echo 'vm.overcommit_memory = 1' >> /etc/sysctl.conf
 
+# After AmneziaWG / network changes IPv6 loopback (::1) may be unavailable; Redis 8
+# defaults bind ::1 and exits if it cannot listen there.
+redis_conf="/etc/redis/redis.conf"
+if [ -f "$redis_conf" ]; then
+  echo "[redis-repair] bind 127.0.0.1 only (disable ::1)"
+  if grep -qE '^[[:space:]]*bind ' "$redis_conf"; then
+    sed -i 's/^[[:space:]]*bind .*/bind 127.0.0.1 -::1/' "$redis_conf"
+  else
+    printf '\nbind 127.0.0.1 -::1\n' >> "$redis_conf"
+  fi
+fi
+
 systemctl reset-failed redis-server 2>/dev/null || true
 
 echo "[redis-repair] status before:"
