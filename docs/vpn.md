@@ -132,6 +132,10 @@ Endpoint = 65.108.215.248:443
 
 Ключи и IP (`10.8.0.x`) **не меняются**. Новые конфиги из портала уже содержат `:443`.
 
+## Россия (AmneziaWG)
+
+Обычный WireGuard в РФ часто не пропускает трафик (DPI): handshake есть, WhatsApp и сайты не работают. Для родных в России — **AmneziaWG** и приложение **AmneziaVPN**. Инструкция: **`docs/vpn-russia.md`**.
+
 - VPN только для номеров с `vpnEnabled: true` и активным whitelist.
 - Отзыв whitelist или VPN автоматически отключает все устройства номера.
 - Не публикуйте server private key — он только на VPS в `/etc/wireguard/`.
@@ -148,3 +152,5 @@ Endpoint = 65.108.215.248:443
 | `src/app/api/vpn/` | API конфигов |
 | `scripts/vpn/wg-sync.mjs` | Синхронизация Redis → WireGuard |
 | `scripts/deploy/vpn-bootstrap.sh` | Первичная установка WireGuard |
+| `scripts/deploy/amneziawg-bootstrap.sh` | AmneziaWG для России |
+| `docs/vpn-russia.md` | Инструкция AmneziaVPN для РФ |
