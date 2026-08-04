@@ -56,3 +56,19 @@ jobs:
           wg show wg0 | awk '/listening port:/ {print "WireGuard listen port:", $3}'
           pm2 restart qhub
           EOF
+
+      - name: Ensure AmneziaWG for Russia (root)
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
+          set -euo pipefail
+          cd /var/www/qhub.kz
+          if [ -x scripts/deploy/amneziawg-bootstrap.sh ]; then
+            if awg show awg0 >/dev/null 2>&1; then
+              echo "AmneziaWG awg0 already running"
+              awg show awg0 | awk '/listening port:/ {print "AmneziaWG listen port:", $3}'
+            else
+              echo "Installing AmneziaWG (may need reboot + re-deploy if first run)..."
+              sudo bash scripts/deploy/amneziawg-bootstrap.sh || true
+            fi
+          fi
+          EOF
