@@ -60,11 +60,11 @@ export function VpnAdminSection() {
       <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
         <h2 className="text-xs font-mono uppercase tracking-wider text-gray-500">VPN (WireGuard)</h2>
         <p className="text-xs text-gray-400 mt-1">
-          Включайте VPN для номеров в whitelist ниже. Если у родных не открывается{" "}
-          <span className="font-mono">/tools/vpn</span> (блокировка сети), нажмите «Конфиг VPN» и
-          отправьте файл или текст конфига вручную. Endpoint:{" "}
-          <span className="font-mono">UDP 443</span> — в старых конфигах замените{" "}
-          <span className="font-mono">:51820</span> на <span className="font-mono">:443</span>.
+          WireGuard (UDP 443) — для Китая и стран без DPI. В{" "}
+          <strong className="font-normal text-amber-700">России</strong> обычный WireGuard не
+          проходит DPI: нужен AmneziaWG + приложение AmneziaVPN — см.{" "}
+          <span className="font-mono">docs/vpn-russia.md</span>. Endpoint WireGuard:{" "}
+          <span className="font-mono">UDP 443</span>.
         </p>
       </div>
       <div className="p-4 space-y-2 text-sm text-gray-700">
@@ -121,6 +121,17 @@ export function VpnAdminSection() {
               {syncing ? "Синхронизация…" : "Синхронизировать WireGuard"}
             </button>
             {msg && <p className="text-xs text-emerald-700">{msg}</p>}
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1">
+              <p className="text-xs font-semibold text-amber-900">Россия (Мегафон, DPI)</p>
+              <p className="text-xs text-amber-800">
+                Конфиги WireGuard из портала в РФ часто не пускают трафик (WA, сайты). Установите
+                AmneziaWG на VPS:{" "}
+                <span className="font-mono">sudo bash scripts/deploy/amneziawg-bootstrap.sh</span>,
+                затем{" "}
+                <span className="font-mono">scripts/vpn/amnezia-client.sh add имя</span> — отправьте
+                QR в AmneziaVPN. Подробно: docs/vpn-russia.md
+              </p>
+            </div>
           </>
         )}
       </div>

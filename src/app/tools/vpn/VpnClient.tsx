@@ -204,9 +204,45 @@ export function VpnClient() {
           <h1 className="text-2xl font-bold text-gray-900">QHub VPN</h1>
           <p className="text-sm text-gray-600">
             Безопасный туннель через ваш сервер. Установите приложение WireGuard и импортируйте
-            конфигурацию.
+            конфигурацию. В Китае и большинстве стран — WireGuard; в России см. блок ниже.
           </p>
         </header>
+
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-amber-900">Россия: нужен AmneziaVPN</h2>
+          <p className="text-xs text-amber-800">
+            Если VPN «подключён», но WhatsApp и сайты не работают — это блокировка обычного
+            WireGuard. В России используйте приложение{" "}
+            <a
+              href="https://amnezia.org/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-medium"
+            >
+              AmneziaVPN
+            </a>{" "}
+            и конфиг AmneziaWG от администратора (QR или ссылка vpn://). Конфиги с этой страницы —
+            только для WireGuard за пределами РФ.
+          </p>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <a
+              href="https://apps.apple.com/app/amneziavpn/id1600529900"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+            >
+              AmneziaVPN (iOS)
+            </a>
+            <a
+              href="https://play.google.com/store/apps/details?id=org.amnezia.vpn"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+            >
+              AmneziaVPN (Android)
+            </a>
+          </div>
+        </section>
 
         <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
           <h2 className="text-sm font-semibold text-gray-900">Приложение WireGuard (бесплатно)</h2>
