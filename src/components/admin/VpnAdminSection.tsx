@@ -12,6 +12,14 @@ interface VpnStatus {
   syncCommandSet: boolean;
   activePeers: number;
   phonesWithPeers: number;
+  amneziaConfigured: boolean;
+  amneziaEnabled: boolean;
+  amneziaEndpoint: string | null;
+  amneziaRunning: boolean;
+  amneziaListenPort?: number | null;
+  amneziaLivePeerCount?: number;
+  amneziaPortMismatch?: boolean;
+  amneziaPortalPeers?: number;
 }
 
 export function VpnAdminSection() {
@@ -58,80 +66,118 @@ export function VpnAdminSection() {
   return (
     <section className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <h2 className="text-xs font-mono uppercase tracking-wider text-gray-500">VPN (WireGuard)</h2>
+        <h2 className="text-xs font-mono uppercase tracking-wider text-gray-500">VPN</h2>
         <p className="text-xs text-gray-400 mt-1">
-          WireGuard (UDP 443) — для Китая и стран без DPI. В{" "}
-          <strong className="font-normal text-amber-700">России</strong> обычный WireGuard не
-          проходит DPI: нужен AmneziaWG + приложение AmneziaVPN — см.{" "}
-          <span className="font-mono">docs/vpn-russia.md</span>. Endpoint WireGuard:{" "}
-          <span className="font-mono">UDP 443</span>.
+          Пользователи на <span className="font-mono">/tools/vpn</span> выбирают WireGuard или
+          AmneziaVPN. Включайте VPN для номеров в whitelist ниже.
         </p>
       </div>
-      <div className="p-4 space-y-2 text-sm text-gray-700">
+      <div className="p-4 space-y-4 text-sm text-gray-700">
         {error && <p className="text-red-700">{error}</p>}
         {!status ? (
           <p className="text-gray-500">Загрузка…</p>
         ) : (
           <>
-            <p>
-              Сервер:{" "}
-              <span className={status.configured ? "text-emerald-700" : "text-amber-700"}>
-                {status.configured ? "готов" : "не настроен (см. docs/vpn.md)"}
-              </span>
-            </p>
-            {status.endpoint && (
+            <div className="space-y-2">
+              <p className="text-xs font-mono uppercase tracking-wider text-gray-500">WireGuard (wg0)</p>
               <p>
-                Endpoint (конфиги): <span className="font-mono text-xs">{status.endpoint}</span>
-              </p>
-            )}
-            {status.liveListenPort != null && (
-              <p>
-                WireGuard слушает:{" "}
-                <span
-                  className={
-                    status.portMismatch ? "font-mono text-xs text-amber-700" : "font-mono text-xs"
-                  }
-                >
-                  UDP {status.liveListenPort}
-                  {status.livePeerCount != null ? ` · ${status.livePeerCount} peer на wg0` : ""}
+                Сервер:{" "}
+                <span className={status.configured ? "text-emerald-700" : "text-amber-700"}>
+                  {status.configured ? "готов" : "не настроен"}
                 </span>
               </p>
-            )}
-            {status.portMismatch && (
-              <p className="text-xs text-amber-700">
-                Порт в .env и на wg0 не совпадают — нажмите «Синхронизировать WireGuard» или
-                дождитесь деплоя.
+              {status.endpoint && (
+                <p>
+                  Endpoint: <span className="font-mono text-xs">{status.endpoint}</span>
+                </p>
+              )}
+              {status.liveListenPort != null && (
+                <p>
+                  Слушает:{" "}
+                  <span
+                    className={
+                      status.portMismatch ? "font-mono text-xs text-amber-700" : "font-mono text-xs"
+                    }
+                  >
+                    UDP {status.liveListenPort}
+                    {status.livePeerCount != null ? ` · ${status.livePeerCount} peer на wg0` : ""}
+                  </span>
+                </p>
+              )}
+              {status.portMismatch && (
+                <p className="text-xs text-amber-700">
+                  Порт в .env и на wg0 не совпадают — «Синхронизировать WireGuard».
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={syncing}
+                onClick={() => void handleSync()}
+                className="text-xs px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-800 font-medium hover:bg-violet-100 disabled:opacity-50"
+              >
+                {syncing ? "Синхронизация…" : "Синхронизировать WireGuard"}
+              </button>
+            </div>
+
+            <div className="border-t border-gray-100 pt-4 space-y-2">
+              <p className="text-xs font-mono uppercase tracking-wider text-gray-500">
+                AmneziaWG (awg0, Россия)
               </p>
-            )}
-            <p>
-              Активных устройств: {status.activePeers} · номеров с VPN: {status.phonesWithPeers}
+              <p>
+                Сервер:{" "}
+                <span className={status.amneziaConfigured ? "text-emerald-700" : "text-amber-700"}>
+                  {status.amneziaConfigured
+                    ? status.amneziaRunning
+                      ? "работает"
+                      : "настроен, awg0 не запущен"
+                    : "не установлен"}
+                </span>
+              </p>
+              {status.amneziaEndpoint && (
+                <p>
+                  Endpoint: <span className="font-mono text-xs">{status.amneziaEndpoint}</span>
+                </p>
+              )}
+              {status.amneziaListenPort != null && status.amneziaRunning && (
+                <p>
+                  Слушает:{" "}
+                  <span
+                    className={
+                      status.amneziaPortMismatch
+                        ? "font-mono text-xs text-amber-700"
+                        : "font-mono text-xs"
+                    }
+                  >
+                    UDP {status.amneziaListenPort}
+                    {status.amneziaLivePeerCount != null
+                      ? ` · ${status.amneziaLivePeerCount} peer на awg0`
+                      : ""}
+                  </span>
+                </p>
+              )}
+              {status.amneziaPortalPeers != null && (
+                <p className="text-xs text-gray-500">
+                  Устройств Amnezia через портал: {status.amneziaPortalPeers}
+                </p>
+              )}
+              {!status.amneziaConfigured && (
+                <p className="text-xs text-amber-700">
+                  Установка:{" "}
+                  <span className="font-mono">sudo bash scripts/deploy/amneziawg-bootstrap.sh</span>
+                </p>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-500 border-t border-gray-100 pt-3">
+              Всего активных устройств (WireGuard + Amnezia): {status.activePeers} · номеров с VPN:{" "}
+              {status.phonesWithPeers}
             </p>
             {!status.syncCommandSet && (
               <p className="text-xs text-amber-700">
-                VPN_SYNC_COMMAND не задан — peers сохраняются в Redis, но WireGuard на сервере нужно
-                синхронизировать вручную.
+                VPN_SYNC_COMMAND не задан — WireGuard peers только в Redis.
               </p>
             )}
-            <button
-              type="button"
-              disabled={syncing}
-              onClick={() => void handleSync()}
-              className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-800 font-medium hover:bg-violet-100 disabled:opacity-50"
-            >
-              {syncing ? "Синхронизация…" : "Синхронизировать WireGuard"}
-            </button>
             {msg && <p className="text-xs text-emerald-700">{msg}</p>}
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1">
-              <p className="text-xs font-semibold text-amber-900">Россия (Мегафон, DPI)</p>
-              <p className="text-xs text-amber-800">
-                Конфиги WireGuard из портала в РФ часто не пускают трафик (WA, сайты). Установите
-                AmneziaWG на VPS:{" "}
-                <span className="font-mono">sudo bash scripts/deploy/amneziawg-bootstrap.sh</span>,
-                затем{" "}
-                <span className="font-mono">scripts/vpn/amnezia-client.sh add имя</span> — отправьте
-                QR в AmneziaVPN. Подробно: docs/vpn-russia.md
-              </p>
-            </div>
           </>
         )}
       </div>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertMessengerSession } from "@/lib/messenger/guard";
 import { isVpnEnabledForPhone } from "./store";
-import { isVpnServerConfigured } from "./env";
+import { isAnyVpnBackendConfigured } from "./env";
 
 export class VpnAccessError extends Error {
   status: number;
@@ -12,7 +12,7 @@ export class VpnAccessError extends Error {
 }
 
 export async function assertVpnAccess(): Promise<{ phone: string }> {
-  if (!isVpnServerConfigured()) {
+  if (!isAnyVpnBackendConfigured()) {
     throw new VpnAccessError("VPN временно недоступен", 503);
   }
   const { phone } = await assertMessengerSession();

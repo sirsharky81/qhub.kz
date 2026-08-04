@@ -20,6 +20,7 @@ function toPublicPeer(peer: VpnPeer): VpnPeerPublic {
   return {
     id: peer.id,
     label: peer.label,
+    protocol: "wireguard",
     address: peer.address,
     createdAt: peer.createdAt,
     status: peer.status,
