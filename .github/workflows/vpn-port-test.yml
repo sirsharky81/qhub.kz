@@ -1,0 +1,37 @@
+name: VPN port diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/vpn/test-listen-port.sh'
+      - '.github/workflows/vpn-port-test.yml'
+
+concurrency:
+  group: vpn-port-test
+  cancel-in-progress: true
+
+jobs:
+  test-port:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add VPS host key
+        run: ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload test script
+        run: |
+          scp -o BatchMode=yes scripts/vpn/test-listen-port.sh \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/test-listen-port.sh"
+
+      - name: Run port diagnostic on VPS
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "chmod +x /tmp/test-listen-port.sh && sudo bash /tmp/test-listen-port.sh"
