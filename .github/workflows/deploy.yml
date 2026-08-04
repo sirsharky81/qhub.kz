@@ -58,16 +58,16 @@ jobs:
           EOF
 
       - name: Ensure AmneziaWG for Russia (root)
+        continue-on-error: true
         run: |
-          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
-          set -euo pipefail
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
           cd /var/www/qhub.kz
           if [ -x scripts/deploy/amneziawg-bootstrap.sh ]; then
             if awg show awg0 >/dev/null 2>&1; then
               echo "AmneziaWG awg0 already running"
               awg show awg0 | awk '/listening port:/ {print "AmneziaWG listen port:", $3}'
             else
-              echo "Installing AmneziaWG (may need reboot + re-deploy if first run)..."
+              echo "Installing AmneziaWG (installer may reboot VPS — re-deploy to continue)..."
               sudo bash scripts/deploy/amneziawg-bootstrap.sh || true
             fi
           fi
