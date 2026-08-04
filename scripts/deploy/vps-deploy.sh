@@ -59,7 +59,8 @@ if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.
   if [ -f scripts/vpn/migrate-listen-port.sh ]; then
     echo "==> WireGuard listen port (UDP 443 test)"
     chmod +x scripts/vpn/migrate-listen-port.sh
-    VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh || echo "==> Warning: WireGuard port migration failed"
+    sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh || echo "==> Warning: WireGuard port migration failed"
+    pm2 restart qhub || true
   fi
   echo "==> Syncing WireGuard VPN peers"
   chmod +x scripts/vpn/run-wg-sync.sh 2>/dev/null || true

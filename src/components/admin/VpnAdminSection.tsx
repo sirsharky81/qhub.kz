@@ -6,6 +6,9 @@ interface VpnStatus {
   configured: boolean;
   enabled: boolean;
   endpoint: string | null;
+  liveListenPort?: number | null;
+  livePeerCount?: number;
+  portMismatch?: boolean;
   syncCommandSet: boolean;
   activePeers: number;
   phonesWithPeers: number;
@@ -78,7 +81,26 @@ export function VpnAdminSection() {
             </p>
             {status.endpoint && (
               <p>
-                Endpoint: <span className="font-mono text-xs">{status.endpoint}</span>
+                Endpoint (конфиги): <span className="font-mono text-xs">{status.endpoint}</span>
+              </p>
+            )}
+            {status.liveListenPort != null && (
+              <p>
+                WireGuard слушает:{" "}
+                <span
+                  className={
+                    status.portMismatch ? "font-mono text-xs text-amber-700" : "font-mono text-xs"
+                  }
+                >
+                  UDP {status.liveListenPort}
+                  {status.livePeerCount != null ? ` · ${status.livePeerCount} peer на wg0` : ""}
+                </span>
+              </p>
+            )}
+            {status.portMismatch && (
+              <p className="text-xs text-amber-700">
+                Порт в .env и на wg0 не совпадают — нажмите «Синхронизировать WireGuard» или
+                дождитесь деплоя.
               </p>
             )}
             <p>
