@@ -58,7 +58,7 @@ case "$cmd" in
       echo "AmneziaWG not installed. Run: sudo bash scripts/deploy/amneziawg-bootstrap.sh" >&2
       exit 1
     fi
-    bash "$MANAGE" add "$@" --yes
+    bash "$MANAGE" add "$@" --yes >&2
     for name in "$@"; do
       echo ""
       echo "=== ${name} ==="
@@ -71,7 +71,11 @@ case "$cmd" in
       echo '{"ok":false,"error":"AmneziaWG not installed"}'
       exit 1
     fi
-    bash "$MANAGE" add "$1" --yes
+    # manage_amneziawg.sh prints colored logs to stdout — keep stdout JSON-only for Node
+    if ! bash "$MANAGE" add "$1" --yes >&2; then
+      echo "{\"ok\":false,\"error\":\"Не удалось добавить клиента на awg0\"}"
+      exit 1
+    fi
     emit_client_json "$1"
     ;;
   export-json)

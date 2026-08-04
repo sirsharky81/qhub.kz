@@ -41,12 +41,11 @@ write_env_flags() {
     || echo "AMNEZIAWG_COMMAND=${amnezia_cmd}" >> "$ENV_FILE"
   chmod +x "$amnezia_cmd" 2>/dev/null || true
   SUDOERS_FILE="/etc/sudoers.d/qhub-amnezia"
-  if [ ! -f "$SUDOERS_FILE" ]; then
-    cat > "$SUDOERS_FILE" <<EOF
+  cat > "$SUDOERS_FILE" <<EOF
+# Allow PM2 / deploy user to manage AmneziaWG clients without password
 ALL ALL=(root) NOPASSWD: ${amnezia_cmd}
 EOF
-    chmod 440 "$SUDOERS_FILE"
-  fi
+  chmod 440 "$SUDOERS_FILE"
 }
 
 if [ "$(id -u)" -ne 0 ]; then
