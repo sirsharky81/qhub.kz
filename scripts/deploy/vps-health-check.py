@@ -314,7 +314,8 @@ def check_wireguard(env: dict[str, str]) -> dict:
             return fail("WireGuard VPN", detail)
         peers = [line for line in show.stdout.splitlines() if line.strip().startswith("peer:")]
         listen = subprocess.run(["ss", "-ulnp"], capture_output=True, text=True, timeout=5, check=False)
-        port_open = ":51820" in listen.stdout
+        wg_port = env.get("VPN_LISTEN_PORT", "443").strip() or "443"
+        port_open = f":{wg_port}" in listen.stdout
         detail = f"{len(peers)} peer(s) on wg0"
 
         redis_active = None
@@ -336,7 +337,7 @@ def check_wireguard(env: dict[str, str]) -> dict:
                 return fail("WireGuard VPN", f"{detail} — run wg-sync (peers out of sync)")
 
         if not port_open:
-            return fail("WireGuard VPN", f"{detail}; UDP 51820 not listening")
+            return fail("WireGuard VPN", f"{detail}; UDP {wg_port} not listening")
         return ok("WireGuard VPN", detail)
     except FileNotFoundError:
         return fail("WireGuard VPN", "wg command missing")
