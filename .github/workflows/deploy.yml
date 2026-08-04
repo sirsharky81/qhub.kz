@@ -38,20 +38,11 @@ jobs:
         continue-on-error: true
         run: |
           ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
-          sudo systemctl stop redis-server 2>/dev/null || true
-          sudo rm -f /var/run/redis/redis-server.pid /var/run/redis/redis.sock 2>/dev/null || true
-          sudo chown -R redis:redis /var/lib/redis 2>/dev/null || true
-          sudo systemctl enable redis-server 2>/dev/null || true
-          sudo systemctl start redis-server 2>/dev/null || sudo systemctl restart redis-server 2>/dev/null || true
-          sleep 2
-          sudo journalctl -u redis-server -n 10 --no-pager 2>/dev/null || true
-          pass=""
-          [ -f /root/.redis_password ] && pass="$(sudo tr -d '\n\r' < /root/.redis_password)"
-          if [ -n "$pass" ]; then
-            sudo redis-cli -a "$pass" --no-auth-warning ping 2>/dev/null || echo "Redis ping failed"
-          else
-            redis-cli ping 2>/dev/null || sudo redis-cli ping 2>/dev/null || echo "Redis ping failed"
-          fi
+          cd /var/www/qhub.kz
+          git fetch origin main
+          git checkout origin/main -- scripts/deploy/repair-redis.sh scripts/deploy/ensure-redis.sh 2>/dev/null || true
+          chmod +x scripts/deploy/repair-redis.sh scripts/deploy/ensure-redis.sh 2>/dev/null || true
+          sudo bash scripts/deploy/repair-redis.sh || true
           EOF
 
       - name: Deploy on VPS
