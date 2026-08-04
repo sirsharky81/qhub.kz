@@ -93,12 +93,24 @@ function isInterfaceUp(name) {
 }
 
 function reloadWireGuardInterface(configPath, iface) {
+  if (trySystemctlRestart(iface)) return;
+
   try {
     execFileSync("wg-quick", ["down", iface], { stdio: "ignore" });
   } catch {
     // interface may already be down
   }
   execFileSync("wg-quick", ["up", configPath], { stdio: "inherit" });
+}
+
+function trySystemctlRestart(iface) {
+  try {
+    execFileSync("systemctl", ["restart", `wg-quick@${iface}`], { stdio: "inherit" });
+    execFileSync("wg", ["show", iface], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function applyWireGuardConfig(configPath, iface, config) {
