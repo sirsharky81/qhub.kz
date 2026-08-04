@@ -4,8 +4,14 @@ import { getAdminEmail } from "@/lib/admin/session";
 import { isValidKzPhone, normalizeKzPhone } from "@/lib/messenger/phone";
 import { loadWhitelist, saveWhitelist } from "@/lib/messenger/store";
 import type { WhitelistEntry, WhitelistStatus } from "@/lib/messenger/types";
+import { revokeAllAmneziaPeersForPhone } from "@/lib/vpn/amnezia-store";
 import { revokeAllPeersForPhone } from "@/lib/vpn/store";
 import { triggerVpnSync } from "@/lib/vpn/sync";
+
+async function revokeAllVpnDevices(phone: string): Promise<void> {
+  await Promise.all([revokeAllPeersForPhone(phone), revokeAllAmneziaPeersForPhone(phone)]);
+  await triggerVpnSync();
+}
 
 async function requireAdmin(): Promise<NextResponse | null> {
   const ok = await isAdminAuthenticated();
@@ -47,8 +53,7 @@ export async function PATCH(request: Request) {
     }
     whitelist[phone] = { ...existing, status: "revoked", vpnEnabled: false };
     await saveWhitelist(whitelist);
-    await revokeAllPeersForPhone(phone);
-    await triggerVpnSync();
+    await revokeAllVpnDevices(phone);
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
   }
 
@@ -74,8 +79,7 @@ export async function PATCH(request: Request) {
     whitelist[phone] = { ...existing, vpnEnabled: body.vpnEnabled };
     await saveWhitelist(whitelist);
     if (!body.vpnEnabled) {
-      await revokeAllPeersForPhone(phone);
-      await triggerVpnSync();
+      await revokeAllVpnDevices(phone);
     }
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
   }

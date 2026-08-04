@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { VpnPeerPublic } from "@/lib/vpn/types";
+import type { VpnPeerPublic, VpnProtocol } from "@/lib/vpn/types";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { platformFetch } from "@/lib/platform/api-client";
 
@@ -11,6 +11,8 @@ interface AccessState {
   vpnEnabled: boolean;
   messengerLoggedIn: boolean;
   configured: boolean;
+  wireguardConfigured: boolean;
+  amneziaConfigured: boolean;
   phone?: string;
   peers: VpnPeerPublic[];
 }
@@ -20,6 +22,7 @@ export function VpnClient() {
   const [state, setState] = useState<AccessState | null>(null);
   const [loading, setLoading] = useState(true);
   const [label, setLabel] = useState("");
+  const [protocol, setProtocol] = useState<VpnProtocol>("wireguard");
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyPeerId, setBusyPeerId] = useState<string | null>(null);
@@ -31,14 +34,20 @@ export function VpnClient() {
     try {
       const res = await platformFetch("/api/vpn/access-check");
       const data = (await res.json()) as AccessState & { error?: string };
-      setState({
+      const next: AccessState = {
         allowed: Boolean(data.allowed),
         vpnEnabled: Boolean(data.vpnEnabled),
         messengerLoggedIn: Boolean(data.messengerLoggedIn),
         configured: Boolean(data.configured),
+        wireguardConfigured: Boolean(data.wireguardConfigured),
+        amneziaConfigured: Boolean(data.amneziaConfigured),
         phone: data.phone,
         peers: Array.isArray(data.peers) ? data.peers : [],
-      });
+      };
+      setState(next);
+      if (next.amneziaConfigured && !next.wireguardConfigured) {
+        setProtocol("amnezia");
+      }
     } catch {
       setError("Не удалось проверить доступ");
     } finally {
@@ -57,15 +66,22 @@ export function VpnClient() {
     const res = await platformFetch("/api/vpn/peers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label: label.trim() || "Устройство" }),
+      body: JSON.stringify({ label: label.trim() || "Устройство", protocol }),
     });
-    const data = (await res.json()) as { error?: string };
+    const data = (await res.json()) as { error?: string; syncWarning?: string };
     if (!res.ok) {
       setError(data.error ?? "Не удалось создать конфиг");
       return;
     }
     setLabel("");
-    setMsg("Конфигурация создана. Скачайте файл или отсканируйте QR.");
+    setMsg(
+      protocol === "amnezia"
+        ? "Конфиг AmneziaVPN создан. Скачайте файл, QR или скопируйте ссылку vpn://."
+        : "Конфигурация WireGuard создана. Скачайте файл или отсканируйте QR.",
+    );
+    if (data.syncWarning) {
+      setError(`WireGuard на сервере: ${data.syncWarning}`);
+    }
     await load();
   }
 
@@ -141,6 +157,17 @@ export function VpnClient() {
     setMsg("Конфиг скопирован в буфер обмена");
   }
 
+  async function handleCopyVpnUri(peerId: string) {
+    const res = await platformFetch(`/api/vpn/peers/${peerId}/config`);
+    const data = (await res.json()) as { vpnUri?: string; error?: string };
+    if (!res.ok || !data.vpnUri) {
+      setError(data.error ?? "Ссылка vpn:// недоступна");
+      return;
+    }
+    await navigator.clipboard.writeText(data.vpnUri);
+    setMsg("Ссылка vpn:// скопирована — вставьте в AmneziaVPN");
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-gray-500 text-sm">
@@ -197,103 +224,106 @@ export function VpnClient() {
     );
   }
 
+  const showWireGuard = state.wireguardConfigured;
+  const showAmnezia = state.amneziaConfigured;
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-xl mx-auto space-y-6">
         <header className="space-y-1">
           <h1 className="text-2xl font-bold text-gray-900">QHub VPN</h1>
           <p className="text-sm text-gray-600">
-            Безопасный туннель через ваш сервер. Установите приложение WireGuard и импортируйте
-            конфигурацию. В Китае и большинстве стран — WireGuard; в России см. блок ниже.
+            Выберите тип VPN: WireGuard (Китай и большинство стран) или AmneziaVPN (Россия и сети с
+            блокировкой).
           </p>
         </header>
 
-        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-          <h2 className="text-sm font-semibold text-amber-900">Россия: нужен AmneziaVPN</h2>
-          <p className="text-xs text-amber-800">
-            Если VPN «подключён», но WhatsApp и сайты не работают — это блокировка обычного
-            WireGuard. В России используйте приложение{" "}
-            <a
-              href="https://amnezia.org/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline font-medium"
-            >
-              AmneziaVPN
-            </a>{" "}
-            и конфиг AmneziaWG от администратора (QR или ссылка vpn://). Конфиги с этой страницы —
-            только для WireGuard за пределами РФ.
-          </p>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <a
-              href="https://apps.apple.com/app/amneziavpn/id1600529900"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
-            >
-              AmneziaVPN (iOS)
-            </a>
-            <a
-              href="https://play.google.com/store/apps/details?id=org.amnezia.vpn"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
-            >
-              AmneziaVPN (Android)
-            </a>
-          </div>
-        </section>
+        {protocol === "wireguard" && showWireGuard && (
+          <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
+            <h2 className="text-sm font-semibold text-gray-900">Приложение WireGuard</h2>
+            <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
+              <li>Установите WireGuard (ссылки ниже).</li>
+              <li>Создайте устройство → скачайте `.conf` или QR.</li>
+              <li>Импортируйте в WireGuard и включите туннель.</li>
+            </ol>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <a
+                href="https://apps.apple.com/app/wireguard/id1441195209"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
+              >
+                App Store (iOS)
+              </a>
+              <a
+                href="https://play.google.com/store/apps/details?id=com.wireguard.android"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
+              >
+                Google Play (Android)
+              </a>
+            </div>
+          </section>
+        )}
 
-        <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-900">Приложение WireGuard (бесплатно)</h2>
-          <p className="text-sm text-gray-600">
-            VPN работает через официальное бесплатное приложение WireGuard — QHub выдаёт конфиг,
-            туннель поднимает WireGuard на вашем устройстве.
-          </p>
-          <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
-            <li>Установите WireGuard (ссылки ниже).</li>
-            <li>Добавьте устройство на этой странице — скачайте `.conf` или отсканируйте QR.</li>
-            <li>Импортируйте конфиг в WireGuard и включите туннель.</li>
-          </ol>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <a
-              href="https://apps.apple.com/app/wireguard/id1441195209"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
-            >
-              App Store (iOS)
-            </a>
-            <a
-              href="https://play.google.com/store/apps/details?id=com.wireguard.android"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
-            >
-              Google Play (Android)
-            </a>
-            <a
-              href="https://www.wireguard.com/install/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
-            >
-              Windows / macOS / Linux
-            </a>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-violet-100 bg-violet-50/50 p-4 space-y-2">
-          <h2 className="text-sm font-semibold text-violet-900">Скоро: VPN в приложении QHub</h2>
-          <p className="text-xs text-violet-800">
-            В будущем переключатель VPN появится прямо в приложении QHub — без WireGuard. Сейчас
-            используйте бесплатный WireGuard: это самый быстрый и надёжный вариант.
-          </p>
-        </section>
+        {protocol === "amnezia" && showAmnezia && (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+            <h2 className="text-sm font-semibold text-amber-900">Приложение AmneziaVPN (Россия)</h2>
+            <p className="text-xs text-amber-800">
+              Обычный WireGuard в РФ часто не пускает трафик. AmneziaVPN обходит DPI — используйте QR
+              или ссылку <span className="font-mono">vpn://</span> с этой страницы.
+            </p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <a
+                href="https://apps.apple.com/app/amneziavpn/id1600529900"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+              >
+                AmneziaVPN (iOS)
+              </a>
+              <a
+                href="https://play.google.com/store/apps/details?id=org.amnezia.vpn"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+              >
+                AmneziaVPN (Android)
+              </a>
+            </div>
+          </section>
+        )}
 
         <section className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 space-y-3">
             <h2 className="text-xs font-mono uppercase tracking-wider text-gray-500">Новое устройство</h2>
+            {showWireGuard && showAmnezia && (
+              <div className="flex rounded-xl border border-gray-200 p-0.5 bg-white text-xs">
+                <button
+                  type="button"
+                  onClick={() => setProtocol("wireguard")}
+                  className={`flex-1 rounded-lg px-3 py-2 font-medium transition-colors ${
+                    protocol === "wireguard"
+                      ? "bg-gray-900 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  WireGuard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProtocol("amnezia")}
+                  className={`flex-1 rounded-lg px-3 py-2 font-medium transition-colors ${
+                    protocol === "amnezia"
+                      ? "bg-amber-600 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  AmneziaVPN
+                </button>
+              </div>
+            )}
           </div>
           <form onSubmit={handleCreate} className="p-4 flex flex-col sm:flex-row gap-2">
             <input
@@ -306,7 +336,11 @@ export function VpnClient() {
             />
             <button
               type="submit"
-              className="rounded-xl bg-gray-900 text-white px-4 py-2 text-sm font-semibold shrink-0"
+              disabled={
+                (protocol === "wireguard" && !showWireGuard) ||
+                (protocol === "amnezia" && !showAmnezia)
+              }
+              className="rounded-xl bg-gray-900 text-white px-4 py-2 text-sm font-semibold shrink-0 disabled:opacity-50"
             >
               Создать
             </button>
@@ -336,7 +370,18 @@ export function VpnClient() {
                 <li key={peer.id} className="p-4 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">{peer.label}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-900">{peer.label}</p>
+                        <span
+                          className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded ${
+                            peer.protocol === "amnezia"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-sky-100 text-sky-800"
+                          }`}
+                        >
+                          {peer.protocol === "amnezia" ? "Amnezia" : "WireGuard"}
+                        </span>
+                      </div>
                       <p className="text-xs text-gray-400 font-mono">
                         {peer.address} · {new Date(peer.createdAt).toLocaleDateString("ru-RU")}
                       </p>
@@ -363,6 +408,15 @@ export function VpnClient() {
                       >
                         Копировать
                       </button>
+                      {peer.protocol === "amnezia" && (
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyVpnUri(peer.id)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-800"
+                        >
+                          vpn://
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={busyPeerId === peer.id}
@@ -374,7 +428,7 @@ export function VpnClient() {
                     </div>
                   </div>
                   {qrByPeer[peer.id] && (
-                    <div className="flex justify-center pt-2">
+                    <div className="flex flex-col items-center pt-2 gap-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={qrByPeer[peer.id]}
@@ -383,6 +437,11 @@ export function VpnClient() {
                         width={280}
                         height={280}
                       />
+                      {peer.protocol === "amnezia" && (
+                        <p className="text-xs text-amber-700 text-center max-w-xs">
+                          Сканируйте в приложении AmneziaVPN (не WireGuard)
+                        </p>
+                      )}
                     </div>
                   )}
                 </li>

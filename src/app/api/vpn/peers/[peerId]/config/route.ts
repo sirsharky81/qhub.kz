@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { assertVpnAccess, vpnErrorResponse } from "@/lib/vpn/guard";
+import { amneziaExportClient } from "@/lib/vpn/amnezia";
 import { getVpnServerConfig } from "@/lib/vpn/env";
-import { getPeerById } from "@/lib/vpn/store";
+import { resolveActivePeer } from "@/lib/vpn/resolve-peer";
 import { buildClientConfig } from "@/lib/vpn/wireguard";
 
 export async function GET(
@@ -11,15 +12,28 @@ export async function GET(
   try {
     const { phone } = await assertVpnAccess();
     const { peerId } = await context.params;
-    const peer = await getPeerById(peerId);
-    if (!peer || peer.phone !== phone || peer.status !== "active") {
+    const resolved = await resolveActivePeer(peerId, phone);
+    if (!resolved) {
       return NextResponse.json({ error: "Устройство не найдено" }, { status: 404 });
+    }
+
+    if (resolved.protocol === "amnezia") {
+      const files = await amneziaExportClient(resolved.peer.amneziaName);
+      const slug = resolved.peer.label.replace(/\s+/g, "-").toLowerCase();
+      return NextResponse.json({
+        ok: true,
+        protocol: "amnezia",
+        config: files.config,
+        vpnUri: files.vpnUri,
+        label: resolved.peer.label,
+        filename: `qhub-amnezia-${slug}.conf`,
+      });
     }
 
     const server = getVpnServerConfig();
     const config = buildClientConfig({
-      privateKey: peer.privateKey,
-      address: peer.address,
+      privateKey: resolved.peer.privateKey,
+      address: resolved.peer.address,
       dns: server.dns,
       serverPublicKey: server.serverPublicKey,
       endpoint: server.endpoint,
@@ -27,9 +41,10 @@ export async function GET(
 
     return NextResponse.json({
       ok: true,
+      protocol: "wireguard",
       config,
-      label: peer.label,
-      filename: `qhub-vpn-${peer.label.replace(/\s+/g, "-").toLowerCase()}.conf`,
+      label: resolved.peer.label,
+      filename: `qhub-vpn-${resolved.peer.label.replace(/\s+/g, "-").toLowerCase()}.conf`,
     });
   } catch (error) {
     return vpnErrorResponse(error);

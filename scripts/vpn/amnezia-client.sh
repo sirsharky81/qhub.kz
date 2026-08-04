@@ -3,21 +3,50 @@
 set -euo pipefail
 
 MANAGE="/root/awg/manage_amneziawg.sh"
-CLIENTS_DIR="/root/awg/clients"
+AWG_DIR="/root/awg"
+APP_DIR="${APP_DIR:-/var/www/qhub.kz}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  amnezia-client.sh add <name> [name2 ...]   Create client(s), print vpn:// links
-  amnezia-client.sh list                     List clients
-  amnezia-client.sh regen <name>             Regenerate config + QR
-  amnezia-client.sh status                   Show awg0 status
+  amnezia-client.sh add <name> [name2 ...]     Create client(s), print summary
+  amnezia-client.sh add-json <name>            Create one client, JSON on stdout
+  amnezia-client.sh export-json <name>         Read client files, JSON on stdout
+  amnezia-client.sh remove <name>              Remove client from awg0
+  amnezia-client.sh list                       List clients
+  amnezia-client.sh regen <name>               Regenerate config + QR
+  amnezia-client.sh status                     Show awg0 status (text)
+  amnezia-client.sh status-json                Show awg0 status (JSON)
 EOF
 }
 
 if [ "$(id -u)" -ne 0 ]; then
   exec sudo -n "$0" "$@" 2>/dev/null || exec sudo "$0" "$@"
 fi
+
+emit_client_json() {
+  local name="$1"
+  python3 - "$name" "$AWG_DIR" <<'PY'
+import json, pathlib, re, sys
+name, awg_dir = sys.argv[1], pathlib.Path(sys.argv[2])
+conf_path = awg_dir / f"{name}.conf"
+vpnuri_path = awg_dir / f"{name}.vpnuri"
+config = conf_path.read_text(encoding="utf-8") if conf_path.is_file() else None
+vpn_uri = vpnuri_path.read_text(encoding="utf-8").strip() if vpnuri_path.is_file() else None
+address = None
+if config:
+    m = re.search(r"^Address\s*=\s*([0-9a-fA-F.:]+)", config, re.M)
+    if m:
+        address = m.group(1).split("/")[0]
+print(json.dumps({
+    "ok": bool(config),
+    "name": name,
+    "config": config,
+    "vpnUri": vpn_uri,
+    "address": address,
+}, ensure_ascii=False))
+PY
+}
 
 cmd="${1:-}"
 shift || true
@@ -31,22 +60,34 @@ case "$cmd" in
     fi
     bash "$MANAGE" add "$@" --yes
     for name in "$@"; do
-      dir="${CLIENTS_DIR}/${name}"
       echo ""
       echo "=== ${name} ==="
-      if [ -f "${dir}/${name}.conf" ]; then
-        echo "Config: ${dir}/${name}.conf"
-      fi
-      if [ -f "${dir}/${name}.vpnuri.png" ]; then
-        echo "QR (Amnezia): ${dir}/${name}.vpnuri.png"
-      elif [ -f "${dir}/${name}.png" ]; then
-        echo "QR: ${dir}/${name}.png"
-      fi
-      if [ -f "${dir}/${name}.vpnuri.txt" ]; then
-        echo "vpn:// link:"
-        cat "${dir}/${name}.vpnuri.txt"
-      fi
+      emit_client_json "$name" | python3 -c "import json,sys; d=json.load(sys.stdin); print('Config:', f'{AWG_DIR}/{name}.conf'); print('vpnUri:', d.get('vpnUri') or '(missing)')"
     done
+    ;;
+  add-json)
+    [ $# -eq 1 ] || { usage; exit 1; }
+    if [ ! -x "$MANAGE" ]; then
+      echo '{"ok":false,"error":"AmneziaWG not installed"}'
+      exit 1
+    fi
+    bash "$MANAGE" add "$1" --yes
+    emit_client_json "$1"
+    ;;
+  export-json)
+    [ $# -eq 1 ] || { usage; exit 1; }
+    emit_client_json "$1"
+    ;;
+  remove)
+    [ $# -eq 1 ] || { usage; exit 1; }
+    if [ ! -x "$MANAGE" ]; then
+      echo '{"ok":false,"error":"AmneziaWG not installed"}'
+      exit 1
+    fi
+    bash "$MANAGE" remove "$1" --yes
+    rm -f "${AWG_DIR}/$1.conf" "${AWG_DIR}/$1.png" "${AWG_DIR}/$1.vpnuri" \
+      "${AWG_DIR}/$1.vpnuri.png" "${AWG_DIR}/$1.vpnuri.txt" 2>/dev/null || true
+    echo '{"ok":true}'
     ;;
   list)
     if [ -x "$MANAGE" ]; then
@@ -67,6 +108,23 @@ case "$cmd" in
       echo "awg0 not running"
       exit 1
     fi
+    ;;
+  status-json)
+    python3 - <<'PY'
+import json, subprocess, re
+try:
+    out = subprocess.check_output(["awg", "show", "awg0"], text=True, stderr=subprocess.DEVNULL)
+    port_m = re.search(r"listening port:\s*(\d+)", out)
+    peers = len(re.findall(r"^peer:", out, re.M))
+    print(json.dumps({
+        "ok": True,
+        "running": True,
+        "listenPort": int(port_m.group(1)) if port_m else None,
+        "peerCount": peers,
+    }))
+except (subprocess.CalledProcessError, FileNotFoundError):
+    print(json.dumps({"ok": True, "running": False, "listenPort": None, "peerCount": 0}))
+PY
     ;;
   *)
     usage

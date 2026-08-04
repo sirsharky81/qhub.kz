@@ -26,6 +26,7 @@ ensure_web_firewall() {
 write_env_flags() {
   local port="$1"
   [ -f "$ENV_FILE" ] || return 0
+  local amnezia_cmd="${APP_DIR}/scripts/vpn/amnezia-client.sh"
   grep -q '^AMNEZIAWG_ENABLED=' "$ENV_FILE" \
     && sed -i 's|^AMNEZIAWG_ENABLED=.*|AMNEZIAWG_ENABLED=1|' "$ENV_FILE" \
     || echo 'AMNEZIAWG_ENABLED=1' >> "$ENV_FILE"
@@ -35,6 +36,17 @@ write_env_flags() {
   grep -q '^AMNEZIAWG_ENDPOINT=' "$ENV_FILE" \
     && sed -i "s|^AMNEZIAWG_ENDPOINT=.*|AMNEZIAWG_ENDPOINT=${AWG_ENDPOINT}:${port}|" "$ENV_FILE" \
     || echo "AMNEZIAWG_ENDPOINT=${AWG_ENDPOINT}:${port}" >> "$ENV_FILE"
+  grep -q '^AMNEZIAWG_COMMAND=' "$ENV_FILE" \
+    && sed -i "s|^AMNEZIAWG_COMMAND=.*|AMNEZIAWG_COMMAND=${amnezia_cmd}|" "$ENV_FILE" \
+    || echo "AMNEZIAWG_COMMAND=${amnezia_cmd}" >> "$ENV_FILE"
+  chmod +x "$amnezia_cmd" 2>/dev/null || true
+  SUDOERS_FILE="/etc/sudoers.d/qhub-amnezia"
+  if [ ! -f "$SUDOERS_FILE" ]; then
+    cat > "$SUDOERS_FILE" <<EOF
+ALL ALL=(root) NOPASSWD: ${amnezia_cmd}
+EOF
+    chmod 440 "$SUDOERS_FILE"
+  fi
 }
 
 if [ "$(id -u)" -ne 0 ]; then
