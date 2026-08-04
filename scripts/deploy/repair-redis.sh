@@ -72,15 +72,43 @@ sleep 2
 [ -f /var/log/redis/redis-server.log ] && tail -15 /var/log/redis/redis-server.log || true
 
 pass_file="/root/.redis_password"
-for _ in $(seq 1 20); do
+redis_cli_auth() {
   if [ -f "$pass_file" ]; then
+    local pass
     pass="$(tr -d '\n\r' < "$pass_file")"
-    if [ "$(redis-cli -h 127.0.0.1 -p 6379 -a "$pass" --no-auth-warning ping 2>/dev/null)" = "PONG" ]; then
-      echo "[redis-repair] PONG (auth)"
-      exit 0
+    redis-cli -h 127.0.0.1 -p 6379 -a "$pass" --no-auth-warning "$@"
+  else
+    redis-cli -h 127.0.0.1 -p 6379 "$@"
+  fi
+}
+
+for _ in $(seq 1 20); do
+  if [ "$(redis_cli_auth ping 2>/dev/null)" = "PONG" ]; then
+    echo "[redis-repair] PONG (auth)"
+    wl_size="$(redis_cli_auth STRLEN qhub:messenger:whitelist 2>/dev/null || echo 0)"
+    if [ "${wl_size:-0}" -lt 10 ]; then
+      echo "[redis-repair] whitelist empty (${wl_size:-0} bytes) — trying RDB backup restore"
+      latest_bak=""
+      for f in $(ls -t /var/lib/redis/dump.rdb.bak.* 2>/dev/null); do
+        if redis-check-rdb "$f" >/dev/null 2>&1; then
+          latest_bak="$f"
+          break
+        fi
+      done
+      if [ -n "$latest_bak" ]; then
+        echo "[redis-repair] restoring from $latest_bak"
+        systemctl stop redis-server 2>/dev/null || true
+        cp "$latest_bak" /var/lib/redis/dump.rdb
+        chown redis:redis /var/lib/redis/dump.rdb
+        rm -f /var/lib/redis/appendonly.aof 2>/dev/null || true
+        systemctl start redis-server 2>/dev/null || systemctl restart redis-server
+        sleep 2
+        wl_size="$(redis_cli_auth STRLEN qhub:messenger:whitelist 2>/dev/null || echo 0)"
+        echo "[redis-repair] whitelist after restore: ${wl_size:-0} bytes"
+      else
+        echo "[redis-repair] no valid RDB backup found — re-add phones in admin"
+      fi
     fi
-  elif [ "$(redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null)" = "PONG" ]; then
-    echo "[redis-repair] PONG"
     exit 0
   fi
   sleep 1
