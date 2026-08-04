@@ -66,7 +66,8 @@ pm2 restart qhub
 ```env
 VPN_ENABLED=1
 VPN_SERVER_PUBLIC_KEY=<из вывода vpn-bootstrap.sh>
-VPN_SERVER_ENDPOINT=65.108.215.248:51820
+VPN_SERVER_ENDPOINT=65.108.215.248:443
+# VPN_LISTEN_PORT=443
 VPN_DNS=1.1.1.1, 8.8.8.8
 VPN_SYNC_COMMAND=/var/www/qhub.kz/scripts/vpn/run-wg-sync.sh
 ```
@@ -106,7 +107,7 @@ node --env-file=.env.production scripts/vpn/wg-sync.mjs
    - «Последнее рукопожатие» **меньше 2 минут** и растёт трафик → VPN **работает**
    - Handshake давно, трафик не растёт → VPN **не активен**
 
-2. **Hetzner Cloud Firewall** (частая причина): в панели Hetzner → Firewalls → разрешить **UDP 51820** на сервер `65.108.215.248`. UFW на VPS недостаточно, если есть облачный firewall.
+2. **Hetzner Cloud Firewall**: в панели Hetzner → Firewalls → разрешить **UDP 443** (и при необходимости старый **UDP 51820**) на сервер `65.108.215.248`.
 
 3. **Синхронизация peer на сервере** (SSH):
    ```bash
@@ -120,6 +121,16 @@ node --env-file=.env.production scripts/vpn/wg-sync.mjs
 4. **Пересоздайте конфиг** в админке («Конфиг VPN») если меняли ключи на сервере.
 
 5. **Мобильный оператор** может резать UDP — попробуйте Wi‑Fi или другую сеть.
+
+## Смена порта (UDP 443)
+
+Сервер слушает **UDP 443** (тест обхода блокировок в РФ). В каждом клиенте в WireGuard измените:
+
+```ini
+Endpoint = 65.108.215.248:443
+```
+
+Ключи и IP (`10.8.0.x`) **не меняются**. Новые конфиги из портала уже содержат `:443`.
 
 - VPN только для номеров с `vpnEnabled: true` и активным whitelist.
 - Отзыв whitelist или VPN автоматически отключает все устройства номера.

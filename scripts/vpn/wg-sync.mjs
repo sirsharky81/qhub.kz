@@ -62,7 +62,7 @@ function readServerPrivateKey() {
 }
 
 function buildServerConfig(activePeers, serverPrivateKey, publicInterface) {
-  const listenPort = process.env.VPN_LISTEN_PORT || "51820";
+  const listenPort = process.env.VPN_LISTEN_PORT || "443";
   const lines = [
     "[Interface]",
     `Address = ${process.env.VPN_SERVER_ADDRESS || "10.8.0.1/24"}`,

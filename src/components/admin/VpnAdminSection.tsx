@@ -59,7 +59,9 @@ export function VpnAdminSection() {
         <p className="text-xs text-gray-400 mt-1">
           Включайте VPN для номеров в whitelist ниже. Если у родных не открывается{" "}
           <span className="font-mono">/tools/vpn</span> (блокировка сети), нажмите «Конфиг VPN» и
-          отправьте файл или текст конфига вручную.
+          отправьте файл или текст конфига вручную. Endpoint:{" "}
+          <span className="font-mono">UDP 443</span> — в старых конфигах замените{" "}
+          <span className="font-mono">:51820</span> на <span className="font-mono">:443</span>.
         </p>
       </div>
       <div className="p-4 space-y-2 text-sm text-gray-700">
