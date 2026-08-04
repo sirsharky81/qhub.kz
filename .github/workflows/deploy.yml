@@ -77,3 +77,13 @@ jobs:
             fi
           fi
           EOF
+
+      - name: Create AmneziaWG client for Russia (root)
+        continue-on-error: true
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
+          if awg show awg0 >/dev/null 2>&1 && [ -x /var/www/qhub.kz/scripts/vpn/amnezia-client.sh ]; then
+            sudo bash /var/www/qhub.kz/scripts/vpn/amnezia-client.sh add sofia 2>/dev/null || \
+              sudo bash /root/awg/manage_amneziawg.sh list 2>/dev/null || true
+          fi
+          EOF
