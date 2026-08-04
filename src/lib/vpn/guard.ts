@@ -31,5 +31,10 @@ export function vpnErrorResponse(error: unknown): NextResponse {
     const status = (error as Error & { status?: number }).status ?? 401;
     return NextResponse.json({ error: error.message }, { status });
   }
+  if (error instanceof Error && error.message) {
+    console.error("[vpn]", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  console.error("[vpn]", error);
   return NextResponse.json({ error: "Ошибка VPN" }, { status: 500 });
 }

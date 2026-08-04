@@ -20,7 +20,19 @@ export interface AmneziaLiveStatus {
 }
 
 function parseJson<T>(stdout: string): T {
-  return JSON.parse(stdout.trim()) as T;
+  const trimmed = stdout.trim();
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    // Fallback: manage script may have printed logs before JSON
+    for (const line of trimmed.split("\n").reverse()) {
+      const candidate = line.trim();
+      if (candidate.startsWith("{")) {
+        return JSON.parse(candidate) as T;
+      }
+    }
+    throw new Error("Некорректный ответ скрипта AmneziaWG");
+  }
 }
 
 async function runAmneziaCommand(args: string[], timeoutMs = 30_000): Promise<string> {
@@ -28,12 +40,22 @@ async function runAmneziaCommand(args: string[], timeoutMs = 30_000): Promise<st
   if (!command) {
     throw new Error("AMNEZIAWG_COMMAND не задан");
   }
-  const { stdout } = await execFileAsync("bash", [command, ...args], {
-    timeout: timeoutMs,
-    cwd: process.env.APP_DIR || process.cwd(),
-    maxBuffer: 2 * 1024 * 1024,
-  });
-  return stdout;
+  try {
+    const { stdout } = await execFileAsync("bash", [command, ...args], {
+      timeout: timeoutMs,
+      cwd: process.env.APP_DIR || process.cwd(),
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (err) {
+    const execErr = err as NodeJS.ErrnoException & { stderr?: string; stdout?: string };
+    const detail =
+      execErr.stderr?.trim() ||
+      execErr.stdout?.trim() ||
+      (err instanceof Error ? err.message : String(err));
+    console.error("[vpn-amnezia] command failed:", args.join(" "), detail);
+    throw new Error(detail || "Команда AmneziaWG завершилась с ошибкой");
+  }
 }
 
 /** Safe client name for manage_amneziawg.sh (a-z0-9, max 32) */
