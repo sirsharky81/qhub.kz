@@ -8,6 +8,15 @@ fi
 
 echo "[redis] ensure redis-server is active"
 
+redis_conf="/etc/redis/redis.conf"
+if [ -f "$redis_conf" ]; then
+  if grep -qE '^[[:space:]]*bind ' "$redis_conf"; then
+    sed -i 's/^[[:space:]]*bind .*/bind 127.0.0.1 -::1/' "$redis_conf"
+  else
+    printf '\nbind 127.0.0.1 -::1\n' >> "$redis_conf"
+  fi
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
   systemctl enable redis-server 2>/dev/null || true
   if ! systemctl is-active --quiet redis-server 2>/dev/null; then
