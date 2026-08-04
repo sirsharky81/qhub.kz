@@ -92,6 +92,35 @@ function isInterfaceUp(name) {
   }
 }
 
+function getLiveListenPort(name) {
+  try {
+    const out = execFileSync("wg", ["show", name], { encoding: "utf8" });
+    const match = out.match(/listening port:\s*(\d+)/);
+    return match ? Number.parseInt(match[1], 10) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseListenPortFromConfig(config) {
+  const match = config.match(/^ListenPort\s*=\s*(\d+)/m);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function tryHotListenPortChange(iface, newPort) {
+  const livePort = getLiveListenPort(iface);
+  if (livePort === newPort) return true;
+  if (livePort === null) return false;
+  try {
+    execFileSync("wg", ["set", iface, "listen-port", String(newPort)], { stdio: "pipe" });
+    return getLiveListenPort(iface) === newPort;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`[vpn-sync] hot listen-port change failed (${detail})`);
+    return false;
+  }
+}
+
 function forceDownInterface(iface) {
   try {
     execFileSync("systemctl", ["stop", `wg-quick@${iface}`], { stdio: "ignore" });
@@ -135,7 +164,10 @@ function applyWireGuardConfig(configPath, iface, config) {
   writeFileSync(configPath, config, { mode: 0o600 });
   chmodSync(configPath, 0o600);
 
+  const targetPort = parseListenPortFromConfig(config);
+
   if (isInterfaceUp(iface)) {
+    let peersSynced = false;
     try {
       const stripped = execFileSync("wg-quick", ["strip", configPath], { encoding: "utf8" });
       const tmpDir = mkdtempSync(join(tmpdir(), "qhub-wg-"));
@@ -143,17 +175,32 @@ function applyWireGuardConfig(configPath, iface, config) {
       try {
         writeFileSync(strippedPath, stripped, { mode: 0o600 });
         execFileSync("wg", ["syncconf", iface, strippedPath], { stdio: "pipe" });
-        return;
+        peersSynced = true;
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      console.warn(`[vpn-sync] syncconf failed (${detail}), restarting ${iface} via wg-quick`);
+      console.warn(`[vpn-sync] syncconf failed (${detail})`);
     }
+
+    if (targetPort != null) {
+      if (tryHotListenPortChange(iface, targetPort)) {
+        if (peersSynced) return;
+      }
+    } else if (peersSynced) {
+      return;
+    }
+
+    console.warn(`[vpn-sync] restarting ${iface} via wg-quick`);
   }
 
   reloadWireGuardInterface(configPath, iface);
+
+  if (targetPort != null && getLiveListenPort(iface) !== targetPort) {
+    if (tryHotListenPortChange(iface, targetPort)) return;
+    throw new Error(`WireGuard listen port is ${getLiveListenPort(iface)}, expected ${targetPort}`);
+  }
 }
 
 async function main() {
