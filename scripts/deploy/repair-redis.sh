@@ -47,10 +47,17 @@ fi
 
 echo "[redis-repair] starting redis-server"
 systemctl enable redis-server 2>/dev/null || true
-systemctl start redis-server 2>/dev/null || systemctl restart redis-server
+if ! systemctl start redis-server 2>/dev/null; then
+  systemctl reset-failed redis-server 2>/dev/null || true
+  echo "[redis-repair] first start failed — moving data files aside"
+  [ -f /var/lib/redis/dump.rdb ] && mv /var/lib/redis/dump.rdb "/var/lib/redis/dump.rdb.bak.${ts}.1"
+  [ -f /var/lib/redis/appendonly.aof ] && mv /var/lib/redis/appendonly.aof "/var/lib/redis/appendonly.aof.bak.${ts}.1"
+  chown -R redis:redis /var/lib/redis
+  systemctl start redis-server 2>/dev/null || systemctl restart redis-server
+fi
 
 sleep 2
-[ -f /var/log/redis/redis-server.log ] && tail -10 /var/log/redis/redis-server.log || true
+[ -f /var/log/redis/redis-server.log ] && tail -15 /var/log/redis/redis-server.log || true
 
 pass_file="/root/.redis_password"
 for _ in $(seq 1 20); do
