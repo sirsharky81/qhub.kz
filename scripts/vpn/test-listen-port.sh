@@ -51,7 +51,7 @@ PY
 done
 
 echo ""
-echo "--- WireGuard probe: ListenPort ${TEST_PORT} (then restore ${PROD_PORT}) ---"
+echo "--- WireGuard probe: hot migrate to UDP ${TEST_PORT} (then restore ${PROD_PORT}) ---"
 
 backup="/tmp/qhub-wg0.conf.porttest.$(date +%s)"
 cp "$WG_CONF" "$backup"
@@ -62,11 +62,10 @@ restore_wg() {
     sed -i "s|^VPN_LISTEN_PORT=.*|VPN_LISTEN_PORT=${PROD_PORT}|" "$APP_DIR/.env.production" 2>/dev/null || true
     sed -i "s|^VPN_SERVER_ENDPOINT=.*|VPN_SERVER_ENDPOINT=$(grep -E '^VPN_SERVER_ENDPOINT=' "$APP_DIR/.env.production" | cut -d= -f2- | sed 's/:[0-9]*$//'):${PROD_PORT}|" "$APP_DIR/.env.production" 2>/dev/null || true
   fi
-  systemctl stop "wg-quick@${WG_INTERFACE}" 2>/dev/null || true
-  wg-quick down "$WG_INTERFACE" 2>/dev/null || true
-  ip link del "$WG_INTERFACE" 2>/dev/null || true
-  sleep 1
-  sed -i "s/^ListenPort = .*/ListenPort = ${PROD_PORT}/" "$WG_CONF"
+  if wg show "$WG_INTERFACE" >/dev/null 2>&1; then
+    wg set "$WG_INTERFACE" listen-port "$PROD_PORT" 2>/dev/null || true
+    sed -i "s/^ListenPort = .*/ListenPort = ${PROD_PORT}/" "$WG_CONF"
+  fi
   if [ -f "$APP_DIR/scripts/vpn/restart-wg.sh" ]; then
     VPN_LISTEN_PORT="$PROD_PORT" bash "$APP_DIR/scripts/vpn/restart-wg.sh" || wg-quick up "$WG_CONF"
   else
@@ -76,27 +75,27 @@ restore_wg() {
 
 trap restore_wg EXIT
 
-systemctl stop "wg-quick@${WG_INTERFACE}" 2>/dev/null || true
-wg-quick down "$WG_INTERFACE" 2>/dev/null || true
-ip link del "$WG_INTERFACE" 2>/dev/null || true
-sleep 1
-
-sed -i "s/^ListenPort = .*/ListenPort = ${TEST_PORT}/" "$WG_CONF"
-
-set +e
-wg_quick_out=$(wg-quick up "$WG_INTERFACE" 2>&1)
-wg_quick_rc=$?
-set -e
-
-echo "wg-quick up (port ${TEST_PORT}) exit=${wg_quick_rc}"
-if [ -n "$wg_quick_out" ]; then
-  echo "$wg_quick_out" | tail -20
+if ! wg show "$WG_INTERFACE" >/dev/null 2>&1; then
+  echo "wg0 not running — starting on ${PROD_PORT} first"
+  wg-quick up "$WG_INTERFACE" 2>/dev/null || systemctl start "wg-quick@${WG_INTERFACE}" 2>/dev/null || true
 fi
 
-if [ "$wg_quick_rc" -eq 0 ] && wg show "$WG_INTERFACE" 2>/dev/null | grep -q "listening port: ${TEST_PORT}"; then
-  echo "RESULT: WireGuard on UDP ${TEST_PORT} — SUCCESS"
+set +e
+if wg show "$WG_INTERFACE" >/dev/null 2>&1; then
+  wg set "$WG_INTERFACE" listen-port "$TEST_PORT" 2>&1
+  hot_rc=$?
+  sed -i "s/^ListenPort = .*/ListenPort = ${TEST_PORT}/" "$WG_CONF"
 else
-  echo "RESULT: WireGuard on UDP ${TEST_PORT} — FAILED"
+  hot_rc=1
+fi
+set -e
+
+echo "wg set listen-port ${TEST_PORT} exit=${hot_rc}"
+
+if [ "$hot_rc" -eq 0 ] && wg show "$WG_INTERFACE" 2>/dev/null | grep -q "listening port: ${TEST_PORT}"; then
+  echo "RESULT: WireGuard hot migrate to UDP ${TEST_PORT} — SUCCESS"
+else
+  echo "RESULT: WireGuard hot migrate to UDP ${TEST_PORT} — FAILED"
 fi
 
 echo ""

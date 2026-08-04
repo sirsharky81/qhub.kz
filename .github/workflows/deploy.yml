@@ -45,7 +45,14 @@ jobs:
           bash scripts/deploy/vps-deploy.sh
           EOF
 
-      - name: Restart WireGuard (root)
+      - name: Migrate WireGuard to UDP 443 (root)
         run: |
-          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "sudo bash /var/www/qhub.kz/scripts/vpn/restart-wg.sh && pm2 restart qhub"
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
+          set -euo pipefail
+          cd /var/www/qhub.kz
+          chmod +x scripts/vpn/migrate-listen-port.sh scripts/vpn/restart-wg.sh
+          sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh \
+            || sudo bash scripts/vpn/restart-wg.sh
+          wg show wg0 | awk '/listening port:/ {print "WireGuard listen port:", $3}'
+          pm2 restart qhub
+          EOF

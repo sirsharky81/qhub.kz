@@ -56,9 +56,11 @@ else
 fi
 
 if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.production ]; then
-  echo "==> Restart WireGuard VPN"
-  chmod +x scripts/vpn/restart-wg.sh 2>/dev/null || true
-  sudo bash scripts/vpn/restart-wg.sh || echo "==> Warning: WireGuard restart failed"
+  echo "==> WireGuard VPN (UDP 443)"
+  chmod +x scripts/vpn/restart-wg.sh scripts/vpn/migrate-listen-port.sh 2>/dev/null || true
+  sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh \
+    || sudo bash scripts/vpn/restart-wg.sh \
+    || echo "==> Warning: WireGuard restart failed"
 fi
 
 echo "==> Health check"

@@ -86,7 +86,20 @@ export VPN_LISTEN_PORT="$NEW_PORT"
 chmod +x scripts/vpn/run-wg-sync.sh 2>/dev/null || true
 
 sync_ok=0
-if [ -x scripts/vpn/run-wg-sync.sh ]; then
+if wg show "$WG_INTERFACE" >/dev/null 2>&1; then
+  LIVE_BEFORE="$(wg show "$WG_INTERFACE" | awk '/listening port:/ {print $3}')"
+  if [ "$LIVE_BEFORE" != "$NEW_PORT" ]; then
+    echo "[vpn-port] hot migrate UDP ${LIVE_BEFORE:-?} -> ${NEW_PORT} (wg set listen-port)"
+    if wg set "$WG_INTERFACE" listen-port "$NEW_PORT" 2>/dev/null; then
+      sed -i "s/^ListenPort = .*/ListenPort = ${NEW_PORT}/" "/etc/wireguard/${WG_INTERFACE}.conf" 2>/dev/null || true
+      sync_ok=1
+    fi
+  else
+    sync_ok=1
+  fi
+fi
+
+if [ "$sync_ok" -eq 0 ] && [ -x scripts/vpn/run-wg-sync.sh ]; then
   bash scripts/vpn/run-wg-sync.sh && sync_ok=1 || true
 fi
 if [ "$sync_ok" -eq 0 ]; then
