@@ -56,38 +56,9 @@ else
 fi
 
 if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.production ]; then
-  if [ -f scripts/vpn/migrate-listen-port.sh ]; then
-    echo "==> WireGuard listen port (UDP 443 test)"
-    chmod +x scripts/vpn/migrate-listen-port.sh
-    sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh || echo "==> Warning: WireGuard port migration failed"
-    pm2 restart qhub || true
-  fi
-  echo "==> Syncing WireGuard VPN peers"
-  chmod +x scripts/vpn/run-wg-sync.sh 2>/dev/null || true
-  SYNC_SCRIPT="${APP_DIR}/scripts/vpn/run-wg-sync.sh"
-  if [ ! -f /etc/sudoers.d/qhub-vpn-sync ] && command -v sudo >/dev/null 2>&1; then
-    echo "==> Ensuring WireGuard sync sudoers"
-    cat <<EOF | sudo tee /etc/sudoers.d/qhub-vpn-sync >/dev/null
-# QHub: allow deploy user to sync WireGuard peers
-ALL ALL=(root) NOPASSWD: ${SYNC_SCRIPT}, /usr/bin/wg, /usr/bin/wg-quick
-EOF
-    sudo chmod 440 /etc/sudoers.d/qhub-vpn-sync
-  fi
-  if grep -q '^VPN_SYNC_COMMAND=node ' .env.production 2>/dev/null; then
-    echo "==> Updating VPN_SYNC_COMMAND to run-wg-sync.sh"
-    sed -i "s|^VPN_SYNC_COMMAND=.*|VPN_SYNC_COMMAND=${SYNC_SCRIPT}|" .env.production
-  fi
-  if [ -x scripts/vpn/run-wg-sync.sh ]; then
-    sudo -n bash scripts/vpn/run-wg-sync.sh 2>/dev/null \
-      || sudo bash scripts/vpn/run-wg-sync.sh \
-      || bash scripts/vpn/run-wg-sync.sh \
-      || echo "==> Warning: WireGuard peer sync failed"
-  else
-    sudo -n node --env-file=.env.production scripts/vpn/wg-sync.mjs 2>/dev/null \
-      || sudo node --env-file=.env.production scripts/vpn/wg-sync.mjs \
-      || node --env-file=.env.production scripts/vpn/wg-sync.mjs \
-      || echo "==> Warning: WireGuard peer sync failed"
-  fi
+  echo "==> Restart WireGuard VPN"
+  chmod +x scripts/vpn/restart-wg.sh 2>/dev/null || true
+  sudo bash scripts/vpn/restart-wg.sh || echo "==> Warning: WireGuard restart failed"
 fi
 
 echo "==> Health check"

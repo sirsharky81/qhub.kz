@@ -92,14 +92,32 @@ function isInterfaceUp(name) {
   }
 }
 
-function reloadWireGuardInterface(configPath, iface) {
-  if (trySystemctlRestart(iface)) return;
-
+function forceDownInterface(iface) {
+  try {
+    execFileSync("systemctl", ["stop", `wg-quick@${iface}`], { stdio: "ignore" });
+  } catch {
+    // not managed by systemd
+  }
   try {
     execFileSync("wg-quick", ["down", iface], { stdio: "ignore" });
   } catch {
-    // interface may already be down
+    // already down
   }
+  try {
+    execFileSync("ip", ["link", "del", iface], { stdio: "ignore" });
+  } catch {
+    try {
+      execFileSync("ip", ["link", "delete", iface], { stdio: "ignore" });
+    } catch {
+      // gone
+    }
+  }
+}
+
+function reloadWireGuardInterface(configPath, iface) {
+  if (trySystemctlRestart(iface)) return;
+
+  forceDownInterface(iface);
   execFileSync("wg-quick", ["up", configPath], { stdio: "inherit" });
 }
 
