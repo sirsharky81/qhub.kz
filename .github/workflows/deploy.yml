@@ -34,6 +34,24 @@ jobs:
       - name: Add VPS host key
         run: ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Ensure Redis (before deploy)
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
+          set -euo pipefail
+          sudo systemctl enable redis-server 2>/dev/null || true
+          sudo systemctl restart redis-server 2>/dev/null || sudo systemctl start redis-server
+          for i in $(seq 1 20); do
+            if [ -f /root/.redis_password ]; then
+              pass="$(sudo tr -d '\n\r' < /root/.redis_password)"
+              sudo redis-cli -a "$pass" --no-auth-warning ping 2>/dev/null | grep -q PONG && break
+            elif redis-cli ping 2>/dev/null | grep -q PONG; then
+              break
+            fi
+            sleep 1
+          done
+          redis-cli ping 2>/dev/null || sudo redis-cli ping 2>/dev/null || echo "Redis still down"
+          EOF
+
       - name: Deploy on VPS
         run: |
           ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'

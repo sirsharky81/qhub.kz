@@ -68,5 +68,14 @@ export function jsonAuthError(err: unknown): Response {
   if (err instanceof MessengerAuthError) {
     return Response.json({ error: err.message }, { status: err.status });
   }
+  const message = err instanceof Error ? err.message : String(err);
+  if (/redis|ECONNREFUSED|Connection is closed/i.test(message)) {
+    console.error("[messenger-auth] redis unavailable:", err);
+    return Response.json(
+      { error: "Сервис временно недоступен. Попробуйте через минуту." },
+      { status: 503 },
+    );
+  }
+  console.error("[messenger-auth]", err);
   return Response.json({ error: "Внутренняя ошибка" }, { status: 500 });
 }
