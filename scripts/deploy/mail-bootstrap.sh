@@ -213,7 +213,7 @@ namespace inbox {
     special_use = \Drafts
     auto = subscribe
   }
-  mailbox Sent {
+  mailbox "Sent Items" {
     special_use = \Sent
     auto = subscribe
   }

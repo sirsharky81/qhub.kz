@@ -1,5 +1,6 @@
 #!/bin/bash
-# Create standard IMAP folders for a mailbox (Sent, Drafts, Trash).
+# Create standard IMAP folders for a mailbox (Sent Items, Drafts, Trash).
+# Outlook desktop/mobile expects "Sent Items", not "Sent".
 # Usage: mail-init-folders.sh user@qhub.kz
 set -euo pipefail
 
@@ -26,8 +27,26 @@ if ! grep -qi "^${EMAIL}:" "$DOVECOT_USERS"; then
   exit 1
 fi
 
-for folder in Sent Drafts Trash; do
-  if doveadm mailbox list -u "$EMAIL" 2>/dev/null | grep -qx "$folder"; then
+list_mailboxes() {
+  doveadm mailbox list -u "$EMAIL" 2>/dev/null
+}
+
+has_mailbox() {
+  list_mailboxes | grep -Fxq "$1"
+}
+
+# Migrate legacy "Sent" → "Sent Items" (Outlook iOS/desktop)
+if has_mailbox "Sent"; then
+  if has_mailbox "Sent Items"; then
+    echo "Both Sent and Sent Items exist — keeping Sent Items"
+  else
+    doveadm mailbox rename -u "$EMAIL" Sent "Sent Items"
+    echo "Renamed: Sent -> Sent Items"
+  fi
+fi
+
+for folder in "Sent Items" Drafts Trash; do
+  if has_mailbox "$folder"; then
     echo "Exists: $folder"
   else
     doveadm mailbox create -u "$EMAIL" "$folder"
@@ -37,4 +56,4 @@ for folder in Sent Drafts Trash; do
 done
 
 echo "Folders for $EMAIL:"
-doveadm mailbox list -u "$EMAIL"
+list_mailboxes
