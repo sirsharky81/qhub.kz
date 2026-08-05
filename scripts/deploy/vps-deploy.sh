@@ -60,11 +60,17 @@ else
 fi
 
 if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.production ]; then
-  echo "==> WireGuard VPN (UDP 443)"
-  chmod +x scripts/vpn/restart-wg.sh scripts/vpn/migrate-listen-port.sh 2>/dev/null || true
-  sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh \
-    || sudo bash scripts/vpn/restart-wg.sh \
-    || echo "==> Warning: WireGuard restart failed"
+  if command -v awg >/dev/null 2>&1 && awg show awg0 >/dev/null 2>&1; then
+    echo "==> VPN ports (Amnezia 443 / WireGuard 51820 for Russia)"
+    chmod +x scripts/vpn/migrate-russia-ports.sh 2>/dev/null || true
+    sudo bash scripts/vpn/migrate-russia-ports.sh || echo "==> Warning: Russia port migration failed"
+  else
+    echo "==> WireGuard VPN (UDP 443)"
+    chmod +x scripts/vpn/restart-wg.sh scripts/vpn/migrate-listen-port.sh 2>/dev/null || true
+    sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh \
+      || sudo bash scripts/vpn/restart-wg.sh \
+      || echo "==> Warning: WireGuard restart failed"
+  fi
 fi
 
 echo "==> Health check"
