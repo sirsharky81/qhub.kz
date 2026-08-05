@@ -39,6 +39,8 @@ grep -qxF "$MAIL_DOMAIN	OK" "$POSTFIX_DOMAINS" 2>/dev/null || echo "$MAIL_DOMAIN
 
 mail_reload_services
 
+bash "${SCRIPT_DIR}/mail-init-folders.sh" "$EMAIL"
+
 echo "Mailbox ready: $EMAIL"
 echo "IMAP: mail.${MAIL_DOMAIN}:993 (SSL)"
 echo "SMTP: mail.${MAIL_DOMAIN}:587 (STARTTLS)"

@@ -99,16 +99,20 @@ jobs:
           fi
           EOF
 
-      - name: Mail folders diagnostic
+      - name: Ensure standard mail folders
         continue-on-error: true
         run: |
           ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
           set +e
-          echo "==> dovecot active: $(systemctl is-active dovecot 2>/dev/null)"
-          echo "==> mailboxes boris@qhub.kz"
-          doveadm mailbox list -u boris@qhub.kz 2>&1
-          echo "==> maildir boris"
-          ls -la /var/mail/vhosts/qhub.kz/boris/ 2>&1
-          echo "==> subscribed"
-          cat /var/mail/vhosts/qhub.kz/boris/subscriptions 2>&1 || true
+          cd /var/www/qhub.kz
+          git fetch origin main
+          git checkout origin/main -- scripts/mail/mail-init-folders.sh 2>/dev/null || true
+          chmod +x scripts/mail/mail-init-folders.sh 2>/dev/null || true
+          if [ -x scripts/mail/mail-init-folders.sh ]; then
+            bash scripts/mail/mail-init-folders.sh boris@qhub.kz
+          else
+            doveadm mailbox create -u boris@qhub.kz Sent 2>/dev/null || true
+            doveadm mailbox subscribe -u boris@qhub.kz Sent 2>/dev/null || true
+            doveadm mailbox list -u boris@qhub.kz
+          fi
           EOF
