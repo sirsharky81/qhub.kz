@@ -119,5 +119,9 @@ jobs:
           if [ -x scripts/mail/mail-init-folders.sh ]; then
             bash scripts/mail/mail-init-folders.sh boris@qhub.kz
           fi
+          echo "==> Postfix queue"
+          mailq 2>/dev/null || postqueue -p 2>/dev/null || echo "mailq unavailable"
+          echo "==> Recent outbound from boris@qhub.kz (last 15)"
+          grep -i "boris@qhub.kz" /var/log/mail.log 2>/dev/null | grep -iE "status=sent|from=<boris" | tail -15 || true
           doveadm mailbox list -u boris@qhub.kz
           EOF
