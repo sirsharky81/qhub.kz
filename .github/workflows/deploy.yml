@@ -98,3 +98,17 @@ jobs:
               sudo bash /root/awg/manage_amneziawg.sh list 2>/dev/null || true
           fi
           EOF
+
+      - name: Mail folders diagnostic
+        continue-on-error: true
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
+          set +e
+          echo "==> dovecot active: $(systemctl is-active dovecot 2>/dev/null)"
+          echo "==> mailboxes boris@qhub.kz"
+          doveadm mailbox list -u boris@qhub.kz 2>&1
+          echo "==> maildir boris"
+          ls -la /var/mail/vhosts/qhub.kz/boris/ 2>&1
+          echo "==> subscribed"
+          cat /var/mail/vhosts/qhub.kz/boris/subscriptions 2>&1 || true
+          EOF
