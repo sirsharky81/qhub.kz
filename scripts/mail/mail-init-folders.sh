@@ -38,7 +38,16 @@ has_mailbox() {
 # Migrate legacy "Sent" → "Sent Items" (Outlook iOS/desktop)
 if has_mailbox "Sent"; then
   if has_mailbox "Sent Items"; then
-    echo "Both Sent and Sent Items exist — keeping Sent Items"
+    echo "Removing duplicate legacy folder Sent (Outlook needs only Sent Items)"
+    doveadm mailbox unsubscribe -u "$EMAIL" Sent 2>/dev/null || true
+    if doveadm move -u "$EMAIL" "Sent Items" mailbox Sent all 2>/dev/null; then
+      echo "Moved messages: Sent -> Sent Items"
+    fi
+    if doveadm mailbox delete -u "$EMAIL" Sent 2>/dev/null; then
+      echo "Deleted: Sent"
+    else
+      echo "WARN: could not delete Sent (may not be empty)" >&2
+    fi
   else
     doveadm mailbox rename -u "$EMAIL" Sent "Sent Items"
     echo "Renamed: Sent -> Sent Items"
