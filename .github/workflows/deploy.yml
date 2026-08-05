@@ -56,20 +56,23 @@ jobs:
           bash scripts/deploy/vps-deploy.sh
           EOF
 
-      - name: Migrate WireGuard to UDP 443 (root)
+      - name: Migrate VPN ports for Russia (Amnezia UDP 443)
         continue-on-error: true
         run: |
           ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
           cd /var/www/qhub.kz
           sudo systemctl start redis-server 2>/dev/null || true
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            redis-cli ping >/dev/null 2>&1 && break
-            sleep 3
-          done
-          chmod +x scripts/vpn/migrate-listen-port.sh scripts/vpn/restart-wg.sh
-          sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh \
-            || sudo bash scripts/vpn/restart-wg.sh || true
-          wg show wg0 2>/dev/null | awk '/listening port:/ {print "WireGuard listen port:", $3}' || echo "wg0 not up"
+          chmod +x scripts/vpn/migrate-russia-ports.sh scripts/vpn/migrate-amnezia-port.sh \
+            scripts/vpn/migrate-listen-port.sh scripts/vpn/restart-wg.sh 2>/dev/null || true
+          if awg show awg0 >/dev/null 2>&1; then
+            sudo bash scripts/vpn/migrate-russia-ports.sh \
+              || sudo AMNEZIAWG_PORT=443 bash scripts/vpn/migrate-amnezia-port.sh || true
+            awg show awg0 | awk '/listening port:/ {print "AmneziaWG listen port:", $3}'
+          else
+            sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh \
+              || sudo bash scripts/vpn/restart-wg.sh || true
+            wg show wg0 2>/dev/null | awk '/listening port:/ {print "WireGuard listen port:", $3}' || echo "wg0 not up"
+          fi
           pm2 restart qhub 2>/dev/null || true
           EOF
 

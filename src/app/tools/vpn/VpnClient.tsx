@@ -272,7 +272,8 @@ export function VpnClient() {
             <h2 className="text-sm font-semibold text-amber-900">Приложение AmneziaVPN (Россия)</h2>
             <p className="text-xs text-amber-800">
               Обычный WireGuard в РФ часто не пускает трафик. AmneziaVPN обходит DPI — используйте QR
-              или ссылку <span className="font-mono">vpn://</span> с этой страницы.
+              или ссылку <span className="font-mono">vpn://</span> с этой страницы. Если на 4G долго
+              «Connecting…» — удалите старый профиль в приложении и заново скачайте QR здесь (порт UDP 443).
             </p>
             <div className="flex flex-wrap gap-2 text-xs">
               <a
