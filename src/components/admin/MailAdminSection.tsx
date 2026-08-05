@@ -89,6 +89,34 @@ export function MailAdminSection() {
     }
   }
 
+  async function handleResetPassword(target: string) {
+    const newPassword = window.prompt(`Новый пароль для ${target} (мин. 8 символов):`);
+    if (newPassword === null) return;
+    if (newPassword.length < 8) {
+      setMessage("Пароль не короче 8 символов");
+      return;
+    }
+    if (!window.confirm(`Сбросить пароль для ${target}?`)) return;
+
+    setMessage(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/mail/mailboxes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: target, password: newPassword }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setMessage(data.error ?? "Ошибка");
+        return;
+      }
+      setMessage(`Пароль сброшен: ${target}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -146,14 +174,24 @@ export function MailAdminSection() {
                 {status.mailboxes.map((box) => (
                   <li key={box.email} className="flex items-center justify-between gap-3 px-3 py-2">
                     <span className="font-mono text-xs">{box.email}</span>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void handleRemove(box.email)}
-                      className="text-xs text-red-700 hover:underline disabled:opacity-50"
-                    >
-                      Удалить
-                    </button>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <button
+                        type="button"
+                        disabled={busy || !status.passwdCommandSet}
+                        onClick={() => void handleResetPassword(box.email)}
+                        className="text-xs text-gray-700 hover:underline disabled:opacity-50"
+                      >
+                        Сбросить пароль
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleRemove(box.email)}
+                        className="text-xs text-red-700 hover:underline disabled:opacity-50"
+                      >
+                        Удалить
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
