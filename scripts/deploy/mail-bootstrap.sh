@@ -204,6 +204,27 @@ plugin {
 EOF
 fi
 
+if [ -f "${CONFIG_DIR}/dovecot-15-mailboxes.conf" ]; then
+  cp "${CONFIG_DIR}/dovecot-15-mailboxes.conf" /etc/dovecot/conf.d/15-mailboxes.conf
+else
+  cat >/etc/dovecot/conf.d/15-mailboxes.conf <<'EOF'
+namespace inbox {
+  mailbox Drafts {
+    special_use = \Drafts
+    auto = subscribe
+  }
+  mailbox Sent {
+    special_use = \Sent
+    auto = subscribe
+  }
+  mailbox Trash {
+    special_use = \Trash
+    auto = subscribe
+  }
+}
+EOF
+fi
+
 mkdir -p "$DKIM_DIR"
 if [ ! -f "${DKIM_DIR}/default.private" ]; then
   opendkim-genkey -b 2048 -d "${MAIL_DOMAIN}" -D "$DKIM_DIR" -s default -v

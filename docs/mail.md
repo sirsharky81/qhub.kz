@@ -209,6 +209,23 @@ bash /var/www/qhub.kz/scripts/mail/mail-passwd.sh user@qhub.kz 'NewPassword123'
 | SMTP | `mail.qhub.kz:587` (STARTTLS) |
 | Логин | `user@qhub.kz` |
 
+**Outlook:** в **Другие настройки → Папки** укажите «Отправленные» = `Sent`. Если письма **застревают в «Исходящих»** и **дублируются у получателя** — Outlook повторно шлёт из «Исходящих», потому что не смог сохранить копию в Sent:
+
+1. **Сначала остановить дубли:** Файл → **Работать автономно** (вкл.) → папка **Исходящие** → удалить всё (**не** «Отправить»).
+2. **Папки:** Отправленные = `Sent`, Черновики = `Drafts`, Удалённые = `Trash`.
+3. **Расширенные:** корневой путь IMAP — пусто; SSL для IMAP 993.
+4. Автономный режим — выкл. → одно тестовое письмо.
+
+Если папки нет:
+
+```bash
+bash /var/www/qhub.kz/scripts/mail/mail-init-folders.sh boris@qhub.kz
+```
+
+Dovecot помечает Sent/Drafts/Trash как special-use (`15-mailboxes.conf`) — Outlook должен подхватить после переподключения аккаунта.
+
+Скрипт создаёт `Sent`, `Drafts`, `Trash` (вызывается автоматически при `mail-add.sh`).
+
 ---
 
 ## Проверка перед production
@@ -252,4 +269,5 @@ python3 /var/www/qhub.kz/scripts/deploy/vps-health-check.py
 | `scripts/mail/mail-dns-check.sh` | Проверка SPF/DKIM/DMARC/PTR |
 | `scripts/mail/mail-quota.sh` | Изменить квоту |
 | `scripts/mail/mail-add.sh` | Создать ящик |
+| `scripts/mail/mail-init-folders.sh` | Sent / Drafts / Trash для ящика |
 | `docs/vps.md` | Общая схема VPS |
