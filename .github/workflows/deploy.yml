@@ -119,5 +119,14 @@ jobs:
           if [ -x scripts/mail/mail-init-folders.sh ]; then
             bash scripts/mail/mail-init-folders.sh boris@qhub.kz
           fi
+          echo "==> postfix queue summary"
+          mailq 2>/dev/null || postqueue -p 2>/dev/null || true
+          echo "deferred files: $(find /var/spool/postfix/deferred -type f 2>/dev/null | wc -l)"
+          echo "active files: $(find /var/spool/postfix/active -type f 2>/dev/null | wc -l)"
+          echo "hold files: $(find /var/spool/postfix/hold -type f 2>/dev/null | wc -l)"
+          echo "==> boris outbound last 30 min"
+          grep "boris@qhub.kz" /var/log/mail.log 2>/dev/null | tail -40 || true
+          echo "==> smtp connections now"
+          ss -tn state established '( sport = :587 or sport = :25 )' 2>/dev/null || true
           doveadm mailbox list -u boris@qhub.kz
           EOF
