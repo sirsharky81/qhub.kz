@@ -1,0 +1,31 @@
+name: VPS remote check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add VPS host key
+        run: ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Mail folders check
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
+          set -euo pipefail
+          echo "==> mailserver container"
+          docker ps --filter name=mailserver --format "{{.Names}} {{.Status}}" || echo "no docker or no mailserver"
+          echo "==> mailboxes boris@qhub.kz"
+          if docker ps --format '{{.Names}}' | grep -qx mailserver; then
+            docker exec mailserver doveadm mailbox list -u boris@qhub.kz
+          else
+            echo "mailserver container not running"
+            ls -la /opt/mailserver 2>/dev/null || echo "/opt/mailserver missing"
+          fi
+          EOF
