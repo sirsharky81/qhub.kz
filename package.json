@@ -31,7 +31,8 @@
     "generate:code-scanner-icons": "node scripts/generate-code-scanner-icons.mjs",
     "generate:music-icons": "node scripts/generate-music-icons.mjs",
     "generate:guitar-tuner-icons": "node scripts/generate-guitar-tuner-icons.mjs",
-    "generate:family-icons": "node scripts/generate-family-icons.mjs"
+    "generate:family-icons": "node scripts/generate-family-icons.mjs",
+    "generate:admin-icons": "node scripts/generate-admin-icons.mjs"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.26",

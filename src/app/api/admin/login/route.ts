@@ -21,15 +21,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Укажите email и пароль" }, { status: 400 });
   }
 
-  const ok = await verifyAdminCredentials(email, password);
-  if (!ok) {
-    return NextResponse.json({ error: "Неверный email или пароль" }, { status: 401 });
-  }
+  try {
+    const ok = await verifyAdminCredentials(email, password);
+    if (!ok) {
+      return NextResponse.json({ error: "Неверный email или пароль" }, { status: 401 });
+    }
 
-  const token = await createSessionToken(getAdminEmail());
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(sessionCookieOptions(token));
-  return res;
+    const token = await createSessionToken(getAdminEmail());
+    const res = NextResponse.json({ ok: true });
+    res.cookies.set(sessionCookieOptions(token));
+    return res;
+  } catch {
+    return NextResponse.json(
+      { error: "Сервис временно недоступен. Попробуйте через минуту." },
+      { status: 503 },
+    );
+  }
 }
 
 export async function DELETE() {
