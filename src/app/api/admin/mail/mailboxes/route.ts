@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/admin/session";
 import {
   addMailbox,
+  changeMailboxPassword,
   getMailStatus,
   isValidMailAddress,
   listMailboxes,
@@ -86,6 +87,40 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true, mailboxes });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Не удалось удалить ящик";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
+  let body: { email?: string; password?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Неверный формат" }, { status: 400 });
+  }
+
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  const { domain } = getMailConfig();
+
+  if (!email || !password) {
+    return NextResponse.json({ error: "Укажите email и новый пароль" }, { status: 400 });
+  }
+  if (!isValidMailAddress(email, domain)) {
+    return NextResponse.json({ error: "Неверный email" }, { status: 400 });
+  }
+  if (password.length < 8) {
+    return NextResponse.json({ error: "Пароль не короче 8 символов" }, { status: 400 });
+  }
+
+  try {
+    await changeMailboxPassword(email, password);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось сбросить пароль";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
