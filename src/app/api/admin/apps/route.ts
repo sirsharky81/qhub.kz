@@ -8,17 +8,24 @@ export async function GET() {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
 
-  const hiddenIds = new Set(await getHiddenAppIds());
-  const list = sortApps(apps).map((app) => ({
-    id: app.id,
-    title: app.title,
-    href: app.href,
-    comingSoon: !!app.comingSoon,
-    devOnly: !!app.devOnly,
-    hiddenFromPublic: hiddenIds.has(app.id),
-  }));
+  try {
+    const hiddenIds = new Set(await getHiddenAppIds());
+    const list = sortApps(apps).map((app) => ({
+      id: app.id,
+      title: app.title,
+      href: app.href,
+      comingSoon: !!app.comingSoon,
+      devOnly: !!app.devOnly,
+      hiddenFromPublic: hiddenIds.has(app.id),
+    }));
 
-  return NextResponse.json({ apps: list });
+    return NextResponse.json({ apps: list });
+  } catch {
+    return NextResponse.json(
+      { error: "Сервис временно недоступен. Попробуйте через минуту." },
+      { status: 503 },
+    );
+  }
 }
 
 export async function PATCH(request: Request) {

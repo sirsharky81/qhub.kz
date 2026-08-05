@@ -5,6 +5,15 @@ import { verifySessionToken } from "@/lib/admin/session-crypto";
 import { shouldHideDevOnlyApps } from "@/lib/admin/runtime";
 import { apiMiddlewareCors, applyCorsToNextResponse } from "@/lib/api/cors";
 
+/** PWA assets must stay public — iOS/Android refuse install if manifest/icons redirect to login. */
+function isAdminPublicPath(pathname: string, panelBase: string): boolean {
+  if (pathname === `${panelBase}/login`) return true;
+  if (pathname === `${panelBase}/manifest.json`) return true;
+  if (pathname === `${panelBase}/apple-touch-icon.png`) return true;
+  if (pathname.startsWith(`${panelBase}/icon`)) return true;
+  return false;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -18,11 +27,15 @@ export async function middleware(request: NextRequest) {
 
   if (pathname.startsWith(panelBase)) {
     const loginPath = `${panelBase}/login`;
-    if (pathname === loginPath) {
+    if (isAdminPublicPath(pathname, panelBase)) {
       return NextResponse.next();
     }
-    const token = request.cookies.get("qhub_admin_session")?.value;
-    if (!token || !(await verifySessionToken(token))) {
+    try {
+      const token = request.cookies.get("qhub_admin_session")?.value;
+      if (!token || !(await verifySessionToken(token))) {
+        return NextResponse.redirect(new URL(loginPath, request.url));
+      }
+    } catch {
       return NextResponse.redirect(new URL(loginPath, request.url));
     }
     return NextResponse.next();

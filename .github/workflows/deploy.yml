@@ -73,7 +73,6 @@ jobs:
               || sudo bash scripts/vpn/restart-wg.sh || true
             wg show wg0 2>/dev/null | awk '/listening port:/ {print "WireGuard listen port:", $3}' || echo "wg0 not up"
           fi
-          pm2 restart qhub 2>/dev/null || true
           EOF
 
       - name: Ensure AmneziaWG for Russia (root)
@@ -129,4 +128,7 @@ jobs:
           echo "==> smtp connections now"
           ss -tn state established '( sport = :587 or sport = :25 )' 2>/dev/null || true
           doveadm mailbox list -u boris@qhub.kz
+          echo "==> pm2 qhub"
+          pm2 status qhub 2>/dev/null || true
+          pm2 logs qhub --lines 30 --nostream 2>/dev/null || true
           EOF
