@@ -54,7 +54,12 @@ if [ "$VERIFY" -eq 1 ]; then
 fi
 
 HASH="$(mail_hash_password "$NEW")"
-mail_parse_user_fields "$EMAIL"
+EXISTING="$(grep -i "^${EMAIL}:" "$DOVECOT_USERS" | head -n1)"
+QUOTA="$MAIL_DEFAULT_QUOTA"
+EXTRA="$(printf '%s' "$EXISTING" | awk -F: '{print $7}')"
+if [[ "$EXTRA" =~ storage=([^[:space:]]+) ]]; then
+  QUOTA="${BASH_REMATCH[1]}"
+fi
 mail_replace_user "$EMAIL" "$(mail_user_line "$EMAIL" "$HASH" "$QUOTA")"
 systemctl reload dovecot
 
