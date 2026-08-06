@@ -108,8 +108,8 @@ jobs:
           set +e
           cd /var/www/qhub.kz
           git fetch origin main
-          git checkout origin/main -- scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/config/dovecot-15-mailboxes.conf 2>/dev/null || true
-          chmod +x scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh 2>/dev/null || true
+          git checkout origin/main -- scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/mail-inbound-trace.sh scripts/mail/config/dovecot-15-mailboxes.conf 2>/dev/null || true
+          chmod +x scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/mail-inbound-trace.sh 2>/dev/null || true
           if [ -x scripts/mail/apply-fast-submission.sh ]; then
             sudo bash scripts/mail/apply-fast-submission.sh || true
           fi
@@ -120,6 +120,9 @@ jobs:
           fi
           if [ -x scripts/mail/mail-init-folders.sh ]; then
             bash scripts/mail/mail-init-folders.sh boris@qhub.kz
+          fi
+          if [ -x scripts/mail/mail-inbound-trace.sh ]; then
+            bash scripts/mail/mail-inbound-trace.sh boris@qhub.kz doping@mail.ru bokhmarnyy@gmail.com || true
           fi
           echo "==> postfix queue summary"
           mailq 2>/dev/null || postqueue -p 2>/dev/null || true
