@@ -19,7 +19,8 @@ Self-hosted почта на том же VPS, что и **qhub.kz**.
   Postfix → Rspamd (Spamhaus RBL, SPF/DMARC check, Bayes) → Dovecot LMTP
 
 Исходящая (порт 587, auth):
-  Postfix → Rspamd → OpenDKIM (подпись) → интернет
+  Postfix → OpenDKIM (подпись) → интернет
+  (Rspamd только на входящем порту 25 — иначе iPhone долго держит письмо в «Исходящих»)
 
 Brute-force:
   Fail2Ban следит за /var/log/mail.log (Postfix SASL + Dovecot auth)
@@ -219,6 +220,24 @@ bash /var/www/qhub.kz/scripts/mail/mail-passwd.sh user@qhub.kz 'NewPassword123'
 5. Если «Исходящие» снова копятся — **удалить аккаунт** в Outlook и добавить IMAP заново
 
 Если не помогает — используйте **Apple Mail** (Почта) с теми же IMAP/SMTP настройками.
+
+**Apple Mail (iPhone) — долго в «Исходящих», но уходит в «Отправленные»:**
+
+iPhone убирает письмо из «Исходящих» только после завершения SMTP-сессии. Если сервер долго обрабатывает письмо (антиспам на порту 587), отправка кажется «зависшей».
+
+На сервере для порта **587** Rspamd отключён — только подпись DKIM:
+
+```bash
+sudo bash /var/www/qhub.kz/scripts/mail/apply-fast-submission.sh
+```
+
+Проверка в логе при отправке с телефона — между `end of data` и `status=sent` должно быть **&lt; 1 с**:
+
+```bash
+grep 'postfix/submission' /var/log/mail.log | tail -20
+```
+
+На iPhone: **Настройки → Почта → boris@qhub.kz → Отправленные** — папка **Sent Items** на сервере (не локальная «Отправленные»).
 
 ---
 

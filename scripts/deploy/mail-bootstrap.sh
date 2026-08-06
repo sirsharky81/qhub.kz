@@ -66,7 +66,7 @@ smtpd_sasl_path = private/auth
 smtpd_sasl_auth_enable = yes
 smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination
 
-# Rspamd antispam (inbound + authenticated) + OpenDKIM signing (outbound)
+# Rspamd antispam (inbound port 25; submission 587 = OpenDKIM only)
 smtpd_milters = inet:127.0.0.1:11332, inet:127.0.0.1:8891
 non_smtpd_milters = inet:127.0.0.1:8891
 milter_default_action = accept
@@ -86,7 +86,7 @@ submission inet n       -       y       -       -       smtpd
   -o smtpd_tls_security_level=encrypt
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_milters=inet:127.0.0.1:11332,inet:127.0.0.1:8891
+  -o smtpd_milters=inet:127.0.0.1:8891
   -o milter_macro_daemon_name=ORIGINATING
 pickup    unix  n       -       y       60      1       pickup
 cleanup   unix  n       -       y       -       0       cleanup
