@@ -277,6 +277,12 @@ fi
 if [ -f "${CONFIG_DIR}/rspamd-worker-proxy.inc" ]; then
   cp "${CONFIG_DIR}/rspamd-worker-proxy.inc" /etc/rspamd/local.d/worker-proxy.inc
 fi
+if [ -f "${CONFIG_DIR}/rspamd-greylist.conf" ]; then
+  cp "${CONFIG_DIR}/rspamd-greylist.conf" /etc/rspamd/local.d/greylist.conf
+fi
+if [ -f "${CONFIG_DIR}/rspamd-settings-greylist.conf" ]; then
+  cp "${CONFIG_DIR}/rspamd-settings-greylist.conf" /etc/rspamd/local.d/settings-greylist.conf
+fi
 
 if [ -f "${CONFIG_DIR}/fail2ban-jail.local" ]; then
   cp "${CONFIG_DIR}/fail2ban-jail.local" /etc/fail2ban/jail.d/qhub-mail.local
