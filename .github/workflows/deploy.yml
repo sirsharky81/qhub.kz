@@ -108,8 +108,11 @@ jobs:
           set +e
           cd /var/www/qhub.kz
           git fetch origin main
-          git checkout origin/main -- scripts/mail/mail-init-folders.sh scripts/mail/config/dovecot-15-mailboxes.conf 2>/dev/null || true
-          chmod +x scripts/mail/mail-init-folders.sh 2>/dev/null || true
+          git checkout origin/main -- scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/config/dovecot-15-mailboxes.conf 2>/dev/null || true
+          chmod +x scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh 2>/dev/null || true
+          if [ -x scripts/mail/apply-fast-submission.sh ]; then
+            sudo bash scripts/mail/apply-fast-submission.sh || true
+          fi
           if [ -f scripts/mail/config/dovecot-15-mailboxes.conf ]; then
             cp scripts/mail/config/dovecot-15-mailboxes.conf /etc/dovecot/conf.d/15-mailboxes.conf
             systemctl reload dovecot
