@@ -15,6 +15,7 @@ import { AudioEngine, type PlaybackStatus } from "@/lib/music/audio-engine";
 import * as storage from "@/lib/music/indexed-db-storage";
 import * as mediaLibrary from "@/lib/music/media-library";
 import { QueueManager } from "@/lib/music/queue-manager";
+import { isIOSDevice, isStandalonePWA } from "@/lib/platform/device";
 import type {
   ImportProgress,
   LibraryTab,
@@ -240,10 +241,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     persistTimerRef.current = setTimeout(() => void persistState(), 500);
   }, [persistState]);
 
-  const prefetchQueueForLockScreen = useCallback((trackId: string) => {
-    const q = queueRef.current.getQueue();
-    if (q.length === 0) return;
-    void mediaLibrary.prefetchTrackFiles(q.length > 1 ? q : [trackId]);
+  const prefetchQueueForLockScreen = useCallback((_trackId: string) => {
+    const upcoming = queueRef.current.peekUpcoming(3);
+    if (upcoming.length === 0) return;
+    // Prefetch local blobs only — remote tracks use stream URLs and need no File cache.
+    const localIds = upcoming.filter((id) => {
+      const t = tracksRef.current.find((x) => x.id === id);
+      return t && t.source !== "remote";
+    });
+    if (localIds.length > 0) void mediaLibrary.prefetchTrackFiles(localIds);
   }, []);
 
   const bindMediaSession = useCallback(
@@ -309,18 +315,23 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     void engine.play();
   }, []);
 
+  /**
+   * Sync-only lock-screen / iOS auto-advance switch. Must not await — iOS drops audio
+   * session if play() is deferred after `ended` or Media Session nexttrack.
+   */
   const tryLockScreenTrackSwitch = useCallback(
-    async (trackId: string): Promise<boolean> => {
-      const file = mediaLibrary.getCachedTrackFile(trackId);
+    (trackId: string): boolean => {
       const track = tracksRef.current.find((t) => t.id === trackId);
       const engine = engineRef.current;
+      const url = track ? mediaLibrary.getLockScreenPlayUrl(track) : null;
       // #region agent log
       agentDebugLog(
         "MusicPlayerContext.tsx:lock-switch",
         "tryLockScreenTrackSwitch",
         {
           trackId,
-          hasFile: !!file,
+          hasUrl: !!url,
+          source: track?.source ?? null,
           hasTrack: !!track,
           hasEngine: !!engine,
           queueLen: queueRef.current.getQueue().length,
@@ -329,11 +340,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         "H2-cache",
       );
       // #endregion
-      if (!file) return false;
-      if (!track) return false;
-      if (!engine) return false;
+      if (!track || !engine || !url) return false;
 
-      const url = mediaLibrary.getOrCreateObjectUrl(track.id, file);
       const trackDuration = track.duration || 0;
       engine.setMediaDuration(trackDuration);
       setCurrentTrack(track);
@@ -342,8 +350,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueueIndex(queueRef.current.getIndex());
       engine.setVolume(volume);
       bindMediaSession(track);
-      // СИНХРОННО: src + play() в том же тике, что и жест/`ended` — без await, чтобы не терять
-      // user activation и право на продолжение аудио-сессии (иначе авто-переход не играет).
       engine.playFreshSync(url, 0, trackDuration);
       schedulePersist();
       prefetchQueueForLockScreen(trackId);
@@ -478,25 +484,28 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
 
-      if (opts?.lockScreen && (await tryLockScreenTrackSwitch(nextId))) {
+      // No await before play — required for iOS lock-screen auto-advance.
+      if (opts?.lockScreen) {
+        if (tryLockScreenTrackSwitch(nextId)) {
+          // #region agent log
+          agentDebugLog(
+            "MusicPlayerContext.tsx:loadNext",
+            "lock screen sync switch ok",
+            { nextId },
+            "H5-navigation",
+          );
+          // #endregion
+          return;
+        }
         // #region agent log
         agentDebugLog(
           "MusicPlayerContext.tsx:loadNext",
-          "lock screen sync switch ok",
+          "lock screen sync switch failed — async fallback (may stay silent on iOS)",
           { nextId },
           "H5-navigation",
         );
         // #endregion
-        return;
       }
-      // #region agent log
-      agentDebugLog(
-        "MusicPlayerContext.tsx:loadNext",
-        "falling back to async loadAndPlay",
-        { nextId, lockScreen: !!opts?.lockScreen },
-        "H5-navigation",
-      );
-      // #endregion
       await loadAndPlayWithSkip(nextId, 0, false, !!opts?.lockScreen);
     },
     [loadAndPlayWithSkip, tryLockScreenTrackSwitch],
@@ -532,7 +541,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setQueue(queueRef.current.getQueue());
       setQueueIndex(queueRef.current.getIndex());
 
-      if (opts?.lockScreen && (await tryLockScreenTrackSwitch(prevId))) {
+      if (opts?.lockScreen && tryLockScreenTrackSwitch(prevId)) {
         return;
       }
       await loadAndPlay(prevId, 0, false);
@@ -550,14 +559,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       },
       onStatusChange: setStatus,
       onEnded: () => {
-        const lockScreen =
+        // iOS PWA: always use sync lock-screen path on natural track end — async
+        // loadAndPlay after `ended` loses the audio session when the screen is asleep.
+        const iosPwa = isIOSDevice() && isStandalonePWA();
+        const pageHidden =
           typeof document !== "undefined" &&
           (document.hidden || document.visibilityState === "hidden");
+        const lockScreen = iosPwa || pageHidden;
         // #region agent log
         agentDebugLog(
           "MusicPlayerContext.tsx:onEnded",
           "track ended → auto-advance",
-          { lockScreen, queueIndex: queueRef.current.getIndex() },
+          { lockScreen, iosPwa, pageHidden, queueIndex: queueRef.current.getIndex() },
           "H7-autoadvance",
         );
         // #endregion

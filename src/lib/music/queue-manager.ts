@@ -135,6 +135,62 @@ export class QueueManager {
     this.rebuildShuffleOrder();
   }
 
+  /** Next track id without advancing the queue (for prefetch). */
+  peekNext(): string | null {
+    if (this.queue.length === 0) return null;
+    if (this.repeat === "one") return this.getCurrentId();
+
+    if (this.shuffle && this.shuffleOrder.length > 0) {
+      const pos = this.shuffleOrder.indexOf(this.queue[this.index]);
+      if (pos < this.shuffleOrder.length - 1) {
+        return this.shuffleOrder[pos + 1] ?? null;
+      }
+      if (this.repeat === "all") return this.shuffleOrder[0] ?? null;
+      return null;
+    }
+
+    if (this.index < this.queue.length - 1) return this.queue[this.index + 1] ?? null;
+    if (this.repeat === "all") return this.queue[0] ?? null;
+    return null;
+  }
+
+  /** Upcoming track ids for lock-screen prefetch (does not mutate). */
+  peekUpcoming(count: number): string[] {
+    if (count <= 0 || this.queue.length === 0) return [];
+    const out: string[] = [];
+    if (this.repeat === "one") {
+      const cur = this.getCurrentId();
+      return cur ? [cur] : [];
+    }
+
+    if (this.shuffle && this.shuffleOrder.length > 0) {
+      const pos = this.shuffleOrder.indexOf(this.queue[this.index]);
+      for (let i = 1; i <= count; i++) {
+        const at = pos + i;
+        if (at < this.shuffleOrder.length) {
+          out.push(this.shuffleOrder[at]!);
+        } else if (this.repeat === "all" && this.shuffleOrder.length > 0) {
+          out.push(this.shuffleOrder[(at - this.shuffleOrder.length) % this.shuffleOrder.length]!);
+        } else {
+          break;
+        }
+      }
+      return out;
+    }
+
+    for (let i = 1; i <= count; i++) {
+      const at = this.index + i;
+      if (at < this.queue.length) {
+        out.push(this.queue[at]!);
+      } else if (this.repeat === "all" && this.queue.length > 0) {
+        out.push(this.queue[(at - this.queue.length) % this.queue.length]!);
+      } else {
+        break;
+      }
+    }
+    return out;
+  }
+
   next(): string | null {
     if (this.queue.length === 0) return null;
     if (this.repeat === "one") return this.getCurrentId();
@@ -142,9 +198,9 @@ export class QueueManager {
     if (this.shuffle && this.shuffleOrder.length > 0) {
       const pos = this.shuffleOrder.indexOf(this.queue[this.index]);
       if (pos < this.shuffleOrder.length - 1) {
-        this.index = this.queue.indexOf(this.shuffleOrder[pos + 1]);
+        this.index = this.queue.indexOf(this.shuffleOrder[pos + 1]!);
       } else if (this.repeat === "all") {
-        this.index = this.queue.indexOf(this.shuffleOrder[0]);
+        this.index = this.queue.indexOf(this.shuffleOrder[0]!);
       } else {
         return null;
       }

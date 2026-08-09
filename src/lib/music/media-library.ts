@@ -258,6 +258,22 @@ export function getOrCreateObjectUrl(trackId: string, file: File): string {
   return url;
 }
 
+export function getCachedObjectUrl(trackId: string): string | undefined {
+  return objectUrlCache.get(trackId);
+}
+
+/** Sync playable URL for lock-screen auto-advance (no await). */
+export function getLockScreenPlayUrl(track: Track): string | null {
+  if (track.source === "remote" && track.remoteId) {
+    return `/api/music/remote/stream/${encodeURIComponent(track.remoteId)}`;
+  }
+  const cachedUrl = objectUrlCache.get(track.id);
+  if (cachedUrl) return cachedUrl;
+  const file = fileCache.get(track.id);
+  if (!file) return null;
+  return getOrCreateObjectUrl(track.id, file);
+}
+
 export function releaseObjectUrl(trackId: string): void {
   const url = objectUrlCache.get(trackId);
   if (!url) return;
