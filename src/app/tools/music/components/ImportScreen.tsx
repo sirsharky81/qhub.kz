@@ -16,7 +16,13 @@ function useShowFileHandlerHint(): boolean {
   return show;
 }
 
-export function ImportScreen() {
+export function ImportScreen({
+  nasAvailable,
+  onOpenNas,
+}: {
+  nasAvailable?: boolean;
+  onOpenNas?: () => void;
+}) {
   const { importDirectory, pickFiles, importProgress } = useMusicPlayer();
   const showFileHandlerHint = useShowFileHandlerHint();
 
@@ -37,7 +43,7 @@ export function ImportScreen() {
 
       <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">QHub Music</h1>
       <p className="text-xs text-gray-500 dark:text-gray-400 max-w-xs mb-6 leading-relaxed">
-        Локальный плеер — файлы не покидают устройство
+        Локальный плеер — или библиотека NAS для whitelist
       </p>
 
       <div className="flex gap-2 w-full max-w-xs">
@@ -56,6 +62,16 @@ export function ImportScreen() {
           Папка
         </button>
       </div>
+
+      {nasAvailable && onOpenNas && (
+        <button
+          type="button"
+          onClick={onOpenNas}
+          className="mt-3 w-full max-w-xs px-4 py-2 rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+        >
+          Библиотека NAS
+        </button>
+      )}
 
       <p className="mt-4 text-[10px] text-gray-400">MP3 · M4A · AAC · WAV · FLAC · OGG</p>
 

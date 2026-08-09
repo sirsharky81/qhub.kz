@@ -7,6 +7,8 @@ export interface WhitelistEntry {
   status: WhitelistStatus;
   /** Разрешён доступ к VPN (WireGuard) через портал */
   vpnEnabled?: boolean;
+  /** Разрешён доступ к remote-библиотеке Music (Navidrome на NAS) */
+  musicEnabled?: boolean;
 }
 
 export interface MessengerAuthRecord {

@@ -22,6 +22,8 @@ export type UnavailableFilter = "hide" | "show" | "only";
 export type SortField = "title" | "artist" | "album" | "duration" | "addedAt";
 export type SortDirection = "asc" | "desc";
 
+export type TrackSource = "local" | "remote";
+
 export interface Track {
   id: string;
   title: string;
@@ -41,6 +43,10 @@ export interface Track {
   folderPath?: string;
   /** true when cover art blob is stored in IndexedDB */
   hasCover?: boolean;
+  /** local (device) or remote (NAS via QHub proxy) */
+  source?: TrackSource;
+  /** Navidrome / Subsonic song id when source === "remote" */
+  remoteId?: string;
 }
 
 export interface Playlist {

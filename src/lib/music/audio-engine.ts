@@ -647,6 +647,43 @@ export class AudioEngine {
     this.setStatus("paused");
   }
 
+  /** Load remote / same-origin stream URL (no blob object URL). */
+  async loadUrl(url: string, startPosition = 0, knownDuration = 0): Promise<void> {
+    this.setStatus("loading");
+    if (!isIOSDevice()) this.releaseAudioGraph();
+    ensureNavigatorAudioSession();
+    this.revokeUrl();
+    this.audio.playbackRate = 1;
+    this.audio.src = url;
+    if (knownDuration > 0) this.mediaDuration = knownDuration;
+
+    await new Promise<void>((resolve, reject) => {
+      const onCanPlay = () => {
+        cleanup();
+        resolve();
+      };
+      const onErr = () => {
+        cleanup();
+        reject(new Error("Cannot load audio"));
+      };
+      const cleanup = () => {
+        this.audio.removeEventListener("canplay", onCanPlay);
+        this.audio.removeEventListener("error", onErr);
+      };
+      this.audio.addEventListener("canplay", onCanPlay);
+      this.audio.addEventListener("error", onErr);
+      this.audio.load();
+    });
+
+    if (this.audio.duration > 0) {
+      this.mediaDuration = this.audio.duration;
+    }
+    if (startPosition > 0) {
+      this.audio.currentTime = startPosition;
+    }
+    this.setStatus("paused");
+  }
+
   async play(): Promise<void> {
     ensureNavigatorAudioSession();
     this.audio.muted = false;

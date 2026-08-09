@@ -78,6 +78,9 @@ interface MusicPlayerContextValue {
   cycleRepeat: () => void;
   playTrack: (trackId: string, contextTracks?: Track[]) => Promise<void>;
   playAlbum: (tracks: Track[], startId?: string) => Promise<void>;
+  /** Merge remote NAS tracks into in-memory library (not IndexedDB) and play. */
+  playRemoteTracks: (remoteTracks: Track[], startId?: string) => Promise<void>;
+  mergeRemoteTracks: (remoteTracks: Track[]) => void;
   toggleFavorite: (trackId: string) => void;
   addToQueue: (trackId: string) => void;
   addTracksToQueue: (trackIds: string[]) => void;
@@ -360,6 +363,33 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         tracksRef.current.find((t) => t.id === trackId) ?? (await storage.getTrack(trackId));
       if (!track) return false;
 
+      const engine = engineRef.current;
+      if (!engine) return false;
+
+      const trackDuration = track.duration || 0;
+      engine.setMediaDuration(trackDuration);
+
+      if (track.source === "remote" && track.remoteId) {
+        const url = `/api/music/remote/stream/${encodeURIComponent(track.remoteId)}`;
+        try {
+          await engine.loadUrl(url, startPosition, trackDuration);
+        } catch {
+          markUnavailable(trackId);
+          if (userInitiated) {
+            showToast("Не удалось загрузить трек с NAS.");
+          }
+          return false;
+        }
+        markAvailable(trackId);
+        setCurrentTrack(track);
+        setDuration(trackDuration || engine.getAudioElement().duration || 0);
+        engine.setVolume(volume);
+        bindMediaSession(track);
+        await engine.play();
+        schedulePersist();
+        return true;
+      }
+
       const file = await mediaLibrary.getTrackFile(track);
       if (!file) {
         markUnavailable(trackId);
@@ -373,11 +403,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       mediaLibrary.cacheTrackFile(track.id, file);
       mediaLibrary.getOrCreateObjectUrl(track.id, file);
 
-      const engine = engineRef.current;
-      if (!engine) return false;
-
-      const trackDuration = track.duration || 0;
-      engine.setMediaDuration(trackDuration);
       await engine.load(file, startPosition, trackDuration);
       setCurrentTrack(track);
       setDuration(trackDuration || engine.getAudioElement().duration || 0);
@@ -821,6 +846,28 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     [loadAndPlayWithSkip, showToast],
   );
 
+  const mergeRemoteTracks = useCallback((remoteTracks: Track[]) => {
+    if (remoteTracks.length === 0) return;
+    setTracks((prev) => {
+      const map = new Map(prev.map((t) => [t.id, t]));
+      for (const t of remoteTracks) {
+        map.set(t.id, t);
+      }
+      const next = Array.from(map.values());
+      tracksRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const playRemoteTracks = useCallback(
+    async (remoteTracks: Track[], startId?: string) => {
+      if (remoteTracks.length === 0) return;
+      mergeRemoteTracks(remoteTracks);
+      await playAlbum(remoteTracks, startId);
+    },
+    [mergeRemoteTracks, playAlbum],
+  );
+
   const toggleFavorite = useCallback(
     (trackId: string) => {
       setFavoriteTrackIds((prev) => {
@@ -1146,6 +1193,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     cycleRepeat,
     playTrack,
     playAlbum,
+    playRemoteTracks,
+    mergeRemoteTracks,
     toggleFavorite,
     addToQueue,
     addTracksToQueue,
