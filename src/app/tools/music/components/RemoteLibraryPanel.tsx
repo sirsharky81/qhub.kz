@@ -245,9 +245,9 @@ export function RemoteLibraryPanel({ onClose }: { onClose?: () => void }) {
           <button
             type="button"
             onClick={onClose}
-            className="text-[11px] text-gray-500 hover:text-gray-800"
+            className="text-[11px] text-emerald-700 dark:text-emerald-400 hover:underline shrink-0"
           >
-            Закрыть
+            Медиатека
           </button>
         )}
       </div>

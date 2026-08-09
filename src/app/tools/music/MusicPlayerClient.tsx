@@ -32,7 +32,8 @@ export default function MusicPlayerClient() {
   const { tracks, isLibraryLoading, pickFiles, importDirectory, queue } = useMusicPlayer();
   const [tab, setTab] = useState<Tab>("player");
   const [nasAllowed, setNasAllowed] = useState(false);
-  const [showNasOnly, setShowNasOnly] = useState(false);
+  /** Keep player/library/queue chrome after first entry (local files or NAS). */
+  const [shellActive, setShellActive] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +52,10 @@ export default function MusicPlayerClient() {
     };
   }, []);
 
+  useEffect(() => {
+    if (tracks.length > 0) setShellActive(true);
+  }, [tracks.length]);
+
   if (isLibraryLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -59,29 +64,30 @@ export default function MusicPlayerClient() {
     );
   }
 
-  if (tracks.length === 0 && !showNasOnly) {
+  if (!shellActive && tracks.length === 0) {
     return (
       <ImportScreen
         nasAvailable={nasAllowed}
         onOpenNas={() => {
-          setShowNasOnly(true);
+          setShellActive(true);
           setTab("nas");
         }}
       />
     );
   }
 
-  if (tracks.length === 0 && showNasOnly) {
-    return (
-      <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-gray-900">
-        <RemoteLibraryPanel onClose={() => setShowNasOnly(false)} />
-      </div>
-    );
-  }
-
   const mobileTabs = nasAllowed
     ? [...TABS, { id: "nas" as const, label: "NAS" }]
     : TABS;
+
+  const openNas = () => {
+    setShellActive(true);
+    setTab("nas");
+  };
+
+  const closeNas = () => {
+    setTab("library");
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-gray-50 dark:bg-gray-950">
@@ -103,8 +109,12 @@ export default function MusicPlayerClient() {
         {nasAllowed && (
           <button
             type="button"
-            onClick={() => setTab("nas")}
-            className={`${actionBtn} border-emerald-300 text-emerald-800 dark:text-emerald-300`}
+            onClick={openNas}
+            className={`${actionBtn} ${
+              tab === "nas"
+                ? "border-emerald-400 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200"
+                : "border-emerald-300 text-emerald-800 dark:text-emerald-300"
+            }`}
           >
             NAS
           </button>
@@ -114,7 +124,12 @@ export default function MusicPlayerClient() {
 
         <div className="flex gap-0.5 flex-1 overflow-x-auto md:hidden">
           {mobileTabs.map((t) => (
-            <button key={t.id} type="button" onClick={() => setTab(t.id)} className={tabBtn(tab === t.id)}>
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={tabBtn(tab === t.id)}
+            >
               {t.label}
               {t.id === "queue" && queue.length > 0 && (
                 <span className="ml-1 text-[9px] opacity-70">{queue.length}</span>
@@ -129,6 +144,7 @@ export default function MusicPlayerClient() {
       </div>
 
       <div className="flex-1 flex min-h-0">
+        {/* Player — always on desktop; mobile only on player tab */}
         <div
           className={`${
             tab === "player" ? "flex" : "hidden"
@@ -137,41 +153,40 @@ export default function MusicPlayerClient() {
           <PlayerView />
         </div>
 
-        {tab === "nas" ? (
-          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-white dark:bg-gray-900">
-            <RemoteLibraryPanel onClose={() => setTab("library")} />
-          </div>
-        ) : (
-          <>
-            <div
-              className={`${
-                tab === "library" ? "flex" : "hidden"
-              } md:flex flex-col flex-1 min-w-0 min-h-0 bg-white dark:bg-gray-900`}
-            >
-              <LibraryPanel />
-            </div>
+        {/* Library or NAS — always on desktop; mobile on library/nas tabs */}
+        <div
+          className={`${
+            tab === "library" || tab === "nas" ? "flex" : "hidden"
+          } md:flex flex-col flex-1 min-w-0 min-h-0 bg-white dark:bg-gray-900`}
+        >
+          {tab === "nas" ? (
+            <RemoteLibraryPanel onClose={closeNas} />
+          ) : (
+            <LibraryPanel />
+          )}
+        </div>
 
-            <div
-              className={`${
-                tab === "playlists" ? "flex" : "hidden"
-              } md:flex flex-col w-full md:w-52 lg:w-60 flex-shrink-0 min-h-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900`}
-            >
-              <PlaylistsPanel />
-            </div>
+        {/* Playlists — always on desktop */}
+        <div
+          className={`${
+            tab === "playlists" ? "flex" : "hidden"
+          } md:flex flex-col w-full md:w-52 lg:w-60 flex-shrink-0 min-h-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900`}
+        >
+          <PlaylistsPanel />
+        </div>
 
-            <div
-              className={`${
-                tab === "queue" ? "flex" : "hidden"
-              } md:flex flex-col w-full md:w-52 lg:w-60 flex-shrink-0 min-h-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900`}
-            >
-              <QueuePanel
-                onNavigate={(target) => {
-                  setTab(target === "library" ? "library" : "playlists");
-                }}
-              />
-            </div>
-          </>
-        )}
+        {/* Queue — always on desktop */}
+        <div
+          className={`${
+            tab === "queue" ? "flex" : "hidden"
+          } md:flex flex-col w-full md:w-52 lg:w-60 flex-shrink-0 min-h-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900`}
+        >
+          <QueuePanel
+            onNavigate={(target) => {
+              setTab(target === "library" ? "library" : "playlists");
+            }}
+          />
+        </div>
       </div>
     </div>
   );
