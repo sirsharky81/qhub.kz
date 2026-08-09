@@ -46,7 +46,7 @@ type SubsonicEnvelope = {
     };
     searchResult3?: {
       artist?: Array<{ id: string; name: string; albumCount?: number }>;
-      album?: Array<{ id: string; name: string; artist?: string; coverArt?: string }>;
+      album?: Array<{ id: string; name: string; artist?: string; coverArt?: string; songCount?: number; year?: number }>;
       song?: Array<{
         id: string;
         title?: string;
@@ -54,11 +54,74 @@ type SubsonicEnvelope = {
         album?: string;
         duration?: number;
         contentType?: string;
+        suffix?: string;
         coverArt?: string;
+        path?: string;
+      }>;
+    };
+    albumList?: {
+      album?: Array<{
+        id: string;
+        name: string;
+        artist?: string;
+        songCount?: number;
+        coverArt?: string;
+        year?: number;
+      }>;
+    };
+    albumList2?: {
+      album?: Array<{
+        id: string;
+        name: string;
+        artist?: string;
+        songCount?: number;
+        coverArt?: string;
+        year?: number;
       }>;
     };
   };
 };
+
+function mapSong(s: {
+  id: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  duration?: number;
+  contentType?: string;
+  suffix?: string;
+  coverArt?: string;
+  path?: string;
+}, fallbackArtist = "Неизвестный исполнитель", fallbackAlbum = ""): RemoteSong {
+  return {
+    id: s.id,
+    title: s.title ?? "Без названия",
+    artist: s.artist ?? fallbackArtist,
+    album: s.album ?? fallbackAlbum,
+    duration: s.duration ?? 0,
+    mimeType: s.contentType ?? "audio/mpeg",
+    coverArt: s.coverArt ?? null,
+    fileName: s.path?.split("/").pop() ?? `${s.title ?? s.id}.${s.suffix ?? "mp3"}`,
+  };
+}
+
+function mapAlbum(al: {
+  id: string;
+  name: string;
+  artist?: string;
+  songCount?: number;
+  coverArt?: string;
+  year?: number;
+}): RemoteAlbum {
+  return {
+    id: al.id,
+    name: al.name,
+    artist: al.artist ?? "",
+    songCount: al.songCount ?? 0,
+    coverArt: al.coverArt ?? null,
+    year: al.year ?? null,
+  };
+}
 
 function authParams(user: string, pass: string): Record<string, string> {
   const salt = randomBytes(6).toString("hex");
@@ -170,16 +233,9 @@ export async function navidromeGetAlbum(id: string): Promise<{
   const body = await subsonicGet("/rest/getAlbum.view", { id });
   const album = body.album;
   if (!album) throw new Error("Альбом не найден");
-  const songs = (album.song ?? []).map((s) => ({
-    id: s.id,
-    title: s.title ?? "Без названия",
-    artist: s.artist ?? album.artist ?? "Неизвестный исполнитель",
-    album: s.album ?? album.name,
-    duration: s.duration ?? 0,
-    mimeType: s.contentType ?? "audio/mpeg",
-    coverArt: s.coverArt ?? album.coverArt ?? null,
-    fileName: s.path?.split("/").pop() ?? `${s.title ?? s.id}.${s.suffix ?? "mp3"}`,
-  }));
+  const songs = (album.song ?? []).map((s) =>
+    mapSong(s, album.artist ?? "Неизвестный исполнитель", album.name),
+  );
   return {
     id: album.id,
     name: album.name,
@@ -189,16 +245,41 @@ export async function navidromeGetAlbum(id: string): Promise<{
   };
 }
 
-export async function navidromeSearch(query: string): Promise<{
+export async function navidromeGetAlbumList(options?: {
+  size?: number;
+  offset?: number;
+}): Promise<RemoteAlbum[]> {
+  const body = await subsonicGet("/rest/getAlbumList2.view", {
+    type: "alphabeticalByName",
+    size: String(options?.size ?? 500),
+    offset: String(options?.offset ?? 0),
+  });
+  const list = body.albumList2?.album ?? body.albumList?.album ?? [];
+  return list.map(mapAlbum);
+}
+
+export type RemoteSearchScope = "artists" | "albums" | "tracks" | "all";
+
+export async function navidromeSearch(
+  query: string,
+  scope: RemoteSearchScope = "all",
+): Promise<{
   artists: RemoteArtist[];
   albums: RemoteAlbum[];
   songs: RemoteSong[];
 }> {
+  const counts =
+    scope === "artists"
+      ? { artistCount: "50", albumCount: "0", songCount: "0" }
+      : scope === "albums"
+        ? { artistCount: "0", albumCount: "50", songCount: "0" }
+        : scope === "tracks"
+          ? { artistCount: "0", albumCount: "0", songCount: "80" }
+          : { artistCount: "20", albumCount: "20", songCount: "40" };
+
   const body = await subsonicGet("/rest/search3.view", {
     query,
-    artistCount: "20",
-    albumCount: "20",
-    songCount: "40",
+    ...counts,
   });
   const result = body.searchResult3 ?? {};
   return {
@@ -207,25 +288,29 @@ export async function navidromeSearch(query: string): Promise<{
       name: a.name,
       albumCount: a.albumCount ?? 0,
     })),
-    albums: (result.album ?? []).map((al) => ({
-      id: al.id,
-      name: al.name,
-      artist: al.artist ?? "",
-      songCount: 0,
-      coverArt: al.coverArt ?? null,
-      year: null,
-    })),
-    songs: (result.song ?? []).map((s) => ({
-      id: s.id,
-      title: s.title ?? "Без названия",
-      artist: s.artist ?? "Неизвестный исполнитель",
-      album: s.album ?? "",
-      duration: s.duration ?? 0,
-      mimeType: s.contentType ?? "audio/mpeg",
-      coverArt: s.coverArt ?? null,
-      fileName: `${s.title ?? s.id}.mp3`,
-    })),
+    albums: (result.album ?? []).map(mapAlbum),
+    songs: (result.song ?? []).map((s) => mapSong(s)),
   };
+}
+
+/** Browse songs by loading album list then album contents (capped). */
+export async function navidromeBrowseSongs(limit = 200): Promise<RemoteSong[]> {
+  const albums = await navidromeGetAlbumList({ size: 80 });
+  const songs: RemoteSong[] = [];
+  for (const al of albums) {
+    if (songs.length >= limit) break;
+    try {
+      const full = await navidromeGetAlbum(al.id);
+      for (const s of full.songs) {
+        songs.push(s);
+        if (songs.length >= limit) break;
+      }
+    } catch {
+      /* skip broken album */
+    }
+  }
+  songs.sort((a, b) => a.title.localeCompare(b.title, "ru"));
+  return songs;
 }
 
 /** Build authenticated upstream URL for stream/cover (credentials stay on server). */
