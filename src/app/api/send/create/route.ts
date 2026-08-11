@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { jsonAuthError } from "@/lib/messenger/guard";
+import { jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
 import { assertSendAccess } from "@/lib/send/access";
 import { getSendMaxBytes, isSendStorageConfigured } from "@/lib/send/config";
 import type { SendExpiryPreset } from "@/lib/send/constants";
 import { SEND_EXPIRY_PRESETS } from "@/lib/send/constants";
+import { sendCreateErrorResponse } from "@/lib/send/errors";
 import { createSendTransfer, buildSendPublicUrl } from "@/lib/send/store";
 import { getPublicOrigin } from "@/lib/public-origin";
 import {
@@ -103,14 +104,9 @@ export async function POST(request: Request) {
       oneTime: transfer.maxDownloads === 1,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (/WebDAV|NAS|не настроен/i.test(message)) {
-      console.error("[send-create]", err);
-      return NextResponse.json(
-        { error: message.includes("WebDAV") ? "Не удалось сохранить файл на NAS" : message },
-        { status: 502 },
-      );
+    if (err instanceof MessengerAuthError) {
+      return jsonAuthError(err);
     }
-    return jsonAuthError(err);
+    return sendCreateErrorResponse(err);
   }
 }

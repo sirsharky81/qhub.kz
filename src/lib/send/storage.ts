@@ -19,7 +19,12 @@ async function webdavRequest(
   const headers = new Headers(init.headers);
   headers.set("Authorization", webdavAuthHeader(init.user, init.pass));
   const { user: _u, pass: _p, ...rest } = init;
-  return fetch(url, { ...rest, headers });
+  try {
+    return await fetch(url, { ...rest, headers, signal: AbortSignal.timeout(120_000) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`WebDAV fetch ${url}: ${msg}`, { cause: err });
+  }
 }
 
 async function webdavEnsureDir(dirUrl: string, user: string, pass: string): Promise<void> {
@@ -112,9 +117,4 @@ export async function deleteSendPath(relativePath: string): Promise<void> {
 /** Delete share directory `{shareId}/`. */
 export async function deleteSendShare(shareId: string): Promise<void> {
   await deleteSendPath(shareId);
-}
-
-export function buildShareFilePath(shareId: string, filename: string): string {
-  const safeName = filename.replace(/[/\\]/g, "_").slice(0, 200);
-  return `${shareId}/${safeName}`;
 }

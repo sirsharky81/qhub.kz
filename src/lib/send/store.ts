@@ -12,7 +12,8 @@ import {
   sendRedisGetJson,
   sendRedisSet,
 } from "./redis";
-import { buildShareFilePath, deleteSendShare, writeSendFile } from "./storage";
+import { buildShareFilePath } from "./paths";
+import { deleteSendShare, writeSendFile } from "./storage";
 import { archiveFiles } from "./archive";
 import type { CreateSendOptions, SendTransfer, SendTransferPublicMeta } from "./types";
 

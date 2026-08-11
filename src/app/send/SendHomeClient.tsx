@@ -125,6 +125,7 @@ export function SendHomeClient() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [mine, setMine] = useState<SendTransferPublicMeta[]>([]);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
 
   const busy = uploadPhase === "uploading" || uploadPhase === "creating";
   const filesReady = files.length > 0;
@@ -138,10 +139,16 @@ export function SendHomeClient() {
         allowed?: boolean;
         configured?: boolean;
         loggedIn?: boolean;
+        storage?: { ok?: boolean; error?: string };
       };
       setAllowed(Boolean(data.allowed));
       setConfigured(Boolean(data.configured));
       setLoggedIn(Boolean(data.loggedIn));
+      if (data.storage && data.storage.ok === false) {
+        setStorageWarning(data.storage.error ?? "NAS недоступен");
+      } else {
+        setStorageWarning(null);
+      }
     } finally {
       setStatusLoading(false);
     }
@@ -325,6 +332,13 @@ export function SendHomeClient() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">QHub Send</h1>
           <p className="text-sm text-gray-500">Файл на NAS → короткая ссылка для получателя</p>
         </header>
+
+        {storageWarning && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
+            <p className="font-medium">NAS недоступен с сервера</p>
+            <p className="mt-1 opacity-90 break-words">{storageWarning}</p>
+          </div>
+        )}
 
         {!result ? (
           <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-4 shadow-sm">
