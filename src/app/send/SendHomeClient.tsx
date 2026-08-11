@@ -12,6 +12,19 @@ const EXPIRY_OPTIONS: { id: SendExpiryPreset; label: string }[] = [
   { id: "7d", label: "7 дней" },
 ];
 
+type UploadPhase = "idle" | "uploading" | "creating" | "done";
+
+type CreateSendResponse = {
+  error?: string;
+  url?: string;
+  shareId?: string;
+  filename?: string;
+  sizeBytes?: number;
+  expiresAt?: number;
+  hasPassword?: boolean;
+  oneTime?: boolean;
+};
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -28,6 +41,43 @@ function formatExpiry(ts: number): string {
   });
 }
 
+function uploadSendCreate(
+  form: FormData,
+  onProgress: (pct: number, loaded: number, total: number) => void,
+): Promise<CreateSendResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/send/create");
+    xhr.withCredentials = true;
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)), event.loaded, event.total);
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      let data: CreateSendResponse = {};
+      try {
+        data = JSON.parse(xhr.responseText) as CreateSendResponse;
+      } catch {
+        reject(new Error("Неверный ответ сервера"));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+        return;
+      }
+      reject(new Error(data.error ?? "Ошибка загрузки"));
+    });
+
+    xhr.addEventListener("error", () => reject(new Error("Сеть недоступна")));
+    xhr.addEventListener("abort", () => reject(new Error("Загрузка отменена")));
+
+    xhr.send(form);
+  });
+}
+
 export function SendHomeClient() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -38,7 +88,10 @@ export function SendHomeClient() {
   const [expiry, setExpiry] = useState<SendExpiryPreset>("1d");
   const [password, setPassword] = useState("");
   const [oneTime, setOneTime] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadLoaded, setUploadLoaded] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     url: string;
@@ -52,6 +105,10 @@ export function SendHomeClient() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [mine, setMine] = useState<SendTransferPublicMeta[]>([]);
+
+  const busy = uploadPhase === "uploading" || uploadPhase === "creating";
+  const filesReady = files.length > 0;
+  const totalFileBytes = files.reduce((s, f) => s + f.size, 0);
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true);
@@ -97,21 +154,37 @@ export function SendHomeClient() {
     void QRCode.toDataURL(result.url, { width: 220, margin: 2 }).then(setQrDataUrl);
   }, [result?.url]);
 
+  const resetUploadState = () => {
+    setUploadPhase("idle");
+    setUploadProgress(0);
+    setUploadLoaded(0);
+    setUploadTotal(0);
+  };
+
   const onPickFiles = (list: FileList | File[] | null) => {
-    if (!list) return;
+    if (!list || busy) return;
     setFiles(Array.from(list));
     setError(null);
     setResult(null);
+    resetUploadState();
+  };
+
+  const removeFile = (index: number) => {
+    if (busy) return;
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    resetUploadState();
   };
 
   const onUpload = async () => {
-    if (files.length === 0) {
-      setError("Выберите файлы");
-      return;
-    }
-    setBusy(true);
+    if (files.length === 0 || busy) return;
+
+    setUploadPhase("uploading");
+    setUploadProgress(0);
+    setUploadLoaded(0);
+    setUploadTotal(totalFileBytes);
     setError(null);
     setResult(null);
+
     try {
       const form = new FormData();
       for (const f of files) form.append("files", f);
@@ -119,19 +192,14 @@ export function SendHomeClient() {
       if (password.trim()) form.set("password", password.trim());
       if (oneTime) form.set("oneTime", "1");
 
-      const res = await fetch("/api/send/create", { method: "POST", body: form });
-      const data = (await res.json()) as {
-        error?: string;
-        url?: string;
-        shareId?: string;
-        filename?: string;
-        sizeBytes?: number;
-        expiresAt?: number;
-        hasPassword?: boolean;
-        oneTime?: boolean;
-      };
-      if (!res.ok) throw new Error(data.error ?? "Ошибка загрузки");
+      const data = await uploadSendCreate(form, (pct, loaded, total) => {
+        setUploadProgress(pct);
+        setUploadLoaded(loaded);
+        setUploadTotal(total);
+        if (pct >= 100) setUploadPhase("creating");
+      });
 
+      setUploadPhase("done");
       setResult({
         url: data.url!,
         shareId: data.shareId!,
@@ -144,11 +212,11 @@ export function SendHomeClient() {
       setFiles([]);
       setPassword("");
       setOneTime(false);
+      resetUploadState();
       void loadMine();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
-    } finally {
-      setBusy(false);
+      resetUploadState();
     }
   };
 
@@ -163,6 +231,17 @@ export function SendHomeClient() {
     const res = await fetch(`/api/send/${shareId}`, { method: "DELETE" });
     if (res.ok) void loadMine();
   };
+
+  const submitLabel = (() => {
+    if (!filesReady) return "Сначала выберите файлы";
+    if (uploadPhase === "uploading") {
+      return uploadTotal > 0
+        ? `Загрузка… ${uploadProgress}%`
+        : "Загрузка…";
+    }
+    if (uploadPhase === "creating") return "Создание ссылки…";
+    return "Получить ссылку";
+  })();
 
   if (statusLoading) {
     return (
@@ -231,31 +310,120 @@ export function SendHomeClient() {
           <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-4 shadow-sm">
             <div
               role="button"
-              tabIndex={0}
-              onClick={() => inputRef.current?.click()}
-              onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
+              tabIndex={busy ? -1 : 0}
+              onClick={() => !busy && inputRef.current?.click()}
+              onKeyDown={(e) => e.key === "Enter" && !busy && inputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (!busy) e.currentTarget.classList.add("border-indigo-400");
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.classList.remove("border-indigo-400");
+              }}
               onDrop={(e) => {
                 e.preventDefault();
+                e.currentTarget.classList.remove("border-indigo-400");
                 onPickFiles(e.dataTransfer.files);
               }}
-              className="border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-8 text-center cursor-pointer hover:border-indigo-400 transition-colors"
+              className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                busy
+                  ? "border-gray-200 dark:border-gray-700 opacity-60 cursor-not-allowed"
+                  : "border-gray-200 dark:border-gray-700 cursor-pointer hover:border-indigo-400"
+              }`}
             >
               <p className="text-sm text-gray-600 dark:text-gray-300">
-                {files.length > 0
-                  ? `${files.length} файл(ов) · ${formatBytes(files.reduce((s, f) => s + f.size, 0))}`
+                {filesReady
+                  ? "Файлы выбраны — можно создать ссылку"
                   : "Перетащите файлы или нажмите для выбора"}
               </p>
+              {!filesReady && (
+                <p className="text-xs text-gray-400 mt-1">Кнопка станет активной после выбора</p>
+              )}
               <input
                 ref={inputRef}
                 type="file"
                 multiple
+                disabled={busy}
                 className="hidden"
                 onChange={(e) => onPickFiles(e.target.files)}
               />
             </div>
 
-            <div>
+            {filesReady && (
+              <div className="rounded-xl bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                    {files.length} файл(ов) · {formatBytes(totalFileBytes)}
+                  </p>
+                  {!busy && (
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                      Готово к отправке
+                    </span>
+                  )}
+                </div>
+                <ul className="max-h-36 overflow-y-auto space-y-1">
+                  {files.map((file, index) => (
+                    <li
+                      key={`${file.name}-${file.size}-${index}`}
+                      className="flex items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-300"
+                    >
+                      <span className="truncate">{file.name}</span>
+                      <span className="shrink-0 flex items-center gap-2">
+                        {formatBytes(file.size)}
+                        {!busy && (
+                          <button
+                            type="button"
+                            onClick={() => removeFile(index)}
+                            className="text-red-500 hover:underline"
+                            aria-label={`Удалить ${file.name}`}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {busy && (
+              <div className="space-y-2" aria-live="polite">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>
+                    {uploadPhase === "creating"
+                      ? "Файл на NAS, создаём ссылку…"
+                      : "Загрузка на сервер…"}
+                  </span>
+                  {uploadPhase === "uploading" && uploadTotal > 0 && (
+                    <span>
+                      {formatBytes(uploadLoaded)} / {formatBytes(uploadTotal)}
+                    </span>
+                  )}
+                </div>
+                <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-200 ${
+                      uploadPhase === "creating"
+                        ? "bg-indigo-400 animate-pulse w-full"
+                        : "bg-indigo-600"
+                    }`}
+                    style={
+                      uploadPhase === "creating"
+                        ? undefined
+                        : { width: `${Math.max(uploadProgress, uploadPhase === "uploading" ? 2 : 0)}%` }
+                    }
+                  />
+                </div>
+                {uploadPhase === "uploading" && uploadTotal > 0 && (
+                  <p className="text-xs text-center text-indigo-600 dark:text-indigo-400 font-medium">
+                    {uploadProgress}%
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className={busy ? "opacity-50 pointer-events-none" : undefined}>
               <p className="text-xs font-medium text-gray-500 mb-2">Срок хранения</p>
               <div className="flex gap-2">
                 {EXPIRY_OPTIONS.map((opt) => (
@@ -275,23 +443,29 @@ export function SendHomeClient() {
               </div>
             </div>
 
-            <label className="block">
+            <label className={`block ${busy ? "opacity-50 pointer-events-none" : ""}`}>
               <span className="text-xs font-medium text-gray-500">Пароль (необязательно)</span>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                disabled={busy}
                 className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-3 py-2 text-sm"
                 placeholder="Для получателя"
                 autoComplete="new-password"
               />
             </label>
 
-            <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+            <label
+              className={`flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 ${
+                busy ? "opacity-50 pointer-events-none" : ""
+              }`}
+            >
               <input
                 type="checkbox"
                 checked={oneTime}
                 onChange={(e) => setOneTime(e.target.checked)}
+                disabled={busy}
                 className="rounded"
               />
               Одноразовая ссылка (удалить после скачивания)
@@ -301,16 +475,28 @@ export function SendHomeClient() {
 
             <button
               type="button"
-              disabled={busy || files.length === 0}
+              disabled={!filesReady || busy}
               onClick={() => void onUpload()}
-              className="w-full rounded-xl bg-indigo-600 text-white py-2.5 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+              className={`w-full rounded-xl py-2.5 text-sm font-medium transition-colors ${
+                !filesReady || busy
+                  ? "bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed"
+                  : "bg-indigo-600 text-white hover:bg-indigo-700"
+              }`}
             >
-              {busy ? "Загрузка…" : "Получить ссылку"}
+              {submitLabel}
             </button>
           </section>
         ) : (
           <section className="rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-white dark:bg-gray-900 p-5 space-y-4 shadow-sm">
-            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Ссылка готова</p>
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600">
+                ✓
+              </span>
+              <div>
+                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Ссылка готова</p>
+                <p className="text-xs text-gray-500">Файл сохранён на NAS</p>
+              </div>
+            </div>
             <p className="text-xs text-gray-500 break-all">{result.url}</p>
             <div className="flex gap-2">
               <button
@@ -372,7 +558,7 @@ export function SendHomeClient() {
 
         <p className="text-center text-xs text-gray-400">
           Получателю не нужен аккаунт — только ссылка
-          {password.trim() ? " и пароль" : ""}.
+          {result?.hasPassword ? " и пароль" : password.trim() ? " и пароль" : ""}.
         </p>
       </div>
     </main>
