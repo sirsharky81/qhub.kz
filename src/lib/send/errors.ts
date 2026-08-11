@@ -57,6 +57,20 @@ export function sendCreateErrorResponse(err: unknown): Response {
     return NextResponse.json({ error: message }, { status: 503 });
   }
 
+  if (
+    /Failed to parse body as FormData|expected boundary|body exceeded|multipart/i.test(
+      combined,
+    )
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Файл слишком большой для загрузки через сервер (лимит тела запроса). Попробуйте файл меньше или обратитесь к администратору.",
+      },
+      { status: 413 },
+    );
+  }
+
   return NextResponse.json(
     {
       error: "Не удалось сохранить файл на NAS",
