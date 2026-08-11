@@ -3,11 +3,10 @@ import type { NextConfig } from "next";
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "1";
 
 const sharedConfig: NextConfig = {
-  // Middleware/proxy clones request bodies (default 10MB). Send allows up to ~500MB
+  // Proxy/middleware clones request bodies (default 10MB). Send allows up to ~500MB
   // (nginx client_max_body_size 520m) — without this, FormData parse fails and the UI
   // shows a misleading "NAS" error.
   experimental: {
-    middlewareClientMaxBodySize: "520mb",
     proxyClientMaxBodySize: "520mb",
   },
   outputFileTracingIncludes: {
