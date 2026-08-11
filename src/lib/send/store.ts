@@ -13,7 +13,7 @@ import {
   sendRedisSet,
 } from "./redis";
 import { buildShareFilePath } from "./paths";
-import { deleteSendShare, writeSendFile } from "./storage";
+import { deleteSendPath, writeSendFile } from "./storage";
 import { archiveFiles } from "./archive";
 import type { CreateSendOptions, SendTransfer, SendTransferPublicMeta } from "./types";
 
@@ -155,14 +155,14 @@ export async function revokeSendTransfer(ownerPhone: string, shareId: string): P
   transfer.revoked = true;
   const remaining = ttlSeconds(transfer.expiresAt);
   await sendRedisSet(shareKey(shareId), JSON.stringify(transfer), remaining);
-  await deleteSendShare(shareId);
+  await deleteSendPath(transfer.filePath);
   await removeOwnerShareId(ownerPhone, shareId);
   return true;
 }
 
 export async function purgeSendTransfer(transfer: SendTransfer): Promise<void> {
   await sendRedisDel(shareKey(transfer.shareId));
-  await deleteSendShare(transfer.shareId);
+  await deleteSendPath(transfer.filePath);
   await removeOwnerShareId(transfer.ownerPhone, transfer.shareId);
 }
 
@@ -193,7 +193,7 @@ export async function recordSendDownload(
   await sendRedisSet(shareKey(updated.shareId), JSON.stringify(updated), remaining);
 
   if (updated.maxDownloads !== null && updated.downloadCount >= updated.maxDownloads) {
-    await deleteSendShare(updated.shareId);
+    await deleteSendPath(updated.filePath);
     await sendRedisDel(shareKey(updated.shareId));
     await removeOwnerShareId(updated.ownerPhone, updated.shareId);
   }

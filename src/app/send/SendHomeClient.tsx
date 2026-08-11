@@ -16,6 +16,7 @@ type UploadPhase = "idle" | "uploading" | "creating" | "done";
 
 type CreateSendResponse = {
   error?: string;
+  detail?: string;
   url?: string;
   urlPath?: string;
   shareId?: string;
@@ -95,7 +96,7 @@ function uploadSendCreate(
         resolve(data);
         return;
       }
-      reject(new Error(data.error ?? "Ошибка загрузки"));
+      reject(new Error(data.detail ? `${data.error ?? "Ошибка загрузки"} (${data.detail})` : (data.error ?? "Ошибка загрузки")));
     });
 
     xhr.addEventListener("error", () => reject(new Error("Сеть недоступна")));
@@ -141,7 +142,7 @@ export function SendHomeClient() {
   const loadStatus = useCallback(async () => {
     setStatusLoading(true);
     try {
-      const res = await fetch("/api/send/status");
+      const res = await fetch("/api/send/status?probe=1");
       const data = (await res.json()) as {
         allowed?: boolean;
         configured?: boolean;

@@ -14,9 +14,8 @@ export async function GET(request: Request) {
   if (configured && session?.phone) {
     const phone = normalizeKzPhone(session.phone);
     allowed = await isSendEnabledForPhone(phone);
-    // Probe only when explicitly requested — avoid NAS writes on every page load
-    const probeRequested = new URL(request.url).searchParams.get("probe") === "1";
-    if (allowed && probeRequested) {
+    // Probe NAS when user can upload — surfaces connectivity issues before they pick a file.
+    if (allowed) {
       storageProbe = await probeSendStorage();
     }
   }
