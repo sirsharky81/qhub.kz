@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       ok: true,
       shareId: transfer.shareId,
       url,
-      urlPath,
+      urlPath: `/s/${transfer.shareId}`,
       filename: transfer.filename,
       sizeBytes: transfer.sizeBytes,
       expiresAt: transfer.expiresAt,

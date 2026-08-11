@@ -17,6 +17,7 @@ type UploadPhase = "idle" | "uploading" | "creating" | "done";
 type CreateSendResponse = {
   error?: string;
   url?: string;
+  urlPath?: string;
   shareId?: string;
   filename?: string;
   sizeBytes?: number;
@@ -30,6 +31,12 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function buildShareUrl(shareId: string, urlPath?: string): string {
+  if (typeof window === "undefined") return `https://www.qhub.kz/s/${shareId}`;
+  const path = urlPath ?? `/s/${shareId}`;
+  return `${window.location.origin}${path}`;
 }
 
 function formatExpiry(ts: number): string {
@@ -227,9 +234,11 @@ export function SendHomeClient() {
       });
 
       setUploadPhase("done");
+      const shareId = data.shareId!;
+      const urlPath = data.urlPath ?? `/s/${shareId}`;
       setResult({
-        url: data.url!,
-        shareId: data.shareId!,
+        url: buildShareUrl(shareId, urlPath),
+        shareId,
         filename: data.filename!,
         sizeBytes: data.sizeBytes!,
         expiresAt: data.expiresAt!,

@@ -5,7 +5,7 @@ import { isSendEnabled, isSendStorageConfigured } from "@/lib/send/config";
 import { probeSendStorage } from "@/lib/send/paths";
 import { normalizeKzPhone } from "@/lib/messenger/phone";
 
-export async function GET() {
+export async function GET(request: Request) {
   const configured = isSendStorageConfigured();
   const session = await getMessengerSession();
   let allowed = false;
@@ -14,7 +14,9 @@ export async function GET() {
   if (configured && session?.phone) {
     const phone = normalizeKzPhone(session.phone);
     allowed = await isSendEnabledForPhone(phone);
-    if (allowed) {
+    // Probe only when explicitly requested — avoid NAS writes on every page load
+    const probeRequested = new URL(request.url).searchParams.get("probe") === "1";
+    if (allowed && probeRequested) {
       storageProbe = await probeSendStorage();
     }
   }
