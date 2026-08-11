@@ -14,13 +14,15 @@ function webdavAuthHeader(user: string, pass: string): string {
 
 async function webdavRequest(
   url: string,
-  init: RequestInit & { user: string; pass: string },
+  init: RequestInit & { user: string; pass: string; timeoutMs?: number },
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", webdavAuthHeader(init.user, init.pass));
-  const { user: _u, pass: _p, ...rest } = init;
+  const { user: _u, pass: _p, timeoutMs = 600_000, ...rest } = init;
   try {
-    return await fetch(url, { ...rest, headers, signal: AbortSignal.timeout(120_000) });
+    // Large Send downloads stream NAS→VPS→client; Tailscale home links are ~1–6 MB/s,
+    // so keep a long timeout for the whole GET body (default was 120s and aborted mid-file).
+    return await fetch(url, { ...rest, headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`WebDAV fetch ${url}: ${msg}`, { cause: err });
