@@ -96,8 +96,13 @@ export async function POST(
       "Content-Disposition": buildContentDisposition(transfer.filename),
       "Cache-Control": "private, no-store",
     });
-    const size = sizeBytes ?? transfer.sizeBytes;
-    if (size > 0) headers.set("Content-Length", String(size));
+    // Do not set Content-Length for proxied WebDAV streams. A mismatched length makes
+    // Safari/XHR wait forever (stuck progress ~30–40%) even after the body has ended.
+    if (sizeBytes && sizeBytes > 0) {
+      headers.set("X-Send-Size", String(sizeBytes));
+    } else if (transfer.sizeBytes > 0) {
+      headers.set("X-Send-Size", String(transfer.sizeBytes));
+    }
 
     return new Response(stream, { status: 200, headers });
   } catch (err) {

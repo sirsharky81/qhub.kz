@@ -45,80 +45,67 @@ function parseFilename(disposition: string | null, fallback: string): string {
   return fallback;
 }
 
-function downloadSendFile(
+/** fetch + stream (same path that was fast before XHR); progress from byte chunks. */
+async function downloadSendFile(
   shareId: string,
   password: string,
   expectedBytes: number,
   onProgress: (pct: number, loaded: number, total: number) => void,
 ): Promise<{ blob: Blob; filename: string }> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/send/s/${encodeURIComponent(shareId)}/download`);
-    xhr.setRequestHeader("Content-Type", "application/json");
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("progress", (event) => {
-      const total =
-        event.lengthComputable && event.total > 0
-          ? event.total
-          : expectedBytes > 0
-            ? expectedBytes
-            : 0;
-      if (total > 0) {
-        onProgress(Math.min(99, Math.round((event.loaded / total) * 100)), event.loaded, total);
-      } else {
-        onProgress(0, event.loaded, 0);
-      }
-    });
-
-    xhr.addEventListener("load", () => {
-      const blob = xhr.response as Blob | null;
-      const contentType = xhr.getResponseHeader("Content-Type") ?? "";
-
-      if (xhr.status < 200 || xhr.status >= 300) {
-        if (blob && contentType.includes("application/json")) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            try {
-              const data = JSON.parse(String(reader.result)) as {
-                error?: string;
-                needsPassword?: boolean;
-              };
-              if (data.needsPassword) {
-                reject(new Error("Введите пароль"));
-                return;
-              }
-              reject(new Error(data.error ?? "Не удалось скачать"));
-            } catch {
-              reject(new Error(`Не удалось скачать (HTTP ${xhr.status})`));
-            }
-          };
-          reader.onerror = () => reject(new Error(`Не удалось скачать (HTTP ${xhr.status})`));
-          reader.readAsText(blob);
-          return;
-        }
-        reject(new Error(`Не удалось скачать (HTTP ${xhr.status})`));
-        return;
-      }
-
-      if (!blob) {
-        reject(new Error("Пустой ответ сервера"));
-        return;
-      }
-
-      onProgress(100, blob.size, blob.size || expectedBytes);
-      const filename = parseFilename(
-        xhr.getResponseHeader("Content-Disposition"),
-        "download",
-      );
-      resolve({ blob, filename });
-    });
-
-    xhr.addEventListener("error", () => reject(new Error("Сеть недоступна")));
-    xhr.addEventListener("abort", () => reject(new Error("Скачивание отменено")));
-
-    xhr.send(JSON.stringify({ password: password.trim() || undefined }));
+  const res = await fetch(`/api/send/s/${encodeURIComponent(shareId)}/download`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: password.trim() || undefined }),
   });
+
+  if (!res.ok) {
+    let message = `Не удалось скачать (HTTP ${res.status})`;
+    try {
+      const data = (await res.json()) as { error?: string; needsPassword?: boolean };
+      if (data.needsPassword) throw new Error("Введите пароль");
+      if (data.error) message = data.error;
+    } catch (err) {
+      if (err instanceof Error && err.message === "Введите пароль") throw err;
+    }
+    throw new Error(message);
+  }
+
+  const filename = parseFilename(
+    res.headers.get("Content-Disposition"),
+    "download",
+  );
+  const hintTotal = Number(
+    res.headers.get("X-Send-Size") || res.headers.get("Content-Length") || "0",
+  );
+  const total = hintTotal > 0 ? hintTotal : expectedBytes > 0 ? expectedBytes : 0;
+
+  // Prefer streaming progress; fall back to blob() if body is unavailable.
+  if (!res.body) {
+    const blob = await res.blob();
+    onProgress(100, blob.size, blob.size || total);
+    return { blob, filename };
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    chunks.push(value);
+    loaded += value.byteLength;
+    if (total > 0) {
+      onProgress(Math.min(99, Math.round((loaded / total) * 100)), loaded, total);
+    } else {
+      onProgress(0, loaded, 0);
+    }
+  }
+
+  const contentType = res.headers.get("Content-Type") || undefined;
+  const blob = new Blob(chunks as BlobPart[], { type: contentType });
+  onProgress(100, loaded, loaded || total);
+  return { blob, filename };
 }
 
 export function SendDownloadClient() {
@@ -193,7 +180,12 @@ export function SendDownloadClient() {
       }
     } catch (err) {
       setPhase("idle");
-      setError(err instanceof Error ? err.message : "Ошибка");
+      const msg = err instanceof Error ? err.message : "Ошибка";
+      setError(
+        /Failed to fetch|NetworkError|Load failed|network/i.test(msg)
+          ? "Сеть недоступна или соединение оборвалось. Попробуйте ещё раз."
+          : msg,
+      );
     }
   };
 
