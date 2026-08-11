@@ -30,11 +30,10 @@ export async function probeSendStorage(): Promise<SendStorageProbe> {
   }
 }
 
-/** ASCII-only path on NAS; original display name stays in Redis metadata. */
+/** ASCII-only flat path on NAS (no MKCOL subdirs — Synology WebDAV is flaky on nested collections). */
 export function buildShareFilePath(shareId: string, originalFilename: string): string {
   const ext = path.extname(originalFilename).replace(/[^\w.-]/g, "").slice(0, 16).toLowerCase();
-  const storageName = ext.length > 1 ? `upload${ext}` : "upload.bin";
-  return `${shareId}/${storageName}`;
+  return ext.length > 1 ? `${shareId}${ext}` : `${shareId}.bin`;
 }
 
 export function storageRootHint(): string {

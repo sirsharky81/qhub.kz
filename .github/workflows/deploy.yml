@@ -60,17 +60,14 @@ jobs:
         env:
           SEND_WEBDAV_USER: ${{ secrets.SEND_WEBDAV_USER }}
           SEND_WEBDAV_PASS: ${{ secrets.SEND_WEBDAV_PASS }}
+        continue-on-error: true
         run: |
-          if [ -z "${SEND_WEBDAV_PASS:-}" ]; then
-            echo "SEND_WEBDAV_PASS secret not set — skip Send env"
-            exit 0
-          fi
           ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<EOF
           set -euo pipefail
           cd /var/www/qhub.kz
           chmod +x scripts/deploy/enable-send-env.sh
-          SEND_WEBDAV_USER='${SEND_WEBDAV_USER:-QHub}' \
-          SEND_WEBDAV_PASS='${SEND_WEBDAV_PASS}' \
+          SEND_WEBDAV_USER='${SEND_WEBDAV_USER:-}' \
+          SEND_WEBDAV_PASS='${SEND_WEBDAV_PASS:-}' \
           bash scripts/deploy/enable-send-env.sh
           pm2 restart qhub --update-env
           EOF

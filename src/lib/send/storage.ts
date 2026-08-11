@@ -14,13 +14,13 @@ function webdavAuthHeader(user: string, pass: string): string {
 
 async function webdavRequest(
   url: string,
-  init: RequestInit & { user: string; pass: string },
+  init: RequestInit & { user: string; pass: string; timeoutMs?: number },
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", webdavAuthHeader(init.user, init.pass));
-  const { user: _u, pass: _p, ...rest } = init;
+  const { user: _u, pass: _p, timeoutMs = 120_000, ...rest } = init;
   try {
-    return await fetch(url, { ...rest, headers, signal: AbortSignal.timeout(120_000) });
+    return await fetch(url, { ...rest, headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`WebDAV fetch ${url}: ${msg}`, { cause: err });
@@ -54,12 +54,14 @@ export async function writeSendFile(relativePath: string, data: Buffer): Promise
       await webdavMkcolPath(cfg.baseUrl, dirPath, cfg.user, cfg.pass);
     }
     const fileUrl = `${cfg.baseUrl}/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
+    const timeoutMs = Math.max(120_000, Math.ceil((data.length / (512 * 1024)) * 60_000));
     const res = await webdavRequest(fileUrl, {
       method: "PUT",
       user: cfg.user,
       pass: cfg.pass,
       body: new Uint8Array(data),
       headers: { "Content-Type": "application/octet-stream" },
+      timeoutMs,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -112,9 +114,4 @@ export async function deleteSendPath(relativePath: string): Promise<void> {
 
   const abs = path.join(getSendLocalRoot(), relativePath);
   await rm(abs, { force: true, recursive: true }).catch(() => {});
-}
-
-/** Delete share directory `{shareId}/`. */
-export async function deleteSendShare(shareId: string): Promise<void> {
-  await deleteSendPath(shareId);
 }
