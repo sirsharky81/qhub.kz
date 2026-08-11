@@ -79,7 +79,7 @@ export async function POST(
     const { stream, sizeBytes } = await openSendFileStream(transfer.filePath);
     const headers = new Headers({
       "Content-Type": transfer.mime,
-      "Content-Disposition": `attachment; filename="${encodeURIComponent(transfer.filename)}"`,
+      "Content-Disposition": `attachment; filename="${transfer.filename.replace(/["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(transfer.filename)}`,
       "Cache-Control": "private, no-store",
     });
     const size = sizeBytes ?? transfer.sizeBytes;

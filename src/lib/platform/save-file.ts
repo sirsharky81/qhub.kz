@@ -1,3 +1,4 @@
+import { isIOSDevice } from "./device";
 import { isNativePlatform } from "./runtime";
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -26,21 +27,28 @@ function downloadViaAnchor(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  // iOS Safari shows "Load Failed" if the blob URL is revoked too quickly.
+  window.setTimeout(() => URL.revokeObjectURL(url), isIOSDevice() ? 60_000 : 2_000);
 }
 
 async function shareFile(blob: Blob, filename: string): Promise<boolean> {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
   const safeName = sanitizeFilename(filename);
-  const file = new File([blob], safeName, { type: blob.type || "application/octet-stream" });
-  if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: safeName });
-      return true;
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return true;
-    }
+  const type = blob.type || "application/octet-stream";
+  const file = new File([blob], safeName, { type });
+
+  const canShareFiles =
+    typeof navigator.canShare === "function" ? navigator.canShare({ files: [file] }) : isIOSDevice();
+  if (!canShareFiles) return false;
+
+  try {
+    await navigator.share({ files: [file], title: safeName });
+    return true;
+  } catch (err) {
+    // User dismissed the sheet — treat as success so UI does not show a false error.
+    if ((err as Error).name === "AbortError") return true;
+    return false;
   }
-  return false;
 }
 
 async function saveNative(blob: Blob, filename: string): Promise<void> {
@@ -75,7 +83,8 @@ export function downloadBlobDirect(blob: Blob, filename: string): void {
 
 /**
  * Save or share a blob — works in browser, PWA, and Capacitor WebView.
- * On native opens the system share sheet (Save to Files, Drive, etc.).
+ * Prefer the system share sheet (especially on iOS Safari) to avoid the native
+ * "Load Failed" banner from blob URLs + anchor downloads.
  */
 export async function saveBlobToDevice(blob: Blob, filename: string): Promise<void> {
   if (isNativePlatform()) {
