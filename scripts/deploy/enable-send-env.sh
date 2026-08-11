@@ -25,6 +25,9 @@ grep -v -E '^SEND_(ENABLED|STORAGE_BACKEND|WEBDAV_URL|WEBDAV_USER|WEBDAV_PASS|ST
   echo "SEND_WEBDAV_URL=$SEND_WEBDAV_URL"
   echo "SEND_WEBDAV_USER=$SEND_WEBDAV_USER"
   echo "SEND_WEBDAV_PASS=$SEND_WEBDAV_PASS"
+  if ! grep -q '^QHUB_PUBLIC_URL=' "$ENV_FILE" 2>/dev/null; then
+    echo "QHUB_PUBLIC_URL=https://www.qhub.kz"
+  fi
 } >"$ENV_FILE"
 rm -f "$tmp"
 chmod 600 "$ENV_FILE"

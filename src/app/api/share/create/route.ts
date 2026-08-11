@@ -2,6 +2,7 @@ import { withCors } from "@/lib/api/cors";
 import { checkShareRateLimit, getClientIp } from "@/lib/rate-limit";
 import { createShareRoom } from "@/lib/share/store";
 import { buildShareInviteUrl } from "@/lib/share/urls";
+import { getPublicOrigin } from "@/lib/public-origin";
 
 export async function POST(request: Request) {
   try {
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
       body.deviceName ?? "Устройство",
       body.pin,
     );
-    const origin = new URL(request.url).origin;
+    const origin = getPublicOrigin(request);
 
     return withCors(
       Response.json({

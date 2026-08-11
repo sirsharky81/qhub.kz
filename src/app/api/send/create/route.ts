@@ -5,6 +5,7 @@ import { getSendMaxBytes, isSendStorageConfigured } from "@/lib/send/config";
 import type { SendExpiryPreset } from "@/lib/send/constants";
 import { SEND_EXPIRY_PRESETS } from "@/lib/send/constants";
 import { createSendTransfer, buildSendPublicUrl } from "@/lib/send/store";
+import { getPublicOrigin } from "@/lib/public-origin";
 import {
   checkSendRateLimit,
   checkSendUploadRateLimit,
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
       oneTime,
     });
 
-    const origin = new URL(request.url).origin;
+    const origin = getPublicOrigin(request);
     const url = buildSendPublicUrl(origin, transfer.shareId);
 
     return NextResponse.json({
