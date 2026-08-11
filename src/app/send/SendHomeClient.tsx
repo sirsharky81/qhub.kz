@@ -57,6 +57,26 @@ function uploadSendCreate(
     });
 
     xhr.addEventListener("load", () => {
+      const contentType = xhr.getResponseHeader("Content-Type") ?? "";
+      const isJson = contentType.includes("application/json");
+
+      if (!isJson) {
+        if (xhr.status === 413) {
+          reject(new Error("Файл слишком большой для сервера (лимит nginx). Попробуйте позже или файл меньше."));
+          return;
+        }
+        if (xhr.status === 502 || xhr.status === 504) {
+          reject(new Error("Сервер не успел обработать файл. Попробуйте ещё раз."));
+          return;
+        }
+        if (xhr.status === 401 || xhr.status === 403) {
+          reject(new Error("Нет доступа. Войдите в мессенджер или проверьте Send в whitelist."));
+          return;
+        }
+        reject(new Error(`Ошибка сервера (HTTP ${xhr.status || "?"}). Обновите страницу и попробуйте снова.`));
+        return;
+      }
+
       let data: CreateSendResponse = {};
       try {
         data = JSON.parse(xhr.responseText) as CreateSendResponse;

@@ -103,6 +103,14 @@ export async function POST(request: Request) {
       oneTime: transfer.maxDownloads === 1,
     });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/WebDAV|NAS|не настроен/i.test(message)) {
+      console.error("[send-create]", err);
+      return NextResponse.json(
+        { error: message.includes("WebDAV") ? "Не удалось сохранить файл на NAS" : message },
+        { status: 502 },
+      );
+    }
     return jsonAuthError(err);
   }
 }

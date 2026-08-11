@@ -37,6 +37,8 @@ cat > /etc/nginx/sites-available/qhub.kz <<'NGINX'
 server {
     listen 80;
     server_name vps.qhub.kz qhub.kz www.qhub.kz;
+    client_max_body_size 520m;
+    client_body_timeout 300s;
 
     location /ws/messenger {
         proxy_pass http://127.0.0.1:3001;

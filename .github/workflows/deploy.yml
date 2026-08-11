@@ -75,6 +75,16 @@ jobs:
           pm2 restart qhub --update-env
           EOF
 
+      - name: Nginx upload limit for QHub Send
+        continue-on-error: true
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
+          set -euo pipefail
+          cd /var/www/qhub.kz
+          chmod +x scripts/deploy/apply-send-nginx-upload-limit.sh
+          sudo bash scripts/deploy/apply-send-nginx-upload-limit.sh
+          EOF
+
       - name: Migrate VPN ports for Russia (Amnezia UDP 443)
         continue-on-error: true
         run: |
