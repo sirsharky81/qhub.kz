@@ -9,6 +9,8 @@ export interface WhitelistEntry {
   vpnEnabled?: boolean;
   /** Разрешён доступ к remote-библиотеке Music (Navidrome на NAS) */
   musicEnabled?: boolean;
+  /** Разрешён QHub Send (файлы на NAS) */
+  sendEnabled?: boolean;
 }
 
 export interface MessengerAuthRecord {

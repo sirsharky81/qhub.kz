@@ -23,6 +23,11 @@ const sharedConfig: NextConfig = {
         permanent: true,
       },
       {
+        source: "/tools/send",
+        destination: "/send",
+        permanent: true,
+      },
+      {
         source: "/random-picker",
         destination: "/tools/random-picker",
         permanent: true,

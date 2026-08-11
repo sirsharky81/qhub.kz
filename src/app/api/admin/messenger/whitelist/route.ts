@@ -32,7 +32,7 @@ export async function PATCH(request: Request) {
   const denied = await requireAdmin();
   if (denied) return denied;
 
-  let body: { phone?: string; status?: WhitelistStatus; vpnEnabled?: boolean; musicEnabled?: boolean };
+  let body: { phone?: string; status?: WhitelistStatus; vpnEnabled?: boolean; musicEnabled?: boolean; sendEnabled?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -51,7 +51,7 @@ export async function PATCH(request: Request) {
     if (!existing) {
       return NextResponse.json({ error: "Номер не найден" }, { status: 404 });
     }
-    whitelist[phone] = { ...existing, status: "revoked", vpnEnabled: false, musicEnabled: false };
+    whitelist[phone] = { ...existing, status: "revoked", vpnEnabled: false, musicEnabled: false, sendEnabled: false };
     await saveWhitelist(whitelist);
     await revokeAllVpnDevices(phone);
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
@@ -93,6 +93,19 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Сначала активируйте номер в whitelist" }, { status: 400 });
     }
     whitelist[phone] = { ...existing, musicEnabled: body.musicEnabled };
+    await saveWhitelist(whitelist);
+    return NextResponse.json({ ok: true, entry: whitelist[phone] });
+  }
+
+  if (typeof body.sendEnabled === "boolean") {
+    const existing = whitelist[phone];
+    if (!existing) {
+      return NextResponse.json({ error: "Номер не найден" }, { status: 404 });
+    }
+    if (existing.status !== "active") {
+      return NextResponse.json({ error: "Сначала активируйте номер в whitelist" }, { status: 400 });
+    }
+    whitelist[phone] = { ...existing, sendEnabled: body.sendEnabled };
     await saveWhitelist(whitelist);
     return NextResponse.json({ ok: true, entry: whitelist[phone] });
   }

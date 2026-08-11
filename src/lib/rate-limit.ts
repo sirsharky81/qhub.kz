@@ -28,6 +28,9 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:family-loc-req-silent": { requests: 1, window: "10 s" },
   "qhub:kz-maps-suggest": { requests: 5, window: "15 m" },
   "qhub:mail-passwd": { requests: 10, window: "1 h" },
+  "qhub:send": { requests: 30, window: "1 m" },
+  "qhub:send-upload": { requests: 10, window: "1 h" },
+  "qhub:send-download": { requests: 120, window: "1 m" },
 };
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;
@@ -232,4 +235,22 @@ export async function checkKzMapsSuggestRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:kz-maps-suggest", identifier);
+}
+
+export async function checkSendRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:send", identifier);
+}
+
+export async function checkSendUploadRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:send-upload", identifier);
+}
+
+export async function checkSendDownloadRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:send-download", identifier);
 }
