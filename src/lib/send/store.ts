@@ -173,6 +173,7 @@ export async function verifySendPassword(transfer: SendTransfer, password: strin
 
 export async function recordSendDownload(
   transfer: SendTransfer,
+  options?: { deleteStorage?: boolean },
 ): Promise<{ ok: true; transfer: SendTransfer } | { ok: false; reason: string }> {
   if (transfer.revoked) return { ok: false, reason: "Ссылка отозвана" };
   if (transfer.expiresAt <= Date.now()) {
@@ -190,12 +191,21 @@ export async function recordSendDownload(
   };
 
   const remaining = ttlSeconds(updated.expiresAt);
-  await sendRedisSet(shareKey(updated.shareId), JSON.stringify(updated), remaining);
+  const exhausted =
+    updated.maxDownloads !== null && updated.downloadCount >= updated.maxDownloads;
 
-  if (updated.maxDownloads !== null && updated.downloadCount >= updated.maxDownloads) {
-    await deleteSendShare(updated.shareId);
+  if (exhausted) {
+    // Drop metadata immediately; delay NAS delete so the already-opened WebDAV
+    // response stream can finish (Synology DELETE mid-GET breaks downloads).
     await sendRedisDel(shareKey(updated.shareId));
     await removeOwnerShareId(updated.ownerPhone, updated.shareId);
+    if (options?.deleteStorage !== false) {
+      setTimeout(() => {
+        void deleteSendShare(updated.shareId).catch(() => {});
+      }, 120_000);
+    }
+  } else {
+    await sendRedisSet(shareKey(updated.shareId), JSON.stringify(updated), remaining);
   }
 
   return { ok: true, transfer: updated };

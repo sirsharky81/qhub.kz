@@ -11,6 +11,13 @@ import { checkSendDownloadRateLimit, getClientIp } from "@/lib/rate-limit";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+/** Headers must be ByteString — put Unicode only in filename*. */
+function buildContentDisposition(filename: string): string {
+  const fallback =
+    filename.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "_").trim() || "download";
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ shareId: string }> },
@@ -70,16 +77,23 @@ export async function POST(
     }
   }
 
-  const recorded = await recordSendDownload(transfer);
-  if (!recorded.ok) {
-    return NextResponse.json({ error: recorded.reason }, { status: 410 });
-  }
-
   try {
+    // Open NAS stream before recording/deleting one-time shares.
     const { stream, sizeBytes } = await openSendFileStream(transfer.filePath);
+
+    const recorded = await recordSendDownload(transfer);
+    if (!recorded.ok) {
+      try {
+        await stream.cancel();
+      } catch {
+        /* ignore */
+      }
+      return NextResponse.json({ error: recorded.reason }, { status: 410 });
+    }
+
     const headers = new Headers({
-      "Content-Type": transfer.mime,
-      "Content-Disposition": `attachment; filename="${transfer.filename.replace(/["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(transfer.filename)}`,
+      "Content-Type": transfer.mime || "application/octet-stream",
+      "Content-Disposition": buildContentDisposition(transfer.filename),
       "Cache-Control": "private, no-store",
     });
     const size = sizeBytes ?? transfer.sizeBytes;
