@@ -30,11 +30,27 @@ export async function probeSendStorage(): Promise<SendStorageProbe> {
   }
 }
 
-/** ASCII-only path on NAS; original display name stays in Redis metadata. */
+/**
+ * Keep the original filename on NAS (WebDAV path segments are encodeURIComponent'd).
+ * Strip path separators / control chars only — avoid renaming to upload.ext.
+ */
+export function sanitizeStorageFilename(originalFilename: string): string {
+  const base = path.basename(originalFilename || "file").normalize("NFC");
+  const cleaned = base
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[\\/]+/g, "_")
+    .replace(/[. ]+$/g, "")
+    .trim()
+    .slice(0, 180);
+  if (!cleaned || cleaned === "." || cleaned === "..") {
+    const ext = path.extname(base).replace(/[^\w.-]/g, "").slice(0, 16).toLowerCase();
+    return ext.length > 1 ? `file${ext}` : "file.bin";
+  }
+  return cleaned;
+}
+
 export function buildShareFilePath(shareId: string, originalFilename: string): string {
-  const ext = path.extname(originalFilename).replace(/[^\w.-]/g, "").slice(0, 16).toLowerCase();
-  const storageName = ext.length > 1 ? `upload${ext}` : "upload.bin";
-  return `${shareId}/${storageName}`;
+  return `${shareId}/${sanitizeStorageFilename(originalFilename)}`;
 }
 
 export function storageRootHint(): string {
