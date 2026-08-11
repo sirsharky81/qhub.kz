@@ -10,7 +10,7 @@
         │ metadata → Redis
         │ file bytes → WebDAV
         ▼ Tailscale 100.x
-   Synology /volume1/qhub-send
+   Synology /volume1/QHubbox
         │
 Получатель ← qhub.kz/s/{id} ← только metadata + прокси скачивания
 ```
@@ -25,15 +25,15 @@
 ## Synology: WebDAV
 
 1. **Панель управления → Файловые службы → WebDAV** — включить HTTP (порт 5005) или HTTPS (5006).
-2. Создать shared folder `qhub-send` (или подпапку в существующей).
-3. Пользователь с правами read/write (отдельный от Navidrome).
+2. Shared folder **`QHubbox`** (`/volume1/QHubbox`) — общая папка для Send (и при желании других сервисов QHub).
+3. Пользователь с правами read/write на `QHubbox` (отдельный от Navidrome).
 4. Доступ **только LAN / Tailscale** — не пробрасывать в интернет.
 
 Проверка с VPS:
 
 ```bash
 ssh root@65.108.215.248
-curl -sS -u 'USER:PASS' -I "http://100.67.214.76:5005/qhub-send/"
+curl -sS -u 'USER:PASS' -I "http://100.67.214.76:5005/QHubbox/"
 ```
 
 ## Доступ для отправителей
@@ -49,7 +49,7 @@ curl -sS -u 'USER:PASS' -I "http://100.67.214.76:5005/qhub-send/"
 ```bash
 SEND_ENABLED=1
 SEND_STORAGE_BACKEND=webdav
-SEND_WEBDAV_URL=http://100.67.214.76:5005/qhub-send
+SEND_WEBDAV_URL=http://100.67.214.76:5005/QHubbox
 SEND_WEBDAV_USER=qhub
 SEND_WEBDAV_PASS=********
 # SEND_MAX_BYTES=524288000
