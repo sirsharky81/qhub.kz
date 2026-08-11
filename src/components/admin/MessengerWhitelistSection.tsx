@@ -112,6 +112,23 @@ export function MessengerWhitelistSection() {
     await load();
   }
 
+  async function setSendEnabled(entryPhone: string, sendEnabled: boolean) {
+    setMsg(null);
+    setError(null);
+    const res = await fetch("/api/admin/messenger/whitelist", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: entryPhone, sendEnabled }),
+    });
+    if (!res.ok) {
+      const data = (await res.json()) as { error?: string };
+      setError(data.error ?? "Ошибка");
+      return;
+    }
+    setMsg(sendEnabled ? "QHub Send включён" : "QHub Send отключён");
+    await load();
+  }
+
   async function handleCopyVpnLink() {
     setMsg(null);
     setError(null);
@@ -268,6 +285,7 @@ export function MessengerWhitelistSection() {
                   {entry.status === "active" ? "активен" : "отозван"} ·{" "}
                   {entry.vpnEnabled ? "VPN ✓" : "VPN —"} ·{" "}
                   {entry.musicEnabled ? "Music ✓" : "Music —"} ·{" "}
+                  {entry.sendEnabled ? "Send ✓" : "Send —"} ·{" "}
                   {new Date(entry.addedAt).toLocaleDateString("ru-RU")}
                 </p>
               </div>
@@ -313,6 +331,19 @@ export function MessengerWhitelistSection() {
                     }`}
                   >
                     {entry.musicEnabled ? "Music вкл." : "Music выкл."}
+                  </button>
+                )}
+                {entry.status === "active" && (
+                  <button
+                    type="button"
+                    onClick={() => setSendEnabled(entry.phone, !entry.sendEnabled)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border ${
+                      entry.sendEnabled
+                        ? "border-sky-300 bg-sky-50 text-sky-800"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {entry.sendEnabled ? "Send вкл." : "Send выкл."}
                   </button>
                 )}
                 {entry.status === "active" && entry.vpnEnabled && (

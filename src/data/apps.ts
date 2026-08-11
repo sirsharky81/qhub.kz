@@ -341,6 +341,20 @@ export const apps: App[] = [
     sortOrder: 50,
   },
   {
+    id: "send",
+    title: "QHub Send",
+    description: "Отправка файлов по ссылке — как WeTransfer, хранение на NAS.",
+    longDescription:
+      "Загрузите файл и получите короткую ссылку qhub.kz/s/… Файлы хранятся на Synology через Tailscale. Срок жизни, пароль, одноразовая ссылка, QR-код, архив из нескольких файлов.",
+    href: "/send",
+    tags: ["tools", "productivity"],
+    icon: "📨",
+    color: "from-indigo-500/10 to-indigo-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 49,
+  },
+  {
     id: "family",
     title: "Семья",
     description: "Геолокация детей и SOS: режим родителя и участника.",

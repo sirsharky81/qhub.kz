@@ -413,6 +413,7 @@ curl -sS "http://100.67.214.76:4533/ping"
 | `scripts/mail/mail-*.sh` | Создание ящиков, смена пароля |
 | `docs/mail.md` | Почта @qhub.kz: DNS, клиенты, self-service |
 | `docs/synology-tailscale.md` | Tailscale NAS↔VPS + Navidrome / QHub Music |
+| `docs/synology-send.md` | Tailscale NAS↔VPS + QHub Send (WebDAV) |
 | `scripts/deploy/vps-health-check.py` | Проверка интеграций на сервере |
 | `scripts/migrate-upstash-to-redis.mjs` | Перенос ключей Upstash → VPS Redis |
 | `src/lib/redis/` | Выбор бэкенда и команды Redis |
