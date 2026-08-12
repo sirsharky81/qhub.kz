@@ -60,9 +60,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip /api/send/* — large multipart uploads must not be body-buffered by middleware
-    // (default 10MB truncate → FormData "expected boundary" → false "NAS" errors).
-    "/api/((?!send(?:/|$)).*)",
+    // Skip large multipart uploads — middleware body buffering (default 10MB) truncates
+    // FormData and causes "expected boundary" / wrong Content-Type parse errors.
+    "/api/((?!send(?:/|$)|cast/upload(?:/|$)).*)",
     // Must stay in sync with ADMIN_PANEL_PATH in constants.ts (static string required by Next.js)
     "/qhub-ctrl-7k2m/:path*",
     "/tools/audio-extractor/:path*",

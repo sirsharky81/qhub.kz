@@ -29,7 +29,10 @@ export async function platformFetch(
 ): Promise<Response> {
   const { rawBody, headers: initHeaders, ...rest } = init;
   const headers = new Headers(initHeaders);
-  if (!rawBody && rest.body && !headers.has("Content-Type")) {
+  // FormData must keep the browser-generated multipart boundary — never force JSON.
+  const isFormData =
+    typeof FormData !== "undefined" && rest.body instanceof FormData;
+  if (!rawBody && rest.body && !headers.has("Content-Type") && !isFormData) {
     headers.set("Content-Type", "application/json");
   }
 

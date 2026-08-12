@@ -43,7 +43,7 @@ export function CastHomeClient() {
       if (!file) return;
       setBusy(true);
       setError(null);
-      setUploadPct(10);
+      setUploadPct(0);
       try {
         const { watchUrl } = await uploadCastFileApi(file, setUploadPct);
         const path = watchUrl.startsWith("http")
