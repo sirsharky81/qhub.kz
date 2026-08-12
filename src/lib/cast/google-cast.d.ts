@@ -26,6 +26,8 @@ declare global {
       }
       class CastSession {
         loadMedia(request: chrome.cast.media.LoadRequest): Promise<void>;
+        endSession(stopCasting?: boolean): void;
+        getCastDevice(): { friendlyName?: string } | null;
       }
       class RemotePlayer {
         isConnected: boolean;

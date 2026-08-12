@@ -168,7 +168,13 @@ export async function loadMediaOnCast(media: CastResolvedMedia): Promise<void> {
   const ctx = window.cast.framework.CastContext.getInstance();
   let session = ctx.getCurrentSession();
   if (!session) {
-    session = await ctx.requestSession();
+    // Picker may resolve without returning the session object on some Chrome builds —
+    // always re-read getCurrentSession afterwards.
+    await ctx.requestSession();
+    session = ctx.getCurrentSession();
+  }
+  if (!session) {
+    throw new Error("Устройство Cast не выбрано или сессия не создана");
   }
 
   const info = new window.chrome.cast.media.MediaInfo(media.streamUrl, media.contentType);
@@ -182,6 +188,40 @@ export async function loadMediaOnCast(media: CastResolvedMedia): Promise<void> {
 
   const request = new window.chrome.cast.media.LoadRequest(info);
   await session.loadMedia(request);
+}
+
+export function getCurrentCastSession(): cast.framework.CastSession | null {
+  if (!window.cast?.framework) return null;
+  return window.cast.framework.CastContext.getInstance().getCurrentSession();
+}
+
+export function getCastDeviceName(): string | null {
+  const name = getCurrentCastSession()?.getCastDevice()?.friendlyName?.trim();
+  return name || null;
+}
+
+/** Disconnect from the receiver. stopCasting=true also stops playback on TV. */
+export function endCastSession(stopCasting = true): void {
+  const session = getCurrentCastSession();
+  if (!session) return;
+  session.endSession(stopCasting);
+}
+
+/** End current session (if any) and open the device picker again. */
+export async function switchCastDevice(): Promise<void> {
+  const ready = await initCastSdk();
+  if (!ready || !window.cast?.framework) {
+    throw new Error("Google Cast недоступен в этом браузере");
+  }
+  const ctx = window.cast.framework.CastContext.getInstance();
+  const current = ctx.getCurrentSession();
+  if (current) {
+    current.endSession(false);
+  }
+  await ctx.requestSession();
+  if (!ctx.getCurrentSession()) {
+    throw new Error("Устройство Cast не выбрано");
+  }
 }
 
 export function createRemotePlayerController(): {
