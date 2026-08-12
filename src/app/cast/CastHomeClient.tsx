@@ -1,9 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 import { stashCastLocalFile, stashCastPendingPassword } from "@/lib/cast/session";
-import { CastShell } from "./components/CastShell";
 
 export function CastHomeClient() {
   const router = useRouter();
@@ -35,24 +35,34 @@ export function CastHomeClient() {
     goWatch({ url: trimmed });
   }, [goWatch, url]);
 
-  const handleFile = useCallback((file: File | null) => {
-    if (!file) return;
-    if (!file.type.startsWith("video/")) {
-      setError("Поддерживаются только видеофайлы");
-      if (fileRef.current) fileRef.current.value = "";
-      return;
-    }
-    setError(null);
-    // Soft nav keeps the in-memory File (no server upload yet → no OOM from XHR).
-    stashCastLocalFile(file);
-    router.push("/cast/watch?local=1");
-  }, [router]);
+  const handleFile = useCallback(
+    (file: File | null) => {
+      if (!file) return;
+      if (!file.type.startsWith("video/")) {
+        setError("Поддерживаются только видеофайлы");
+        if (fileRef.current) fileRef.current.value = "";
+        return;
+      }
+      setError(null);
+      stashCastLocalFile(file);
+      router.push("/cast/watch?local=1");
+    },
+    [router],
+  );
 
   return (
-    <CastShell title="QHub Cast" subtitle="Видео на TV через Chromecast">
-      <div className="p-4 space-y-5">
-        <section className="space-y-2">
-          <label htmlFor="cast-url" className="text-sm font-medium text-gray-800">
+    <main className="min-h-dvh bg-gray-50 py-8 px-4">
+      <div className="max-w-lg mx-auto space-y-5">
+        <header className="text-center space-y-1">
+          <Link href="/" className="text-xs text-gray-400 hover:text-gray-600">
+            ← На главную QHub
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900">QHub Cast</h1>
+          <p className="text-sm text-gray-500">Видео на TV через Chromecast</p>
+        </header>
+
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 shadow-sm">
+          <label htmlFor="cast-url" className="block text-sm font-medium text-gray-800">
             Ссылка на видео
           </label>
           <input
@@ -62,7 +72,8 @@ export function CastHomeClient() {
             placeholder="https://…/video.m3u8 или Send /s/…"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
+            onKeyDown={(e) => e.key === "Enter" && handleOpenUrl()}
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
           />
           <label className="flex items-center gap-2 text-xs text-gray-600">
             <input
@@ -78,19 +89,19 @@ export function CastHomeClient() {
               placeholder="Пароль Send"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
             />
           )}
           <button
             type="button"
             onClick={handleOpenUrl}
-            className="w-full rounded-xl bg-violet-600 py-2.5 text-sm font-medium text-white hover:bg-violet-700"
+            className="w-full rounded-lg bg-indigo-600 py-2 text-sm font-medium text-white hover:bg-indigo-700"
           >
             Открыть
           </button>
         </section>
 
-        <section className="space-y-2">
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 shadow-sm">
           <p className="text-sm font-medium text-gray-800">Файл с устройства</p>
           <input
             ref={fileRef}
@@ -102,27 +113,28 @@ export function CastHomeClient() {
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            className="w-full rounded-xl border border-gray-200 py-2.5 text-sm font-medium hover:bg-gray-50"
+            className="w-full rounded-lg border border-gray-200 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
           >
             Выбрать видео
           </button>
           <p className="text-xs text-gray-500">
-            Превью на телефоне без загрузки на сервер. На VPS файл попадает только на время Cast и
-            удаляется при смене / отключении / закрытии страницы.
+            Превью локально. На сервер файл уходит только на время Cast и удаляется при смене,
+            отключении или закрытии страницы.
           </p>
         </section>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <aside className="rounded-xl bg-gray-50 p-3 text-xs text-gray-600 space-y-1">
-          <p>Поддерживаются прямые HTTPS-ссылки (.mp4, .m3u8, .mpd), QHub Send и файлы с телефона.</p>
-          <p>YouTube вещается через приложение YouTube на TV — здесь не поддерживается.</p>
-          <p>
-            Cast на TV: Chrome / Edge / Opera на Android или ПК (не iPhone и не PWA с домашнего экрана).
-            Телефон и TV — в одной Wi‑Fi.
+        {error && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
           </p>
+        )}
+
+        <aside className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-xs text-gray-500 space-y-1.5 shadow-sm">
+          <p>HTTPS (.mp4, .m3u8, .mpd), QHub Send и файлы с телефона.</p>
+          <p>YouTube — через приложение YouTube на TV.</p>
+          <p>Cast: Chrome / Edge / Opera на Android или ПК, одна Wi‑Fi с TV.</p>
         </aside>
       </div>
-    </CastShell>
+    </main>
   );
 }

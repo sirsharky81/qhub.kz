@@ -80,12 +80,12 @@ export function CastPlayer({ media, className }: Props) {
     <div className={className}>
       <video
         ref={videoRef}
-        className="w-full aspect-video bg-black rounded-lg"
+        className="w-full aspect-video bg-black"
         controls
         playsInline
         preload="metadata"
       />
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="m-2 text-sm text-red-600">{error}</p>}
     </div>
   );
 }

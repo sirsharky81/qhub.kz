@@ -15,39 +15,38 @@ interface Props {
 
 export function CastShell({ title, subtitle, backHref, onBack, trailing, children }: Props) {
   return (
-    <div className="flex flex-col h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-200/60 text-gray-900">
-      <div className="flex flex-col h-full w-full min-w-0 mx-auto overflow-hidden max-w-lg bg-white shadow-sm md:border-x border-gray-200/70">
-        <header
-          className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur px-3 py-2 flex items-center gap-1.5 shrink-0 pt-[max(0.5rem,env(safe-area-inset-top))]"
-          style={{
-            paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
-            paddingRight: "max(0.75rem, env(safe-area-inset-right))",
-          }}
-        >
-          {backHref && (
-            <Link
-              href={backHref}
-              onClick={() => onBack?.()}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-100 shrink-0 touch-manipulation text-sm"
-              aria-label="Назад"
-            >
-              ←
+    <div className="min-h-dvh bg-gray-50 text-gray-900">
+      <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col">
+        <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <Link href="/" className="text-xs text-gray-400 hover:text-gray-600">
+              ← На главную
             </Link>
-          )}
-          <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-semibold truncate leading-tight">{title}</h1>
-            {subtitle && (
-              <p className="text-[11px] text-gray-500 truncate leading-snug mt-0.5">{subtitle}</p>
-            )}
+            {trailing}
           </div>
-          {trailing}
+          <div className="flex items-center gap-2">
+            {backHref && (
+              <Link
+                href={backHref}
+                onClick={() => onBack?.()}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                aria-label="Назад"
+              >
+                ←
+              </Link>
+            )}
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-base font-semibold leading-tight">{title}</h1>
+              {subtitle && (
+                <p className="mt-0.5 truncate text-xs text-gray-500 leading-snug">{subtitle}</p>
+              )}
+            </div>
+          </div>
         </header>
         <main
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y"
+          className="flex-1 overflow-y-auto px-4 py-4"
           style={{
-            paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
-            paddingLeft: "max(0px, env(safe-area-inset-left))",
-            paddingRight: "max(0px, env(safe-area-inset-right))",
+            paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
           }}
         >
           {children}

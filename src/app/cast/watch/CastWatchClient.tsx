@@ -198,13 +198,15 @@ export function CastWatchClient() {
         {error && <p className="text-sm text-red-600">{error}</p>}
         {previewMedia && (
           <>
-            <h2 className="text-base font-semibold text-gray-900 break-words">{previewMedia.title}</h2>
+            <h2 className="text-sm font-semibold text-gray-900 break-words">{previewMedia.title}</h2>
             {previewMedia.warnings?.map((w) => (
-              <p key={w} className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+              <p key={w} className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 {w}
               </p>
             ))}
-            <CastPlayer media={previewMedia} />
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-black shadow-sm">
+              <CastPlayer media={previewMedia} />
+            </div>
             <input
               ref={fileInputRef}
               type="file"

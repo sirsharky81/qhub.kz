@@ -190,14 +190,13 @@ export function CastRemoteControls({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => void handleCast()}
           disabled={loading || !castReady}
-          className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-violet-700"
+          className="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 hover:bg-indigo-700"
         >
-          <span aria-hidden>📺</span>
           {castLabel}
         </button>
         {canPickOtherVideo && (
@@ -205,7 +204,7 @@ export function CastRemoteControls({
             type="button"
             onClick={onRequestOtherVideo}
             disabled={loading}
-            className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 disabled:opacity-50 hover:bg-gray-50"
+            className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 disabled:opacity-50 hover:bg-gray-50"
           >
             Другое видео
           </button>
@@ -216,7 +215,7 @@ export function CastRemoteControls({
               type="button"
               onClick={() => void handleSwitchDevice()}
               disabled={loading}
-              className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 disabled:opacity-50 hover:bg-gray-50"
+              className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 disabled:opacity-50 hover:bg-gray-50"
             >
               Сменить устройство
             </button>
@@ -224,7 +223,7 @@ export function CastRemoteControls({
               type="button"
               onClick={handleDisconnect}
               disabled={loading}
-              className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 disabled:opacity-50 hover:bg-red-100"
+              className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 disabled:opacity-50 hover:bg-red-100"
             >
               Отключить
             </button>
@@ -257,7 +256,7 @@ function CopyWatchLinkButton() {
   return (
     <button
       type="button"
-      className="text-xs text-violet-700 underline underline-offset-2"
+      className="text-xs text-indigo-600 underline underline-offset-2 hover:text-indigo-700"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(window.location.href);
