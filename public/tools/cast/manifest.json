@@ -1,0 +1,51 @@
+{
+  "name": "QHub Cast",
+  "short_name": "Cast",
+  "description": "Вещание видео на TV через Chromecast — QHub",
+  "start_url": "/cast",
+  "scope": "/cast",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#7c3aed",
+  "theme_color": "#7c3aed",
+  "lang": "ru",
+  "share_target": {
+    "action": "/cast/watch",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "/cast",
+      "accept": {
+        "video/*": [".mp4", ".webm", ".mov", ".mkv", ".m4v"]
+      },
+      "launch_type": "single-client",
+      "icons": [
+        {
+          "src": "/tools/cast/icon-512.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "src": "/tools/cast/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tools/cast/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -341,6 +341,20 @@ export const apps: App[] = [
     sortOrder: 50,
   },
   {
+    id: "cast",
+    title: "QHub Cast",
+    description: "Вещание видео на TV через Chromecast — прямые ссылки, Send и файлы с телефона.",
+    longDescription:
+      "Откройте видео на телефоне или ноутбуке и отправьте на Mi Stick и другие Chromecast-устройства. Поддерживаются HLS/MP4, QHub Send и загрузка с устройства. YouTube — через приложение YouTube.",
+    href: "/cast",
+    tags: ["tools"],
+    icon: "📺",
+    color: "from-violet-500/10 to-violet-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 51,
+  },
+  {
     id: "send",
     title: "QHub Send",
     description: "Отправка файлов по ссылке — как WeTransfer, хранение на NAS.",
