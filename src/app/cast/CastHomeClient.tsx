@@ -45,20 +45,18 @@ export function CastHomeClient() {
       setError(null);
       setUploadPct(0);
       try {
-        const { watchUrl } = await uploadCastFileApi(file, setUploadPct);
-        const path = watchUrl.startsWith("http")
-          ? new URL(watchUrl).pathname + new URL(watchUrl).search
-          : watchUrl;
-        router.push(path);
+        const { uploadId } = await uploadCastFileApi(file, setUploadPct);
+        // Hard navigation: after a large upload, Next soft-nav often OOMs / crashes
+        // Android Chrome ("This page couldn't load") and drops the query string.
+        window.location.assign(`/cast/watch?upload=${encodeURIComponent(uploadId)}`);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Ошибка загрузки");
-      } finally {
         setBusy(false);
         setUploadPct(null);
         if (fileRef.current) fileRef.current.value = "";
       }
     },
-    [router],
+    [],
   );
 
   return (

@@ -35,50 +35,58 @@ export async function resolveCastUploadApi(uploadId: string): Promise<CastResolv
 export async function uploadCastFileApi(
   file: File,
   onProgress?: (pct: number) => void,
-): Promise<{ media: CastResolvedMedia; watchUrl: string }> {
+): Promise<{ media: CastResolvedMedia; watchUrl: string; uploadId: string }> {
   const form = new FormData();
   form.append("file", file);
 
   // XHR: real upload progress + no forced JSON Content-Type (FormData needs multipart boundary).
-  const data = await new Promise<{ media: CastResolvedMedia; watchUrl: string }>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", resolveApiUrl("/api/cast/upload"));
+  const data = await new Promise<{ media: CastResolvedMedia; watchUrl: string; uploadId: string }>(
+    (resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", resolveApiUrl("/api/cast/upload"));
 
-    xhr.upload.addEventListener("progress", (event) => {
-      if (!onProgress) return;
-      if (event.lengthComputable && event.total > 0) {
-        onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
-      }
-    });
+      xhr.upload.addEventListener("progress", (event) => {
+        if (!onProgress) return;
+        if (event.lengthComputable && event.total > 0) {
+          onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+        }
+      });
 
-    xhr.addEventListener("load", () => {
-      const contentType = xhr.getResponseHeader("Content-Type") ?? "";
-      const isJson = contentType.includes("application/json");
-      let payload: { error?: string; media?: CastResolvedMedia; watchUrl?: string } = {};
-      if (isJson) {
-        try {
-          payload = JSON.parse(xhr.responseText) as typeof payload;
-        } catch {
-          reject(new Error("Неверный ответ сервера"));
+      xhr.addEventListener("load", () => {
+        const contentType = xhr.getResponseHeader("Content-Type") ?? "";
+        const isJson = contentType.includes("application/json");
+        let payload: {
+          error?: string;
+          media?: CastResolvedMedia;
+          watchUrl?: string;
+          upload?: { uploadId?: string };
+        } = {};
+        if (isJson) {
+          try {
+            payload = JSON.parse(xhr.responseText) as typeof payload;
+          } catch {
+            reject(new Error("Неверный ответ сервера"));
+            return;
+          }
+        }
+        const uploadId = payload.upload?.uploadId?.trim() ?? "";
+        if (xhr.status >= 200 && xhr.status < 300 && payload.media && payload.watchUrl && uploadId) {
+          onProgress?.(100);
+          resolve({ media: payload.media, watchUrl: payload.watchUrl, uploadId });
           return;
         }
-      }
-      if (xhr.status >= 200 && xhr.status < 300 && payload.media && payload.watchUrl) {
-        onProgress?.(100);
-        resolve({ media: payload.media, watchUrl: payload.watchUrl });
-        return;
-      }
-      if (xhr.status === 413) {
-        reject(new Error(payload.error ?? "Файл слишком большой"));
-        return;
-      }
-      reject(new Error(payload.error ?? "Не удалось загрузить файл"));
-    });
+        if (xhr.status === 413) {
+          reject(new Error(payload.error ?? "Файл слишком большой"));
+          return;
+        }
+        reject(new Error(payload.error ?? "Не удалось загрузить файл"));
+      });
 
-    xhr.addEventListener("error", () => reject(new Error("Нет связи с сервером")));
-    xhr.addEventListener("abort", () => reject(new Error("Загрузка отменена")));
-    xhr.send(form);
-  });
+      xhr.addEventListener("error", () => reject(new Error("Нет связи с сервером")));
+      xhr.addEventListener("abort", () => reject(new Error("Загрузка отменена")));
+      xhr.send(form);
+    },
+  );
 
   return data;
 }
