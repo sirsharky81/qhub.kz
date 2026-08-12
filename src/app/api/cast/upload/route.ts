@@ -1,11 +1,11 @@
 import { withCors } from "@/lib/api/cors";
+import { createCastUploadRecord, purgeCastUploadById, toCastUploadPublicMeta } from "@/lib/cast/upload-store";
 import {
   CAST_MAX_UPLOAD_BYTES_DESKTOP,
   CAST_MAX_UPLOAD_BYTES_MOBILE,
 } from "@/lib/cast/constants";
 import { resolveCastUpload } from "@/lib/cast/resolve";
 import { buildCastWatchUrl } from "@/lib/cast/urls";
-import { createCastUploadRecord, toCastUploadPublicMeta } from "@/lib/cast/upload-store";
 import { isVideoMime } from "@/lib/cast/guard";
 import { getPublicOrigin } from "@/lib/public-origin";
 import { checkCastUploadRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -44,6 +44,8 @@ export async function POST(request: Request) {
       return withCors(Response.json({ error: "Файл не передан" }, { status: 400 }), request);
     }
 
+    const replaceUploadId = String(form.get("replaceUploadId") ?? "").trim();
+
     const limit = maxUploadBytes(request);
     if (file.size <= 0) {
       return withCors(Response.json({ error: "Пустой файл" }, { status: 400 }), request);
@@ -65,6 +67,11 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const record = await createCastUploadRecord(file.name || "video.mp4", mime, file.size, buffer);
+
+    if (replaceUploadId && replaceUploadId !== record.uploadId) {
+      await purgeCastUploadById(replaceUploadId).catch(() => {});
+    }
+
     const origin = getPublicOrigin(request);
     const resolved = await resolveCastUpload(record.uploadId, origin);
 

@@ -6,7 +6,7 @@ UI: [`/cast`](/cast) · API: `/api/cast/*` · код: `src/lib/cast/`, `src/app/
 
 ## Назначение
 
-Пользователь открывает QHub Cast, указывает источник видеo, нажимает **Cast на TV** → выбирает приставку в списке → видео воспроизводится на TV. Ноутбук/телефон остаётся пультом.
+Пользователь открывает QHub Cast, указывает источник видео, нажимает **Cast на TV** → выбирает приставку в списке → видео воспроизводится на TV. Ноутбук/телефон остаётся пультом.
 
 **YouTube не поддерживается** — на Mi Stick для него есть своё приложение с нативным Cast.
 
@@ -16,9 +16,24 @@ UI: [`/cast`](/cast) · API: `/api/cast/*` · код: `src/lib/cast/`, `src/app/
 |----------|--------|-------------------|
 | Прямой HTTPS URL | `https://cdn.example.com/film.m3u8` | resolve → signed token → Cast CDN proxy |
 | QHub Send | `https://www.qhub.kz/s/{shareId}` | meta из Send store, stream через NAS/local |
-| Upload с устройства | файл с телефона | temp file в `.data/cast/uploads/` + Redis metadata |
+| Файл с устройства | video/* с телефона | превью через `blob:` локально; на сервер — только на время Cast |
 
 **Не входит в MVP:** сторонние страницы (cinemar.cc через yt-dlp), room-core sync, Custom Cast Receiver.
+
+## Эфемерные загрузки (не постоянное хранение)
+
+Chromecast требует публичный HTTPS URL, поэтому полностью «только на телефоне» для TV нельзя. Модель:
+
+1. Выбор файла → превью через `URL.createObjectURL` (сервер не трогаем).
+2. **Cast на TV** → `POST /api/cast/upload` пишет файл в **`os.tmpdir()/qhub-cast/{id}`** (+ Redis meta).
+3. Удаление (`DELETE /api/cast/upload/{id}`) при:
+   - **Отключить**
+   - **Другое видео**
+   - «Назад» на `/cast`
+   - `pagehide` / `beforeunload` (закрытие вкладки)
+4. Safety-net TTL Redis: **2 часа** (`CAST_UPLOAD_TTL_SEC`).
+
+Опционально `CAST_LOCAL_ROOT` переопределяет tmp-каталог (по умолчанию не `.data/`).
 
 ## Архитектура
 
@@ -32,7 +47,7 @@ Mi Stick (Default Media Receiver CC1AD845)
 Cast CDN (Next.js API на qhub.kz)
     │  verify HMAC token → upstream
     ▼
-Upstream: CDN / Send NAS / local upload
+Upstream: CDN / Send NAS / ephemeral tmp upload
 ```
 
 **Cast CDN** — ключевой слой. Chromecast на TV не видит cookies браузера и часто не может взять URL напрямую с чужого CDN. Все потоки идут через **HTTPS URL на qhub.kz**:
@@ -41,7 +56,7 @@ Upstream: CDN / Send NAS / local upload
 https://www.qhub.kz/api/cast/stream/{signedToken}
 ```
 
-Токен живёт **4 часа** (`CAST_STREAM_TTL_SEC`).
+Токен для URL/Send живёт **4 часа** (`CAST_STREAM_TTL_SEC`).
 
 ## API
 
@@ -49,7 +64,8 @@ https://www.qhub.kz/api/cast/stream/{signedToken}
 |-------|------|----------|
 | POST | `/api/cast/resolve` | URL / Send / `uploadId` → `{ title, streamUrl, contentType, source, warnings? }` |
 | GET | `/api/cast/stream/[token]` | Range-aware proxy для Chromecast |
-| POST | `/api/cast/upload` | multipart `file` → `{ media, upload, watchUrl }` |
+| POST | `/api/cast/upload` | multipart `file` (+ optional `replaceUploadId`) → `{ media, upload, watchUrl }` |
+| DELETE | `/api/cast/upload/[id]` | удалить эфемерный файл + Redis |
 | GET | `/api/cast/upload/[id]/meta` | метаданные загрузки |
 
 ### Resolve
@@ -68,7 +84,7 @@ https://www.qhub.kz/api/cast/stream/{signedToken}
 
 Логика (`src/lib/cast/resolve.ts`):
 
-1. `uploadId` → lookup Redis + local file
+1. `uploadId` → lookup Redis + tmp file
 2. YouTube URL → reject (`youtube_not_supported`)
 3. Send URL (`/s/{id}`) → проверка transfer, mime `video/*`, пароль
 4. иначе → прямой media URL (`.mp4`, `.m3u8`, `.mpd`, …) + SSRF allowlist
@@ -79,7 +95,7 @@ https://www.qhub.kz/api/cast/stream/{signedToken}
 
 - **`upstreamKind: url`** — fetch upstream с forward `Range`; для `.m3u8` — rewrite сегментов в Cast CDN URLs
 - **`upstreamKind: send`** — `openSendFileStream`, атомарный claim для `recordSendDownload` (одноразовые ссылки)
-- **`upstreamKind: upload`** — read из `.data/cast/uploads/{uploadId}/`
+- **`upstreamKind: upload`** — read из tmp `qhub-cast/{uploadId}/` с реальным byte-range
 
 ## Безопасность
 
@@ -96,10 +112,12 @@ https://www.qhub.kz/api/cast/stream/{signedToken}
 
 | Путь | Компонент | Роль |
 |------|-----------|------|
-| `/cast` | `CastHomeClient` | ввод URL, upload файла |
-| `/cast/watch` | `CastWatchClient` | resolve + preview + Cast |
+| `/cast` | `CastHomeClient` | URL / выбор файла (без upload на сервер) |
+| `/cast/watch` | `CastWatchClient` | preview + пульт + смена видео |
 | — | `CastPlayer` | `<video>` + hls.js для HLS preview |
-| — | `CastRemoteControls` | Google Cast SDK, кнопка «Cast на TV» |
+| — | `CastRemoteControls` | Cast / другое видео / сменить устройство / отключить |
+
+На пульте: **Другое видео**, **Сменить устройство**, **Отключить**. Локальный файл: `/cast/watch?local=1` + in-memory stash.
 
 Cast SDK загружается динамически:
 
@@ -111,16 +129,16 @@ Receiver ID по умолчанию: **Default Media Receiver** `CC1AD845`.
 
 **Ограничение браузеров:** Google Cast Web Sender работает только в **Chrome / Edge / Opera** на Android и ПК. На **iPhone/iPad**, в **Safari**, в **Android WebView (приложение QHub)** и часто в PWA кнопка Cast недоступна — откройте ту же `/cast/watch` ссылку в Chrome на телефоне или ноутбуке.
 
-Stream proxy для upload/Send обязан отдавать **реальный byte-range** (`createReadStream({ start, end })`). Иначе Android `<video>` и Chromecast не играют MP4 (заголовок 206 без среза тела).
+Stream proxy для upload/Send обязан отдавать **реальный byte-range** (`createReadStream({ start, end })`). Иначе Android `<video>` и Chromecast не играют MP4.
 
 ## Redis и хранилище
 
 | Key prefix | Назначение |
 |------------|------------|
-| `cast:upload:{id}` | metadata upload (JSON) |
+| `cast:upload:{id}` | metadata upload (JSON), TTL 2 ч |
 | `cast:stream-started:{streamId}` | атомарный claim первого Range-запроса Send |
 
-Upload files: `CAST_LOCAL_ROOT` или `.data/cast/uploads/` (TTL 4 ч).
+Файлы: `os.tmpdir()/qhub-cast/` или `CAST_LOCAL_ROOT`.
 
 ## Переменные окружения
 
@@ -134,8 +152,8 @@ NEXT_PUBLIC_CAST_RECEIVER_ID=CC1AD845
 # 0 — скрыть Cast UI
 NEXT_PUBLIC_CAST_ENABLED=1
 
-# Опционально: каталог upload на VPS
-# CAST_LOCAL_ROOT=/var/www/qhub.kz/.data/cast/uploads
+# Опционально: переопределить tmp-каталог эфемерных upload
+# CAST_LOCAL_ROOT=/tmp/qhub-cast
 ```
 
 На VPS после первого деплоя рекомендуется добавить `CAST_STREAM_SECRET` в `.env.production` и `pm2 restart qhub --update-env`.

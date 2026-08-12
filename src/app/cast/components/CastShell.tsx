@@ -7,11 +7,13 @@ interface Props {
   title: string;
   subtitle?: ReactNode;
   backHref?: string;
+  /** Called before navigating back (e.g. purge ephemeral upload). */
+  onBack?: () => void;
   trailing?: ReactNode;
   children: ReactNode;
 }
 
-export function CastShell({ title, subtitle, backHref, trailing, children }: Props) {
+export function CastShell({ title, subtitle, backHref, onBack, trailing, children }: Props) {
   return (
     <div className="flex flex-col h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-200/60 text-gray-900">
       <div className="flex flex-col h-full w-full min-w-0 mx-auto overflow-hidden max-w-lg bg-white shadow-sm md:border-x border-gray-200/70">
@@ -25,6 +27,7 @@ export function CastShell({ title, subtitle, backHref, trailing, children }: Pro
           {backHref && (
             <Link
               href={backHref}
+              onClick={() => onBack?.()}
               className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-100 shrink-0 touch-manipulation text-sm"
               aria-label="Назад"
             >

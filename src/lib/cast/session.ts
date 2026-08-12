@@ -1,5 +1,8 @@
 const CAST_PASSWORD_STORAGE_KEY = "qhub_cast_pending_password";
 
+/** In-memory File stash for lazy Cast upload (survives soft nav within the same tab). */
+let pendingLocalFile: File | null = null;
+
 /** Stash a Send password in sessionStorage instead of the URL so it never
  * ends up in browser history, referrer headers, or server access logs. */
 export function stashCastPendingPassword(password: string): void {
@@ -20,4 +23,18 @@ export function takeCastPendingPassword(): string | null {
   } catch {
     return null;
   }
+}
+
+export function stashCastLocalFile(file: File): void {
+  pendingLocalFile = file;
+}
+
+export function takeCastLocalFile(): File | null {
+  const file = pendingLocalFile;
+  pendingLocalFile = null;
+  return file;
+}
+
+export function peekCastLocalFile(): File | null {
+  return pendingLocalFile;
 }

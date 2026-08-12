@@ -1,8 +1,12 @@
-/** Stream token lifetime — 4 hours. */
+/** Stream token lifetime — 4 hours (URL / Send proxy). */
 export const CAST_STREAM_TTL_SEC = 4 * 60 * 60;
 
-/** Upload metadata lifetime in Redis. */
-export const CAST_UPLOAD_TTL_SEC = CAST_STREAM_TTL_SEC;
+/**
+ * Ephemeral upload metadata TTL (safety-net).
+ * Files live in os.tmpdir and are deleted on cast end / video change / pagehide;
+ * Redis TTL only catches abandoned sessions.
+ */
+export const CAST_UPLOAD_TTL_SEC = 2 * 60 * 60;
 
 export const CAST_REDIS_PREFIX = "cast:";
 

@@ -35,9 +35,13 @@ export async function resolveCastUploadApi(uploadId: string): Promise<CastResolv
 export async function uploadCastFileApi(
   file: File,
   onProgress?: (pct: number) => void,
+  options?: { replaceUploadId?: string },
 ): Promise<{ media: CastResolvedMedia; watchUrl: string; uploadId: string }> {
   const form = new FormData();
   form.append("file", file);
+  if (options?.replaceUploadId?.trim()) {
+    form.append("replaceUploadId", options.replaceUploadId.trim());
+  }
 
   // XHR: real upload progress + no forced JSON Content-Type (FormData needs multipart boundary).
   const data = await new Promise<{ media: CastResolvedMedia; watchUrl: string; uploadId: string }>(
@@ -89,4 +93,25 @@ export async function uploadCastFileApi(
   );
 
   return data;
+}
+
+/** Best-effort delete of ephemeral server upload (keepalive for pagehide). */
+export function deleteCastUploadApi(uploadId: string, opts?: { keepalive?: boolean }): void {
+  const id = uploadId.trim();
+  if (!id) return;
+  const url = resolveApiUrl(`/api/cast/upload/${encodeURIComponent(id)}`);
+  void fetch(url, {
+    method: "DELETE",
+    keepalive: opts?.keepalive ?? false,
+    credentials: "same-origin",
+  }).catch(() => {});
+}
+
+export function mediaFromLocalFile(file: File, blobUrl: string): CastResolvedMedia {
+  return {
+    title: file.name || "Видео",
+    streamUrl: blobUrl,
+    contentType: file.type || "video/mp4",
+    source: "upload",
+  };
 }

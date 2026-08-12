@@ -17,11 +17,27 @@ import type { CastResolvedMedia } from "@/lib/cast/types";
 import { isCastEnabled } from "@/lib/cast/urls";
 
 interface Props {
-  media: CastResolvedMedia;
+  previewMedia: CastResolvedMedia;
+  /** Upload (if needed) and return a Chromecast-reachable media URL. */
+  ensureCastMedia: (onProgress?: (pct: number) => void) => Promise<CastResolvedMedia>;
+  uploadPct?: number | null;
+  onUploadPct?: (pct: number | null) => void;
   onError?: (message: string | null) => void;
+  onRequestOtherVideo?: () => void;
+  onDisconnectCleanup?: () => void;
+  canPickOtherVideo?: boolean;
 }
 
-export function CastRemoteControls({ media, onError }: Props) {
+export function CastRemoteControls({
+  previewMedia,
+  ensureCastMedia,
+  uploadPct,
+  onUploadPct,
+  onError,
+  onRequestOtherVideo,
+  onDisconnectCleanup,
+  canPickOtherVideo,
+}: Props) {
   const [support] = useState<CastSenderSupport>(() => getCastSenderSupport());
   const [castReady, setCastReady] = useState(false);
   const [castState, setCastState] = useState("NOT_CONNECTED");
@@ -86,6 +102,8 @@ export function CastRemoteControls({ media, onError }: Props) {
     setLoading(true);
     onError?.(null);
     try {
+      const media = await ensureCastMedia((pct) => onUploadPct?.(pct));
+      onUploadPct?.(null);
       await loadMediaOnCast(media);
       const remote = createRemotePlayerController();
       setMediaOnTv(Boolean(remote?.player.isConnected));
@@ -95,25 +113,29 @@ export function CastRemoteControls({ media, onError }: Props) {
       syncSessionUi();
       onError?.(err instanceof Error ? err.message : "Cast недоступен");
     } finally {
+      onUploadPct?.(null);
       setLoading(false);
     }
-  }, [media, onError, syncSessionUi]);
+  }, [ensureCastMedia, onError, onUploadPct, syncSessionUi]);
 
   const handleDisconnect = useCallback(() => {
     try {
       endCastSession(true);
       setMediaOnTv(false);
       syncSessionUi();
+      onDisconnectCleanup?.();
     } catch (err) {
       onError?.(err instanceof Error ? err.message : "Не удалось отключить");
     }
-  }, [onError, syncSessionUi]);
+  }, [onDisconnectCleanup, onError, syncSessionUi]);
 
   const handleSwitchDevice = useCallback(async () => {
     setLoading(true);
     try {
       setMediaOnTv(false);
       await switchCastDevice();
+      const media = await ensureCastMedia((pct) => onUploadPct?.(pct));
+      onUploadPct?.(null);
       await loadMediaOnCast(media);
       setMediaOnTv(true);
       syncSessionUi();
@@ -122,9 +144,10 @@ export function CastRemoteControls({ media, onError }: Props) {
       syncSessionUi();
       onError?.(err instanceof Error ? err.message : "Не удалось сменить устройство");
     } finally {
+      onUploadPct?.(null);
       setLoading(false);
     }
-  }, [media, onError, syncSessionUi]);
+  }, [ensureCastMedia, onError, onUploadPct, syncSessionUi]);
 
   if (!isCastEnabled()) {
     return <p className="text-xs text-gray-500">Cast отключён на этом сервере.</p>;
@@ -155,6 +178,16 @@ export function CastRemoteControls({ media, onError }: Props) {
     );
   }
 
+  const castLabel = !castReady
+    ? "Подготовка Cast…"
+    : loading
+      ? uploadPct != null
+        ? `Загрузка ${uploadPct}%…`
+        : "Отправка…"
+      : connected
+        ? "Отправить снова"
+        : "Cast на TV";
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
@@ -165,14 +198,18 @@ export function CastRemoteControls({ media, onError }: Props) {
           className="inline-flex items-center gap-2 rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-violet-700"
         >
           <span aria-hidden>📺</span>
-          {!castReady
-            ? "Подготовка Cast…"
-            : loading
-              ? "Отправка…"
-              : connected
-                ? "Отправить снова"
-                : "Cast на TV"}
+          {castLabel}
         </button>
+        {canPickOtherVideo && (
+          <button
+            type="button"
+            onClick={onRequestOtherVideo}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 disabled:opacity-50 hover:bg-gray-50"
+          >
+            Другое видео
+          </button>
+        )}
         {connected && (
           <>
             <button
@@ -200,6 +237,12 @@ export function CastRemoteControls({ media, onError }: Props) {
       </p>
       {mediaOnTv && connected && (
         <p className="text-xs text-emerald-600">Воспроизведение на TV. Этот экран — пульт.</p>
+      )}
+      {previewMedia.streamUrl.startsWith("blob:") && (
+        <p className="text-xs text-gray-500">
+          Локальное превью. На сервер файл уйдёт только при «Cast на TV» и будет удалён после
+          отключения или смены видео.
+        </p>
       )}
       <CopyWatchLinkButton />
       <p className="text-xs text-gray-400">

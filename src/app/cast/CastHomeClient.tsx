@@ -2,8 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
-import { uploadCastFileApi } from "@/lib/cast/client";
-import { stashCastPendingPassword } from "@/lib/cast/session";
+import { stashCastLocalFile, stashCastPendingPassword } from "@/lib/cast/session";
 import { CastShell } from "./components/CastShell";
 
 export function CastHomeClient() {
@@ -12,9 +11,7 @@ export function CastHomeClient() {
   const [url, setUrl] = useState("");
   const [password, setPassword] = useState("");
   const [needsPassword, setNeedsPassword] = useState(false);
-  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const goWatch = useCallback(
     (params: { url?: string }) => {
@@ -38,26 +35,18 @@ export function CastHomeClient() {
     goWatch({ url: trimmed });
   }, [goWatch, url]);
 
-  const handleFile = useCallback(
-    async (file: File | null) => {
-      if (!file) return;
-      setBusy(true);
-      setError(null);
-      setUploadPct(0);
-      try {
-        const { uploadId } = await uploadCastFileApi(file, setUploadPct);
-        // Hard navigation: after a large upload, Next soft-nav often OOMs / crashes
-        // Android Chrome ("This page couldn't load") and drops the query string.
-        window.location.assign(`/cast/watch?upload=${encodeURIComponent(uploadId)}`);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Ошибка загрузки");
-        setBusy(false);
-        setUploadPct(null);
-        if (fileRef.current) fileRef.current.value = "";
-      }
-    },
-    [],
-  );
+  const handleFile = useCallback((file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("video/")) {
+      setError("Поддерживаются только видеофайлы");
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
+    setError(null);
+    // Soft nav keeps the in-memory File (no server upload yet → no OOM from XHR).
+    stashCastLocalFile(file);
+    router.push("/cast/watch?local=1");
+  }, [router]);
 
   return (
     <CastShell title="QHub Cast" subtitle="Видео на TV через Chromecast">
@@ -108,16 +97,19 @@ export function CastHomeClient() {
             type="file"
             accept="video/*"
             className="hidden"
-            onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
           />
           <button
             type="button"
-            disabled={busy}
             onClick={() => fileRef.current?.click()}
-            className="w-full rounded-xl border border-gray-200 py-2.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+            className="w-full rounded-xl border border-gray-200 py-2.5 text-sm font-medium hover:bg-gray-50"
           >
-            {busy ? `Загрузка${uploadPct != null ? ` ${uploadPct}%` : "…"}` : "Выбрать видео"}
+            Выбрать видео
           </button>
+          <p className="text-xs text-gray-500">
+            Превью на телефоне без загрузки на сервер. На VPS файл попадает только на время Cast и
+            удаляется при смене / отключении / закрытии страницы.
+          </p>
         </section>
 
         {error && <p className="text-sm text-red-600">{error}</p>}

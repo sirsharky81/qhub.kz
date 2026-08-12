@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "crypto";
 import { Readable } from "node:stream";
@@ -16,8 +17,11 @@ function uploadKey(uploadId: string): string {
   return `${CAST_UPLOAD_REDIS_PREFIX}${uploadId}`;
 }
 
-function getCastLocalRoot(): string {
-  return process.env.CAST_LOCAL_ROOT?.trim() || path.join(process.cwd(), ".data", "cast", "uploads");
+/** Ephemeral cast uploads — OS temp dir (not durable .data on VPS). */
+export function getCastLocalRoot(): string {
+  const override = process.env.CAST_LOCAL_ROOT?.trim();
+  if (override) return override;
+  return path.join(os.tmpdir(), "qhub-cast");
 }
 
 export function buildCastUploadPath(uploadId: string, filename: string): string {
@@ -92,6 +96,21 @@ export async function purgeCastUpload(record: CastUploadRecord): Promise<void> {
   await castRedisDel(uploadKey(record.uploadId));
   const absDir = path.join(getCastLocalRoot(), record.uploadId);
   await rm(absDir, { force: true, recursive: true }).catch(() => {});
+}
+
+/** Delete by id (Redis meta + tmp files). No-op if missing. */
+export async function purgeCastUploadById(uploadId: string): Promise<boolean> {
+  const id = uploadId.trim();
+  if (!id) return false;
+  const record = await castRedisGetJson<CastUploadRecord>(uploadKey(id));
+  if (record) {
+    await purgeCastUpload(record);
+    return true;
+  }
+  // Redis already gone — still try to remove orphaned tmp dir
+  const absDir = path.join(getCastLocalRoot(), id);
+  await rm(absDir, { force: true, recursive: true }).catch(() => {});
+  return false;
 }
 
 /** Atomically claims the "first request" slot for a stream token.
