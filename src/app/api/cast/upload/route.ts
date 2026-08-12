@@ -24,9 +24,14 @@ export async function POST(request: Request) {
     const ip = getClientIp(request);
     const { allowed, retryAfterSec } = await checkCastUploadRateLimit(`upload:${ip}`);
     if (!allowed) {
+      const waitMin = retryAfterSec ? Math.max(1, Math.ceil(retryAfterSec / 60)) : null;
       return withCors(
         Response.json(
-          { error: "Слишком много загрузок" },
+          {
+            error: waitMin
+              ? `Слишком много загрузок — подождите ~${waitMin} мин.`
+              : "Слишком много загрузок — попробуйте позже",
+          },
           { status: 429, headers: retryAfterSec ? { "Retry-After": String(retryAfterSec) } : undefined },
         ),
         request,

@@ -127,7 +127,10 @@ export function CastHomeClient() {
         <aside className="rounded-xl bg-gray-50 p-3 text-xs text-gray-600 space-y-1">
           <p>Поддерживаются прямые HTTPS-ссылки (.mp4, .m3u8, .mpd), QHub Send и файлы с телефона.</p>
           <p>YouTube вещается через приложение YouTube на TV — здесь не поддерживается.</p>
-          <p>Cast: Chrome, Edge, Opera. Mi Stick и другие Chromecast в одной Wi‑Fi сети.</p>
+          <p>
+            Cast на TV: Chrome / Edge / Opera на Android или ПК (не iPhone и не PWA с домашнего экрана).
+            Телефон и TV — в одной Wi‑Fi.
+          </p>
         </aside>
       </div>
     </CastShell>

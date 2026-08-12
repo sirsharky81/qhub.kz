@@ -109,31 +109,24 @@ async function streamFromSend(payload: CastStreamTokenPayload, request: Request)
     }
   }
 
-  const range = request.headers.get("range");
-  const { stream, sizeBytes } = await openSendFileStream(transfer.filePath);
+  const total = transfer.sizeBytes;
+  const parsed = parseByteRange(request.headers.get("range"), total);
+  const { stream, sizeBytes } = await openSendFileStream(transfer.filePath, parsed ?? undefined);
+  const effectiveTotal = sizeBytes ?? total;
 
   const headers = new Headers({
     "Content-Type": transfer.mime || payload.contentType,
     "Accept-Ranges": "bytes",
     "Cache-Control": "private, no-store",
   });
-  const total = sizeBytes ?? transfer.sizeBytes;
-  if (total > 0) headers.set("Content-Length", String(total));
 
-  if (range && total > 0) {
-    const match = /^bytes=(\d+)-(\d+)?$/.exec(range);
-    if (match) {
-      const start = Number(match[1]);
-      const end = match[2] ? Number(match[2]) : total - 1;
-      if (Number.isFinite(start) && start >= 0 && start < total) {
-        const safeEnd = Math.min(end, total - 1);
-        headers.set("Content-Range", `bytes ${start}-${safeEnd}/${total}`);
-        headers.set("Content-Length", String(safeEnd - start + 1));
-        return new Response(stream, { status: 206, headers });
-      }
-    }
+  if (parsed && effectiveTotal > 0) {
+    headers.set("Content-Range", `bytes ${parsed.start}-${parsed.end}/${effectiveTotal}`);
+    headers.set("Content-Length", String(parsed.end - parsed.start + 1));
+    return new Response(stream, { status: 206, headers });
   }
 
+  if (effectiveTotal > 0) headers.set("Content-Length", String(effectiveTotal));
   return new Response(stream, { status: 200, headers });
 }
 
@@ -147,32 +140,39 @@ async function streamFromUpload(
     return Response.json({ error: "Загрузка не найдена" }, { status: 404 });
   }
 
-  const range = request.headers.get("range");
-  const { stream, sizeBytes } = await openCastUploadStream(record);
+  const total = record.sizeBytes;
+  const parsed = parseByteRange(request.headers.get("range"), total);
+  const { stream, sizeBytes } = await openCastUploadStream(record, parsed ?? undefined);
 
   const headers = new Headers({
-    "Content-Type": record.mime || payload.contentType,
+    "Content-Type": record.mime || payload.contentType || "video/mp4",
     "Accept-Ranges": "bytes",
     "Cache-Control": "private, no-store",
   });
-  const total = sizeBytes;
-  if (total > 0) headers.set("Content-Length", String(total));
 
-  if (range && total > 0) {
-    const match = /^bytes=(\d+)-(\d+)?$/.exec(range);
-    if (match) {
-      const start = Number(match[1]);
-      const end = match[2] ? Number(match[2]) : total - 1;
-      if (Number.isFinite(start) && start >= 0 && start < total) {
-        const safeEnd = Math.min(end, total - 1);
-        headers.set("Content-Range", `bytes ${start}-${safeEnd}/${total}`);
-        headers.set("Content-Length", String(safeEnd - start + 1));
-        return new Response(stream, { status: 206, headers });
-      }
-    }
+  if (parsed && sizeBytes > 0) {
+    headers.set("Content-Range", `bytes ${parsed.start}-${parsed.end}/${sizeBytes}`);
+    headers.set("Content-Length", String(parsed.end - parsed.start + 1));
+    return new Response(stream, { status: 206, headers });
   }
 
+  if (sizeBytes > 0) headers.set("Content-Length", String(sizeBytes));
   return new Response(stream, { status: 200, headers });
+}
+
+/** Parse `Range: bytes=start-end` into inclusive bounds. Returns null if absent/invalid. */
+function parseByteRange(
+  rangeHeader: string | null,
+  total: number,
+): { start: number; end: number } | null {
+  if (!rangeHeader || total <= 0) return null;
+  const match = /^bytes=(\d+)-(\d+)?$/.exec(rangeHeader.trim());
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = match[2] !== undefined ? Number(match[2]) : total - 1;
+  if (!Number.isFinite(start) || start < 0 || start >= total) return null;
+  if (!Number.isFinite(end) || end < start) return null;
+  return { start, end: Math.min(end, total - 1) };
 }
 
 function proxyResponse(upstream: Response): Response {

@@ -109,6 +109,10 @@ https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1
 
 Receiver ID по умолчанию: **Default Media Receiver** `CC1AD845`.
 
+**Ограничение браузеров:** Google Cast Web Sender работает только в **Chrome / Edge / Opera** на Android и ПК. На **iPhone/iPad**, в **Safari**, в **Android WebView (приложение QHub)** и часто в PWA кнопка Cast недоступна — откройте ту же `/cast/watch` ссылку в Chrome на телефоне или ноутбуке.
+
+Stream proxy для upload/Send обязан отдавать **реальный byte-range** (`createReadStream({ start, end })`). Иначе Android `<video>` и Chromecast не играют MP4 (заголовок 206 без среза тела).
+
 ## Redis и хранилище
 
 | Key prefix | Назначение |

@@ -75,7 +75,10 @@ export async function writeSendFile(relativePath: string, data: Buffer): Promise
   await writeFile(abs, data);
 }
 
-export async function openSendFileStream(relativePath: string): Promise<{
+export async function openSendFileStream(
+  relativePath: string,
+  range?: { start: number; end: number },
+): Promise<{
   stream: ReadableStream<Uint8Array>;
   sizeBytes?: number;
 }> {
@@ -84,20 +87,31 @@ export async function openSendFileStream(relativePath: string): Promise<{
     const cfg = getSendWebDavConfig();
     if (!cfg) throw new Error("WebDAV не настроен");
     const fileUrl = `${cfg.baseUrl}/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
-    const res = await webdavRequest(fileUrl, { method: "GET", user: cfg.user, pass: cfg.pass });
-    if (!res.ok) {
+    const headers: HeadersInit = {};
+    if (range) {
+      headers.Range = `bytes=${range.start}-${range.end}`;
+    }
+    const res = await webdavRequest(fileUrl, {
+      method: "GET",
+      user: cfg.user,
+      pass: cfg.pass,
+      headers,
+    });
+    if (!res.ok && res.status !== 206) {
       throw new Error(`WebDAV GET ${res.status}`);
     }
     if (!res.body) throw new Error("WebDAV GET empty body");
     const len = res.headers.get("content-length");
     return {
       stream: res.body,
-      sizeBytes: len ? Number(len) : undefined,
+      sizeBytes: len && !range ? Number(len) : undefined,
     };
   }
 
   const abs = path.join(getSendLocalRoot(), relativePath);
-  const nodeStream = createReadStream(abs);
+  const nodeStream = range
+    ? createReadStream(abs, { start: range.start, end: range.end })
+    : createReadStream(abs);
   const webStream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
   return { stream: webStream };
 }

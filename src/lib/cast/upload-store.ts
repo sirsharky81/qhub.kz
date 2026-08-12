@@ -78,9 +78,12 @@ export function toCastUploadPublicMeta(record: CastUploadRecord): CastUploadPubl
 
 export async function openCastUploadStream(
   record: CastUploadRecord,
+  range?: { start: number; end: number },
 ): Promise<{ stream: ReadableStream<Uint8Array>; sizeBytes: number }> {
   const abs = path.join(getCastLocalRoot(), record.filePath);
-  const nodeStream = createReadStream(abs);
+  const nodeStream = range
+    ? createReadStream(abs, { start: range.start, end: range.end })
+    : createReadStream(abs);
   const webStream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
   return { stream: webStream, sizeBytes: record.sizeBytes };
 }

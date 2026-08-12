@@ -32,7 +32,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:send-upload": { requests: 10, window: "1 h" },
   "qhub:send-download": { requests: 120, window: "1 m" },
   "qhub:cast-resolve": { requests: 30, window: "1 m" },
-  "qhub:cast-upload": { requests: 10, window: "1 h" },
+  "qhub:cast-upload": { requests: 30, window: "1 h" },
 };
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;

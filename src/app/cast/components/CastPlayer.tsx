@@ -20,6 +20,20 @@ export function CastPlayer({ media, className }: Props) {
     let cancelled = false;
     setError(null);
 
+    const onVideoError = () => {
+      const code = video.error?.code;
+      const detail =
+        code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+          ? "Формат не поддерживается этим устройством"
+          : code === MediaError.MEDIA_ERR_NETWORK
+            ? "Ошибка сети при загрузке видео"
+            : code === MediaError.MEDIA_ERR_DECODE
+              ? "Не удалось декодировать видео"
+              : "Не удалось воспроизвести видео";
+      setError(detail);
+    };
+    video.addEventListener("error", onVideoError);
+
     async function attach() {
       hlsRef.current?.destroy();
       hlsRef.current = null;
@@ -56,6 +70,7 @@ export function CastPlayer({ media, className }: Props) {
 
     return () => {
       cancelled = true;
+      video.removeEventListener("error", onVideoError);
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };

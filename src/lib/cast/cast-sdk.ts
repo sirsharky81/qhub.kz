@@ -7,64 +7,159 @@ import { getCastReceiverId } from "./urls";
 // Web Sender SDK live in ./google-cast.d.ts.
 
 const CAST_SCRIPT = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+const CAST_READY_POLL_MS = 50;
+const CAST_READY_TIMEOUT_MS = 10_000;
 
 let loadPromise: Promise<boolean> | null = null;
 
+export type CastSenderSupport =
+  | { ok: true }
+  | { ok: false; reason: "ios" | "safari" | "firefox" | "standalone" | "webview" | "unsupported" };
+
+/** Google Cast Web Sender works in Chromium (Chrome/Edge/Opera) on desktop & Android — not iOS/Safari/WebView. */
+export function getCastSenderSupport(): CastSenderSupport {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return { ok: false, reason: "unsupported" };
+  }
+
+  const ua = navigator.userAgent || "";
+  const isIos =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isIos) return { ok: false, reason: "ios" };
+
+  if (/Firefox\//i.test(ua)) return { ok: false, reason: "firefox" };
+
+  // Desktop Safari (not Chrome/Edge/Opera disguised)
+  const isSafari =
+    /Safari\//i.test(ua) && !/Chrome\//i.test(ua) && !/Chromium\//i.test(ua) && !/Edg\//i.test(ua);
+  if (isSafari) return { ok: false, reason: "safari" };
+
+  // Capacitor / Android WebView — Cast framework is not available
+  if (/; wv\)/i.test(ua) || /\bwv\b/i.test(ua) || /Capacitor/i.test(ua)) {
+    return { ok: false, reason: "webview" };
+  }
+
+  // Installed PWA / TWA: Cast framework often never becomes available
+  const standalone =
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    ("standalone" in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
+  if (standalone) return { ok: false, reason: "standalone" };
+
+  return { ok: true };
+}
+
+export function getCastUnsupportedMessage(
+  reason: Extract<CastSenderSupport, { ok: false }>["reason"],
+): string {
+  switch (reason) {
+    case "ios":
+      return "На iPhone/iPad Cast в браузере недоступен. Откройте эту страницу в Chrome на Android или на ноутбуке (Chrome/Edge) в той же Wi‑Fi.";
+    case "safari":
+      return "Safari не поддерживает Google Cast. Откройте страницу в Chrome или Edge.";
+    case "firefox":
+      return "Firefox не поддерживает Google Cast. Откройте страницу в Chrome или Edge.";
+    case "standalone":
+      return "В установленном приложении (PWA) Cast часто не работает. Откройте qhub.kz/cast в Chrome (не с домашнего экрана).";
+    case "webview":
+      return "В Android-приложении QHub Cast на TV недоступен. Откройте ту же ссылку в Chrome на телефоне или ноутбуке — в одной Wi‑Fi с TV.";
+    default:
+      return "Google Cast недоступен в этом браузере. Нужны Chrome, Edge или Opera на Android/ПК.";
+  }
+}
+
+function isCastFrameworkReady(): boolean {
+  return Boolean(window.cast?.framework?.CastContext && window.chrome?.cast);
+}
+
+function waitForCastFramework(timeoutMs: number): Promise<boolean> {
+  if (isCastFrameworkReady()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      if (isCastFrameworkReady()) {
+        window.clearInterval(id);
+        resolve(true);
+        return;
+      }
+      if (Date.now() - started >= timeoutMs) {
+        window.clearInterval(id);
+        resolve(false);
+      }
+    }, CAST_READY_POLL_MS);
+  });
+}
+
 function loadCastScript(): Promise<boolean> {
   if (typeof window === "undefined") return Promise.resolve(false);
-  if (window.cast?.framework?.CastContext) return Promise.resolve(true);
+  if (isCastFrameworkReady()) return Promise.resolve(true);
   if (loadPromise) return loadPromise;
 
   loadPromise = new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    const prev = window.__onGCastApiAvailable;
     window.__onGCastApiAvailable = (isAvailable) => {
-      resolve(Boolean(isAvailable && window.cast?.framework?.CastContext));
+      try {
+        prev?.(isAvailable);
+      } catch {
+        /* ignore prior callback errors */
+      }
+      if (!isAvailable) {
+        finish(false);
+        return;
+      }
+      void waitForCastFramework(CAST_READY_TIMEOUT_MS).then(finish);
     };
 
     if (document.querySelector(`script[src^="https://www.gstatic.com/cv/js/sender"]`)) {
-      const poll = window.setInterval(() => {
-        if (window.cast?.framework?.CastContext) {
-          window.clearInterval(poll);
-          resolve(true);
-        }
-      }, 100);
-      window.setTimeout(() => {
-        window.clearInterval(poll);
-        resolve(Boolean(window.cast?.framework?.CastContext));
-      }, 8000);
+      void waitForCastFramework(CAST_READY_TIMEOUT_MS).then(finish);
       return;
     }
 
     const script = document.createElement("script");
     script.src = CAST_SCRIPT;
     script.async = true;
-    script.onerror = () => resolve(false);
+    script.onerror = () => finish(false);
     document.head.appendChild(script);
 
     window.setTimeout(() => {
-      resolve(Boolean(window.cast?.framework?.CastContext));
-    }, 8000);
+      finish(isCastFrameworkReady());
+    }, CAST_READY_TIMEOUT_MS);
   });
 
   return loadPromise;
 }
 
 export async function initCastSdk(): Promise<boolean> {
-  const ok = await loadCastScript();
-  if (!ok || !window.cast?.framework?.CastContext || !window.chrome?.cast) return false;
+  if (getCastSenderSupport().ok === false) return false;
 
-  const ctx = window.cast.framework.CastContext.getInstance();
+  const ok = await loadCastScript();
+  if (!ok || !isCastFrameworkReady()) return false;
+
+  const ctx = window.cast!.framework.CastContext.getInstance();
   ctx.setOptions({
     receiverApplicationId: getCastReceiverId(),
-    autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+    autoJoinPolicy: window.chrome!.cast!.AutoJoinPolicy.ORIGIN_SCOPED,
   });
   return true;
 }
 
 export function isCastApiAvailable(): boolean {
-  return Boolean(window.cast?.framework?.CastContext);
+  return isCastFrameworkReady();
 }
 
 export async function loadMediaOnCast(media: CastResolvedMedia): Promise<void> {
+  const support = getCastSenderSupport();
+  if (!support.ok) {
+    throw new Error(getCastUnsupportedMessage(support.reason));
+  }
+
   const ready = await initCastSdk();
   if (!ready || !window.cast?.framework || !window.chrome?.cast) {
     throw new Error("Google Cast недоступен в этом браузере");
@@ -102,9 +197,9 @@ export function createRemotePlayerController(): {
 export function getCastStateLabel(state: string): string {
   switch (state) {
     case "NO_DEVICES_AVAILABLE":
-      return "Устройства Cast не найдены";
+      return "Устройства Cast не найдены — телефон/ПК и TV должны быть в одной Wi‑Fi";
     case "NOT_CONNECTED":
-      return "Не подключено";
+      return "Не подключено — нажмите «Cast на TV» и выберите приставку";
     case "CONNECTING":
       return "Подключение…";
     case "CONNECTED":
