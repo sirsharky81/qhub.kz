@@ -1,6 +1,5 @@
-import { recordSendDownload } from "@/lib/send/store";
+import { getSendTransfer, recordSendDownload } from "@/lib/send/store";
 import { openSendFileStream } from "@/lib/send/storage";
-import { getSendTransfer } from "@/lib/send/store";
 import {
   isHlsPlaylistBody,
   isHlsPlaylistContentType,
@@ -9,12 +8,7 @@ import {
 } from "./hls-rewrite";
 import { verifyCastStreamToken } from "./proxy-token";
 import type { CastSendUpstreamRef, CastStreamTokenPayload, CastUploadUpstreamRef } from "./types";
-import {
-  getCastUploadRecord,
-  markCastSendStreamStarted,
-  openCastUploadStream,
-  wasCastSendStreamStarted,
-} from "./upload-store";
+import { claimCastSendStreamStart, getCastUploadRecord, openCastUploadStream } from "./upload-store";
 
 const FORWARD_REQ = ["range", "if-range"] as const;
 const FORWARD_RES = [
@@ -102,19 +96,17 @@ async function streamFromSend(payload: CastStreamTokenPayload, request: Request)
   if (transfer.revoked || transfer.expiresAt <= Date.now()) {
     return Response.json({ error: "Send-ссылка истекла" }, { status: 410 });
   }
-  if (transfer.passwordHash) {
-    if (!ref.passwordHash || ref.passwordHash !== transfer.passwordHash) {
-      return Response.json({ error: "Неверный пароль" }, { status: 403 });
-    }
-  }
+  // Password was already verified when this token was issued in resolveCastSend —
+  // the signed token itself is the proof of authorization for this shareId.
 
-  const alreadyStarted = await wasCastSendStreamStarted(payload.streamId);
-  if (!alreadyStarted) {
+  // Atomic claim: only the first of possibly-concurrent Range requests for this
+  // stream token records the Send download, avoiding double-consuming one-time links.
+  const claimed = await claimCastSendStreamStart(payload.streamId);
+  if (claimed) {
     const recorded = await recordSendDownload(transfer);
     if (!recorded.ok) {
       return Response.json({ error: recorded.reason }, { status: 410 });
     }
-    await markCastSendStreamStarted(payload.streamId);
   }
 
   const range = request.headers.get("range");

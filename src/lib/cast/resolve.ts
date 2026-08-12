@@ -1,5 +1,4 @@
 import { getPublicOrigin } from "@/lib/public-origin";
-import { hashToken } from "@/lib/share/tokens";
 import { getSendTransfer, verifySendPassword } from "@/lib/send/store";
 import { assertPublicHttpsUrl } from "./allowlist";
 import {
@@ -95,7 +94,6 @@ async function resolveCastSend(
     warnings.push("Одноразовая Send-ссылка будет использована при начале воспроизведения на TV");
   }
 
-  let passwordHash: string | undefined;
   if (transfer.passwordHash) {
     const provided = password?.trim() ?? "";
     if (!provided) {
@@ -105,13 +103,15 @@ async function resolveCastSend(
     if (!ok) {
       throw new CastResolveError("Неверный пароль Send-ссылки", "send_password_invalid");
     }
-    passwordHash = hashToken(provided);
   }
 
+  // The signed stream token is only issued after the password check above passes,
+  // so the token itself is proof of authorization — the stream endpoint does not
+  // need to (and cannot, since Send hashes are salted per-password) re-check it.
   const contentType = transfer.mime || "video/mp4";
   const token = await signCastStreamToken({
     upstreamKind: "send",
-    upstreamRef: { shareId, passwordHash },
+    upstreamRef: { shareId },
     contentType,
     title: transfer.filename,
   });

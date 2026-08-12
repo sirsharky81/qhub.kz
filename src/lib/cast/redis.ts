@@ -1,5 +1,7 @@
 import * as core from "@/lib/redis/commands";
 import { getRedisBackend, parseRedisJsonValue } from "@/lib/redis/commands";
+import { getTcpClient } from "@/lib/redis/tcp";
+import { getUpstashClient } from "@/lib/redis/upstash";
 import { CAST_REDIS_PREFIX } from "./constants";
 
 type MemoryEntry = { value: string; expiresAt: number | null };
@@ -71,14 +73,32 @@ export async function castRedisDel(...keys: string[]): Promise<void> {
   for (const k of keys) memoryStore().delete(k);
 }
 
+/** Atomic SET-if-not-exists — required to avoid double-consuming one-time Send links
+ * when a player issues concurrent overlapping Range requests. */
 export async function castRedisSetNx(
   key: string,
   value: string,
   exSeconds: number,
 ): Promise<boolean> {
   assertAllowedCastRedisKey(key);
-  const existing = await castRedisGet(key);
-  if (existing !== null) return false;
-  await castRedisSet(key, value, exSeconds);
+  const backend = getRedisBackend();
+
+  if (backend === "tcp") {
+    const client = getTcpClient();
+    if (!client) return true;
+    const res = await client.set(key, value, "EX", exSeconds, "NX");
+    return res === "OK";
+  }
+
+  if (backend === "upstash") {
+    const client = getUpstashClient();
+    if (!client) return true;
+    const res = await client.set(key, value, { ex: exSeconds, nx: true });
+    return res === "OK";
+  }
+
+  purgeExpiredMemory();
+  if (memoryStore().has(key)) return false;
+  memoryStore().set(key, { value, expiresAt: Date.now() + exSeconds * 1000 });
   return true;
 }

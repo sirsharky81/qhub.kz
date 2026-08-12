@@ -9,7 +9,7 @@ import {
   CAST_UPLOAD_REDIS_PREFIX,
   CAST_UPLOAD_TTL_SEC,
 } from "./constants";
-import { castRedisDel, castRedisGet, castRedisGetJson, castRedisSet, castRedisSetNx } from "./redis";
+import { castRedisDel, castRedisGetJson, castRedisSet, castRedisSetNx } from "./redis";
 import type { CastUploadPublicMeta, CastUploadRecord } from "./types";
 
 function uploadKey(uploadId: string): string {
@@ -91,13 +91,10 @@ export async function purgeCastUpload(record: CastUploadRecord): Promise<void> {
   await rm(absDir, { force: true, recursive: true }).catch(() => {});
 }
 
-export async function markCastSendStreamStarted(streamId: string): Promise<boolean> {
+/** Atomically claims the "first request" slot for a stream token.
+ * Returns true only for the request that acquired the claim — callers should
+ * record the Send download exactly once, on that first successful claim. */
+export async function claimCastSendStreamStart(streamId: string): Promise<boolean> {
   const key = `${CAST_STREAM_STARTED_PREFIX}${streamId}`;
   return castRedisSetNx(key, "1", CAST_STREAM_TTL_SEC);
-}
-
-export async function wasCastSendStreamStarted(streamId: string): Promise<boolean> {
-  const key = `${CAST_STREAM_STARTED_PREFIX}${streamId}`;
-  const val = await castRedisGet(key);
-  return val !== null;
 }

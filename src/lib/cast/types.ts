@@ -2,7 +2,6 @@ export type CastUpstreamKind = "url" | "send" | "upload";
 
 export interface CastSendUpstreamRef {
   shareId: string;
-  passwordHash?: string;
 }
 
 export interface CastUploadUpstreamRef {

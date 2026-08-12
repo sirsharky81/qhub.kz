@@ -3,101 +3,10 @@
 import type { CastResolvedMedia } from "./types";
 import { getCastReceiverId } from "./urls";
 
-declare global {
-  interface Window {
-    __onGCastApiAvailable?: (isAvailable: boolean) => void;
-    cast?: typeof cast;
-    chrome?: { cast?: typeof chrome.cast };
-  }
-}
+// Ambient `cast` / `chrome.cast` global type declarations for the Google Cast
+// Web Sender SDK live in ./google-cast.d.ts.
 
-declare namespace cast {
-  namespace framework {
-    class CastContext {
-      static getInstance(): CastContext;
-      setOptions(options: CastOptions): void;
-      getCastState(): CastState;
-      addEventListener(type: CastContextEventType, handler: (ev: Event) => void): void;
-      removeEventListener(type: CastContextEventType, handler: (ev: Event) => void): void;
-      requestSession(): Promise<cast.framework.CastSession>;
-      getCurrentSession(): cast.framework.CastSession | null;
-    }
-    class CastSession {
-      loadMedia(request: chrome.cast.media.LoadRequest): Promise<void>;
-    }
-    class RemotePlayer {
-      isConnected: boolean;
-      isMediaLoaded: boolean;
-      playerState: string;
-      currentTime: number;
-      duration: number;
-    }
-    class RemotePlayerController {
-      constructor(player: RemotePlayer);
-      addEventListener(type: RemotePlayerEventType, handler: () => void): void;
-      playOrPause(): void;
-      seek(): void;
-      stop(): void;
-    }
-    enum CastContextEventType {
-      CAST_STATE_CHANGED = "caststatechanged",
-      SESSION_STATE_CHANGED = "sessionstatechanged",
-    }
-    enum RemotePlayerEventType {
-      ANY_CHANGE = "anyChange",
-    }
-    enum CastState {
-      NO_DEVICES_AVAILABLE = "NO_DEVICES_AVAILABLE",
-      NOT_CONNECTED = "NOT_CONNECTED",
-      CONNECTING = "CONNECTING",
-      CONNECTED = "CONNECTED",
-    }
-    enum SessionState {
-      SESSION_STARTED = "SESSION_STARTED",
-      SESSION_ENDED = "SESSION_ENDED",
-    }
-    interface CastOptions {
-      receiverApplicationId: string;
-      autoJoinPolicy: chrome.cast.AutoJoinPolicy;
-    }
-  }
-}
-
-declare namespace chrome {
-  namespace cast {
-    enum AutoJoinPolicy {
-      ORIGIN_SCOPED = "origin_scoped",
-    }
-    namespace media {
-      class MediaInfo {
-        constructor(contentId: string, contentType: string);
-        streamType: StreamType;
-        metadata: GenericMediaMetadata | MovieMediaMetadata;
-      }
-      class LoadRequest {
-        constructor(mediaInfo: MediaInfo);
-        currentTime: number;
-      }
-      class GenericMediaMetadata {
-        title?: string;
-        subtitle?: string;
-        images?: { url: string }[];
-      }
-      class MovieMediaMetadata {
-        title?: string;
-        subtitle?: string;
-        images?: { url: string }[];
-      }
-      enum StreamType {
-        BUFFERED = "BUFFERED",
-        LIVE = "LIVE",
-      }
-    }
-  }
-}
-
-const CAST_SCRIPT =
-  "https://www.gstatic.com/cast/sdk/libs/sender/1.0/cast_framework.js?loadCastFramework=1";
+const CAST_SCRIPT = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
 
 let loadPromise: Promise<boolean> | null = null;
 
@@ -111,7 +20,7 @@ function loadCastScript(): Promise<boolean> {
       resolve(Boolean(isAvailable && window.cast?.framework?.CastContext));
     };
 
-    if (document.querySelector(`script[src^="https://www.gstatic.com/cast/sdk/libs/sender"]`)) {
+    if (document.querySelector(`script[src^="https://www.gstatic.com/cv/js/sender"]`)) {
       const poll = window.setInterval(() => {
         if (window.cast?.framework?.CastContext) {
           window.clearInterval(poll);

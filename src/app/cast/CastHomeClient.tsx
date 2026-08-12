@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 import { uploadCastFileApi } from "@/lib/cast/client";
+import { stashCastPendingPassword } from "@/lib/cast/session";
 import { CastShell } from "./components/CastShell";
 
 export function CastHomeClient() {
@@ -17,9 +18,11 @@ export function CastHomeClient() {
 
   const goWatch = useCallback(
     (params: { url?: string }) => {
+      if (needsPassword && password.trim()) {
+        stashCastPendingPassword(password.trim());
+      }
       const sp = new URLSearchParams();
       sp.set("url", params.url ?? "");
-      if (needsPassword && password.trim()) sp.set("pw", password.trim());
       router.push(`/cast/watch?${sp.toString()}`);
     },
     [needsPassword, password, router],

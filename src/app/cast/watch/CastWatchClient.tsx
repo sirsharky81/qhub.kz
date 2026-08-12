@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { resolveCastUploadApi, resolveCastUrlApi } from "@/lib/cast/client";
+import { takeCastPendingPassword } from "@/lib/cast/session";
 import type { CastResolvedMedia } from "@/lib/cast/types";
 import { CastPlayer } from "../components/CastPlayer";
 import { CastRemoteControls } from "../components/CastRemoteControls";
@@ -12,7 +13,6 @@ export function CastWatchClient() {
   const searchParams = useSearchParams();
   const urlParam = searchParams.get("url")?.trim() ?? "";
   const uploadParam = searchParams.get("upload")?.trim() ?? "";
-  const password = searchParams.get("pw")?.trim() ?? "";
 
   const [media, setMedia] = useState<CastResolvedMedia | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +29,8 @@ export function CastWatchClient() {
         if (uploadParam) {
           resolved = await resolveCastUploadApi(uploadParam);
         } else if (urlParam) {
-          resolved = await resolveCastUrlApi(urlParam, password || undefined);
+          const password = takeCastPendingPassword() ?? undefined;
+          resolved = await resolveCastUrlApi(urlParam, password);
         } else {
           throw new Error("Не указана ссылка или загрузка");
         }
@@ -47,7 +48,7 @@ export function CastWatchClient() {
     return () => {
       cancelled = true;
     };
-  }, [uploadParam, urlParam, password]);
+  }, [uploadParam, urlParam]);
 
   return (
     <CastShell title="QHub Cast" subtitle={media?.title ?? "Просмотр"} backHref="/cast">

@@ -23,16 +23,30 @@ export function CastRemoteControls({ media, onError }: Props) {
 
   useEffect(() => {
     if (!isCastEnabled()) return;
-    void initCastSdk().then(setCastReady);
 
-    const ctx = () => window.cast?.framework?.CastContext.getInstance();
+    let instance: cast.framework.CastContext | null = null;
     const onState = () => {
-      const instance = ctx();
       if (instance) setCastState(String(instance.getCastState()));
     };
 
-    const timer = window.setInterval(onState, 1000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    void initCastSdk().then((ready) => {
+      if (cancelled || !ready || !window.cast?.framework) return;
+      setCastReady(true);
+      instance = window.cast.framework.CastContext.getInstance();
+      onState();
+      instance.addEventListener(window.cast.framework.CastContextEventType.CAST_STATE_CHANGED, onState);
+    });
+
+    return () => {
+      cancelled = true;
+      if (instance) {
+        instance.removeEventListener(
+          window.cast!.framework.CastContextEventType.CAST_STATE_CHANGED,
+          onState,
+        );
+      }
+    };
   }, []);
 
   const handleCast = useCallback(async () => {
