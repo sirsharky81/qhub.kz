@@ -283,3 +283,14 @@ export function addCutRegion(
   if (!isCutWithinKeep(cut, duration, settings)) return null;
   return mergeCutRegions([...settings.cutRegions, cut]);
 }
+
+/** Clone settings with a pending cut applied. Does not mutate `settings`. */
+export function settingsWithPendingCut(
+  settings: ManualEditSettings,
+  duration: number,
+  cut: TrimRegion,
+): ManualEditSettings | null {
+  const cutRegions = addCutRegion(duration, settings, cut);
+  if (!cutRegions) return null;
+  return { ...settings, cutRegions };
+}

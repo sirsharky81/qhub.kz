@@ -122,6 +122,7 @@ export default function MusicEditorClient() {
     seek,
     skip,
     setLoop,
+    wantPlayingRef,
   };
 
   const viewTrackIdx = useMemo(() => {

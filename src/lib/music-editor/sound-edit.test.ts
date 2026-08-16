@@ -12,6 +12,7 @@ import {
   mapResultTimeToSource,
   mapResumeResultTime,
   mapSourceTimeToResult,
+  settingsWithPendingCut,
   upsertEditRegion,
 } from "./selection";
 import { timeStretch, timeStretchPlanar } from "./time-stretch";
@@ -168,5 +169,17 @@ describe("BPM and playback rate", () => {
   it("clamps target BPM to the 0.5×–2× range", () => {
     expect(playbackRateFromBpm(120, 300)).toBe(2);
     expect(playbackRateFromBpm(120, 40)).toBe(0.5);
+  });
+});
+
+describe("pending cut preview", () => {
+  it("shortens duration without mutating committed settings", () => {
+    const settings = createManualSettings();
+    const preview = settingsWithPendingCut(settings, 10, { start: 4, end: 6 });
+    expect(preview).not.toBeNull();
+    expect(settings.cutRegions).toEqual([]);
+    expect(preview?.cutRegions).toEqual([{ start: 4, end: 6 }]);
+    expect(computeResultDuration(10, preview!)).toBeCloseTo(8, 5);
+    expect(mapSourceTimeToResult(7, 10, preview!)).toBeCloseTo(5, 5);
   });
 });

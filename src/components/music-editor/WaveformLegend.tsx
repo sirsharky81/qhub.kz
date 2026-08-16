@@ -14,8 +14,8 @@ export function WaveformLegend({ className = "" }: WaveformLegendProps) {
         Останется
       </span>
       <span className="flex items-center gap-1">
-        <span className="w-3 h-3 rounded-sm bg-indigo-100 border border-indigo-300" />
-        Loop / выделение
+        <span className="w-3 h-3 rounded-sm bg-rose-100 border border-rose-400" />
+        Участок (ручки)
       </span>
       <span className="flex items-center gap-1">
         <span className="w-3 h-3 rounded-sm bg-amber-100 border border-amber-400" />

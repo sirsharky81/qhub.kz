@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { WaveformEditor } from "./WaveformEditor";
 import { PlaybackControls } from "./AudioPlayer";
+import { CutPreviewBar } from "./CutPreviewBar";
 import { ExportPanel } from "./ExportPanel";
 import { HistoryToolbar } from "./HistoryToolbar";
 import { ProgramPanel } from "./ProgramPanel";
 import { TimeField, SecondsField } from "./EditorInputs";
 import { SoundEditPanel } from "./SoundEditPanel";
+import { processSingleTrack } from "@/lib/music-editor/program";
 import { detectBeatGrid } from "@/lib/music-editor/beat-analysis";
 import {
   formatTimePrecise,
@@ -27,6 +29,7 @@ import {
   getPlayheadSourceTime,
   addCutRegion,
   isCutWithinKeep,
+  settingsWithPendingCut,
 } from "@/lib/music-editor/selection";
 import type {
   ActiveObject,
@@ -51,6 +54,7 @@ interface PlayerApi {
   skip: (delta: number) => void;
   setLoop: (region: { start: number; end: number } | null, enabled: boolean) => void;
   load: (buffer: AudioBuffer, opts?: { resetTime?: boolean }) => void;
+  wantPlayingRef: RefObject<boolean>;
 }
 
 interface ManualEditorPanelProps {
@@ -151,8 +155,18 @@ export function ManualEditorPanel({
   const [analyzingBeat, setAnalyzingBeat] = useState(false);
   const [loopRegion, setLoopRegion] = useState<TrimRegion | null>(null);
   const [loopEnabled, setLoopEnabled] = useState(false);
+  const [selStartInput, setSelStartInput] = useState("");
+  const [selEndInput, setSelEndInput] = useState("");
+  const [selStartFocused, setSelStartFocused] = useState(false);
+  const [selEndFocused, setSelEndFocused] = useState(false);
   const [cutError, setCutError] = useState<string | null>(null);
   const [compareMode, setCompareMode] = useState<"result" | "original">("result");
+  const [listenResult, setListenResult] = useState(false);
+  const [cutPreview, setCutPreview] = useState<{
+    buffer: AudioBuffer;
+    settings: ManualEditSettings;
+  } | null>(null);
+  const [cutPreviewBusy, setCutPreviewBusy] = useState(false);
   const compareSeqRef = useRef<{
     phase: "orig" | "result";
     origEnd: number;
@@ -164,25 +178,33 @@ export function ManualEditorPanel({
   const isProgramActive = activeObject.type === "program";
 
   const effEnd = effectiveTrimEnd(settings, track.duration);
-  const finalDuration = resultDuration || computeResultDuration(track.duration, settings);
+  const mappingSettings = cutPreview?.settings ?? settings;
+  const mappingSettingsRef = useRef(mappingSettings);
+  mappingSettingsRef.current = mappingSettings;
+  const previewHasBufferRef = useRef(false);
+  const waveBuffer = cutPreview?.buffer ?? processedBuffer;
+  const finalDuration =
+    cutPreview?.buffer.duration ??
+    (resultDuration || computeResultDuration(track.duration, settings));
   const durationChanged = Math.abs(finalDuration - track.duration) > 0.05;
+  const sourceCompare = compareMode === "original" && !cutPreview;
 
   const playheadOnWave = useMemo(
     () => {
       if (!isTrackActive) return 0;
-      if (compareMode === "original") return player.currentTime;
-      return mapResultTimeToSource(player.currentTime, track.duration, settings);
+      if (sourceCompare) return player.currentTime;
+      return mapResultTimeToSource(player.currentTime, track.duration, mappingSettings);
     },
-    [isTrackActive, compareMode, player.currentTime, track.duration, settings],
+    [isTrackActive, sourceCompare, player.currentTime, track.duration, mappingSettings],
   );
 
   const getPlayheadTime = useCallback(
     () => {
       if (!isTrackActive) return 0;
-      if (compareMode === "original") return player.currentTimeRef.current;
-      return mapResultTimeToSource(player.currentTimeRef.current, track.duration, settings);
+      if (sourceCompare) return player.currentTimeRef.current;
+      return mapResultTimeToSource(player.currentTimeRef.current, track.duration, mappingSettings);
     },
-    [isTrackActive, compareMode, player.currentTimeRef, track.duration, settings],
+    [isTrackActive, sourceCompare, player.currentTimeRef, track.duration, mappingSettings],
   );
 
   const prevTrackIdRef = useRef(track.id);
@@ -194,11 +216,13 @@ export function ManualEditorPanel({
     setLoopEnabled(false);
     setCutError(null);
     setCompareMode("result");
+    setListenResult(false);
+    setCutPreview(null);
     compareSeqRef.current = null;
   }, [track.id]);
 
   useEffect(() => {
-    if (!isTrackActive || !loopRegion || !loopEnabled) {
+    if (listenResult || !isTrackActive || !loopRegion || !loopEnabled) {
       setLoopRef.current(null, false);
       return;
     }
@@ -213,7 +237,7 @@ export function ManualEditorPanel({
       return;
     }
     setLoopRef.current({ start, end }, true);
-  }, [isTrackActive, loopRegion, loopEnabled, track.duration, settings, compareMode]);
+  }, [isTrackActive, loopRegion, loopEnabled, track.duration, settings, compareMode, listenResult]);
 
   const snapLoopTime = useCallback(
     (time: number) => {
@@ -239,34 +263,51 @@ export function ManualEditorPanel({
     }
   }, [effEnd, track.id, endFocused]);
 
+  useEffect(() => {
+    if (!loopRegion) {
+      setSelStartInput("");
+      setSelEndInput("");
+      return;
+    }
+    if (!selStartFocused) setSelStartInput(formatTimePrecise(loopRegion.start));
+    else setSelStartInput(formatTimeMs(loopRegion.start));
+  }, [loopRegion, selStartFocused]);
+
+  useEffect(() => {
+    if (!loopRegion) return;
+    if (!selEndFocused) setSelEndInput(formatTimePrecise(loopRegion.end));
+    else setSelEndInput(formatTimeMs(loopRegion.end));
+  }, [loopRegion, selEndFocused]);
+
   const seekFromSourceTime = useCallback(
     (sourceTime: number) => {
-      if (compareMode === "original") {
+      if (sourceCompare) {
         player.seek(sourceTime);
         return;
       }
-      const resultTime = mapSourceTimeToResult(sourceTime, track.duration, settings);
+      const resultTime = mapSourceTimeToResult(sourceTime, track.duration, mappingSettings);
       player.seek(resultTime);
     },
-    [compareMode, track.duration, settings, player],
+    [sourceCompare, track.duration, mappingSettings, player],
   );
 
   const handleWaveformSeek = (sourceTime: number) => {
     seekFromSourceTime(sourceTime);
   };
 
-  const playheadSource =
-    compareMode === "original"
-      ? player.currentTime
-      : getPlayheadSourceTime(player.currentTime, track.duration, settings);
+  const playheadSource = sourceCompare
+    ? player.currentTime
+    : getPlayheadSourceTime(player.currentTime, track.duration, mappingSettings);
 
   useEffect(() => {
+    if (listenResult) return;
     setCompareMode("result");
     compareSeqRef.current = null;
-  }, [processedBuffer]);
+  }, [processedBuffer, listenResult]);
 
   const switchCompare = useCallback(
     (mode: "result" | "original") => {
+      if (listenResult) return;
       if (mode === compareMode) return;
       compareSeqRef.current = null;
       const playing = player.isPlaying;
@@ -288,11 +329,11 @@ export function ManualEditorPanel({
       if (playing) player.play(resultTime);
       else player.seek(resultTime);
     },
-    [compareMode, player, track.buffer, track.duration, settings, processedBuffer],
+    [compareMode, player, track.buffer, track.duration, settings, processedBuffer, listenResult],
   );
 
   const compareSelection = () => {
-    if (!loopRegion || !processedBuffer) return;
+    if (listenResult || !loopRegion || !processedBuffer) return;
     compareSeqRef.current = {
       phase: "orig",
       origEnd: loopRegion.end,
@@ -307,7 +348,7 @@ export function ManualEditorPanel({
 
   useEffect(() => {
     const seq = compareSeqRef.current;
-    if (!seq || !isTrackActive) return;
+    if (!seq || !isTrackActive || listenResult) return;
     if (seq.phase === "orig" && player.currentTime >= seq.origEnd - 0.04) {
       if (!processedBuffer) {
         compareSeqRef.current = null;
@@ -322,7 +363,7 @@ export function ManualEditorPanel({
       compareSeqRef.current = null;
       player.pause();
     }
-  }, [player.currentTime, processedBuffer, isTrackActive, player]);
+  }, [player.currentTime, processedBuffer, isTrackActive, player, listenResult]);
 
   const nudgeSourcePlayhead = useCallback(
     (deltaSec: number) => {
@@ -400,9 +441,169 @@ export function ManualEditorPanel({
     setCutError(null);
   };
 
-  const handleApplyCut = () => {
+  const ensureSelection = useCallback((): TrimRegion | null => {
+    if (loopRegion) return loopRegion;
+    const t = snapLoopTime(clampTime(playheadSource, track.duration));
+    const start = clampTime(Math.max(settings.trimStart, t - 1), track.duration);
+    const end = clampTime(Math.min(effEnd, Math.max(t + 1, start + 0.5)), track.duration);
+    if (end - start < 0.05) return null;
+    const region = { start, end };
+    setLoopRegion(region);
+    return region;
+  }, [loopRegion, snapLoopTime, playheadSource, track.duration, settings.trimStart, effEnd]);
+
+  const nudgeSelection = (edge: "start" | "end", delta: number) => {
+    setLoopRegion((prev) => {
+      const base =
+        prev ??
+        ({
+          start: clampTime(playheadSource, track.duration),
+          end: clampTime(playheadSource + 1, track.duration),
+        } satisfies TrimRegion);
+      if (edge === "start") {
+        return {
+          start: clampTime(Math.min(base.start + delta, base.end - 0.05), track.duration),
+          end: base.end,
+        };
+      }
+      return {
+        start: base.start,
+        end: clampTime(Math.max(base.end + delta, base.start + 0.05), track.duration),
+      };
+    });
+    setCutError(null);
+  };
+
+  const applySelStartInput = () => {
+    if (!selStartInput.trim()) return;
+    const parsed = parseTimeInput(selStartInput);
+    if (parsed === null) {
+      setCutError("Формат: 00:00.0 или 00:00.000");
+      return;
+    }
+    const t = snapLoopTime(clampTime(parsed, track.duration));
+    setLoopRegion((prev) => {
+      if (!prev) {
+        return {
+          start: t,
+          end: clampTime(Math.min(t + 2, effEnd), track.duration),
+        };
+      }
+      return {
+        start: clampTime(Math.min(t, prev.end - 0.05), track.duration),
+        end: prev.end,
+      };
+    });
+    setCutError(null);
+  };
+
+  const applySelEndInput = () => {
+    if (!selEndInput.trim()) return;
+    const parsed = parseTimeInput(selEndInput);
+    if (parsed === null) {
+      setCutError("Формат: 00:00.0 или 00:00.000");
+      return;
+    }
+    const t = snapLoopTime(clampTime(parsed, track.duration));
+    setLoopRegion((prev) => {
+      if (!prev) {
+        return {
+          start: clampTime(Math.max(t - 2, settings.trimStart), track.duration),
+          end: t,
+        };
+      }
+      return {
+        start: prev.start,
+        end: clampTime(Math.max(t, prev.start + 0.05), track.duration),
+      };
+    });
+    setCutError(null);
+  };
+
+  const closeListenResult = useCallback(() => {
+    const preview = cutPreview;
+    const src = preview
+      ? mapResultTimeToSource(player.currentTimeRef.current, track.duration, preview.settings)
+      : mapResultTimeToSource(player.currentTimeRef.current, track.duration, settings);
+    setListenResult(false);
+    setCutPreview(null);
+    setCutPreviewBusy(false);
+    if (!processedBuffer) return;
+    const resultTime = mapSourceTimeToResult(src, track.duration, settings);
+    const playing = player.wantPlayingRef.current;
+    player.load(processedBuffer, { resetTime: false });
+    if (playing) player.play(resultTime);
+    else player.seek(resultTime);
+  }, [cutPreview, player, track.duration, processedBuffer, settings]);
+
+  useEffect(() => {
+    if (!listenResult) {
+      previewHasBufferRef.current = false;
+      return;
+    }
     if (!loopRegion) return;
-    const next = addCutRegion(track.duration, settings, loopRegion);
+    const previewSettings = settingsWithPendingCut(settings, track.duration, loopRegion);
+    if (!previewSettings) {
+      setCutError("Участок должен быть внутри сохраняемой части (мин. 50 мс)");
+      setCutPreviewBusy(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCutPreviewBusy(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const buffer = await processSingleTrack(track.buffer, previewSettings);
+          if (cancelled) return;
+          const sourceNow = mapResultTimeToSource(
+            player.currentTimeRef.current,
+            track.duration,
+            mappingSettingsRef.current,
+          );
+          const resumeAt = mapSourceTimeToResult(sourceNow, track.duration, previewSettings);
+          const shouldPlay = player.wantPlayingRef.current || !previewHasBufferRef.current;
+          previewHasBufferRef.current = true;
+          setCutPreview({ buffer, settings: previewSettings });
+          setCompareMode("result");
+          player.load(buffer, { resetTime: false });
+          const clamped = Math.min(Math.max(0, resumeAt), Math.max(0, buffer.duration - 0.02));
+          if (shouldPlay) player.play(clamped);
+          else player.seek(clamped);
+        } catch {
+          if (!cancelled) setCutError("Не удалось собрать результат");
+        } finally {
+          if (!cancelled) setCutPreviewBusy(false);
+        }
+      })();
+    }, 140);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [listenResult, loopRegion, settings, track.buffer, track.duration, player]);
+
+  const openListenResult = () => {
+    const region = ensureSelection();
+    if (!region) {
+      setCutError("Сначала отметьте участок на волне");
+      return;
+    }
+    if (!settingsWithPendingCut(settings, track.duration, region)) {
+      setCutError("Участок должен быть внутри сохраняемой части (мин. 50 мс)");
+      return;
+    }
+    setLoopEnabled(false);
+    compareSeqRef.current = null;
+    setCutError(null);
+    setListenResult(true);
+  };
+
+  const handleApplyCut = () => {
+    const region = loopRegion ?? ensureSelection();
+    if (!region) return;
+    const next = addCutRegion(track.duration, settings, region);
     if (!next) {
       setCutError("Участок должен быть внутри сохраняемой части (мин. 50 мс)");
       return;
@@ -412,6 +613,8 @@ export function ManualEditorPanel({
     onEndGesture();
     setLoopRegion(null);
     setLoopEnabled(false);
+    setListenResult(false);
+    setCutPreview(null);
     setCutError(null);
   };
 
@@ -499,13 +702,17 @@ export function ManualEditorPanel({
             cutRegions={settings.cutRegions}
             loopRegion={loopRegion}
             editRegions={settings.editRegions ?? []}
-            processedBuffer={processedBuffer}
+            processedBuffer={waveBuffer}
             resultCurrentTime={
-              compareMode === "result"
-                ? player.currentTime
-                : mapSourceTimeToResult(player.currentTime, track.duration, settings)
+              sourceCompare
+                ? mapSourceTimeToResult(player.currentTime, track.duration, settings)
+                : player.currentTime
             }
             onResultSeek={(t) => {
+              if (listenResult) {
+                player.seek(t);
+                return;
+              }
               if (compareMode === "original") switchCompare("result");
               player.seek(t);
             }}
@@ -521,39 +728,22 @@ export function ManualEditorPanel({
               });
             }}
             onLoopRegionChange={setLoopRegion}
-            height={140}
+            height={156}
           />
 
-          <div className="mt-2 rounded-xl border border-indigo-100 bg-indigo-50/40 p-2 space-y-2">
-            <p className={sectionLabel}>Loop и вырезка</p>
+          <div className="mt-2 rounded-xl border border-rose-100 bg-rose-50/40 p-2 space-y-2">
+            <p className={sectionLabel}>Участок — сначала послушать, потом сохранить</p>
             <div className="flex flex-wrap gap-1">
               <button type="button" onClick={setLoopStartHere} className={btnClass}>
-                Начало loop
+                Начало у курсора
               </button>
               <button type="button" onClick={setLoopEndHere} className={btnClass}>
-                Конец loop
+                Конец у курсора
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  if (!loopRegion) return;
-                  if (!loopEnabled) {
-                    seekFromSourceTime(loopRegion.start);
-                  }
-                  setLoopEnabled((v) => !v);
-                }}
-                disabled={!loopRegion}
-                className={[
-                  btnClass,
-                  loopEnabled ? "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700" : "",
-                  !loopRegion ? "opacity-40" : "",
-                ].join(" ")}
-              >
-                {loopEnabled ? "Loop вкл" : "Loop выкл"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
+                  if (listenResult) closeListenResult();
                   setLoopRegion(null);
                   setLoopEnabled(false);
                   setCutError(null);
@@ -561,7 +751,80 @@ export function ManualEditorPanel({
                 disabled={!loopRegion}
                 className={`${btnClass} disabled:opacity-40`}
               >
-                Сбросить loop
+                Сбросить участок
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!loopRegion || listenResult) return;
+                  if (!loopEnabled) seekFromSourceTime(loopRegion.start);
+                  setLoopEnabled((v) => !v);
+                }}
+                disabled={!loopRegion || listenResult}
+                className={[
+                  btnClass,
+                  loopEnabled && !listenResult ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800" : "",
+                  !loopRegion || listenResult ? "opacity-40" : "",
+                ].join(" ")}
+              >
+                {loopEnabled ? "Повтор вкл" : "Повтор участка"}
+              </button>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] text-gray-500 w-12 shrink-0">Начало</span>
+                <button type="button" onClick={() => nudgeSelection("start", -0.01)} className={btnClass}>
+                  −
+                </button>
+                <TimeField
+                  value={selStartInput}
+                  onChange={setSelStartInput}
+                  onCommit={applySelStartInput}
+                  onFocus={() => setSelStartFocused(true)}
+                  onBlurExtra={() => setSelStartFocused(false)}
+                  className={inputClass}
+                />
+                <button type="button" onClick={() => nudgeSelection("start", 0.01)} className={btnClass}>
+                  +
+                </button>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] text-gray-500 w-12 shrink-0">Конец</span>
+                <button type="button" onClick={() => nudgeSelection("end", -0.01)} className={btnClass}>
+                  −
+                </button>
+                <TimeField
+                  value={selEndInput}
+                  onChange={setSelEndInput}
+                  onCommit={applySelEndInput}
+                  onFocus={() => setSelEndFocused(true)}
+                  onBlurExtra={() => setSelEndFocused(false)}
+                  className={inputClass}
+                />
+                <button type="button" onClick={() => nudgeSelection("end", 0.01)} className={btnClass}>
+                  +
+                </button>
+              </div>
+            </div>
+            {loopRegion && (
+              <p className="text-[11px] font-mono text-rose-700">
+                {formatTimeMs(loopRegion.start)} – {formatTimeMs(loopRegion.end)}
+                <span className="text-rose-500 ml-1">
+                  ({formatTimeMs(loopRegion.end - loopRegion.start)})
+                </span>
+              </p>
+            )}
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={openListenResult}
+                disabled={listenResult}
+                className={[
+                  btnClass,
+                  listenResult ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800" : "",
+                ].join(" ")}
+              >
+                {cutPreviewBusy ? "Готовим результат…" : "Послушать результат"}
               </button>
               <button
                 type="button"
@@ -569,17 +832,13 @@ export function ManualEditorPanel({
                 disabled={!canApplyCut}
                 className={`${btnClass} text-red-600 border-red-200 hover:bg-red-50 disabled:opacity-40`}
               >
-                Вырезать участок
+                Сохранить вырез
               </button>
             </div>
-            {loopRegion && (
-              <p className="text-[11px] font-mono text-indigo-700">
-                Loop: {formatTimeMs(loopRegion.start)} – {formatTimeMs(loopRegion.end)}
-                <span className="text-indigo-500 ml-1">
-                  ({formatTimeMs(loopRegion.end - loopRegion.start)})
-                </span>
-              </p>
-            )}
+            <p className="text-[10px] text-gray-400">
+              Ручки на волне двигают участок. «Послушать результат» играет трек без этого куска, файл
+              не меняется. «Сохранить вырез» записывает правку.
+            </p>
             {settings.cutRegions.length > 0 && (
               <ul className="space-y-1">
                 {settings.cutRegions.map((cut, i) => (
@@ -679,41 +938,76 @@ export function ManualEditorPanel({
           </div>
 
           <div className="mt-2">
-            <PlaybackControls
-              isPlaying={player.isPlaying && isTrackActive}
-              currentTime={isTrackActive ? player.currentTime : 0}
-              duration={
-                isTrackActive
-                  ? compareMode === "original"
-                    ? track.duration
-                    : player.duration || finalDuration
-                  : finalDuration
-              }
-              onPlay={() => !isRendering && isTrackActive && player.play()}
-              onPause={() => player.pause()}
-              onStop={() => player.stop()}
-              onSeek={(t) => isTrackActive && player.seek(t)}
-              onSkipBack={() => isTrackActive && player.skip(-5)}
-              onSkipForward={() => isTrackActive && player.skip(5)}
-              isRendering={isRendering && isTrackActive}
-            />
+            {!listenResult && (
+              <PlaybackControls
+                isPlaying={player.isPlaying && isTrackActive}
+                currentTime={isTrackActive ? player.currentTime : 0}
+                duration={
+                  isTrackActive
+                    ? sourceCompare
+                      ? track.duration
+                      : player.duration || finalDuration
+                    : finalDuration
+                }
+                onPlay={() => !isRendering && isTrackActive && player.play()}
+                onPause={() => player.pause()}
+                onStop={() => player.stop()}
+                onSeek={(t) => isTrackActive && player.seek(t)}
+                onSkipBack={() => isTrackActive && player.skip(-5)}
+                onSkipForward={() => isTrackActive && player.skip(5)}
+                isRendering={isRendering && isTrackActive}
+              />
+            )}
+            {listenResult && (
+              <CutPreviewBar
+                isPlaying={player.isPlaying && isTrackActive}
+                currentTime={isTrackActive ? player.currentTime : 0}
+                duration={cutPreview?.buffer.duration || player.duration || finalDuration}
+                selectionLabel={
+                  loopRegion
+                    ? `${formatTimeMs(loopRegion.start)} – ${formatTimeMs(loopRegion.end)}`
+                    : "участка"
+                }
+                resultLabel={formatTimePrecise(
+                  cutPreview?.buffer.duration || computeResultDuration(track.duration, mappingSettings),
+                )}
+                busy={cutPreviewBusy}
+                canSave={canApplyCut}
+                onPlay={() => isTrackActive && player.play()}
+                onPause={() => player.pause()}
+                onStop={() => player.stop()}
+                onSeek={(t) => isTrackActive && player.seek(t)}
+                onSkipBack={() => isTrackActive && player.skip(-5)}
+                onSkipForward={() => isTrackActive && player.skip(5)}
+                onClose={closeListenResult}
+                onSave={handleApplyCut}
+              />
+            )}
             <div className="flex flex-wrap gap-1 mt-2">
               <button
                 type="button"
                 onClick={() => switchCompare("result")}
+                disabled={listenResult}
                 className={[
                   btnClass,
-                  compareMode === "result" ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800" : "",
+                  !listenResult && compareMode === "result"
+                    ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800"
+                    : "",
+                  listenResult ? "opacity-40" : "",
                 ].join(" ")}
               >
-                Результат
+                Сохранённый результат
               </button>
               <button
                 type="button"
                 onClick={() => switchCompare("original")}
+                disabled={listenResult}
                 className={[
                   btnClass,
-                  compareMode === "original" ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800" : "",
+                  !listenResult && compareMode === "original"
+                    ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800"
+                    : "",
+                  listenResult ? "opacity-40" : "",
                 ].join(" ")}
               >
                 Оригинал
@@ -721,7 +1015,7 @@ export function ManualEditorPanel({
               <button
                 type="button"
                 onClick={compareSelection}
-                disabled={!loopRegion || !processedBuffer}
+                disabled={listenResult || !loopRegion || !processedBuffer}
                 className={`${btnClass} disabled:opacity-40`}
               >
                 Сравнить выделение

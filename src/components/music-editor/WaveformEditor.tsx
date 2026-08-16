@@ -49,6 +49,7 @@ interface WaveformEditorProps {
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 128;
 const MARKER_HIT_PX = 14;
+const SELECTION_HANDLE_HIT_PX = 26;
 const MINIMAP_HEIGHT = 32;
 
 function applySnap(time: number, beatGrid: BeatGrid | null | undefined, snap: boolean): number {
@@ -91,6 +92,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     const [zoom, setZoom] = useState(1);
     const [viewStart, setViewStart] = useState(0);
     const dragRef = useRef<DragTarget>(null);
+    const selectionDragRef = useRef<{ start: number; end: number } | null>(null);
     const [dragPlayheadTime, setDragPlayheadTime] = useState<number | null>(null);
     const [showTooltip, setShowTooltip] = useState(false);
     const [tooltipTime, setTooltipTime] = useState(0);
@@ -320,7 +322,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
       for (const cut of cutRegions) drawRegion(cut.start, cut.end, "rgba(239, 68, 68, 0.25)");
       for (const region of editRegions) drawRegion(region.start, region.end, "rgba(245, 158, 11, 0.22)");
-      if (loopRegion) drawRegion(loopRegion.start, loopRegion.end, "rgba(99, 102, 241, 0.28)");
+      if (loopRegion) drawRegion(loopRegion.start, loopRegion.end, "rgba(244, 63, 94, 0.28)");
       if (trimStart > viewStart) drawRegion(viewStart, trimStart, "rgba(254, 226, 226, 0.75)");
       if (effectiveTrimEnd < viewEnd) drawRegion(effectiveTrimEnd, viewEnd, "rgba(254, 226, 226, 0.75)");
       drawRegion(trimStart, effectiveTrimEnd, "rgba(16, 185, 129, 0.12)");
@@ -358,7 +360,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         const inTrim = isInKeep(t);
 
         if (inCut || !inTrim) ctx.fillStyle = "#fca5a5";
-        else if (inLoop) ctx.fillStyle = "#6366f1";
+        else if (inLoop) ctx.fillStyle = "#e11d48";
         else if (inEdit) ctx.fillStyle = "#d97706";
         else ctx.fillStyle = "#374151";
         ctx.fillRect(x, top, Math.max(1, barWidth - 0.5), bottom - top);
@@ -387,8 +389,33 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       drawMarker(trimStart, "#059669", "▶");
       drawMarker(effectiveTrimEnd, "#dc2626", "◼");
       if (loopRegion) {
-        drawMarker(loopRegion.start, "#4f46e5", "↺");
-        drawMarker(loopRegion.end, "#4f46e5", "↺");
+        const drawSelectionHandle = (time: number) => {
+          const px = timeToX(time, width);
+          if (px < -12 || px > width + 12) return;
+          ctx.strokeStyle = "#e11d48";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(px, 6);
+          ctx.lineTo(px, height - 6);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(px, height / 2, 11, 0, Math.PI * 2);
+          ctx.fillStyle = "#e11d48";
+          ctx.fill();
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.strokeStyle = "rgba(255,255,255,0.9)";
+          ctx.lineWidth = 1.5;
+          ctx.moveTo(px - 3.5, height / 2 - 4);
+          ctx.lineTo(px - 3.5, height / 2 + 4);
+          ctx.moveTo(px + 3.5, height / 2 - 4);
+          ctx.lineTo(px + 3.5, height / 2 + 4);
+          ctx.stroke();
+        };
+        drawSelectionHandle(loopRegion.start);
+        drawSelectionHandle(loopRegion.end);
       }
 
       ctx.font = "9px monospace";
@@ -536,13 +563,15 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       const rect = container.getBoundingClientRect();
       const x = clientX - rect.left;
       const w = rect.width;
-      const near = (time: number) => Math.abs(timeToX(time, w) - x) < MARKER_HIT_PX;
+      const near = (time: number, px = MARKER_HIT_PX) => Math.abs(timeToX(time, w) - x) < px;
 
-      if (near(resolvePlayheadTime())) return "playhead";
+      if (loopRegion && onLoopRegionChange) {
+        if (near(loopRegion.start, SELECTION_HANDLE_HIT_PX)) return "loopStart";
+        if (near(loopRegion.end, SELECTION_HANDLE_HIT_PX)) return "loopEnd";
+      }
       if (near(trimStart)) return "trimStart";
       if (near(effectiveTrimEnd)) return "trimEnd";
-      if (loopRegion && near(loopRegion.start)) return "loopStart";
-      if (loopRegion && near(loopRegion.end)) return "loopEnd";
+      if (near(resolvePlayheadTime())) return "playhead";
       return null;
     };
 
@@ -577,21 +606,29 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           break;
         }
         case "loopStart":
-          if (loopRegion && onLoopRegionChange) {
+          if (onLoopRegionChange) {
+            const origin = selectionDragRef.current ?? loopRegion;
+            if (!origin) break;
             const time = applyTime(rawTime, target);
-            onLoopRegionChange({
-              start: clampTime(Math.min(time, loopRegion.end - 0.01), duration),
-              end: loopRegion.end,
-            });
+            const next = {
+              start: clampTime(Math.min(time, origin.end - 0.01), duration),
+              end: origin.end,
+            };
+            selectionDragRef.current = next;
+            onLoopRegionChange(next);
           }
           break;
         case "loopEnd":
-          if (loopRegion && onLoopRegionChange) {
+          if (onLoopRegionChange) {
+            const origin = selectionDragRef.current ?? loopRegion;
+            if (!origin) break;
             const time = applyTime(rawTime, target);
-            onLoopRegionChange({
-              start: loopRegion.start,
-              end: clampTime(Math.max(time, loopRegion.start + 0.01), duration),
-            });
+            const next = {
+              start: origin.start,
+              end: clampTime(Math.max(time, origin.start + 0.01), duration),
+            };
+            selectionDragRef.current = next;
+            onLoopRegionChange(next);
           }
           break;
         case "playhead":
@@ -612,12 +649,18 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       e.stopPropagation();
       const target = hitTest(e.clientX);
       dragRef.current = target ?? "playhead";
+      if (loopRegion && (target === "loopStart" || target === "loopEnd")) {
+        selectionDragRef.current = { start: loopRegion.start, end: loopRegion.end };
+      } else {
+        selectionDragRef.current = null;
+      }
       e.currentTarget.setPointerCapture(e.pointerId);
       handlePointerMove(e.clientX, true);
     };
 
     const clearDrag = () => {
       dragRef.current = null;
+      selectionDragRef.current = null;
       setDragPlayheadTime(null);
       setShowTooltip(false);
     };
