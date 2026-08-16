@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
 import { formatTimePrecise, formatTimeMs, clampTime, snapToBeat } from "@/lib/music-editor/format";
-import { PeaksLodCache } from "@/lib/music-editor/waveform";
-import type { BeatGrid, TrimRegion } from "@/lib/music-editor/types";
+import { PeaksLodCache, computePeaks } from "@/lib/music-editor/waveform";
+import type { BeatGrid, EditRegion, TrimRegion } from "@/lib/music-editor/types";
+import { describeEditRegion } from "@/lib/music-editor/selection";
 import { WaveformLegend } from "./WaveformLegend";
 
 type DragTarget =
@@ -31,6 +32,10 @@ interface WaveformEditorProps {
   trimEnd: number | null;
   cutRegions: TrimRegion[];
   loopRegion: TrimRegion | null;
+  editRegions?: EditRegion[];
+  processedBuffer?: AudioBuffer | null;
+  resultCurrentTime?: number;
+  onResultSeek?: (time: number) => void;
   beatGrid?: BeatGrid | null;
   snapToBeat?: boolean;
   onSeek: (time: number) => void;
@@ -63,6 +68,10 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       trimEnd,
       cutRegions,
       loopRegion,
+      editRegions = [],
+      processedBuffer = null,
+      resultCurrentTime = 0,
+      onResultSeek,
       beatGrid,
       snapToBeat: snapEnabled = false,
       onSeek,
@@ -76,6 +85,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const minimapRef = useRef<HTMLCanvasElement>(null);
+    const resultCanvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const lodCacheRef = useRef(new PeaksLodCache());
     const [zoom, setZoom] = useState(1);
@@ -223,6 +233,16 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         );
       }
 
+      for (const region of editRegions) {
+        ctx.fillStyle = "rgba(245, 158, 11, 0.4)";
+        ctx.fillRect(
+          mapX(region.start),
+          0,
+          mapX(region.end) - mapX(region.start),
+          MINIMAP_HEIGHT,
+        );
+      }
+
       for (let i = 0; i < peaks.length; i++) {
         const x = i * barW;
         const barH = peaks[i] * (MINIMAP_HEIGHT * 0.7);
@@ -252,6 +272,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       effectiveTrimEnd,
       cutRegions,
       loopRegion,
+      editRegions,
       viewStart,
       viewEnd,
       resolvePlayheadTime,
@@ -298,6 +319,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       ctx.fillRect(0, 0, width, height);
 
       for (const cut of cutRegions) drawRegion(cut.start, cut.end, "rgba(239, 68, 68, 0.25)");
+      for (const region of editRegions) drawRegion(region.start, region.end, "rgba(245, 158, 11, 0.22)");
       if (loopRegion) drawRegion(loopRegion.start, loopRegion.end, "rgba(99, 102, 241, 0.28)");
       if (trimStart > viewStart) drawRegion(viewStart, trimStart, "rgba(254, 226, 226, 0.75)");
       if (effectiveTrimEnd < viewEnd) drawRegion(effectiveTrimEnd, viewEnd, "rgba(254, 226, 226, 0.75)");
@@ -332,10 +354,12 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         const bottom = mid - peak.min * (height * 0.42);
         const inCut = cutRegions.some((c) => t >= c.start && t <= c.end);
         const inLoop = loopRegion ? t >= loopRegion.start && t <= loopRegion.end : false;
+        const inEdit = editRegions.some((r) => t >= r.start && t <= r.end);
         const inTrim = isInKeep(t);
 
         if (inCut || !inTrim) ctx.fillStyle = "#fca5a5";
         else if (inLoop) ctx.fillStyle = "#6366f1";
+        else if (inEdit) ctx.fillStyle = "#d97706";
         else ctx.fillStyle = "#374151";
         ctx.fillRect(x, top, Math.max(1, barWidth - 0.5), bottom - top);
       }
@@ -367,6 +391,15 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         drawMarker(loopRegion.end, "#4f46e5", "↺");
       }
 
+      ctx.font = "9px monospace";
+      for (const region of editRegions) {
+        const x1 = timeToX(Math.max(region.start, viewStart), width);
+        const x2 = timeToX(Math.min(region.end, viewEnd), width);
+        if (x2 - x1 < 8) continue;
+        ctx.fillStyle = "rgba(146, 64, 14, 0.9)";
+        ctx.fillText(describeEditRegion(region), x1 + 4, height - 8);
+      }
+
       const playTime = resolvePlayheadTime();
       const playX = timeToX(playTime, width);
       if (playX >= -8 && playX <= width + 8) {
@@ -391,6 +424,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       effectiveTrimEnd,
       cutRegions,
       loopRegion,
+      editRegions,
       height,
       viewStart,
       viewEnd,
@@ -400,22 +434,81 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       beatGrid,
     ]);
 
+    const resultPeaks = useMemo(() => {
+      if (!processedBuffer) return [];
+      return computePeaks(processedBuffer, 320);
+    }, [processedBuffer]);
+
+    const resultTimeRef = useRef(resultCurrentTime);
+    resultTimeRef.current = resultCurrentTime;
+
+    const drawResult = useCallback(() => {
+      const canvas = resultCanvasRef.current;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const width = container.clientWidth;
+      const stripH = 44;
+      canvas.width = width * dpr;
+      canvas.height = stripH * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${stripH}px`;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, stripH);
+      ctx.fillStyle = "#fffbeb";
+      ctx.fillRect(0, 0, width, stripH);
+
+      if (resultPeaks.length === 0 || !processedBuffer) {
+        ctx.fillStyle = "#b45309";
+        ctx.font = "10px sans-serif";
+        ctx.fillText("Результат появится после обработки", 8, 26);
+        return;
+      }
+
+      const barW = width / resultPeaks.length;
+      const mid = stripH / 2;
+      for (let i = 0; i < resultPeaks.length; i++) {
+        const barH = resultPeaks[i] * (stripH * 0.72);
+        ctx.fillStyle = "#d97706";
+        ctx.fillRect(i * barW, mid - barH / 2, Math.max(1, barW - 0.4), barH);
+      }
+
+      const playX = (Math.max(0, resultTimeRef.current) / processedBuffer.duration) * width;
+      ctx.strokeStyle = "#2563eb";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(playX, 0);
+      ctx.lineTo(playX, stripH);
+      ctx.stroke();
+
+      ctx.fillStyle = "#92400e";
+      ctx.font = "9px sans-serif";
+      ctx.fillText(`После правки · ${formatTimePrecise(processedBuffer.duration)}`, 6, 11);
+    }, [processedBuffer, resultPeaks]);
+
     useEffect(() => {
       draw();
       drawMinimap();
+      drawResult();
       const observer = new ResizeObserver(() => {
         draw();
         drawMinimap();
+        drawResult();
       });
       if (containerRef.current) observer.observe(containerRef.current);
       return () => observer.disconnect();
-    }, [draw, drawMinimap]);
+    }, [draw, drawMinimap, drawResult]);
 
     useEffect(() => {
       if (isPlaying) return;
       draw();
       drawMinimap();
-    }, [isPlaying, currentTime, dragPlayheadTime, draw, drawMinimap]);
+      drawResult();
+    }, [isPlaying, currentTime, dragPlayheadTime, draw, drawMinimap, drawResult]);
 
     useEffect(() => {
       if (!isPlaying) return;
@@ -430,11 +523,12 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         });
         draw();
         drawMinimap();
+        drawResult();
         raf = requestAnimationFrame(loop);
       };
       raf = requestAnimationFrame(loop);
       return () => cancelAnimationFrame(raf);
-    }, [isPlaying, draw, drawMinimap, resolvePlayheadTime, duration, zoom, clampViewStart]);
+    }, [isPlaying, draw, drawMinimap, drawResult, resolvePlayheadTime, duration, zoom, clampViewStart]);
 
     const hitTest = (clientX: number): DragTarget => {
       const container = containerRef.current;
@@ -720,6 +814,19 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               </div>
             )}
           </div>
+          <canvas
+            ref={resultCanvasRef}
+            className="w-full border-t border-amber-200 cursor-pointer touch-none"
+            onPointerDown={(e) => {
+              if (!processedBuffer || !onResultSeek) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+              onResultSeek((x / rect.width) * processedBuffer.duration);
+            }}
+            aria-label="Волна результата"
+          />
           <canvas
             ref={minimapRef}
             className="w-full border-t border-gray-200 cursor-pointer touch-none"

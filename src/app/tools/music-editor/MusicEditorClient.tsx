@@ -24,6 +24,7 @@ import type {
   BeatGrid,
 } from "@/lib/music-editor/types";
 import {
+  createManualSettings,
   DEFAULT_MANUAL_SETTINGS,
   DEFAULT_PROGRAM_TRANSITION,
   MAX_TRACKS,
@@ -35,7 +36,7 @@ function createEmptyEditor(): EditorState {
     manualSettings: [],
     programTrackIds: [],
     transitions: [],
-    programSettings: { ...DEFAULT_MANUAL_SETTINGS },
+    programSettings: createManualSettings(),
     activeObject: { type: "track", trackId: "" },
     viewTrackId: "",
   };
@@ -125,7 +126,7 @@ export default function MusicEditorClient() {
   const viewTrack = tracks[viewTrackIdx] ?? null;
   const viewSettings = manualSettings[viewTrackIdx] ?? DEFAULT_MANUAL_SETTINGS;
 
-  const { resultDuration, programDuration, isRendering } = useProcessedPlayback(
+  const { resultDuration, programDuration, isRendering, processedBuffer } = useProcessedPlayback(
     tracks,
     manualSettings,
     programTrackIds,
@@ -201,10 +202,10 @@ export default function MusicEditorClient() {
           replaceState(
             {
               tracks: loaded,
-              manualSettings: loaded.map(() => ({ ...DEFAULT_MANUAL_SETTINGS })),
+              manualSettings: loaded.map(() => createManualSettings()),
               programTrackIds: [],
               transitions: [],
-              programSettings: { ...DEFAULT_MANUAL_SETTINGS },
+              programSettings: createManualSettings(),
               activeObject: { type: "track", trackId: loaded[0].id },
               viewTrackId: loaded[0].id,
             },
@@ -216,7 +217,7 @@ export default function MusicEditorClient() {
             tracks: [...prev.tracks, ...loaded],
             manualSettings: [
               ...prev.manualSettings,
-              ...loaded.map(() => ({ ...DEFAULT_MANUAL_SETTINGS })),
+              ...loaded.map(() => createManualSettings()),
             ],
           }));
         }
@@ -564,6 +565,7 @@ export default function MusicEditorClient() {
               isRendering={isRendering}
               resultDuration={resultDuration}
               programDuration={programDuration}
+              processedBuffer={processedBuffer}
               player={player}
               canUndo={canUndo}
               canRedo={canRedo}

@@ -5,13 +5,15 @@ import MusicEditorClient from "./MusicEditorClient";
 export const metadata: Metadata = {
   title: "Music Editor — подготовка музыки онлайн | QHub",
   description:
-    "Браузерный редактор музыки для выступлений. Обрезка, склейка треков, fade, crossfade и экспорт MP3/WAV.",
+    "Браузерный редактор музыки для выступлений. Обрезка, склейка, скорость, эквалайзер, fade, crossfade и экспорт MP3/WAV.",
   keywords: [
     "редактор музыки онлайн",
     "обрезать mp3",
     "музыка для фигурного катания",
     "склеить треки",
     "сократить музыку",
+    "скорость музыки",
+    "эквалайзер онлайн",
     "fade in fade out",
     "экспорт mp3",
   ],
@@ -39,7 +41,7 @@ const webAppJsonLd = {
     priceCurrency: "KZT",
   },
   description:
-    "Браузерный редактор музыки: обрезка, склейка, fade, crossfade и сборка программы выступления.",
+    "Браузерный редактор музыки: обрезка, склейка, скорость, эквалайзер, fade, crossfade и сборка программы выступления.",
   provider: {
     "@type": "Organization",
     name: "QHub",

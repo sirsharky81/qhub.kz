@@ -1,4 +1,6 @@
 import type { ManualEditSettings, ProgramTransition } from "./types";
+import { cloneEq, FLAT_EQ } from "./types";
+import { cloneEditRegion } from "./selection";
 
 export interface EditorState {
   tracks: import("./types").AudioTrack[];
@@ -12,11 +14,18 @@ export interface EditorState {
   viewTrackId: string;
 }
 
+export function cloneSettings(settings: ManualEditSettings): ManualEditSettings {
+  return {
+    ...settings,
+    cutRegions: settings.cutRegions.map((c) => ({ ...c })),
+    playbackRate: settings.playbackRate ?? 1,
+    eq: cloneEq(settings.eq ?? FLAT_EQ),
+    editRegions: (settings.editRegions ?? []).map(cloneEditRegion),
+  };
+}
+
 export function cloneManualSettings(settings: ManualEditSettings[]): ManualEditSettings[] {
-  return settings.map((s) => ({
-    ...s,
-    cutRegions: s.cutRegions.map((c) => ({ ...c })),
-  }));
+  return settings.map(cloneSettings);
 }
 
 export function cloneTransitions(transitions: ProgramTransition[]): ProgramTransition[] {
@@ -29,7 +38,7 @@ export function cloneEditorState(state: EditorState): EditorState {
     manualSettings: cloneManualSettings(state.manualSettings),
     programTrackIds: [...state.programTrackIds],
     transitions: cloneTransitions(state.transitions),
-    programSettings: { ...state.programSettings, cutRegions: [] },
+    programSettings: cloneSettings(state.programSettings),
     activeObject: { ...state.activeObject },
     viewTrackId: state.viewTrackId,
   };
@@ -52,6 +61,9 @@ export function settingsFingerprint(
       volume: s.volume,
       fadeIn: s.fadeIn,
       fadeOut: s.fadeOut,
+      playbackRate: s.playbackRate ?? 1,
+      eq: s.eq ?? FLAT_EQ,
+      editRegions: s.editRegions ?? [],
     })),
     programTrackIds,
     transitions,
@@ -61,6 +73,9 @@ export function settingsFingerprint(
       volume: programSettings.volume,
       fadeIn: programSettings.fadeIn,
       fadeOut: programSettings.fadeOut,
+      playbackRate: programSettings.playbackRate ?? 1,
+      eq: programSettings.eq ?? FLAT_EQ,
+      editRegions: programSettings.editRegions ?? [],
     },
     activeObject,
   });

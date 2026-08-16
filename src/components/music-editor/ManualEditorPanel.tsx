@@ -7,6 +7,7 @@ import { ExportPanel } from "./ExportPanel";
 import { HistoryToolbar } from "./HistoryToolbar";
 import { ProgramPanel } from "./ProgramPanel";
 import { TimeField, SecondsField } from "./EditorInputs";
+import { SoundEditPanel } from "./SoundEditPanel";
 import { detectBeatGrid } from "@/lib/music-editor/beat-analysis";
 import {
   formatTimePrecise,
@@ -36,6 +37,7 @@ import type {
   ProgramTransition,
   TrimRegion,
 } from "@/lib/music-editor/types";
+import { cloneEq, FLAT_EQ } from "@/lib/music-editor/types";
 
 interface PlayerApi {
   isPlaying: boolean;
@@ -48,6 +50,7 @@ interface PlayerApi {
   seek: (time: number) => void;
   skip: (delta: number) => void;
   setLoop: (region: { start: number; end: number } | null, enabled: boolean) => void;
+  load: (buffer: AudioBuffer) => void;
 }
 
 interface ManualEditorPanelProps {
@@ -64,6 +67,7 @@ interface ManualEditorPanelProps {
   isRendering: boolean;
   resultDuration: number;
   programDuration: number;
+  processedBuffer: AudioBuffer | null;
   player: PlayerApi;
   canUndo: boolean;
   canRedo: boolean;
@@ -113,6 +117,7 @@ export function ManualEditorPanel({
   isRendering,
   resultDuration,
   programDuration,
+  processedBuffer,
   player,
   canUndo,
   canRedo,
@@ -147,28 +152,37 @@ export function ManualEditorPanel({
   const [loopRegion, setLoopRegion] = useState<TrimRegion | null>(null);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [cutError, setCutError] = useState<string | null>(null);
+  const [compareMode, setCompareMode] = useState<"result" | "original">("result");
+  const compareSeqRef = useRef<{
+    phase: "orig" | "result";
+    origEnd: number;
+    resultStart: number;
+    resultEnd: number;
+  } | null>(null);
 
   const isTrackActive = activeObject.type === "track" && activeObject.trackId === track.id;
   const isProgramActive = activeObject.type === "program";
 
   const effEnd = effectiveTrimEnd(settings, track.duration);
   const finalDuration = resultDuration || computeResultDuration(track.duration, settings);
-  const isTrimmed = finalDuration < track.duration - 0.5;
+  const durationChanged = Math.abs(finalDuration - track.duration) > 0.05;
 
   const playheadOnWave = useMemo(
-    () =>
-      isTrackActive
-        ? mapResultTimeToSource(player.currentTime, track.duration, settings)
-        : 0,
-    [isTrackActive, player.currentTime, track.duration, settings],
+    () => {
+      if (!isTrackActive) return 0;
+      if (compareMode === "original") return player.currentTime;
+      return mapResultTimeToSource(player.currentTime, track.duration, settings);
+    },
+    [isTrackActive, compareMode, player.currentTime, track.duration, settings],
   );
 
   const getPlayheadTime = useCallback(
-    () =>
-      isTrackActive
-        ? mapResultTimeToSource(player.currentTimeRef.current, track.duration, settings)
-        : 0,
-    [isTrackActive, player.currentTimeRef, track.duration, settings],
+    () => {
+      if (!isTrackActive) return 0;
+      if (compareMode === "original") return player.currentTimeRef.current;
+      return mapResultTimeToSource(player.currentTimeRef.current, track.duration, settings);
+    },
+    [isTrackActive, compareMode, player.currentTimeRef, track.duration, settings],
   );
 
   const prevTrackIdRef = useRef(track.id);
@@ -179,11 +193,17 @@ export function ManualEditorPanel({
     setLoopRegion(null);
     setLoopEnabled(false);
     setCutError(null);
+    setCompareMode("result");
+    compareSeqRef.current = null;
   }, [track.id]);
 
   useEffect(() => {
     if (!isTrackActive || !loopRegion || !loopEnabled) {
       setLoopRef.current(null, false);
+      return;
+    }
+    if (compareMode === "original") {
+      setLoopRef.current({ start: loopRegion.start, end: loopRegion.end }, true);
       return;
     }
     const start = mapSourceTimeToResult(loopRegion.start, track.duration, settings);
@@ -193,7 +213,7 @@ export function ManualEditorPanel({
       return;
     }
     setLoopRef.current({ start, end }, true);
-  }, [isTrackActive, loopRegion, loopEnabled, track.duration, settings]);
+  }, [isTrackActive, loopRegion, loopEnabled, track.duration, settings, compareMode]);
 
   const snapLoopTime = useCallback(
     (time: number) => {
@@ -221,17 +241,88 @@ export function ManualEditorPanel({
 
   const seekFromSourceTime = useCallback(
     (sourceTime: number) => {
+      if (compareMode === "original") {
+        player.seek(sourceTime);
+        return;
+      }
       const resultTime = mapSourceTimeToResult(sourceTime, track.duration, settings);
       player.seek(resultTime);
     },
-    [track.duration, settings, player],
+    [compareMode, track.duration, settings, player],
   );
 
   const handleWaveformSeek = (sourceTime: number) => {
     seekFromSourceTime(sourceTime);
   };
 
-  const playheadSource = getPlayheadSourceTime(player.currentTime, track.duration, settings);
+  const playheadSource =
+    compareMode === "original"
+      ? player.currentTime
+      : getPlayheadSourceTime(player.currentTime, track.duration, settings);
+
+  useEffect(() => {
+    setCompareMode("result");
+    compareSeqRef.current = null;
+  }, [processedBuffer]);
+
+  const switchCompare = useCallback(
+    (mode: "result" | "original") => {
+      if (mode === compareMode) return;
+      compareSeqRef.current = null;
+      const playing = player.isPlaying;
+      if (mode === "original") {
+        const src = mapResultTimeToSource(player.currentTime, track.duration, settings);
+        player.load(track.buffer);
+        setCompareMode("original");
+        if (playing) player.play(src);
+        else player.seek(src);
+        return;
+      }
+      if (!processedBuffer) {
+        setCompareMode("result");
+        return;
+      }
+      const resultTime = mapSourceTimeToResult(player.currentTime, track.duration, settings);
+      player.load(processedBuffer);
+      setCompareMode("result");
+      if (playing) player.play(resultTime);
+      else player.seek(resultTime);
+    },
+    [compareMode, player, track.buffer, track.duration, settings, processedBuffer],
+  );
+
+  const compareSelection = () => {
+    if (!loopRegion || !processedBuffer) return;
+    compareSeqRef.current = {
+      phase: "orig",
+      origEnd: loopRegion.end,
+      resultStart: mapSourceTimeToResult(loopRegion.start, track.duration, settings),
+      resultEnd: mapSourceTimeToResult(loopRegion.end, track.duration, settings),
+    };
+    setLoopEnabled(false);
+    setCompareMode("original");
+    player.load(track.buffer);
+    player.play(loopRegion.start);
+  };
+
+  useEffect(() => {
+    const seq = compareSeqRef.current;
+    if (!seq || !isTrackActive) return;
+    if (seq.phase === "orig" && player.currentTime >= seq.origEnd - 0.04) {
+      if (!processedBuffer) {
+        compareSeqRef.current = null;
+        player.pause();
+        return;
+      }
+      seq.phase = "result";
+      setCompareMode("result");
+      player.load(processedBuffer);
+      player.play(seq.resultStart);
+    } else if (seq.phase === "result" && player.currentTime >= seq.resultEnd - 0.04) {
+      compareSeqRef.current = null;
+      player.pause();
+    }
+  }, [player.currentTime, processedBuffer, isTrackActive, player]);
 
   const nudgeSourcePlayhead = useCallback(
     (deltaSec: number) => {
@@ -379,17 +470,11 @@ export function ManualEditorPanel({
     onSettingsChange({ trimEnd: clamped >= track.duration - 0.05 ? null : clamped });
   };
 
-  const sliderGesture = {
-    onPointerDown: onBeginGesture,
-    onPointerUp: onEndGesture,
-    onPointerLeave: onEndGesture,
-  };
-
   return (
     <div className="space-y-3">
-      {isTrimmed && isTrackActive && (
+      {durationChanged && isTrackActive && (
         <p className="text-[11px] text-gray-500 px-0.5">
-          После обрезки: <strong className="text-gray-800">{formatTimePrecise(finalDuration)}</strong>
+          После правки: <strong className="text-gray-800">{formatTimePrecise(finalDuration)}</strong>
           <span className="text-gray-400 ml-1">(было {formatTimePrecise(track.duration)})</span>
         </p>
       )}
@@ -421,6 +506,17 @@ export function ManualEditorPanel({
             trimEnd={settings.trimEnd}
             cutRegions={settings.cutRegions}
             loopRegion={loopRegion}
+            editRegions={settings.editRegions ?? []}
+            processedBuffer={processedBuffer}
+            resultCurrentTime={
+              compareMode === "result"
+                ? player.currentTime
+                : mapSourceTimeToResult(player.currentTime, track.duration, settings)
+            }
+            onResultSeek={(t) => {
+              if (compareMode === "original") switchCompare("result");
+              player.seek(t);
+            }}
             beatGrid={track.beatGrid}
             snapToBeat={snapToBeat}
             onSeek={handleWaveformSeek}
@@ -581,7 +677,13 @@ export function ManualEditorPanel({
             <PlaybackControls
               isPlaying={player.isPlaying && isTrackActive}
               currentTime={isTrackActive ? player.currentTime : 0}
-              duration={isTrackActive ? player.duration || finalDuration : finalDuration}
+              duration={
+                isTrackActive
+                  ? compareMode === "original"
+                    ? track.duration
+                    : player.duration || finalDuration
+                  : finalDuration
+              }
               onPlay={() => !isRendering && isTrackActive && player.play()}
               onPause={() => player.pause()}
               onStop={() => player.stop()}
@@ -590,6 +692,36 @@ export function ManualEditorPanel({
               onSkipForward={() => isTrackActive && player.skip(5)}
               isRendering={isRendering && isTrackActive}
             />
+            <div className="flex flex-wrap gap-1 mt-2">
+              <button
+                type="button"
+                onClick={() => switchCompare("result")}
+                className={[
+                  btnClass,
+                  compareMode === "result" ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800" : "",
+                ].join(" ")}
+              >
+                Результат
+              </button>
+              <button
+                type="button"
+                onClick={() => switchCompare("original")}
+                className={[
+                  btnClass,
+                  compareMode === "original" ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800" : "",
+                ].join(" ")}
+              >
+                Оригинал
+              </button>
+              <button
+                type="button"
+                onClick={compareSelection}
+                disabled={!loopRegion || !processedBuffer}
+                className={`${btnClass} disabled:opacity-40`}
+              >
+                Сравнить выделение
+              </button>
+            </div>
             <div className="flex flex-wrap gap-1 mt-2">
               <button type="button" onClick={() => nudgeSourcePlayhead(-0.1)} className={btnClass}>
                 −100ms
@@ -646,7 +778,17 @@ export function ManualEditorPanel({
               </button>
               <button
                 type="button"
-                onClick={() => onSettingsChange({ trimStart: 0, trimEnd: null, cutRegions: [] })}
+                onClick={() =>
+                  onSettingsChange({
+                    trimStart: 0,
+                    trimEnd: null,
+                    cutRegions: [],
+                    playbackRate: 1,
+                    eq: cloneEq(FLAT_EQ),
+                    editRegions: [],
+                    volume: 1,
+                  })
+                }
                 className={`${btnClass} text-red-600 border-red-200 hover:bg-red-50`}
               >
                 Сбросить всё
@@ -713,20 +855,13 @@ export function ManualEditorPanel({
       </section>
 
       <section className={`${cardClass} ${!isTrackActive ? inactiveClass : ""}`}>
-        <p className={sectionLabel}>Громкость</p>
-        <label className="text-[11px] text-gray-500">
-          Уровень — {Math.round(settings.volume * 100)}%
-        </label>
-        <input
-          type="range"
-          min={0}
-          max={200}
-          value={settings.volume * 100}
-          onChange={(e) =>
-            onSettingsChange({ volume: Number(e.target.value) / 100 }, { skipHistory: true })
-          }
-          {...sliderGesture}
-          className="w-full accent-gray-900 h-1.5"
+        <SoundEditPanel
+          settings={settings}
+          loopRegion={loopRegion}
+          sourceBpm={track.beatGrid?.bpm ?? null}
+          onSettingsChange={onSettingsChange}
+          onBeginGesture={onBeginGesture}
+          onEndGesture={onEndGesture}
         />
       </section>
 

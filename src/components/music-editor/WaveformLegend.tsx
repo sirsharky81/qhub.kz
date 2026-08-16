@@ -18,6 +18,10 @@ export function WaveformLegend({ className = "" }: WaveformLegendProps) {
         Loop / выделение
       </span>
       <span className="flex items-center gap-1">
+        <span className="w-3 h-3 rounded-sm bg-amber-100 border border-amber-400" />
+        Скорость / EQ
+      </span>
+      <span className="flex items-center gap-1">
         <span className="w-3 h-3 rounded-sm bg-red-100 border border-red-300" />
         Вырезано
       </span>

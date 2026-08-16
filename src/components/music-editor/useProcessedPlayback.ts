@@ -26,6 +26,7 @@ export function useProcessedPlayback(
   const [resultDuration, setResultDuration] = useState(0);
   const [programDuration, setProgramDuration] = useState(0);
   const [isRendering, setIsRendering] = useState(false);
+  const [processedBuffer, setProcessedBuffer] = useState<AudioBuffer | null>(null);
   const lastFingerprint = useRef("");
   const playerRef = useRef(player);
   playerRef.current = player;
@@ -76,6 +77,7 @@ export function useProcessedPlayback(
           if (cancelled) return;
           lastFingerprint.current = fingerprint;
           setResultDuration(buffer.duration);
+          setProcessedBuffer(buffer);
           playerRef.current.load(buffer);
         } finally {
           if (!cancelled) setIsRendering(false);
@@ -88,5 +90,5 @@ export function useProcessedPlayback(
     };
   }, [tracks, manualSettings, programTrackIds, transitions, programSettings, activeObject, enabled]);
 
-  return { resultDuration, programDuration, isRendering };
+  return { resultDuration, programDuration, isRendering, processedBuffer };
 }

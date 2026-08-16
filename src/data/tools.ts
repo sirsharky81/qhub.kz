@@ -35,7 +35,7 @@ export const tools: Tool[] = [
     id: "music-editor",
     name: "Music Editor",
     description:
-      "Подготовка музыки для фигурного катания, танцев и выступлений — обрезка, склейка, fade и экспорт.",
+      "Подготовка музыки для фигурного катания, танцев и выступлений — обрезка, скорость, эквалайзер, склейка, fade и экспорт.",
     icon: "Music",
     category: "audio",
     href: "/tools/music-editor",

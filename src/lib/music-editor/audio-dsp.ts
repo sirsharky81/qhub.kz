@@ -98,6 +98,49 @@ export function mixCrossfadeSample(
   return clampSample(prev * fadeOut + next * fadeIn);
 }
 
+/** Concatenate PCM parts with a short crossfade to avoid clicks at joins. */
+export function concatPcmWithCrossfade(
+  parts: Float32Array[],
+  sampleRate: number,
+  fadeSec = 0.008,
+): Float32Array {
+  if (parts.length === 0) return new Float32Array(0);
+  if (parts.length === 1) return parts[0];
+
+  const fadeSamples = Math.max(0, Math.floor(fadeSec * sampleRate));
+  let total = parts[0].length;
+  const fades: number[] = [];
+  for (let i = 1; i < parts.length; i++) {
+    const fade = Math.min(fadeSamples, parts[i - 1].length, parts[i].length);
+    fades.push(fade);
+    total += parts[i].length - fade;
+  }
+
+  const output = new Float32Array(Math.max(1, total));
+  output.set(parts[0], 0);
+  let offset = parts[0].length;
+
+  for (let i = 1; i < parts.length; i++) {
+    const fade = fades[i - 1];
+    const chunk = parts[i];
+    if (fade > 0) {
+      const fadeStart = offset - fade;
+      for (let j = 0; j < fade; j++) {
+        const idx = fadeStart + j;
+        output[idx] = mixCrossfadeSample(output[idx], chunk[j], j, fade);
+      }
+      const rest = chunk.subarray(fade);
+      output.set(rest, offset);
+      offset += rest.length;
+    } else {
+      output.set(chunk, offset);
+      offset += chunk.length;
+    }
+  }
+
+  return output.subarray(0, offset);
+}
+
 /** Sanity checks for unit-style verification (dev / scripts). */
 export function verifyFadeIntegrity(
   data: Float32Array,

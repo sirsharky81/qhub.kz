@@ -23,6 +23,7 @@ import { PlaybackControls } from "./AudioPlayer";
 import { ProgramTimeline } from "./ProgramTimeline";
 import { HistoryToolbar } from "./HistoryToolbar";
 import { TimeField, SecondsField } from "./EditorInputs";
+import { EqEditor, SpeedSlider } from "./SoundEditPanel";
 import {
   formatTimePrecise,
   parseTimePrecise,
@@ -49,7 +50,7 @@ import type {
   ManualEditSettings,
   ProgramTransition,
 } from "@/lib/music-editor/types";
-import { PROGRAM_SEGMENT_COLORS } from "@/lib/music-editor/types";
+import { FLAT_EQ, PROGRAM_SEGMENT_COLORS } from "@/lib/music-editor/types";
 
 interface PlayerApi {
   isPlaying: boolean;
@@ -693,6 +694,23 @@ export function ProgramPanel({
                 }
                 {...sliderGesture}
                 className="w-full accent-gray-900 h-1.5 mt-0.5"
+              />
+            </div>
+
+            <SpeedSlider
+              value={programSettings.playbackRate ?? 1}
+              onChange={(playbackRate, opts) => onProgramSettingsChange({ playbackRate }, opts)}
+              onBeginGesture={onBeginGesture}
+              onEndGesture={onEndGesture}
+            />
+
+            <div>
+              <p className="text-[11px] text-gray-500 mb-1">Эквалайзер программы</p>
+              <EqEditor
+                eq={programSettings.eq ?? FLAT_EQ}
+                onChange={(eq, opts) => onProgramSettingsChange({ eq }, opts)}
+                onBeginGesture={onBeginGesture}
+                onEndGesture={onEndGesture}
               />
             </div>
           </div>
