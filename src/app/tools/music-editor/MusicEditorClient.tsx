@@ -99,9 +99,11 @@ export default function MusicEditorClient() {
     () => ({
       load,
       stop,
+      play,
       isPlaying,
+      currentTime,
     }),
-    [load, stop, isPlaying],
+    [load, stop, play, isPlaying, currentTime],
   );
 
   const player = {

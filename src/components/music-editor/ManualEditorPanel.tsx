@@ -37,7 +37,7 @@ import type {
   ProgramTransition,
   TrimRegion,
 } from "@/lib/music-editor/types";
-import { cloneEq, FLAT_EQ } from "@/lib/music-editor/types";
+import { cloneEq, DEFAULT_SOURCE_BPM, FLAT_EQ, playbackRateFromBpm } from "@/lib/music-editor/types";
 
 interface PlayerApi {
   isPlaying: boolean;
@@ -347,14 +347,6 @@ export function ManualEditorPanel({
     }
   }, [track.buffer, track.id, settings.trimStart, effEnd, onBeatGridChange]);
 
-  const adjustBeatGrid = useCallback(
-    (patch: Partial<BeatGrid>) => {
-      const base = track.beatGrid ?? { bpm: 120, offset: 0, confidence: 0 };
-      onBeatGridChange(track.id, { ...base, ...patch });
-    },
-    [track.beatGrid, track.id, onBeatGridChange],
-  );
-
   useEffect(() => {
     const section = waveSectionRef.current;
     if (!section || !isTrackActive) return;
@@ -624,53 +616,94 @@ export function ManualEditorPanel({
               >
                 {analyzingBeat ? "Анализ…" : "Определить BPM"}
               </button>
-              {track.beatGrid && (
-                <>
-                  <span className="text-[11px] font-mono text-gray-600 px-1">
-                    {Math.round(track.beatGrid.bpm)} BPM ·{" "}
-                    {Math.round(track.beatGrid.confidence * 100)}%
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => adjustBeatGrid({ bpm: track.beatGrid!.bpm - 1 })}
-                    className={btnClass}
-                  >
-                    BPM −
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => adjustBeatGrid({ bpm: track.beatGrid!.bpm + 1 })}
-                    className={btnClass}
-                  >
-                    BPM +
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => adjustBeatGrid({ offset: track.beatGrid!.offset - 0.01 })}
-                    className={btnClass}
-                  >
-                    Сдвиг −10ms
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => adjustBeatGrid({ offset: track.beatGrid!.offset + 0.01 })}
-                    className={btnClass}
-                  >
-                    Сдвиг +10ms
-                  </button>
-                </>
+              {track.beatGrid ? (
+                <span className="text-[11px] font-mono text-gray-600 px-1">
+                  сетка {Math.round(track.beatGrid.bpm)} ·{" "}
+                  {Math.round(track.beatGrid.confidence * 100)}%
+                </span>
+              ) : (
+                <span className="text-[11px] text-gray-400 px-1">сетка {DEFAULT_SOURCE_BPM}</span>
               )}
+              <span className="text-[11px] font-mono text-gray-800 px-1">
+                {Math.round((track.beatGrid?.bpm ?? DEFAULT_SOURCE_BPM) * (settings.playbackRate ?? 1))} BPM
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const source = track.beatGrid?.bpm ?? DEFAULT_SOURCE_BPM;
+                  const current = (settings.playbackRate ?? 1) * source;
+                  onSettingsChange({
+                    playbackRate: playbackRateFromBpm(source, Math.round(current) - 1),
+                  });
+                }}
+                className={btnClass}
+              >
+                BPM −
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const source = track.beatGrid?.bpm ?? DEFAULT_SOURCE_BPM;
+                  const current = (settings.playbackRate ?? 1) * source;
+                  onSettingsChange({
+                    playbackRate: playbackRateFromBpm(source, Math.round(current) + 1),
+                  });
+                }}
+                className={btnClass}
+              >
+                BPM +
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const base = track.beatGrid ?? {
+                    bpm: DEFAULT_SOURCE_BPM,
+                    offset: 0,
+                    confidence: 0,
+                  };
+                  onBeatGridChange(track.id, { ...base, offset: base.offset - 0.01 });
+                }}
+                className={btnClass}
+              >
+                Сдвиг −10ms
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const base = track.beatGrid ?? {
+                    bpm: DEFAULT_SOURCE_BPM,
+                    offset: 0,
+                    confidence: 0,
+                  };
+                  onBeatGridChange(track.id, { ...base, offset: base.offset + 0.01 });
+                }}
+                className={btnClass}
+              >
+                Сдвиг +10ms
+              </button>
               <label className="flex items-center gap-1.5 text-[11px] text-gray-600 ml-auto cursor-pointer">
                 <input
                   type="checkbox"
                   checked={snapToBeat}
-                  onChange={(e) => setSnapToBeat(e.target.checked)}
-                  disabled={!track.beatGrid}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setSnapToBeat(enabled);
+                    if (enabled && !track.beatGrid) {
+                      onBeatGridChange(track.id, {
+                        bpm: DEFAULT_SOURCE_BPM,
+                        offset: 0,
+                        confidence: 0,
+                      });
+                    }
+                  }}
                   className="rounded border-gray-300"
                 />
                 Привязка к такту
               </label>
             </div>
+            <p className="text-[10px] text-gray-400">
+              BPM ± меняет скорость музыки. «Определить BPM» уточняет исходный темп для сетки.
+            </p>
           </div>
 
           <div className="mt-2">

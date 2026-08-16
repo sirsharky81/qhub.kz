@@ -10,7 +10,9 @@ import { DEFAULT_MANUAL_SETTINGS } from "@/lib/music-editor/types";
 interface ProcessedPlaybackPlayer {
   load: (buffer: AudioBuffer) => void;
   stop: () => void;
+  play: (from?: number) => void;
   isPlaying: boolean;
+  currentTime: number;
 }
 
 export function useProcessedPlayback(
@@ -50,6 +52,8 @@ export function useProcessedPlayback(
       if (cancelled) return;
 
       void (async () => {
+        const wasPlaying = playerRef.current.isPlaying;
+        const resumeAt = playerRef.current.currentTime;
         playerRef.current.stop();
         if (cancelled) return;
         setIsRendering(true);
@@ -79,6 +83,9 @@ export function useProcessedPlayback(
           setResultDuration(buffer.duration);
           setProcessedBuffer(buffer);
           playerRef.current.load(buffer);
+          if (wasPlaying) {
+            playerRef.current.play(Math.min(resumeAt, Math.max(0, buffer.duration - 0.05)));
+          }
         } finally {
           if (!cancelled) setIsRendering(false);
         }

@@ -13,6 +13,7 @@ import {
   clampEqGain,
   clampPlaybackRate,
   cloneEq,
+  DEFAULT_SOURCE_BPM,
   FLAT_EQ,
   MAX_PLAYBACK_RATE,
   MIN_PLAYBACK_RATE,
@@ -63,40 +64,36 @@ export function SpeedSlider({
   onBeginGesture,
   onEndGesture,
   sourceBpm = null,
-  bpmHint,
 }: {
   value: number;
   onChange: (rate: number, opts?: { skipHistory?: boolean }) => void;
   onBeginGesture: () => void;
   onEndGesture: () => void;
   sourceBpm?: number | null;
-  bpmHint?: string;
 }) {
   const percent = Math.round(value * 100);
-  const hasBpm = Boolean(sourceBpm && sourceBpm > 0);
-  const targetBpm = hasBpm ? bpmFromPlaybackRate(sourceBpm!, value) : null;
+  const source = sourceBpm && sourceBpm > 0 ? sourceBpm : DEFAULT_SOURCE_BPM;
+  const assumedSource = !(sourceBpm && sourceBpm > 0);
+  const targetBpm = bpmFromPlaybackRate(source, value);
   const [bpmInput, setBpmInput] = useState("");
   const [bpmFocused, setBpmFocused] = useState(false);
 
   useEffect(() => {
-    if (!bpmFocused && targetBpm != null) {
-      setBpmInput(formatBpm(targetBpm));
-    }
+    if (!bpmFocused) setBpmInput(formatBpm(targetBpm));
   }, [targetBpm, bpmFocused]);
 
   const applyTargetBpm = (raw: string) => {
-    if (!hasBpm || sourceBpm == null) return;
     const parsed = Number(raw.replace(",", "."));
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      setBpmInput(formatBpm(bpmFromPlaybackRate(sourceBpm, value)));
+      setBpmInput(formatBpm(targetBpm));
       return;
     }
-    onChange(playbackRateFromBpm(sourceBpm, parsed));
+    onChange(playbackRateFromBpm(source, parsed));
   };
 
   const nudgeBpm = (delta: number) => {
-    if (!hasBpm || sourceBpm == null || targetBpm == null) return;
-    onChange(playbackRateFromBpm(sourceBpm, targetBpm + delta));
+    const next = Math.round(targetBpm) + delta;
+    onChange(playbackRateFromBpm(source, next));
   };
 
   return (
@@ -144,39 +141,42 @@ export function SpeedSlider({
         ))}
       </div>
 
-      {hasBpm && targetBpm != null && sourceBpm != null ? (
-        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-          <span className="text-[11px] text-gray-500">{formatBpm(sourceBpm)} →</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={bpmInput}
-            onChange={(e) => setBpmInput(e.target.value.replace(/[^\d.,]/g, ""))}
-            onFocus={() => setBpmFocused(true)}
-            onBlur={() => {
-              setBpmFocused(false);
-              applyTargetBpm(bpmInput);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-            }}
-            className="w-14 px-1.5 py-1 font-mono text-[11px] text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400"
-            aria-label="Целевой BPM"
-          />
-          <span className="text-[11px] text-gray-500">BPM</span>
-          <button type="button" className={btnClass} onClick={() => nudgeBpm(-1)}>
-            BPM −
-          </button>
-          <button type="button" className={btnClass} onClick={() => nudgeBpm(1)}>
-            BPM +
-          </button>
-          <span className="text-[10px] text-gray-400">
-            {formatBpm(sourceBpm * MIN_PLAYBACK_RATE)}–{formatBpm(sourceBpm * MAX_PLAYBACK_RATE)}
+      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+        <span className="text-[11px] text-gray-500">
+          {formatBpm(source)} →
+        </span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={bpmInput}
+          onChange={(e) => setBpmInput(e.target.value.replace(/[^\d.,]/g, ""))}
+          onFocus={() => setBpmFocused(true)}
+          onBlur={() => {
+            setBpmFocused(false);
+            applyTargetBpm(bpmInput);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+          className="w-14 px-1.5 py-1 font-mono text-[11px] text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400"
+          aria-label="Целевой BPM"
+        />
+        <span className="text-[11px] text-gray-500">BPM</span>
+        <button type="button" className={btnClass} onClick={() => nudgeBpm(-1)}>
+          BPM −
+        </button>
+        <button type="button" className={btnClass} onClick={() => nudgeBpm(1)}>
+          BPM +
+        </button>
+        <span className="text-[10px] text-gray-400">
+          {formatBpm(source * MIN_PLAYBACK_RATE)}–{formatBpm(source * MAX_PLAYBACK_RATE)}
+        </span>
+        {assumedSource && (
+          <span className="text-[10px] text-gray-400 w-full">
+            Исходный темп 120, пока нет анализа. «Определить BPM» уточнит сетку.
           </span>
-        </div>
-      ) : bpmHint ? (
-        <p className="text-[11px] text-gray-400">{bpmHint}</p>
-      ) : null}
+        )}
+      </div>
     </div>
   );
 }
@@ -370,7 +370,6 @@ export function SoundEditPanel({
         onBeginGesture={onBeginGesture}
         onEndGesture={onEndGesture}
         sourceBpm={sourceBpm}
-        bpmHint="Чтобы задать темп в BPM, сначала нажмите «Определить BPM» в блоке «Ритм»."
       />
 
       <div>

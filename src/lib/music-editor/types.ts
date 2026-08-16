@@ -96,6 +96,7 @@ export const MAX_TRACKS = 10;
 export const MIN_PLAYBACK_RATE = 0.5;
 export const MAX_PLAYBACK_RATE = 2;
 export const PLAYBACK_RATE_PRESETS = [0.75, 0.9, 1, 1.1, 1.25] as const;
+export const DEFAULT_SOURCE_BPM = 120;
 export const EQ_MIN_DB = -12;
 export const EQ_MAX_DB = 12;
 
