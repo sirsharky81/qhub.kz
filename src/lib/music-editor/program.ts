@@ -198,6 +198,11 @@ function concatWithTransitions(
     }
   }
 
+  const result = output.slice(0, offset);
+  clampBuffer(result);
+  return result;
+}
+
 function concatWithTransitionsPlanar(
   chunks: Float32Array[][],
   transitions: ProgramTransition[],
