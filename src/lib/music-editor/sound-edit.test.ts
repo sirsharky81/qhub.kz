@@ -182,4 +182,25 @@ describe("pending cut preview", () => {
     expect(computeResultDuration(10, preview!)).toBeCloseTo(8, 5);
     expect(mapSourceTimeToResult(7, 10, preview!)).toBeCloseTo(5, 5);
   });
+
+  it("allows cutting from the start of the track", () => {
+    const settings = createManualSettings();
+    const preview = settingsWithPendingCut(settings, 10, { start: 0, end: 2 });
+    expect(preview).not.toBeNull();
+    expect(computeResultDuration(10, preview!)).toBeCloseTo(8, 5);
+    expect(mapSourceTimeToResult(3, 10, preview!)).toBeCloseTo(1, 5);
+  });
+
+  it("allows cutting from the end of the track", () => {
+    const settings = createManualSettings();
+    const preview = settingsWithPendingCut(settings, 10, { start: 8, end: 10 });
+    expect(preview).not.toBeNull();
+    expect(computeResultDuration(10, preview!)).toBeCloseTo(8, 5);
+    expect(mapSourceTimeToResult(8, 10, preview!)).toBeCloseTo(8, 5);
+  });
+
+  it("rejects cutting the entire remaining track", () => {
+    const settings = createManualSettings();
+    expect(settingsWithPendingCut(settings, 10, { start: 0, end: 10 })).toBeNull();
+  });
 });

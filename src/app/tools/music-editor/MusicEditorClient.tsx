@@ -93,6 +93,7 @@ export default function MusicEditorClient() {
     seek,
     skip,
     setLoop,
+    unlock,
     wantPlayingRef,
   } = useAudioPlayer();
 
@@ -122,6 +123,7 @@ export default function MusicEditorClient() {
     seek,
     skip,
     setLoop,
+    unlock,
     wantPlayingRef,
   };
 

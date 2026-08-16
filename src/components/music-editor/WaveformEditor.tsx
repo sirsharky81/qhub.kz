@@ -389,7 +389,10 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       drawMarker(trimStart, "#059669", "▶");
       drawMarker(effectiveTrimEnd, "#dc2626", "◼");
       if (loopRegion) {
-        const drawSelectionHandle = (time: number) => {
+        const handleR = 11;
+        const startHandleY = handleR + 10;
+        const endHandleY = height - handleR - 10;
+        const drawSelectionHandle = (time: number, cy: number) => {
           const px = timeToX(time, width);
           if (px < -12 || px > width + 12) return;
           ctx.strokeStyle = "#e11d48";
@@ -399,7 +402,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           ctx.lineTo(px, height - 6);
           ctx.stroke();
           ctx.beginPath();
-          ctx.arc(px, height / 2, 11, 0, Math.PI * 2);
+          ctx.arc(px, cy, handleR, 0, Math.PI * 2);
           ctx.fillStyle = "#e11d48";
           ctx.fill();
           ctx.strokeStyle = "#ffffff";
@@ -408,14 +411,14 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           ctx.beginPath();
           ctx.strokeStyle = "rgba(255,255,255,0.9)";
           ctx.lineWidth = 1.5;
-          ctx.moveTo(px - 3.5, height / 2 - 4);
-          ctx.lineTo(px - 3.5, height / 2 + 4);
-          ctx.moveTo(px + 3.5, height / 2 - 4);
-          ctx.lineTo(px + 3.5, height / 2 + 4);
+          ctx.moveTo(px - 3.5, cy - 4);
+          ctx.lineTo(px - 3.5, cy + 4);
+          ctx.moveTo(px + 3.5, cy - 4);
+          ctx.lineTo(px + 3.5, cy + 4);
           ctx.stroke();
         };
-        drawSelectionHandle(loopRegion.start);
-        drawSelectionHandle(loopRegion.end);
+        drawSelectionHandle(loopRegion.start, startHandleY);
+        drawSelectionHandle(loopRegion.end, endHandleY);
       }
 
       ctx.font = "9px monospace";
@@ -557,17 +560,19 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       return () => cancelAnimationFrame(raf);
     }, [isPlaying, draw, drawMinimap, drawResult, resolvePlayheadTime, duration, zoom, clampViewStart]);
 
-    const hitTest = (clientX: number): DragTarget => {
+    const hitTest = (clientX: number, clientY: number): DragTarget => {
       const container = containerRef.current;
       if (!container) return null;
       const rect = container.getBoundingClientRect();
       const x = clientX - rect.left;
+      const y = clientY - rect.top;
       const w = rect.width;
       const near = (time: number, px = MARKER_HIT_PX) => Math.abs(timeToX(time, w) - x) < px;
 
       if (loopRegion && onLoopRegionChange) {
-        if (near(loopRegion.start, SELECTION_HANDLE_HIT_PX)) return "loopStart";
-        if (near(loopRegion.end, SELECTION_HANDLE_HIT_PX)) return "loopEnd";
+        const nearX = (time: number) => near(time, SELECTION_HANDLE_HIT_PX);
+        if (nearX(loopRegion.start) && y < height * 0.45) return "loopStart";
+        if (nearX(loopRegion.end) && y > height * 0.55) return "loopEnd";
       }
       if (near(trimStart)) return "trimStart";
       if (near(effectiveTrimEnd)) return "trimEnd";
@@ -647,7 +652,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.preventDefault();
       e.stopPropagation();
-      const target = hitTest(e.clientX);
+      const target = hitTest(e.clientX, e.clientY);
       dragRef.current = target ?? "playhead";
       if (loopRegion && (target === "loopStart" || target === "loopEnd")) {
         selectionDragRef.current = { start: loopRegion.start, end: loopRegion.end };

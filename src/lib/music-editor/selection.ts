@@ -257,22 +257,13 @@ export function mergeCutRegions(cuts: TrimRegion[]): TrimRegion[] {
   return merged;
 }
 
-/** Cut must lie fully inside one kept segment. */
+/** Cut may start/end at the track edges. Rejects empty cuts and deleting the whole keep. */
 export function isCutWithinKeep(
   cut: TrimRegion,
   duration: number,
   settings: ManualEditSettings,
 ): boolean {
-  if (cut.end - cut.start < 0.05) return false;
-  const segments = getKeepSegments(
-    duration,
-    settings.trimStart,
-    settings.trimEnd,
-    settings.cutRegions,
-  );
-  return segments.some(
-    (s) => cut.start >= s.start + 0.01 && cut.end <= s.end - 0.01,
-  );
+  return addCutRegion(duration, settings, cut) !== null;
 }
 
 export function addCutRegion(
@@ -280,8 +271,27 @@ export function addCutRegion(
   settings: ManualEditSettings,
   cut: TrimRegion,
 ): TrimRegion[] | null {
-  if (!isCutWithinKeep(cut, duration, settings)) return null;
-  return mergeCutRegions([...settings.cutRegions, cut]);
+  const start = Math.max(0, Math.min(cut.start, duration));
+  const end = Math.max(0, Math.min(cut.end, duration));
+  if (end - start < 0.05) return null;
+
+  const keep = getKeepSegments(
+    duration,
+    settings.trimStart,
+    settings.trimEnd,
+    settings.cutRegions,
+  );
+  const pieces: TrimRegion[] = [];
+  let remaining = 0;
+  for (const s of keep) {
+    const overlapStart = Math.max(s.start, start);
+    const overlapEnd = Math.min(s.end, end);
+    const overlap = Math.max(0, overlapEnd - overlapStart);
+    remaining += Math.max(0, s.end - s.start - overlap);
+    if (overlap >= 0.05) pieces.push({ start: overlapStart, end: overlapEnd });
+  }
+  if (pieces.length === 0 || remaining < 0.05) return null;
+  return mergeCutRegions([...settings.cutRegions, ...pieces]);
 }
 
 /** Clone settings with a pending cut applied. Does not mutate `settings`. */

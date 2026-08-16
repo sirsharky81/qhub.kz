@@ -121,15 +121,25 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     [stopSource, syncUiTime],
   );
 
+  const unlock = useCallback(() => {
+    const ctx = getCtx();
+    if (ctx.state === "suspended") void ctx.resume();
+  }, [getCtx]);
+
   const play = useCallback(
     (fromTime?: number) => {
+      wantPlayingRef.current = true;
       const buffer = bufferRef.current;
       if (!buffer) return;
-
-      wantPlayingRef.current = true;
-      stopSource({ keepPlayingState: true });
       const ctx = getCtx();
-      if (ctx.state === "suspended") void ctx.resume();
+      if (ctx.state === "suspended") {
+        void ctx.resume().then(() => {
+          if (ctx.state === "suspended") return;
+          if (wantPlayingRef.current && bufferRef.current) playRef.current(fromTime);
+        });
+        return;
+      }
+      stopSource({ keepPlayingState: true });
 
       const offset = fromTime ?? offsetRef.current;
       offsetRef.current = Math.max(0, Math.min(offset, buffer.duration));
@@ -259,6 +269,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     skip,
     toggle,
     setLoop,
+    unlock,
     wantPlayingRef,
   };
 }
