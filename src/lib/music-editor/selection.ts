@@ -148,6 +148,17 @@ export function mapResultTimeToSource(
   return segments[segments.length - 1].end;
 }
 
+/** Keep the same place in the original track after speed/trim/EQ rebuild. */
+export function mapResumeResultTime(
+  resultTime: number,
+  duration: number,
+  oldSettings: ManualEditSettings,
+  newSettings: ManualEditSettings,
+): number {
+  const source = mapResultTimeToSource(resultTime, duration, oldSettings);
+  return mapSourceTimeToResult(source, duration, newSettings);
+}
+
 /** Map click on waveform (source time) → playback seek position. */
 export function mapSourceTimeToResult(
   sourceTime: number,

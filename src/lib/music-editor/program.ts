@@ -61,7 +61,7 @@ export function processTrackToChunk(
     if (Math.abs(seg.volume - 1) > 0.001) {
       for (let i = 0; i < chunk.length; i++) chunk[i] *= seg.volume;
     }
-    chunk = timeStretch(chunk, seg.rate);
+    chunk = timeStretch(chunk, seg.rate, sampleRate);
 
     const isFirst = s === 0;
     const isLast = s === segments.length - 1;
@@ -229,7 +229,7 @@ function processPcmWithSettings(
     if (Math.abs(seg.volume - 1) > 0.001) {
       for (let i = 0; i < chunk.length; i++) chunk[i] *= seg.volume;
     }
-    chunk = timeStretch(chunk, seg.rate);
+    chunk = timeStretch(chunk, seg.rate, sampleRate);
 
     const isFirst = s === 0;
     const isLast = s === segments.length - 1;

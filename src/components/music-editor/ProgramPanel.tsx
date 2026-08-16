@@ -704,15 +704,13 @@ export function ProgramPanel({
               onEndGesture={onEndGesture}
             />
 
-            <div>
-              <p className="text-[11px] text-gray-500 mb-1">Эквалайзер программы</p>
-              <EqEditor
+            <EqEditor
                 eq={programSettings.eq ?? FLAT_EQ}
                 onChange={(eq, opts) => onProgramSettingsChange({ eq }, opts)}
                 onBeginGesture={onBeginGesture}
                 onEndGesture={onEndGesture}
+                label="Эквалайзер программы"
               />
-            </div>
           </div>
         </div>
       )}

@@ -45,9 +45,7 @@ function findBestOffset(
   for (let candidate = from; candidate <= to; candidate++) {
     let err = 0;
     for (let i = 0; i < overlap; i++) {
-      const a = prevGrain[prevStart + i];
-      const b = input[candidate + i];
-      const d = a - b;
+      const d = prevGrain[prevStart + i] - input[candidate + i];
       err += d * d;
     }
     if (err < bestErr) {
@@ -62,34 +60,34 @@ function findBestOffset(
  * Pitch-preserving time stretch (WSOLA).
  * rate > 1 → faster / shorter; rate < 1 → slower / longer.
  */
-export function timeStretch(input: Float32Array, rate: number): Float32Array {
+export function timeStretch(input: Float32Array, rate: number, sampleRate = 44100): Float32Array {
   const r = clampPlaybackRate(rate);
   if (input.length === 0) return input.slice();
   if (Math.abs(r - 1) < 0.001) return input.slice();
 
-  const windowSize = 1024;
+  const sr = sampleRate > 0 ? sampleRate : 44100;
+  const windowSize = sr >= 40000 ? 2048 : 1024;
   if (input.length < windowSize * 2) {
     return resampleLinear(input, r);
   }
 
-  const synthesisHop = 512;
+  const synthesisHop = Math.floor(windowSize / 4);
   const analysisHop = Math.max(1, Math.round(synthesisHop * r));
-  const searchRadius = 40;
-  const overlap = 256;
+  const searchRadius = Math.max(24, Math.round(sr * 0.0015));
+  const overlap = Math.min(256, synthesisHop);
   const window = hannWindow(windowSize);
 
   const outputLength = Math.max(1, Math.round(input.length / r));
   const output = new Float32Array(outputLength + windowSize);
   const norm = new Float32Array(output.length);
+  const fallback = resampleLinear(input, r);
 
   let predicted = 0;
   let outputPos = 0;
   let prevGrain: Float32Array | null = null;
+  const maxStart = input.length - windowSize;
 
-  while (outputPos < outputLength) {
-    const maxStart = input.length - windowSize;
-    if (maxStart < 0) break;
-
+  while (outputPos < outputLength && maxStart >= 0) {
     let grainStart = Math.max(0, Math.min(maxStart, predicted));
     if (prevGrain) {
       grainStart = findBestOffset(input, grainStart, prevGrain, windowSize, overlap, searchRadius);
@@ -106,13 +104,16 @@ export function timeStretch(input: Float32Array, rate: number): Float32Array {
     prevGrain = input.subarray(grainStart, grainStart + windowSize);
     predicted += analysisHop;
     outputPos += synthesisHop;
-    if (predicted > maxStart && outputPos >= outputLength) break;
-    if (predicted > maxStart + searchRadius) break;
+    if (predicted > maxStart + searchRadius && outputPos >= outputLength) break;
   }
 
   const trimmed = new Float32Array(outputLength);
   for (let i = 0; i < outputLength; i++) {
-    trimmed[i] = norm[i] > 1e-6 ? output[i] / norm[i] : output[i];
+    if (norm[i] > 0.2) {
+      trimmed[i] = output[i] / norm[i];
+    } else if (i < fallback.length) {
+      trimmed[i] = fallback[i];
+    }
   }
   return trimmed;
 }

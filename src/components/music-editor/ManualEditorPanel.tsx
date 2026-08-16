@@ -37,7 +37,7 @@ import type {
   ProgramTransition,
   TrimRegion,
 } from "@/lib/music-editor/types";
-import { cloneEq, DEFAULT_SOURCE_BPM, FLAT_EQ, playbackRateFromBpm } from "@/lib/music-editor/types";
+import { cloneEq, DEFAULT_SOURCE_BPM, FLAT_EQ } from "@/lib/music-editor/types";
 
 interface PlayerApi {
   isPlaying: boolean;
@@ -50,7 +50,7 @@ interface PlayerApi {
   seek: (time: number) => void;
   skip: (delta: number) => void;
   setLoop: (region: { start: number; end: number } | null, enabled: boolean) => void;
-  load: (buffer: AudioBuffer) => void;
+  load: (buffer: AudioBuffer, opts?: { resetTime?: boolean }) => void;
 }
 
 interface ManualEditorPanelProps {
@@ -606,7 +606,7 @@ export function ManualEditorPanel({
           </div>
 
           <div className="mt-2 rounded-xl border border-gray-100 bg-gray-50 p-2 space-y-2">
-            <p className={sectionLabel}>Ритм</p>
+            <p className={sectionLabel}>Ритм — сетка тактов, не скорость</p>
             <div className="flex flex-wrap items-center gap-1">
               <button
                 type="button"
@@ -624,35 +624,6 @@ export function ManualEditorPanel({
               ) : (
                 <span className="text-[11px] text-gray-400 px-1">сетка {DEFAULT_SOURCE_BPM}</span>
               )}
-              <span className="text-[11px] font-mono text-gray-800 px-1">
-                {Math.round((track.beatGrid?.bpm ?? DEFAULT_SOURCE_BPM) * (settings.playbackRate ?? 1))} BPM
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  const source = track.beatGrid?.bpm ?? DEFAULT_SOURCE_BPM;
-                  const current = (settings.playbackRate ?? 1) * source;
-                  onSettingsChange({
-                    playbackRate: playbackRateFromBpm(source, Math.round(current) - 1),
-                  });
-                }}
-                className={btnClass}
-              >
-                BPM −
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const source = track.beatGrid?.bpm ?? DEFAULT_SOURCE_BPM;
-                  const current = (settings.playbackRate ?? 1) * source;
-                  onSettingsChange({
-                    playbackRate: playbackRateFromBpm(source, Math.round(current) + 1),
-                  });
-                }}
-                className={btnClass}
-              >
-                BPM +
-              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -665,7 +636,7 @@ export function ManualEditorPanel({
                 }}
                 className={btnClass}
               >
-                Сдвиг −10ms
+                Сетка −10ms
               </button>
               <button
                 type="button"
@@ -679,7 +650,7 @@ export function ManualEditorPanel({
                 }}
                 className={btnClass}
               >
-                Сдвиг +10ms
+                Сетка +10ms
               </button>
               <label className="flex items-center gap-1.5 text-[11px] text-gray-600 ml-auto cursor-pointer">
                 <input
@@ -702,7 +673,8 @@ export function ManualEditorPanel({
               </label>
             </div>
             <p className="text-[10px] text-gray-400">
-              BPM ± меняет скорость музыки. «Определить BPM» уточняет исходный темп для сетки.
+              Сетка только рисует доли и помогает резать по такту. Скорость музыки — блок «Звук»
+              ниже. Перемотка — кнопки под плеером.
             </p>
           </div>
 
@@ -756,6 +728,9 @@ export function ManualEditorPanel({
               </button>
             </div>
             <div className="flex flex-wrap gap-1 mt-2">
+              <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider self-center mr-1">
+                Перемотка
+              </span>
               <button type="button" onClick={() => nudgeSourcePlayhead(-0.1)} className={btnClass}>
                 −100ms
               </button>

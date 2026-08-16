@@ -93,17 +93,21 @@ export default function MusicEditorClient() {
     seek,
     skip,
     setLoop,
+    wantPlayingRef,
   } = useAudioPlayer();
 
   const playbackApi = useMemo(
     () => ({
       load,
-      stop,
       play,
+      seek,
       isPlaying,
       currentTime,
+      currentTimeRef,
+      wantPlayingRef,
+      duration: playerDuration,
     }),
-    [load, stop, play, isPlaying, currentTime],
+    [load, play, seek, isPlaying, currentTime, currentTimeRef, wantPlayingRef, playerDuration],
   );
 
   const player = {

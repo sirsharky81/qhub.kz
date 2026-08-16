@@ -13,6 +13,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   optionsRef.current = options;
   const ctxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const startTimeRef = useRef(0);
   const offsetRef = useRef(0);
   const bufferRef = useRef<AudioBuffer | null>(null);
@@ -51,11 +52,20 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       const src = sourceRef.current;
       sourceRef.current = null;
       try {
+        src.onended = null;
         src.stop();
       } catch {
         /* already stopped */
       }
       src.disconnect();
+    }
+    if (gainRef.current) {
+      try {
+        gainRef.current.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      gainRef.current = null;
     }
     cancelAnimationFrame(rafRef.current);
     playingRef.current = false;
@@ -100,10 +110,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [stopSource, syncUiTime, restartAt]);
 
   const load = useCallback(
-    (buffer: AudioBuffer) => {
-      stopSource();
+    (buffer: AudioBuffer, opts?: { resetTime?: boolean }) => {
+      stopSource({ keepPlayingState: wantPlayingRef.current });
       bufferRef.current = buffer;
       setDuration(buffer.duration);
+      if (opts?.resetTime === false) return;
       syncUiTime(0, true);
       offsetRef.current = 0;
     },
@@ -134,9 +145,16 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       syncUiTime(offsetRef.current, true);
 
+      const fadeSec = 0.012;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(1, ctx.currentTime + fadeSec);
+      gain.connect(ctx.destination);
+      gainRef.current = gain;
+
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(ctx.destination);
+      source.connect(gain);
       source.onended = () => {
         if (sourceRef.current !== source) return;
         if (loopEnabledRef.current && loopRef.current) {
@@ -241,6 +259,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     skip,
     toggle,
     setLoop,
+    wantPlayingRef,
   };
 }
 

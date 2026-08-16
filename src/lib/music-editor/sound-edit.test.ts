@@ -10,6 +10,7 @@ import {
   computeResultDuration,
   getTimedSegments,
   mapResultTimeToSource,
+  mapResumeResultTime,
   mapSourceTimeToResult,
   upsertEditRegion,
 } from "./selection";
@@ -46,6 +47,13 @@ describe("timeStretch", () => {
     const input = sine(220, 44100, 22050);
     const out = timeStretch(input, 0.5);
     expect(out.length / input.length).toBeCloseTo(2, 1);
+  });
+
+  it("does not leave a silent tail at a small rate change", () => {
+    const input = sine(220, 44100, 44100);
+    const out = timeStretch(input, 1.05, 44100);
+    const last = out.subarray(Math.floor(out.length * 0.9));
+    expect(rms(last)).toBeGreaterThan(0.2);
   });
 });
 
@@ -92,6 +100,14 @@ describe("timed segments and mapping", () => {
       const back = mapResultTimeToSource(result, 10, settings);
       expect(back).toBeCloseTo(src, 3);
     }
+  });
+
+  it("keeps the same source position when speed changes", () => {
+    const before = createManualSettings();
+    const after = createManualSettings();
+    after.playbackRate = 2;
+    expect(mapResumeResultTime(5, 10, before, after)).toBeCloseTo(2.5, 5);
+    expect(mapResumeResultTime(2.5, 10, after, before)).toBeCloseTo(5, 5);
   });
 
   it("splits overlapping regions on upsert", () => {

@@ -15,6 +15,7 @@ import {
   cloneEq,
   DEFAULT_SOURCE_BPM,
   FLAT_EQ,
+  isFlatEq,
   MAX_PLAYBACK_RATE,
   MIN_PLAYBACK_RATE,
   PLAYBACK_RATE_PRESETS,
@@ -173,7 +174,7 @@ export function SpeedSlider({
         </span>
         {assumedSource && (
           <span className="text-[10px] text-gray-400 w-full">
-            Исходный темп 120, пока нет анализа. «Определить BPM» уточнит сетку.
+            Пока нет анализа, исходный темп считается 120. «Определить BPM» в блоке «Ритм» уточнит сетку, не скорость.
           </span>
         )}
       </div>
@@ -186,14 +187,27 @@ export function EqEditor({
   onChange,
   onBeginGesture,
   onEndGesture,
+  label = "Эквалайзер",
 }: {
   eq: EqSettings;
   onChange: (eq: EqSettings, opts?: { skipHistory?: boolean }) => void;
   onBeginGesture: () => void;
   onEndGesture: () => void;
+  label?: string;
 }) {
   return (
     <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-gray-500">{label}</p>
+        <button
+          type="button"
+          onClick={() => onChange(cloneEq(FLAT_EQ))}
+          disabled={isFlatEq(eq)}
+          className={`${btnClass} disabled:opacity-40`}
+        >
+          Сброс эквалайзера
+        </button>
+      </div>
       <div className="grid grid-cols-5 gap-1">
         {EQ_BANDS.map((band) => (
           <label key={band.key} className="flex flex-col items-center gap-1 min-w-0">
@@ -357,6 +371,9 @@ export function SoundEditPanel({
           </button>
         </div>
       </div>
+      <p className="text-[10px] text-gray-400">
+        BPM ± меняет скорость, не позицию. Перемотка — кнопки «−100ms / +100ms» под плеером.
+      </p>
 
       {scope === "selection" && !loopRegion && (
         <p className="text-[11px] text-amber-800">
@@ -372,15 +389,12 @@ export function SoundEditPanel({
         sourceBpm={sourceBpm}
       />
 
-      <div>
-        <p className="text-[11px] text-gray-500 mb-1">Эквалайзер</p>
-        <EqEditor
+      <EqEditor
           eq={current.eq}
           onChange={(eq, opts) => commit({ eq }, opts)}
           onBeginGesture={onBeginGesture}
           onEndGesture={onEndGesture}
         />
-      </div>
 
       <div>
         <label className="text-[11px] text-gray-500">
