@@ -1,5 +1,6 @@
 import type {
   AudioTrack,
+  EqSettings,
   ManualEditSettings,
   ProgramTimeline,
   ProgramTransition,
@@ -7,7 +8,7 @@ import type {
 import { computeResultDuration, getTimedSegments } from "./selection";
 import { applyFade, clampBuffer, concatPcmWithCrossfade, mixCrossfadeSample } from "./audio-dsp";
 import { applyEq } from "./eq";
-import { timeStretch } from "./time-stretch";
+import { timeStretchPlanar } from "./time-stretch";
 
 function effectiveCrossfadeSamples(
   prevChunk: Float32Array,
@@ -30,19 +31,72 @@ function effectiveCrossfadeSec(
   return Math.min(transition.duration, prevDuration, nextDuration);
 }
 
+function channelCount(buffer: AudioBuffer): number {
+  return Math.min(2, Math.max(1, buffer.numberOfChannels));
+}
+
+function extractSegment(buffer: AudioBuffer, startSample: number, length: number): Float32Array[] {
+  const nCh = channelCount(buffer);
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < nCh; c++) {
+    channels.push(buffer.getChannelData(c).slice(startSample, startSample + length));
+  }
+  return channels;
+}
+
+function applyVolume(channels: Float32Array[], volume: number): void {
+  if (Math.abs(volume - 1) <= 0.001) return;
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) ch[i] *= volume;
+  }
+}
+
+function processChannels(
+  channels: Float32Array[],
+  sampleRate: number,
+  rate: number,
+  volume: number,
+  eq: EqSettings,
+  fadeIn: number,
+  fadeOut: number,
+): Float32Array[] {
+  let out = channels.map((ch) => applyEq(ch, sampleRate, eq));
+  applyVolume(out, volume);
+  out = timeStretchPlanar(out, rate, sampleRate);
+  for (const ch of out) {
+    applyFade(ch, sampleRate, fadeIn, fadeOut);
+    clampBuffer(ch);
+  }
+  return out;
+}
+
+function concatPlanar(parts: Float32Array[][], sampleRate: number): Float32Array[] {
+  if (parts.length === 0) return [];
+  const nCh = parts[0].length;
+  const aligned = parts.map((p) => {
+    if (p.length === nCh) return p;
+    const next = p.slice();
+    while (next.length < nCh) next.push(p[0].slice());
+    return next.slice(0, nCh);
+  });
+  return Array.from({ length: nCh }, (_, c) =>
+    concatPcmWithCrossfade(
+      aligned.map((p) => p[c]),
+      sampleRate,
+    ),
+  );
+}
+
 export function processTrackToChunk(
   buffer: AudioBuffer,
   settings: ManualEditSettings,
-): Float32Array {
+): Float32Array[] {
   const sampleRate = buffer.sampleRate;
   const segments = getTimedSegments(buffer.duration, settings);
 
-  if (segments.length === 0) return new Float32Array(0);
+  if (segments.length === 0) return extractSegment(buffer, 0, 0);
 
-  const parts: Float32Array[] = [];
-
-  const ch0 = buffer.getChannelData(0);
-  const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : ch0;
+  const parts: Float32Array[][] = [];
 
   for (let s = 0; s < segments.length; s++) {
     const seg = segments[s];
@@ -51,54 +105,42 @@ export function processTrackToChunk(
     const length = endSample - startSample;
     if (length <= 0) continue;
 
-    let chunk: Float32Array = new Float32Array(length);
-
-    for (let i = 0; i < length; i++) {
-      chunk[i] = (ch0[startSample + i] + ch1[startSample + i]) / 2;
-    }
-
-    chunk = applyEq(chunk, sampleRate, seg.eq);
-    if (Math.abs(seg.volume - 1) > 0.001) {
-      for (let i = 0; i < chunk.length; i++) chunk[i] *= seg.volume;
-    }
-    chunk = timeStretch(chunk, seg.rate, sampleRate);
-
-    const isFirst = s === 0;
-    const isLast = s === segments.length - 1;
-    applyFade(
-      chunk,
-      sampleRate,
-      isFirst ? settings.fadeIn : 0,
-      isLast ? settings.fadeOut : 0,
+    parts.push(
+      processChannels(
+        extractSegment(buffer, startSample, length),
+        sampleRate,
+        seg.rate,
+        seg.volume,
+        seg.eq,
+        s === 0 ? settings.fadeIn : 0,
+        s === segments.length - 1 ? settings.fadeOut : 0,
+      ),
     );
-    clampBuffer(chunk);
-    parts.push(chunk);
   }
 
-  if (parts.length === 0) return new Float32Array(0);
+  if (parts.length === 0) return extractSegment(buffer, 0, 0);
 
-  const merged = concatPcmWithCrossfade(parts, sampleRate);
-  clampBuffer(merged);
+  const merged = concatPlanar(parts, sampleRate);
+  for (const ch of merged) clampBuffer(ch);
   return merged;
 }
 
-function chunksToBuffer(chunks: Float32Array[], sampleRate: number): AudioBuffer {
-  if (chunks.length === 0 || chunks[0].length === 0) {
-    const ctx = new OfflineAudioContext(1, Math.floor(sampleRate * 0.1), sampleRate);
-    return ctx.createBuffer(1, Math.floor(sampleRate * 0.1), sampleRate);
+function planarToBuffer(channels: Float32Array[], sampleRate: number): AudioBuffer {
+  const nCh = Math.max(1, channels.length);
+  const length = Math.max(1, channels[0]?.length ?? Math.floor(sampleRate * 0.1));
+  const ctx = new OfflineAudioContext(nCh, length, sampleRate);
+  const outBuffer = ctx.createBuffer(nCh, length, sampleRate);
+  for (let c = 0; c < nCh; c++) {
+    const src = channels[c] ?? channels[0] ?? new Float32Array(length);
+    const copy = src.length === length ? src : src.slice(0, length);
+    if (copy.length < length) {
+      const padded = new Float32Array(length);
+      padded.set(copy);
+      outBuffer.copyToChannel(padded, c);
+    } else {
+      outBuffer.copyToChannel(new Float32Array(copy), c);
+    }
   }
-
-  const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-  const output = new Float32Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  const ctx = new OfflineAudioContext(1, output.length, sampleRate);
-  const outBuffer = ctx.createBuffer(1, output.length, sampleRate);
-  outBuffer.copyToChannel(new Float32Array(output), 0);
   return outBuffer;
 }
 
@@ -156,9 +198,26 @@ function concatWithTransitions(
     }
   }
 
-  const result = output.slice(0, offset);
-  clampBuffer(result);
-  return result;
+function concatWithTransitionsPlanar(
+  chunks: Float32Array[][],
+  transitions: ProgramTransition[],
+  sampleRate: number,
+): Float32Array[] {
+  if (chunks.length === 0) return [];
+  const nCh = Math.max(...chunks.map((c) => c.length), 1);
+  const aligned = chunks.map((p) => {
+    if (p.length === nCh) return p;
+    const next = p.slice();
+    while (next.length < nCh) next.push(p[0].slice());
+    return next.slice(0, nCh);
+  });
+  return Array.from({ length: nCh }, (_, c) =>
+    concatWithTransitions(
+      aligned.map((p) => p[c]),
+      transitions,
+      sampleRate,
+    ),
+  );
 }
 
 export async function processSingleTrack(
@@ -166,7 +225,7 @@ export async function processSingleTrack(
   settings: ManualEditSettings,
 ): Promise<AudioBuffer> {
   const chunk = processTrackToChunk(buffer, settings);
-  return chunksToBuffer([chunk], buffer.sampleRate);
+  return planarToBuffer(chunk, buffer.sampleRate);
 }
 
 export async function processProgramOutput(
@@ -181,7 +240,7 @@ export async function processProgramOutput(
   }
 
   const sampleRate = tracks[0]?.buffer.sampleRate ?? 44100;
-  const chunks: Float32Array[] = [];
+  const chunks: Float32Array[][] = [];
 
   for (const id of programTrackIds) {
     const idx = tracks.findIndex((t) => t.id === id);
@@ -191,31 +250,31 @@ export async function processProgramOutput(
   }
 
   const alignedTransitions = transitions.slice(0, Math.max(0, chunks.length - 1));
-  const merged = concatWithTransitions(chunks, alignedTransitions, sampleRate);
-  if (merged.length === 0) {
+  const merged = concatWithTransitionsPlanar(chunks, alignedTransitions, sampleRate);
+  if (merged.length === 0 || (merged[0]?.length ?? 0) === 0) {
     return processProgram(tracks, manualSettings, programTrackIds, transitions);
   }
 
-  const mergedDuration = merged.length / sampleRate;
+  const mergedDuration = merged[0].length / sampleRate;
   const finalChunk = processPcmWithSettings(merged, sampleRate, mergedDuration, {
     ...programSettings,
     cutRegions: [],
   });
-  return chunksToBuffer([finalChunk], sampleRate);
+  return planarToBuffer(finalChunk, sampleRate);
 }
 
-/** Apply trim / volume / fade / speed / EQ on already-rendered mono PCM (program final pass). */
+/** Apply trim / volume / fade / speed / EQ on already-rendered PCM (program final pass). */
 function processPcmWithSettings(
-  pcm: Float32Array,
+  channels: Float32Array[],
   sampleRate: number,
   sourceDuration: number,
   settings: ManualEditSettings,
-): Float32Array {
+): Float32Array[] {
   const segments = getTimedSegments(sourceDuration, settings);
 
-  if (segments.length === 0) return new Float32Array(0);
+  if (segments.length === 0) return channels.map((ch) => new Float32Array(0));
 
-  const parts: Float32Array[] = [];
+  const parts: Float32Array[][] = [];
 
   for (let s = 0; s < segments.length; s++) {
     const seg = segments[s];
@@ -224,29 +283,24 @@ function processPcmWithSettings(
     const length = endSample - startSample;
     if (length <= 0) continue;
 
-    let chunk: Float32Array = pcm.slice(startSample, endSample);
-    chunk = applyEq(chunk, sampleRate, seg.eq);
-    if (Math.abs(seg.volume - 1) > 0.001) {
-      for (let i = 0; i < chunk.length; i++) chunk[i] *= seg.volume;
-    }
-    chunk = timeStretch(chunk, seg.rate, sampleRate);
-
-    const isFirst = s === 0;
-    const isLast = s === segments.length - 1;
-    applyFade(
-      chunk,
-      sampleRate,
-      isFirst ? settings.fadeIn : 0,
-      isLast ? settings.fadeOut : 0,
+    const sliced = channels.map((ch) => ch.slice(startSample, startSample + length));
+    parts.push(
+      processChannels(
+        sliced,
+        sampleRate,
+        seg.rate,
+        seg.volume,
+        seg.eq,
+        s === 0 ? settings.fadeIn : 0,
+        s === segments.length - 1 ? settings.fadeOut : 0,
+      ),
     );
-    clampBuffer(chunk);
-    parts.push(chunk);
   }
 
-  if (parts.length === 0) return new Float32Array(0);
+  if (parts.length === 0) return channels.map((ch) => new Float32Array(0));
 
-  const merged = concatPcmWithCrossfade(parts, sampleRate);
-  clampBuffer(merged);
+  const merged = concatPlanar(parts, sampleRate);
+  for (const ch of merged) clampBuffer(ch);
   return merged;
 }
 
@@ -263,7 +317,7 @@ export async function processProgram(
   }
 
   const sampleRate = tracks[0]?.buffer.sampleRate ?? 44100;
-  const chunks: Float32Array[] = [];
+  const chunks: Float32Array[][] = [];
 
   for (const id of programTrackIds) {
     const idx = tracks.findIndex((t) => t.id === id);
@@ -273,12 +327,8 @@ export async function processProgram(
   }
 
   const alignedTransitions = transitions.slice(0, Math.max(0, chunks.length - 1));
-  const output = concatWithTransitions(chunks, alignedTransitions, sampleRate);
-
-  const ctx = new OfflineAudioContext(1, output.length, sampleRate);
-  const outBuffer = ctx.createBuffer(1, output.length, sampleRate);
-  outBuffer.copyToChannel(new Float32Array(output), 0);
-  return outBuffer;
+  const output = concatWithTransitionsPlanar(chunks, alignedTransitions, sampleRate);
+  return planarToBuffer(output, sampleRate);
 }
 
 export function computeProgramTimeline(

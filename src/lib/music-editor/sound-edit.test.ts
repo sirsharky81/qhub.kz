@@ -14,7 +14,7 @@ import {
   mapSourceTimeToResult,
   upsertEditRegion,
 } from "./selection";
-import { timeStretch } from "./time-stretch";
+import { timeStretch, timeStretchPlanar } from "./time-stretch";
 
 function sine(freq: number, sampleRate: number, length: number): Float32Array {
   const out = new Float32Array(length);
@@ -54,6 +54,16 @@ describe("timeStretch", () => {
     const out = timeStretch(input, 1.05, 44100);
     const last = out.subarray(Math.floor(out.length * 0.9));
     expect(rms(last)).toBeGreaterThan(0.2);
+  });
+
+  it("keeps stereo channels distinct", () => {
+    const left = sine(220, 44100, 44100);
+    const right = sine(550, 44100, 44100);
+    const [outL, outR] = timeStretchPlanar([left, right], 1.1, 44100);
+    expect(outL.length).toBe(outR.length);
+    let diff = 0;
+    for (let i = 0; i < outL.length; i++) diff += (outL[i] - outR[i]) ** 2;
+    expect(Math.sqrt(diff / outL.length)).toBeGreaterThan(0.2);
   });
 });
 
