@@ -4,14 +4,13 @@ set -euo pipefail
 
 LOG="${MAIL_LOG:-/var/log/mail.log}"
 SENDER="${1:-boris@qhub.kz}"
-HOURS="${2:-24}"
 
 if [ ! -r "$LOG" ]; then
   echo "Cannot read $LOG" >&2
   exit 1
 fi
 
-echo "==> Outbound mail trace for ${SENDER} (last ${HOURS}h)"
+echo "==> Outbound mail trace for ${SENDER}"
 echo "==> Log: $LOG"
 echo ""
 
@@ -23,29 +22,37 @@ for dir in deferred active hold corrupt; do
 done
 echo ""
 
-echo "==> Outbound status lines (sent / bounced / deferred) from ${SENDER}"
-grep -Fi "from=<${SENDER}>" "$LOG" 2>/dev/null | grep -E 'postfix/(smtp|submission|qmgr|bounce|error)' | tail -60 || echo "(none)"
+echo "==> Recent outbound accepts (qmgr) from ${SENDER}"
+grep -Fi "from=<${SENDER}>" "$LOG" 2>/dev/null | grep 'postfix/qmgr' | tail -15 || echo "(none)"
 echo ""
 
-echo "==> Delivery results to remote MTAs (status=)"
-grep -Fi "from=<${SENDER}>" "$LOG" 2>/dev/null | grep 'postfix/smtp\[' | grep -E 'status=(sent|bounced|deferred)' | tail -30 || echo "(none)"
+echo "==> Recent authenticated uploads (587 submission + 465 smtps)"
+grep -E 'postfix/(submission|smtps)/smtpd' "$LOG" 2>/dev/null | grep -Fi "$SENDER" | tail -15 || echo "(none)"
 echo ""
 
-echo "==> Large messages (>5 MB) from ${SENDER}"
-grep -Fi "from=<${SENDER}>" "$LOG" 2>/dev/null | grep -E 'size=[0-9]{7,}' | tail -20 || echo "(none)"
+echo "==> Large messages (>400 KB) from ${SENDER}"
+grep -Fi "from=<${SENDER}>" "$LOG" 2>/dev/null | grep -E 'size=[0-9]{6,}' | tail -15 || echo "(none)"
 echo ""
 
-echo "==> Submission port (587) — recent accepts from ${SENDER}"
-grep 'postfix/submission' "$LOG" 2>/dev/null | grep -Fi "$SENDER" | tail -20 || echo "(none)"
+echo "==> Full lifecycle for recent queue IDs from ${SENDER}"
+mapfile -t qids < <(grep -Fi "from=<${SENDER}>" "$LOG" 2>/dev/null | grep 'postfix/qmgr' | grep -oE '[A-F0-9]{8,12}' | tail -5 | sort -u)
+if [ ${#qids[@]} -eq 0 ]; then
+  echo "(no recent queue ids)"
+else
+  for qid in "${qids[@]}"; do
+    echo "── queue id: $qid ──"
+    grep "$qid" "$LOG" 2>/dev/null | grep -E 'postfix/(smtps|submission|cleanup|qmgr|smtp|bounce|error|local|virtual|lmtp)' || echo "(no matching lines)"
+    echo ""
+  done
+fi
+
+echo "==> Recent outbound SMTP delivery attempts (any sender, last 30)"
+grep 'postfix/smtp\[' "$LOG" 2>/dev/null | grep -E 'status=(sent|bounced|deferred)' | tail -30 || echo "(none)"
 echo ""
 
 echo "==> Bounces / rejects mentioning ${SENDER}"
-grep -Fi "$SENDER" "$LOG" 2>/dev/null | grep -iE 'status=bounced|reject|550 |552 |554 |421 |451 |warning:' | tail -25 || echo "(none)"
+grep -Fi "$SENDER" "$LOG" 2>/dev/null | grep -iE 'status=bounced|reject|550 |552 |554 |421 |451 |warning:|connect to|Connection timed out|Network is unreachable' | tail -25 || echo "(none)"
 echo ""
 
-echo "==> Deferred queue details (if any)"
-if mailq 2>/dev/null | grep -q 'Mail queue is empty'; then
-  echo "Queue empty — nothing stuck on server."
-else
-  mailq 2>/dev/null || postqueue -p 2>/dev/null || true
-fi
+echo "==> Postfix journal (last 40 lines, outbound errors)"
+journalctl -u postfix --no-pager -n 40 2>/dev/null | grep -iE 'smtp|deferred|bounce|fatal|error|61835|connect' || echo "(journal unavailable or no matches)"
