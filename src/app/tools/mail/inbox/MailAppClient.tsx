@@ -209,7 +209,7 @@ export function MailAppClient() {
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="relative flex h-9 w-9 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800"
+            className="relative flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 touch-manipulation"
             aria-label="Папки"
           >
             ☰
@@ -228,7 +228,7 @@ export function MailAppClient() {
                 setFilterOpen((v) => !v);
                 setSearchOpen(false);
               }}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 touch-manipulation"
               aria-label="Фильтр"
             >
               ⏚
@@ -239,7 +239,7 @@ export function MailAppClient() {
                 setSearchOpen((v) => !v);
                 setFilterOpen(false);
               }}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-300 hover:bg-zinc-800"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 touch-manipulation"
               aria-label="Поиск"
             >
               🔍
@@ -256,14 +256,15 @@ export function MailAppClient() {
           </div>
         }
       >
+        <div className="flex min-h-0 flex-1 flex-col">
         {searchOpen && (
-          <div className="shrink-0 px-3 py-2 border-b border-zinc-800">
+          <div className="shrink-0 px-3 py-2 border-b border-gray-200">
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Поиск…"
-              className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm"
+              className="w-full rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-sm text-gray-900"
               style={{ fontSize: "16px" }}
               autoFocus
             />
@@ -271,11 +272,11 @@ export function MailAppClient() {
         )}
 
         {error && (
-          <p className="shrink-0 px-3 py-2 text-sm text-red-400 bg-red-950/30">{error}</p>
+          <p className="shrink-0 px-3 py-2 text-sm text-red-600 bg-red-50">{error}</p>
         )}
 
         {loading && !items.length ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
+          <div className="flex flex-1 items-center justify-center text-sm text-gray-500">
             Загрузка…
           </div>
         ) : (
@@ -294,6 +295,7 @@ export function MailAppClient() {
             ✏️ Написать
           </button>
           <MailServicesNav email={email} onAccount={() => setAccountOpen(true)} />
+        </div>
         </div>
       </MailShell>
 
