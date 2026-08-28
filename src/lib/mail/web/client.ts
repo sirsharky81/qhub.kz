@@ -3,6 +3,8 @@
 import type { MailFilter } from "./constants";
 import type { MailFolder, MailListItem, MailMessage } from "./types";
 
+const MAIL_FETCH: RequestInit = { credentials: "include", cache: "no-store" };
+
 export interface MailLoginResult {
   ok: boolean;
   error?: string;
@@ -23,7 +25,7 @@ export interface MailProfileResult {
 }
 
 export async function fetchMailSession(): Promise<MailSessionResult> {
-  const res = await fetch("/api/mail/web/auth/session", { credentials: "include" });
+  const res = await fetch("/api/mail/web/auth/session", MAIL_FETCH);
   if (!res.ok) return { loggedIn: false };
   return res.json() as Promise<MailSessionResult>;
 }
@@ -75,7 +77,7 @@ export async function updateMailProfile(input: {
 }
 
 export async function fetchMailFolders(): Promise<MailFolder[]> {
-  const res = await fetch("/api/mail/web/folders", { credentials: "include" });
+  const res = await fetch("/api/mail/web/folders", MAIL_FETCH);
   if (!res.ok) throw new Error("Не удалось загрузить папки");
   const data = (await res.json()) as { folders: MailFolder[] };
   return data.folders;
@@ -95,7 +97,7 @@ export async function fetchMailMessages(params: {
     offset: String(params.offset ?? 0),
     limit: String(params.limit ?? 50),
   });
-  const res = await fetch(`/api/mail/web/messages?${search}`, { credentials: "include" });
+  const res = await fetch(`/api/mail/web/messages?${search}`, MAIL_FETCH);
   const data = (await res.json()) as { items?: MailListItem[]; total?: number; error?: string };
   if (!res.ok) throw new Error(data.error ?? "Не удалось загрузить письма");
   return { items: data.items ?? [], total: data.total ?? 0 };
@@ -103,7 +105,7 @@ export async function fetchMailMessages(params: {
 
 export async function fetchMailMessage(folder: string, uid: number): Promise<MailMessage> {
   const search = new URLSearchParams({ folder });
-  const res = await fetch(`/api/mail/web/messages/${uid}?${search}`, { credentials: "include" });
+  const res = await fetch(`/api/mail/web/messages/${uid}?${search}`, MAIL_FETCH);
   if (!res.ok) throw new Error("Не удалось загрузить письмо");
   const data = (await res.json()) as { message: MailMessage };
   return data.message;

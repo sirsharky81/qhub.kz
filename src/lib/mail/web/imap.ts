@@ -141,6 +141,7 @@ export async function listMailMessages(
   return withImapClient(email, password, async (client) => {
     const lock = await client.getMailboxLock(query.folder);
     try {
+      await client.noop();
       const searchCriteria = buildSearchQuery(query.filter, query.q);
       const uidsResult = await client.search(searchCriteria, { uid: true });
       const uids = uidsResult === false ? [] : uidsResult;
