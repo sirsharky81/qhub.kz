@@ -10,9 +10,17 @@ interface Props {
   onBack: () => void;
   onReply: () => void;
   onDelete: () => void;
+  onToggleRead: () => void;
 }
 
-export function MailMessageView({ message, folder, onBack, onReply, onDelete }: Props) {
+export function MailMessageView({
+  message,
+  folder,
+  onBack,
+  onReply,
+  onDelete,
+  onToggleRead,
+}: Props) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
@@ -20,6 +28,9 @@ export function MailMessageView({ message, folder, onBack, onReply, onDelete }: 
           ← Назад
         </button>
         <div className="ml-auto flex gap-2">
+          <button type="button" onClick={onToggleRead} className="text-sm text-zinc-400">
+            {message.unread ? "Прочитано" : "Не прочитано"}
+          </button>
           <button type="button" onClick={onReply} className="text-sm text-sky-400">
             Ответить
           </button>

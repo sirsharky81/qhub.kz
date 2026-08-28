@@ -30,6 +30,7 @@ function MailComposeForm({
 }: FormProps) {
   const [to, setTo] = useState(initialTo);
   const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
   const [subject, setSubject] = useState(initialSubject);
   const [text, setText] = useState(initialText);
   const [files, setFiles] = useState<File[]>([]);
@@ -48,6 +49,7 @@ function MailComposeForm({
       const form = new FormData();
       form.set("to", to.trim());
       if (cc.trim()) form.set("cc", cc.trim());
+      if (bcc.trim()) form.set("bcc", bcc.trim());
       form.set("subject", subject);
       form.set("text", text);
       for (const file of files) form.append("attachments", file);
@@ -104,6 +106,16 @@ function MailComposeForm({
             type="text"
             value={cc}
             onChange={(e) => setCc(e.target.value)}
+            className="flex-1 bg-transparent text-sm outline-none"
+            style={{ fontSize: "16px" }}
+          />
+        </label>
+        <label className="flex items-center gap-2 border-b border-zinc-800 pb-2">
+          <span className="text-sm text-zinc-500 shrink-0">Скрытая:</span>
+          <input
+            type="text"
+            value={bcc}
+            onChange={(e) => setBcc(e.target.value)}
             className="flex-1 bg-transparent text-sm outline-none"
             style={{ fontSize: "16px" }}
           />

@@ -128,6 +128,22 @@ export function MailAppClient() {
     setMessage(null);
   }
 
+  async function handleToggleRead() {
+    if (!selectedUid || !message) return;
+    const action = message.unread ? "read" : "unread";
+    await patchMailMessage(activeFolder, selectedUid, action);
+    setMessage({ ...message, unread: action === "unread" });
+    setItems((prev) =>
+      prev.map((item) =>
+        item.uid === selectedUid ? { ...item, unread: action === "unread" } : item,
+      ),
+    );
+    refreshMailbox();
+    void fetchMailFolders()
+      .then(setFolders)
+      .catch(() => undefined);
+  }
+
   async function handleDelete() {
     if (!selectedUid) return;
     await patchMailMessage(activeFolder, selectedUid, "delete");
@@ -164,6 +180,7 @@ export function MailAppClient() {
           onBack={closeMessage}
           onReply={handleReply}
           onDelete={() => void handleDelete()}
+          onToggleRead={() => void handleToggleRead()}
         />
         <MailServicesNav email={email} onAccount={() => setAccountOpen(true)} />
         <MailAccountSheet
