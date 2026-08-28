@@ -65,8 +65,9 @@ export async function fetchMailMessages(params: {
     limit: String(params.limit ?? 50),
   });
   const res = await fetch(`/api/mail/web/messages?${search}`, { credentials: "include" });
-  if (!res.ok) throw new Error("Не удалось загрузить письма");
-  return res.json() as Promise<{ items: MailListItem[]; total: number }>;
+  const data = (await res.json()) as { items?: MailListItem[]; total?: number; error?: string };
+  if (!res.ok) throw new Error(data.error ?? "Не удалось загрузить письма");
+  return { items: data.items ?? [], total: data.total ?? 0 };
 }
 
 export async function fetchMailMessage(folder: string, uid: number): Promise<MailMessage> {

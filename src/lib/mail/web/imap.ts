@@ -151,13 +151,17 @@ export async function listMailMessages(
       if (!slice.length) return { items: [], total };
 
       const items: MailListItem[] = [];
-      for await (const msg of client.fetch(slice, {
-        uid: true,
-        envelope: true,
-        flags: true,
-        bodyStructure: true,
-        source: { start: 0, maxLength: 512 },
-      })) {
+      for await (const msg of client.fetch(
+        slice,
+        {
+          uid: true,
+          envelope: true,
+          flags: true,
+          bodyStructure: true,
+          source: { maxLength: 512 },
+        },
+        { uid: true },
+      )) {
         const { from, fromName } = formatFrom(msg.envelope);
         let preview = "";
         if (msg.source) {

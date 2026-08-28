@@ -64,7 +64,16 @@ export function MailAppClient() {
     let cancelled = false;
     void fetchMailFolders()
       .then((list) => {
-        if (!cancelled) setFolders(list);
+        if (cancelled) return;
+        setFolders(list);
+        const inbox =
+          list.find((f) => f.specialUse === "\\Inbox") ??
+          list.find((f) => f.path.toUpperCase() === "INBOX");
+        if (inbox) {
+          setActiveFolder((current) =>
+            current === DEFAULT_FOLDER && current !== inbox.path ? inbox.path : current,
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setError("Не удалось загрузить папки");
