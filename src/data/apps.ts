@@ -355,6 +355,20 @@ export const apps: App[] = [
     sortOrder: 51,
   },
   {
+    id: "mail",
+    title: "Почта QHub",
+    description: "Webmail для ящиков @qhub.kz — входящие, поиск, отправка с вложениями.",
+    longDescription:
+      "Почтовый клиент QHub с IMAP-доступом к вашему ящику @qhub.kz. Входящие, папки, фильтры, поиск и написание писем с вложениями.",
+    href: "/tools/mail",
+    tags: ["tools", "productivity"],
+    icon: "✉️",
+    color: "from-sky-500/10 to-sky-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 48,
+  },
+  {
     id: "send",
     title: "QHub Send",
     description: "Отправка файлов по ссылке — как WeTransfer, хранение на NAS.",
