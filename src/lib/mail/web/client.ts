@@ -14,6 +14,14 @@ export interface MailSessionResult {
   email?: string;
 }
 
+export interface MailProfileResult {
+  email: string;
+  fullName: string;
+  phone: string;
+  signature: string;
+  updatedAt: number | null;
+}
+
 export async function fetchMailSession(): Promise<MailSessionResult> {
   const res = await fetch("/api/mail/web/auth/session", { credentials: "include" });
   if (!res.ok) return { loggedIn: false };
@@ -43,6 +51,29 @@ export async function logoutMail(): Promise<void> {
   });
 }
 
+export async function fetchMailProfile(): Promise<MailProfileResult> {
+  const res = await fetch("/api/mail/web/profile", { credentials: "include" });
+  const data = (await res.json()) as MailProfileResult & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? "Не удалось загрузить профиль");
+  return data;
+}
+
+export async function updateMailProfile(input: {
+  fullName?: string;
+  phone?: string;
+  signature?: string;
+}): Promise<MailProfileResult> {
+  const res = await fetch("/api/mail/web/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
+  const data = (await res.json()) as MailProfileResult & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? "Не удалось сохранить");
+  return data;
+}
+
 export async function fetchMailFolders(): Promise<MailFolder[]> {
   const res = await fetch("/api/mail/web/folders", { credentials: "include" });
   if (!res.ok) throw new Error("Не удалось загрузить папки");
@@ -65,8 +96,9 @@ export async function fetchMailMessages(params: {
     limit: String(params.limit ?? 50),
   });
   const res = await fetch(`/api/mail/web/messages?${search}`, { credentials: "include" });
-  if (!res.ok) throw new Error("Не удалось загрузить письма");
-  return res.json() as Promise<{ items: MailListItem[]; total: number }>;
+  const data = (await res.json()) as { items?: MailListItem[]; total?: number; error?: string };
+  if (!res.ok) throw new Error(data.error ?? "Не удалось загрузить письма");
+  return { items: data.items ?? [], total: data.total ?? 0 };
 }
 
 export async function fetchMailMessage(folder: string, uid: number): Promise<MailMessage> {

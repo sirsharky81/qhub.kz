@@ -151,29 +151,23 @@ export async function listMailMessages(
       if (!slice.length) return { items: [], total };
 
       const items: MailListItem[] = [];
-      for await (const msg of client.fetch(slice, {
-        uid: true,
-        envelope: true,
-        flags: true,
-        bodyStructure: true,
-        source: { start: 0, maxLength: 512 },
-      })) {
+      for await (const msg of client.fetch(
+        slice,
+        {
+          uid: true,
+          envelope: true,
+          flags: true,
+          bodyStructure: true,
+        },
+        { uid: true },
+      )) {
         const { from, fromName } = formatFrom(msg.envelope);
-        let preview = "";
-        if (msg.source) {
-          try {
-            const parsed = await simpleParser(msg.source);
-            preview = (parsed.text || parsed.html || "").replace(/\s+/g, " ").trim().slice(0, 160);
-          } catch {
-            preview = "";
-          }
-        }
         items.push({
           uid: msg.uid,
           from,
           fromName,
           subject: msg.envelope?.subject || "(без темы)",
-          preview,
+          preview: "",
           date: msg.envelope?.date?.toISOString() ?? new Date().toISOString(),
           unread: !msg.flags?.has("\\Seen"),
           flagged: !!msg.flags?.has("\\Flagged"),

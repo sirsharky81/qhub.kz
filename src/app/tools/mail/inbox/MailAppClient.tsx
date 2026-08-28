@@ -35,11 +35,13 @@ export function MailAppClient() {
   const [composeDefaults, setComposeDefaults] = useState({ to: "", subject: "", text: "" });
   const [items, setItems] = useState<MailListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [message, setMessage] = useState<MailMessage | null>(null);
 
   const [refreshCounter, setRefreshCounter] = useState(0);
+  const [inboxReady, setInboxReady] = useState(false);
 
   function refreshMailbox() {
     setRefreshCounter((value) => value + 1);
@@ -62,12 +64,28 @@ export function MailAppClient() {
 
   useEffect(() => {
     let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setInboxReady(false);
+    });
     void fetchMailFolders()
       .then((list) => {
-        if (!cancelled) setFolders(list);
+        if (cancelled) return;
+        setFolders(list);
+        setFoldersError(null);
+        const inbox =
+          list.find((f) => f.specialUse === "\\Inbox") ??
+          list.find((f) => f.path.toUpperCase() === "INBOX");
+        if (inbox) {
+          setActiveFolder((current) =>
+            current === DEFAULT_FOLDER && current !== inbox.path ? inbox.path : current,
+          );
+        }
       })
       .catch(() => {
-        if (!cancelled) setError("Не удалось загрузить папки");
+        if (!cancelled) setFoldersError("Не удалось загрузить папки");
+      })
+      .finally(() => {
+        if (!cancelled) setInboxReady(true);
       });
     return () => {
       cancelled = true;
@@ -75,11 +93,12 @@ export function MailAppClient() {
   }, [refreshCounter]);
 
   useEffect(() => {
+    if (!inboxReady) return;
     let cancelled = false;
     queueMicrotask(() => {
       if (!cancelled) {
         setLoading(true);
-        setError(null);
+        setMessagesError(null);
       }
     });
     void fetchMailMessages({
@@ -88,11 +107,14 @@ export function MailAppClient() {
       q: search,
     })
       .then((result) => {
-        if (!cancelled) setItems(result.items);
+        if (!cancelled) {
+          setItems(result.items);
+          setMessagesError(null);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Ошибка загрузки");
+          setMessagesError(err instanceof Error ? err.message : "Ошибка загрузки");
         }
       })
       .finally(() => {
@@ -101,7 +123,7 @@ export function MailAppClient() {
     return () => {
       cancelled = true;
     };
-  }, [activeFolder, filter, search, refreshCounter]);
+  }, [activeFolder, filter, search, refreshCounter, inboxReady]);
 
   const activeFolderLabel =
     folders.find((f) => f.path === activeFolder)?.label ?? activeFolder;
@@ -116,7 +138,7 @@ export function MailAppClient() {
         prev.map((item) => (item.uid === uid ? { ...item, unread: false } : item)),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка");
+      setMessagesError(err instanceof Error ? err.message : "Ошибка");
       setSelectedUid(null);
     } finally {
       setLoading(false);
@@ -271,8 +293,26 @@ export function MailAppClient() {
           </div>
         )}
 
-        {error && (
-          <p className="shrink-0 px-3 py-2 text-sm text-red-600 bg-red-50">{error}</p>
+        {foldersError && (
+          <p className="shrink-0 px-3 py-2 text-sm text-amber-700 bg-amber-50">{foldersError}</p>
+        )}
+
+        {messagesError && !items.length && (
+          <p className="shrink-0 px-3 py-2 text-sm text-red-600 bg-red-50">{messagesError}</p>
+        )}
+
+        {messagesError && items.length > 0 && (
+          <p className="shrink-0 px-3 py-2 text-sm text-amber-700 bg-amber-50">
+            {messagesError}
+            {" · "}
+            <button
+              type="button"
+              className="underline touch-manipulation"
+              onClick={refreshMailbox}
+            >
+              Повторить
+            </button>
+          </p>
         )}
 
         {loading && !items.length ? (
