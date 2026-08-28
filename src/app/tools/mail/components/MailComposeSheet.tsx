@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MAX_ATTACHMENTS } from "@/lib/mail/web/constants";
-import { sendMailCompose } from "@/lib/mail/web/client";
+import { fetchMailProfile, sendMailCompose } from "@/lib/mail/web/client";
+import { effectiveMailSignature } from "@/lib/mail/web/profile-utils";
 import { iosPwaShellStyle, useIosPwaKeyboardShell } from "@/lib/platform/ios-pwa-keyboard-shell";
 
 interface Props {
@@ -40,7 +41,23 @@ function MailComposeForm({
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signaturePreview, setSignaturePreview] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchMailProfile()
+      .then((profile) => {
+        if (cancelled) return;
+        setSignaturePreview(effectiveMailSignature(profile));
+      })
+      .catch(() => {
+        if (!cancelled) setSignaturePreview("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSend() {
     if (!to.trim()) {
@@ -181,6 +198,13 @@ function MailComposeForm({
           className="w-full min-h-[200px] bg-transparent text-sm outline-none resize-none leading-relaxed text-gray-900 placeholder:text-gray-400"
           style={{ fontSize: "16px" }}
         />
+
+        {signaturePreview && (
+          <div className="rounded-xl bg-gray-50 border border-gray-200 px-3 py-2.5 text-sm text-gray-500 whitespace-pre-wrap">
+            <p className="text-xs text-gray-400 mb-1">Подпись (добавится автоматически)</p>
+            {signaturePreview}
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-600 text-center pb-2">{error}</p>}
       </div>

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { isMailServerConfigured } from "@/lib/mail/env";
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from "@/lib/mail/web/constants";
+import { effectiveMailSignature } from "@/lib/mail/web/profile-utils";
+import { getMailProfile } from "@/lib/mail/web/profile-store";
 import { getMailSession } from "@/lib/mail/web/session";
 import { sendMailMessage } from "@/lib/mail/web/smtp";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -56,6 +58,12 @@ export async function POST(request: Request) {
   }
 
   try {
+    const profile = await getMailProfile(session.email);
+    const fullName = profile?.fullName ?? "";
+    const signature = profile
+      ? effectiveMailSignature(profile)
+      : "";
+
     await sendMailMessage({
       email: session.email,
       password: session.password,
@@ -64,6 +72,8 @@ export async function POST(request: Request) {
       bcc: bcc || undefined,
       subject,
       text,
+      fromName: fullName || undefined,
+      signature: signature || undefined,
       attachments: attachments.length ? attachments : undefined,
     });
     return NextResponse.json({ ok: true });
