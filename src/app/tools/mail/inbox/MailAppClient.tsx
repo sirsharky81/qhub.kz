@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { MailFilter } from "@/lib/mail/web/constants";
 import { DEFAULT_FOLDER } from "@/lib/mail/web/constants";
 import {
@@ -39,48 +39,72 @@ export function MailAppClient() {
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [message, setMessage] = useState<MailMessage | null>(null);
 
-  const activeFolderLabel =
-    folders.find((f) => f.path === activeFolder)?.label ?? activeFolder;
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
-  const loadFolders = useCallback(async () => {
-    const list = await fetchMailFolders();
-    setFolders(list);
-  }, []);
-
-  const loadMessages = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fetchMailMessages({
-        folder: activeFolder,
-        filter,
-        q: search,
-      });
-      setItems(result.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeFolder, filter, search]);
+  function refreshMailbox() {
+    setRefreshCounter((value) => value + 1);
+  }
 
   useEffect(() => {
+    let cancelled = false;
     void fetchMailSession().then((session) => {
+      if (cancelled) return;
       if (!session.loggedIn) {
         router.replace("/tools/mail/login");
         return;
       }
       setEmail(session.email ?? "");
     });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {
-    void loadFolders().catch(() => setError("Не удалось загрузить папки"));
-  }, [loadFolders]);
+    let cancelled = false;
+    void fetchMailFolders()
+      .then((list) => {
+        if (!cancelled) setFolders(list);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Не удалось загрузить папки");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshCounter]);
 
   useEffect(() => {
-    void loadMessages();
-  }, [loadMessages]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setLoading(true);
+        setError(null);
+      }
+    });
+    void fetchMailMessages({
+      folder: activeFolder,
+      filter,
+      q: search,
+    })
+      .then((result) => {
+        if (!cancelled) setItems(result.items);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Ошибка загрузки");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFolder, filter, search, refreshCounter]);
+
+  const activeFolderLabel =
+    folders.find((f) => f.path === activeFolder)?.label ?? activeFolder;
 
   async function openMessage(uid: number) {
     setSelectedUid(uid);
@@ -108,8 +132,10 @@ export function MailAppClient() {
     if (!selectedUid) return;
     await patchMailMessage(activeFolder, selectedUid, "delete");
     closeMessage();
-    void loadMessages();
-    void loadFolders();
+    refreshMailbox();
+    void fetchMailFolders()
+      .then(setFolders)
+      .catch(() => undefined);
   }
 
   function handleReply() {
@@ -152,7 +178,7 @@ export function MailAppClient() {
           initialSubject={composeDefaults.subject}
           initialText={composeDefaults.text}
           onClose={() => setComposeOpen(false)}
-          onSent={() => void loadMessages()}
+          onSent={refreshMailbox}
         />
       </MailShell>
     );
@@ -277,8 +303,10 @@ export function MailAppClient() {
         initialText={composeDefaults.text}
         onClose={() => setComposeOpen(false)}
         onSent={() => {
-          void loadMessages();
-          void loadFolders();
+          refreshMailbox();
+          void fetchMailFolders()
+            .then(setFolders)
+            .catch(() => undefined);
         }}
       />
     </>

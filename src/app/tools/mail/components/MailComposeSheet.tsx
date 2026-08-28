@@ -13,14 +13,21 @@ interface Props {
   onSent: () => void;
 }
 
-export function MailComposeSheet({
-  open,
-  initialTo = "",
-  initialSubject = "",
-  initialText = "",
+interface FormProps {
+  initialTo: string;
+  initialSubject: string;
+  initialText: string;
+  onClose: () => void;
+  onSent: () => void;
+}
+
+function MailComposeForm({
+  initialTo,
+  initialSubject,
+  initialText,
   onClose,
   onSent,
-}: Props) {
+}: FormProps) {
   const [to, setTo] = useState(initialTo);
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState(initialSubject);
@@ -29,17 +36,6 @@ export function MailComposeSheet({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  if (!open) return null;
-
-  function resetFromProps() {
-    setTo(initialTo);
-    setSubject(initialSubject);
-    setText(initialText);
-    setCc("");
-    setFiles([]);
-    setError(null);
-  }
 
   async function handleSend() {
     if (!to.trim()) {
@@ -56,7 +52,6 @@ export function MailComposeSheet({
       form.set("text", text);
       for (const file of files) form.append("attachments", file);
       await sendMailCompose(form);
-      resetFromProps();
       onSent();
       onClose();
     } catch (err) {
@@ -64,11 +59,6 @@ export function MailComposeSheet({
     } finally {
       setLoading(false);
     }
-  }
-
-  function handleClose() {
-    resetFromProps();
-    onClose();
   }
 
   function handleFiles(selected: FileList | null) {
@@ -83,7 +73,7 @@ export function MailComposeSheet({
         className="shrink-0 flex items-center gap-3 border-b border-zinc-800 px-4 py-3"
         style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
       >
-        <button type="button" onClick={handleClose} className="text-sky-400 text-sm">
+        <button type="button" onClick={onClose} className="text-sky-400 text-sm">
           Отменить
         </button>
         <h2 className="flex-1 text-center text-sm font-semibold">Новое</h2>
@@ -170,9 +160,31 @@ export function MailComposeSheet({
         />
       </div>
 
-      {error && (
-        <p className="px-4 pb-3 text-sm text-red-400 text-center">{error}</p>
-      )}
+      {error && <p className="px-4 pb-3 text-sm text-red-400 text-center">{error}</p>}
     </div>
+  );
+}
+
+export function MailComposeSheet({
+  open,
+  initialTo = "",
+  initialSubject = "",
+  initialText = "",
+  onClose,
+  onSent,
+}: Props) {
+  if (!open) return null;
+
+  const formKey = `${initialTo}|${initialSubject}|${initialText}`;
+
+  return (
+    <MailComposeForm
+      key={formKey}
+      initialTo={initialTo}
+      initialSubject={initialSubject}
+      initialText={initialText}
+      onClose={onClose}
+      onSent={onSent}
+    />
   );
 }
