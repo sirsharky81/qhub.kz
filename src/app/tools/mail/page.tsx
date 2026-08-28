@@ -14,7 +14,7 @@ export default function MailEntryPage() {
   }, [router]);
 
   return (
-    <div className="dark min-h-[100dvh] flex items-center justify-center bg-black text-zinc-400 text-sm">
+    <div className="min-h-[100dvh] flex items-center justify-center bg-slate-50 text-gray-500 text-sm">
       Загрузка…
     </div>
   );

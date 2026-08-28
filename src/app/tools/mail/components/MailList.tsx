@@ -30,20 +30,20 @@ interface Props {
 export function MailList({ items, onSelect }: Props) {
   if (!items.length) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-zinc-500 px-4 text-center">
+      <div className="flex flex-1 items-center justify-center text-sm text-gray-500 px-4 text-center min-h-[12rem]">
         Нет писем
       </div>
     );
   }
 
   return (
-    <ul className="flex-1 overflow-y-auto divide-y divide-zinc-900">
+    <ul className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain divide-y divide-gray-100">
       {items.map((item) => (
         <li key={item.uid}>
           <button
             type="button"
             onClick={() => onSelect(item.uid)}
-            className="w-full flex gap-3 px-3 py-3 text-left hover:bg-zinc-900/80"
+            className="w-full flex gap-3 px-3 py-3 text-left hover:bg-gray-50 active:bg-gray-100"
           >
             <div
               className={`shrink-0 h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold text-white ${avatarColor(item.fromName)}`}
@@ -52,20 +52,20 @@ export function MailList({ items, onSelect }: Props) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                {item.unread && <span className="h-2 w-2 rounded-full bg-sky-500 shrink-0" />}
-                <span className={`truncate text-sm ${item.unread ? "font-semibold" : "font-medium text-zinc-300"}`}>
+                {item.unread && <span className="h-2 w-2 rounded-full bg-sky-600 shrink-0" />}
+                <span className={`truncate text-sm ${item.unread ? "font-semibold text-gray-900" : "font-medium text-gray-700"}`}>
                   {item.fromName || item.from}
                 </span>
-                <span className="ml-auto text-xs text-zinc-500 shrink-0 flex items-center gap-1">
+                <span className="ml-auto text-xs text-gray-400 shrink-0 flex items-center gap-1">
                   {item.hasAttachments && <span aria-hidden>📎</span>}
                   {formatDate(item.date)}
                 </span>
               </div>
-              <p className={`truncate text-sm mt-0.5 ${item.unread ? "text-white" : "text-zinc-400"}`}>
+              <p className={`truncate text-sm mt-0.5 ${item.unread ? "text-gray-900" : "text-gray-600"}`}>
                 {item.subject}
               </p>
               {item.preview && (
-                <p className="truncate text-xs text-zinc-500 mt-0.5">{item.preview}</p>
+                <p className="truncate text-xs text-gray-400 mt-0.5">{item.preview}</p>
               )}
             </div>
           </button>
