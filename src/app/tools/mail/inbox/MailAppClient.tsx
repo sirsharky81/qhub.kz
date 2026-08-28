@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MailFilter } from "@/lib/mail/web/constants";
 import { DEFAULT_FOLDER } from "@/lib/mail/web/constants";
+import { findSentFolderPath, isSameMailbox } from "@/lib/mail/web/addresses";
 import {
   fetchMailFolders,
   fetchMailMessage,
@@ -42,9 +43,55 @@ export function MailAppClient() {
 
   const [refreshCounter, setRefreshCounter] = useState(0);
   const [inboxReady, setInboxReady] = useState(false);
+  const [sentNotice, setSentNotice] = useState<string | null>(null);
+  const retryTimersRef = useRef<number[]>([]);
 
-  function refreshMailbox() {
+  const refreshMailbox = useCallback(() => {
     setRefreshCounter((value) => value + 1);
+  }, []);
+
+  const refreshMailboxWithRetry = useCallback(() => {
+    refreshMailbox();
+    for (const timerId of retryTimersRef.current) {
+      window.clearTimeout(timerId);
+    }
+    retryTimersRef.current = [3000, 8000, 20000].map((delay) =>
+      window.setTimeout(() => refreshMailbox(), delay),
+    );
+  }, [refreshMailbox]);
+
+  useEffect(() => {
+    return () => {
+      for (const timerId of retryTimersRef.current) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sentNotice) return;
+    const timerId = window.setTimeout(() => setSentNotice(null), 8000);
+    return () => window.clearTimeout(timerId);
+  }, [sentNotice]);
+
+  function handleSent(to: string) {
+    refreshMailboxWithRetry();
+    const applySentFolder = (list: MailFolder[]) => {
+      const sentPath = findSentFolderPath(list);
+      if (!sentPath) return;
+      setActiveFolder(sentPath);
+      setSentNotice(
+        isSameMailbox(to, email)
+          ? "Письмо отправлено. Копия — в «Отправленных». Во «Входящие» может прийти с небольшой задержкой."
+          : "Письмо отправлено. Копия — в «Отправленных».",
+      );
+    };
+    void fetchMailFolders()
+      .then((list) => {
+        setFolders(list);
+        applySentFolder(list);
+      })
+      .catch(() => applySentFolder(folders));
   }
 
   useEffect(() => {
@@ -124,6 +171,16 @@ export function MailAppClient() {
       cancelled = true;
     };
   }, [activeFolder, filter, search, refreshCounter, inboxReady]);
+
+  useEffect(() => {
+    if (!inboxReady || selectedUid !== null) return;
+    const timerId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        refreshMailbox();
+      }
+    }, 45000);
+    return () => window.clearInterval(timerId);
+  }, [inboxReady, selectedUid, refreshMailbox]);
 
   const activeFolderLabel =
     folders.find((f) => f.path === activeFolder)?.label ?? activeFolder;
@@ -217,7 +274,7 @@ export function MailAppClient() {
           initialSubject={composeDefaults.subject}
           initialText={composeDefaults.text}
           onClose={() => setComposeOpen(false)}
-          onSent={refreshMailbox}
+          onSent={handleSent}
         />
       </MailShell>
     );
@@ -244,6 +301,14 @@ export function MailAppClient() {
         }
         trailing={
           <div className="flex items-center gap-1 relative">
+            <button
+              type="button"
+              onClick={refreshMailbox}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 touch-manipulation"
+              aria-label="Обновить"
+            >
+              ↻
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -291,6 +356,10 @@ export function MailAppClient() {
               autoFocus
             />
           </div>
+        )}
+
+        {sentNotice && (
+          <p className="shrink-0 px-3 py-2 text-sm text-sky-800 bg-sky-50">{sentNotice}</p>
         )}
 
         {foldersError && (
@@ -361,12 +430,7 @@ export function MailAppClient() {
         initialSubject={composeDefaults.subject}
         initialText={composeDefaults.text}
         onClose={() => setComposeOpen(false)}
-        onSent={() => {
-          refreshMailbox();
-          void fetchMailFolders()
-            .then(setFolders)
-            .catch(() => undefined);
-        }}
+        onSent={handleSent}
       />
     </>
   );

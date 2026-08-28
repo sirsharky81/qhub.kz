@@ -12,7 +12,7 @@ interface Props {
   initialSubject?: string;
   initialText?: string;
   onClose: () => void;
-  onSent: () => void;
+  onSent: (to: string) => void;
 }
 
 interface FormProps {
@@ -20,7 +20,7 @@ interface FormProps {
   initialSubject: string;
   initialText: string;
   onClose: () => void;
-  onSent: () => void;
+  onSent: (to: string) => void;
 }
 
 function MailComposeForm({
@@ -75,7 +75,7 @@ function MailComposeForm({
       form.set("text", text);
       for (const file of files) form.append("attachments", file);
       await sendMailCompose(form);
-      onSent();
+      onSent(to.trim());
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка отправки");

@@ -5,7 +5,11 @@ import { listMailMessages } from "@/lib/mail/web/imap";
 import { getMailSession } from "@/lib/mail/web/session";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
+export const dynamic = "force-dynamic";
+
 const VALID_FILTERS = new Set<MailFilter>(["all", "unread", "flagged", "attachments"]);
+
+const NO_STORE = { headers: { "Cache-Control": "no-store" } };
 
 export async function GET(request: Request) {
   if (!isMailServerConfigured()) {
@@ -38,9 +42,9 @@ export async function GET(request: Request) {
       offset,
       limit,
     });
-    return NextResponse.json(result);
+    return NextResponse.json(result, NO_STORE);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Ошибка IMAP";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json({ error: message }, { status: 502, ...NO_STORE });
   }
 }
