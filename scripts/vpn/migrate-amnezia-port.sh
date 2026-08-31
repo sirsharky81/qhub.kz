@@ -102,18 +102,22 @@ fi
 
 if [ -x "$MANAGE" ]; then
   echo "[amnezia-port] regenerating all AmneziaWG client configs (new Endpoint port)..."
-  mapfile -t clients < <(
-    bash "$MANAGE" list 2>/dev/null | awk -F'|' '
-      NR > 2 && $0 !~ /^-/ {
-        gsub(/^[ \t]+|[ \t]+$/, "", $1)
-        if ($1 != "" && $1 !~ /Client name/) print $1
-      }'
-  )
-  for name in "${clients[@]}"; do
-    [ -z "$name" ] && continue
-    bash "$MANAGE" regen "$name" --yes >&2 || echo "[amnezia-port] warn: regen failed for ${name}" >&2
-  done
-  echo "[amnezia-port] regen done (${#clients[@]} client(s))"
+  if [ -x "${APP_DIR}/scripts/vpn/amnezia-client.sh" ]; then
+    bash "${APP_DIR}/scripts/vpn/amnezia-client.sh" regen-all || true
+  else
+    mapfile -t clients < <(
+      bash "$MANAGE" list 2>/dev/null | awk -F'|' '
+        NR > 2 && $0 !~ /^-/ {
+          gsub(/^[ \t]+|[ \t]+$/, "", $1)
+          if ($1 != "" && $1 !~ /Client name/) print $1
+        }'
+    )
+    for name in "${clients[@]}"; do
+      [ -z "$name" ] && continue
+      bash "$MANAGE" regen "$name" --yes >&2 || echo "[amnezia-port] warn: regen failed for ${name}" >&2
+    done
+    echo "[amnezia-port] regen done (${#clients[@]} client(s))"
+  fi
 fi
 
 echo "[amnezia-port] done — awg0 UDP ${LIVE_AFTER}. Re-import config in AmneziaVPN app."

@@ -118,9 +118,11 @@ jobs:
           ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
           cd /var/www/qhub.kz
           chmod +x scripts/deploy/repair-redis.sh scripts/vpn/diagnose-amnezia.sh \
-            scripts/vpn/amnezia-client.sh 2>/dev/null || true
+            scripts/vpn/amnezia-client.sh scripts/vpn/apply-russia-hetzner-i1.sh \
+            scripts/vpn/generate-quic-i1.mjs 2>/dev/null || true
           sudo bash scripts/deploy/repair-redis.sh || true
           if awg show awg0 >/dev/null 2>&1; then
+            sudo bash scripts/vpn/apply-russia-hetzner-i1.sh || true
             sudo bash scripts/vpn/amnezia-client.sh regen-all || true
           fi
           sudo bash scripts/vpn/diagnose-amnezia.sh || true

@@ -109,6 +109,9 @@ case "$cmd" in
     ;;
   export-json)
     [ $# -eq 1 ] || { usage; exit 1; }
+    if [ -x "$MANAGE" ]; then
+      bash "$MANAGE" regen "$1" --yes >&2 || true
+    fi
     emit_client_json "$1"
     ;;
   remove)

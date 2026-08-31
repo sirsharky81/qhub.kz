@@ -79,13 +79,15 @@ Workflow **AmneziaWG setup (Russia)** → `workflow_dispatch`:
 
 ## «Подключено», но WhatsApp и сайты не работают
 
-Типично для российского DPI на 4G: handshake проходит, трафик режется.
+Типично для российского DPI на 4G и для VPS на **Hetzner (AS24940)**: handshake проходит, трафик режется TSPU.
 
-1. На сервере: `sudo bash scripts/vpn/repair-amnezia-russia.sh` (обновляет installer, mobile preset, regen).
-2. В приложении **удалите** старый профиль и заново импортируйте QR/`vpn://` из портала.
+1. На сервере автоматически применяется **QUIC-mimicry I1** (SNI `7-zip.org`) — см. `scripts/vpn/apply-russia-hetzner-i1.sh`.
+2. В приложении **удалите** старый профиль AmneziaVPN и заново импортируйте QR/`vpn://` из портала (конфиг обновляется при скачивании).
 3. Проверьте IP на [2ip.ru](https://2ip.ru) — должен быть IP VPS (`65.108.215.248`).
 
 **QHub без VPN в РФ:** домен/IP VPS может быть в реестре блокировок — для доступа к qhub.kz из России нужен рабочий VPN-туннель.
+
+На некоторых провайдерах (например Seven Sky) обход может не сработать — тогда нужен VPS в другом AS.
 
 ---
 
@@ -95,4 +97,7 @@ Workflow **AmneziaWG setup (Russia)** → `workflow_dispatch`:
 |------|------------|
 | `scripts/deploy/amneziawg-bootstrap.sh` | Установка AmneziaWG |
 | `scripts/vpn/amnezia-client.sh` | Клиенты и QR |
+| `scripts/vpn/repair-amnezia-russia.sh` | Repair + regen |
+| `scripts/vpn/apply-russia-hetzner-i1.sh` | QUIC I1 для Hetzner / TSPU |
+| `scripts/vpn/generate-quic-i1.mjs` | Генератор I1 (SNI) |
 | `docs/vpn.md` | Обычный WireGuard (Китай и др.) |
