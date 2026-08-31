@@ -44,22 +44,11 @@ fi
 AWG_ENDPOINT="${AWG_ENDPOINT:-$(curl -4 -fsS https://ifconfig.me 2>/dev/null || echo 65.108.215.248)}"
 
 regen_all_clients() {
-  if [ ! -x "$MANAGE" ] || ! awg show awg0 >/dev/null 2>&1; then
+  if [ ! -x "$APP_DIR/scripts/vpn/amnezia-client.sh" ] || ! awg show awg0 >/dev/null 2>&1; then
     return 0
   fi
-  echo "[amnezia-repair] regen all client configs from live awg0.conf"
-  mapfile -t clients < <(
-    bash "$MANAGE" list 2>/dev/null | awk -F'|' '
-      NR > 2 && $0 !~ /^-/ {
-        gsub(/^[ \t]+|[ \t]+$/, "", $1)
-        if ($1 != "" && $1 !~ /Client name/) print $1
-      }'
-  )
-  for name in "${clients[@]}"; do
-    [ -z "$name" ] && continue
-    bash "$MANAGE" regen "$name" --yes >&2 || echo "[amnezia-repair] warn: regen ${name}" >&2
-  done
-  echo "[amnezia-repair] regen done (${#clients[@]} clients)"
+  echo "[amnezia-repair] regen all clients"
+  bash "$APP_DIR/scripts/vpn/amnezia-client.sh" regen-all || true
 }
 
 if ! command -v awg >/dev/null 2>&1 || ! awg show awg0 >/dev/null 2>&1; then

@@ -6,6 +6,26 @@ MANAGE="/root/awg/manage_amneziawg.sh"
 AWG_DIR="/root/awg"
 APP_DIR="${APP_DIR:-/var/www/qhub.kz}"
 
+# Client names from disk (manage list output has ANSI codes — unreliable for scripts).
+list_client_names() {
+  python3 - "$AWG_DIR" <<'PY'
+import pathlib, re, sys
+awg = pathlib.Path(sys.argv[1])
+names: set[str] = set()
+clients_dir = awg / "clients"
+if clients_dir.is_dir():
+    for d in clients_dir.iterdir():
+        if d.is_dir():
+            names.add(d.name)
+for f in awg.glob("*.conf"):
+    names.add(f.stem)
+valid = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+for n in sorted(names):
+    if valid.match(n):
+        print(n)
+PY
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -119,17 +139,11 @@ case "$cmd" in
       echo "AmneziaWG not installed" >&2
       exit 1
     fi
-    mapfile -t names < <(
-      bash "$MANAGE" list 2>/dev/null | awk -F'|' '
-        NR > 2 && $0 !~ /^-/ {
-          gsub(/^[ \t]+|[ \t]+$/, "", $1)
-          if ($1 != "" && $1 !~ /Client name/) print $1
-        }'
-    )
+    mapfile -t names < <(list_client_names)
     for name in "${names[@]}"; do
       [ -z "$name" ] && continue
       echo "[regen-all] $name" >&2
-      bash "$MANAGE" regen "$name" --yes >&2 || true
+      bash "$MANAGE" regen "$name" --yes >&2 || echo "[regen-all] warn: $name" >&2
     done
     echo "[regen-all] done (${#names[@]} clients)"
     ;;
