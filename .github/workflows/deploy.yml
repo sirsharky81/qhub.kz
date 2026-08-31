@@ -75,6 +75,17 @@ jobs:
           fi
           EOF
 
+      - name: Repair AmneziaWG for Russia (upgrade + regen)
+        continue-on-error: true
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
+          cd /var/www/qhub.kz
+          chmod +x scripts/vpn/repair-amnezia-russia.sh 2>/dev/null || true
+          if [ -x scripts/vpn/repair-amnezia-russia.sh ]; then
+            sudo bash scripts/vpn/repair-amnezia-russia.sh || true
+          fi
+          EOF
+
       - name: Ensure AmneziaWG for Russia (root)
         continue-on-error: true
         run: |

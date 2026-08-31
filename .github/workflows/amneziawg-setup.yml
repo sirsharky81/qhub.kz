@@ -33,8 +33,8 @@ jobs:
           cd /var/www/qhub.kz
           git fetch origin main
           git reset --hard origin/main
-          chmod +x scripts/deploy/amneziawg-bootstrap.sh scripts/vpn/amnezia-client.sh
-          sudo bash scripts/deploy/amneziawg-bootstrap.sh || true
+          chmod +x scripts/deploy/amneziawg-bootstrap.sh scripts/vpn/amnezia-client.sh scripts/vpn/repair-amnezia-russia.sh
+          sudo bash scripts/vpn/repair-amnezia-russia.sh || sudo bash scripts/deploy/amneziawg-bootstrap.sh || true
           sudo bash scripts/vpn/amnezia-client.sh status || echo "awg0 not up — reboot VPS and re-run workflow"
           EOF
 
