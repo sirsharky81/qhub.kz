@@ -85,6 +85,11 @@ else
   echo "[amnezia-repair] safe mode — regen only (set AWG_FORCE_UPGRADE=1 for full upgrade)"
 fi
 
+chmod +x scripts/vpn/apply-russia-hetzner-i1.sh scripts/vpn/generate-quic-i1.mjs 2>/dev/null || true
+if [ -x scripts/vpn/apply-russia-hetzner-i1.sh ]; then
+  bash scripts/vpn/apply-russia-hetzner-i1.sh || echo "[amnezia-repair] warn: hetzner I1 apply failed" >&2
+fi
+
 regen_all_clients
 
 echo "[amnezia-repair] diagnostics"
@@ -94,7 +99,7 @@ if awg show awg0 >/dev/null 2>&1; then
 else
   echo "awg0: DOWN — run deploy again or: sudo bash scripts/deploy/amneziawg-bootstrap.sh"
 fi
-[ -f "$AWG_CONF" ] && grep -E '^(Jc|Jmin|Jmax|ListenPort)' "$AWG_CONF" 2>/dev/null | head -6 || true
+[ -f "$AWG_CONF" ] && grep -E '^(Jc|Jmin|Jmax|ListenPort|I1)' "$AWG_CONF" 2>/dev/null | head -8 || true
 
 if command -v pm2 >/dev/null 2>&1; then
   pm2 restart qhub 2>/dev/null || true
