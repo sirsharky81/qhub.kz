@@ -112,6 +112,21 @@ jobs:
           fi
           EOF
 
+      - name: Final Redis + VPN diagnostics
+        continue-on-error: true
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
+          cd /var/www/qhub.kz
+          chmod +x scripts/deploy/repair-redis.sh scripts/vpn/diagnose-amnezia.sh \
+            scripts/vpn/amnezia-client.sh 2>/dev/null || true
+          sudo bash scripts/deploy/repair-redis.sh || true
+          if awg show awg0 >/dev/null 2>&1; then
+            sudo bash scripts/vpn/amnezia-client.sh regen-all || true
+          fi
+          sudo bash scripts/vpn/diagnose-amnezia.sh || true
+          pm2 restart qhub 2>/dev/null || true
+          EOF
+
       - name: Ensure standard mail folders
         continue-on-error: true
         run: |
