@@ -73,9 +73,19 @@ Workflow **AmneziaWG setup (Russia)** → `workflow_dispatch`:
 
 ## Если не подключается
 
-1. Переустановите конфиг через `amnezia-client.sh regen <имя>`.
+1. Переустановите конфиг через `amnezia-client.sh regen <имя>` или `regen-all`.
 2. Попробуйте мобильный интернет вместо Wi‑Fi (или наоборот).
 3. Убедитесь, что в AmneziaVPN импортирован **AmneziaWG** конфиг, не WireGuard.
+
+## «Подключено», но WhatsApp и сайты не работают
+
+Типично для российского DPI на 4G: handshake проходит, трафик режется.
+
+1. На сервере: `sudo bash scripts/vpn/repair-amnezia-russia.sh` (обновляет installer, mobile preset, regen).
+2. В приложении **удалите** старый профиль и заново импортируйте QR/`vpn://` из портала.
+3. Проверьте IP на [2ip.ru](https://2ip.ru) — должен быть IP VPS (`65.108.215.248`).
+
+**QHub без VPN в РФ:** домен/IP VPS может быть в реестре блокировок — для доступа к qhub.kz из России нужен рабочий VPN-туннель.
 
 ---
 
