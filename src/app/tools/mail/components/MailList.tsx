@@ -25,9 +25,10 @@ function avatarColor(name: string): string {
 interface Props {
   items: MailListItem[];
   onSelect: (uid: number) => void;
+  selectedUid?: number | null;
 }
 
-export function MailList({ items, onSelect }: Props) {
+export function MailList({ items, onSelect, selectedUid = null }: Props) {
   if (!items.length) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-gray-500 px-4 text-center min-h-[12rem]">
@@ -38,12 +39,18 @@ export function MailList({ items, onSelect }: Props) {
 
   return (
     <ul className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain divide-y divide-gray-100">
-      {items.map((item) => (
+      {items.map((item) => {
+        const selected = selectedUid === item.uid;
+        return (
         <li key={item.uid}>
           <button
             type="button"
             onClick={() => onSelect(item.uid)}
-            className="w-full flex gap-3 px-3 py-3 text-left hover:bg-gray-50 active:bg-gray-100"
+            className={`w-full flex gap-3 px-3 py-3 text-left transition ${
+              selected
+                ? "bg-sky-50 border-l-2 border-sky-600 pl-[calc(0.75rem-2px)]"
+                : "hover:bg-gray-50 active:bg-gray-100 border-l-2 border-transparent"
+            }`}
           >
             <div
               className={`shrink-0 h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold text-white ${avatarColor(item.fromName)}`}
@@ -70,7 +77,8 @@ export function MailList({ items, onSelect }: Props) {
             </div>
           </button>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

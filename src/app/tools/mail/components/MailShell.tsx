@@ -11,20 +11,41 @@ interface Props {
   children: ReactNode;
   /** When true, the main column scrolls (login/forms). Inbox uses nested list scroll. */
   scrollMain?: boolean;
+  /** Inbox uses full-width split layout on desktop; login keeps phone-width shell. */
+  layout?: "default" | "inbox";
 }
 
-export function MailShell({ title, leading, trailing, children, scrollMain = false }: Props) {
+export function MailShell({
+  title,
+  leading,
+  trailing,
+  children,
+  scrollMain = false,
+  layout = "default",
+}: Props) {
   const mainRef = useRef<HTMLElement>(null);
   useIosPwaKeyboardShell(mainRef, true);
 
+  const isInbox = layout === "inbox";
+
   return (
     <div
-      className="fixed inset-x-0 z-40 mx-auto flex w-full max-w-lg flex-col overflow-hidden bg-slate-200/60 text-gray-900"
+      className={`fixed z-40 flex w-full flex-col overflow-hidden text-gray-900 ${
+        isInbox
+          ? "inset-0 bg-slate-100"
+          : "inset-x-0 mx-auto max-w-lg bg-slate-200/60"
+      }`}
       style={iosPwaShellStyle}
     >
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white shadow-sm md:border-x border-gray-200/70">
+      <div
+        className={`flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white ${
+          isInbox ? "shadow-none md:shadow-sm" : "shadow-sm md:border-x border-gray-200/70"
+        }`}
+      >
         <header
-          className="shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur flex items-center gap-2"
+          className={`shrink-0 border-b border-gray-200 bg-white/95 backdrop-blur flex items-center gap-2 ${
+            isInbox ? "md:px-4" : ""
+          }`}
           style={{
             paddingTop: "max(0.75rem, env(safe-area-inset-top))",
             paddingBottom: "0.75rem",
@@ -33,7 +54,16 @@ export function MailShell({ title, leading, trailing, children, scrollMain = fal
           }}
         >
           {leading}
-          <h1 className="flex-1 min-w-0 text-base font-semibold truncate">{title}</h1>
+          <h1 className="flex-1 min-w-0 text-base font-semibold truncate">
+            {isInbox ? (
+              <>
+                <span className="md:hidden">{title}</span>
+                <span className="hidden md:inline">Почта</span>
+              </>
+            ) : (
+              title
+            )}
+          </h1>
           {trailing}
         </header>
         <main

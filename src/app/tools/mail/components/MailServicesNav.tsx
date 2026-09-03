@@ -151,10 +151,17 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
     : "";
 
   return (
-    <div
-      className="fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-hidden bg-white text-gray-900"
-      style={iosPwaShellStyle}
-    >
+    <>
+      <button
+        type="button"
+        className="fixed inset-0 z-[65] bg-black/40 md:bg-black/50"
+        aria-label="Закрыть"
+        onClick={onClose}
+      />
+      <div
+        className="fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-hidden bg-white text-gray-900 md:inset-x-auto md:inset-y-auto md:left-1/2 md:top-1/2 md:!h-auto md:max-h-[min(85vh,640px)] md:w-full md:max-w-xl md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-gray-200 md:shadow-2xl"
+        style={iosPwaShellStyle}
+      >
       <header
         className="shrink-0 flex items-center gap-3 border-b border-gray-200 px-4 py-3 bg-white"
         style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
@@ -288,5 +295,6 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
         )}
       </div>
     </div>
+    </>
   );
 }

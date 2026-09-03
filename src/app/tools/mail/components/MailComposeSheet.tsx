@@ -91,10 +91,17 @@ function MailComposeForm({
   }
 
   return (
-    <div
-      className="fixed inset-x-0 z-[60] mx-auto flex w-full max-w-lg flex-col overflow-hidden bg-white text-gray-900 shadow-xl"
-      style={iosPwaShellStyle}
-    >
+    <>
+      <button
+        type="button"
+        className="fixed inset-0 z-[55] bg-black/40 md:bg-black/50"
+        aria-label="Закрыть"
+        onClick={onClose}
+      />
+      <div
+        className="fixed inset-x-0 z-[60] mx-auto flex w-full max-w-lg flex-col overflow-hidden bg-white text-gray-900 shadow-xl md:inset-x-auto md:left-1/2 md:top-1/2 md:!h-auto md:max-h-[min(85vh,720px)] md:w-full md:max-w-2xl md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-gray-200"
+        style={iosPwaShellStyle}
+      >
       <header
         className="shrink-0 flex items-center gap-3 border-b border-gray-200 px-4 py-3 bg-white"
         style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
@@ -209,6 +216,7 @@ function MailComposeForm({
         {error && <p className="text-sm text-red-600 text-center pb-2">{error}</p>}
       </div>
     </div>
+    </>
   );
 }
 
