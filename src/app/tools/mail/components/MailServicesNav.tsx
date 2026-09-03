@@ -71,8 +71,8 @@ const TABS: Array<{ id: AccountTab; label: string }> = [
 ];
 
 export function MailAccountSheet({ open, email, onClose, onLogout }: AccountSheetProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useIosPwaKeyboardShell(scrollRef, open);
+  const mobileScrollRef = useRef<HTMLDivElement>(null);
+  useIosPwaKeyboardShell(mobileScrollRef, open);
   const [tab, setTab] = useState<AccountTab>("general");
   const [profile, setProfile] = useState<MailProfileResult | null>(null);
   const [fullName, setFullName] = useState("");
@@ -114,6 +114,15 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   async function handleSavePersonal() {
     setSaving(true);
     setError(null);
@@ -150,30 +159,36 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
     ? effectiveMailSignature({ fullName, phone, signature })
     : "";
 
-  return (
-    <>
-      <button
-        type="button"
-        className="fixed inset-0 z-[65] bg-black/40 md:bg-black/50"
-        aria-label="Закрыть"
-        onClick={onClose}
-      />
-      <div
-        className="fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-hidden bg-white text-gray-900 md:inset-x-auto md:inset-y-auto md:left-1/2 md:top-1/2 md:!h-auto md:max-h-[min(85vh,640px)] md:w-full md:max-w-xl md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-gray-200 md:shadow-2xl"
-        style={iosPwaShellStyle}
-      >
+  function AccountHeader({ variant }: { variant: "mobile" | "desktop" }) {
+    return (
       <header
-        className="shrink-0 flex items-center gap-3 border-b border-gray-200 px-4 py-3 bg-white"
-        style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+        className={`shrink-0 flex items-center gap-3 border-b border-gray-200 bg-white ${
+          variant === "desktop" ? "px-5 py-4" : "px-4 py-3"
+        }`}
+        style={variant === "mobile" ? { paddingTop: "max(0.75rem, env(safe-area-inset-top))" } : undefined}
       >
-        <button type="button" onClick={onClose} className="text-sky-600 text-sm touch-manipulation">
-          Закрыть
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-sm text-gray-500 hover:text-gray-800 touch-manipulation"
+        >
+          {variant === "desktop" ? "✕" : "Закрыть"}
         </button>
-        <h2 className="flex-1 text-center text-sm font-semibold">Аккаунт</h2>
-        <span className="w-12" />
+        <h2 className={`flex-1 font-semibold text-gray-900 ${variant === "desktop" ? "text-base" : "text-center text-sm"}`}>
+          Настройки аккаунта
+        </h2>
+        {variant === "mobile" ? <span className="w-12" /> : null}
       </header>
+    );
+  }
 
-      <div className="shrink-0 flex border-b border-gray-200">
+  function AccountTabs({ variant }: { variant: "mobile" | "desktop" }) {
+    return (
+      <div
+        className={`shrink-0 border-b border-gray-200 ${
+          variant === "desktop" ? "flex gap-1 px-5 pt-3" : "flex"
+        }`}
+      >
         {TABS.map((item) => (
           <button
             key={item.id}
@@ -183,20 +198,30 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
               setError(null);
               setSaved(false);
             }}
-            className={`flex-1 py-2.5 text-xs font-medium touch-manipulation ${
-              tab === item.id ? "text-sky-700 border-b-2 border-sky-600" : "text-gray-500"
+            className={`touch-manipulation font-medium transition ${
+              variant === "desktop"
+                ? `rounded-t-lg px-4 py-2.5 text-sm ${
+                    tab === item.id
+                      ? "border-b-2 border-sky-600 text-sky-700 bg-sky-50/50"
+                      : "text-gray-500 hover:text-gray-800"
+                  }`
+                : `flex-1 py-2.5 text-xs ${
+                    tab === item.id ? "text-sky-700 border-b-2 border-sky-600" : "text-gray-500"
+                  }`
             }`}
           >
             {item.label}
           </button>
         ))}
       </div>
+    );
+  }
 
-      <div
-        ref={scrollRef}
-        className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain touch-pan-y px-4 py-4 space-y-4 [-webkit-overflow-scrolling:touch]"
-        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
-      >
+  function AccountBody({ variant }: { variant: "mobile" | "desktop" }) {
+    const padding = variant === "desktop" ? "px-5 py-5" : "px-4 py-4";
+
+    return (
+      <div className={`space-y-4 ${padding}`}>
         <p className="text-sm text-gray-500 truncate">{email}</p>
 
         {loading && <p className="text-sm text-gray-500">Загрузка…</p>}
@@ -205,7 +230,7 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
         {saved && <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">Сохранено</p>}
 
         {tab === "general" && (
-          <div className="space-y-3">
+          <div className={variant === "desktop" ? "grid max-w-sm gap-3" : "space-y-3"}>
             <Link
               href="/tools/mail/password"
               className="block w-full rounded-xl border border-gray-200 px-4 py-3 text-sm text-center text-gray-900 hover:bg-gray-50"
@@ -216,7 +241,7 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
             <button
               type="button"
               onClick={() => void logoutMail().then(onLogout)}
-              className="w-full rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 touch-manipulation"
+              className="w-full rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 touch-manipulation hover:bg-red-100"
             >
               Выйти
             </button>
@@ -224,7 +249,7 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
         )}
 
         {tab === "personal" && !loading && (
-          <div className="space-y-4">
+          <div className={`space-y-4 ${variant === "desktop" ? "max-w-md" : ""}`}>
             <p className="text-sm text-gray-500">
               ФИО будет отображаться у получателей как имя отправителя.
             </p>
@@ -254,7 +279,7 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
               type="button"
               disabled={saving}
               onClick={() => void handleSavePersonal()}
-              className="w-full rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 touch-manipulation"
+              className="rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 touch-manipulation hover:bg-sky-700"
             >
               {saving ? "Сохранение…" : "Сохранить"}
             </button>
@@ -262,7 +287,7 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
         )}
 
         {tab === "signature" && !loading && (
-          <div className="space-y-4">
+          <div className={`space-y-4 ${variant === "desktop" ? "max-w-lg" : ""}`}>
             <p className="text-sm text-gray-500">
               Подпись добавляется в конец исходящих писем. Если поле пустое, используются ФИО и телефон из личных данных.
             </p>
@@ -287,14 +312,60 @@ export function MailAccountSheet({ open, email, onClose, onLogout }: AccountShee
               type="button"
               disabled={saving}
               onClick={() => void handleSaveSignature()}
-              className="w-full rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 touch-manipulation"
+              className="rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 touch-manipulation hover:bg-sky-700"
             >
               {saving ? "Сохранение…" : "Сохранить"}
             </button>
           </div>
         )}
       </div>
-    </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="fixed inset-0 z-[65] bg-black/40 md:bg-black/50"
+        aria-label="Закрыть"
+        onClick={onClose}
+      />
+
+      {/* Mobile: full-screen sheet */}
+      <div
+        className="md:hidden fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-hidden bg-white text-gray-900"
+        style={iosPwaShellStyle}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Настройки аккаунта"
+      >
+        <AccountHeader variant="mobile" />
+        <AccountTabs variant="mobile" />
+        <div
+          ref={mobileScrollRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]"
+          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+        >
+          <AccountBody variant="mobile" />
+        </div>
+      </div>
+
+      {/* Desktop: centered dialog */}
+      <div className="hidden md:flex fixed inset-0 z-[70] items-center justify-center p-6 pointer-events-none">
+        <div
+          className="pointer-events-auto flex w-full max-w-xl max-h-[min(88vh,680px)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white text-gray-900 shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Настройки аккаунта"
+        >
+          <AccountHeader variant="desktop" />
+          <AccountTabs variant="desktop" />
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <AccountBody variant="desktop" />
+          </div>
+        </div>
+      </div>
     </>
   );
 }

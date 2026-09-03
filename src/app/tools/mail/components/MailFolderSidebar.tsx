@@ -32,8 +32,6 @@ export function MailFolderSidebar({
   className = "",
   style,
 }: Props) {
-  const totalUnread = folders.reduce((sum, folder) => sum + folder.unread, 0);
-
   return (
     <aside className={`flex flex-col bg-slate-50/90 ${className}`} style={style}>
       <div className="shrink-0 border-b border-gray-200 px-4 py-4">
@@ -100,13 +98,12 @@ export function MailFolderSidebar({
         <button
           type="button"
           onClick={onAccount}
-          className="mt-2 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-gray-600 transition hover:bg-white hover:text-gray-900"
+          className="mt-2 flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-gray-600 transition hover:bg-white hover:text-gray-900"
         >
-          <span aria-hidden>👤</span>
-          <span className="truncate">Аккаунт</span>
-          {totalUnread > 0 && (
-            <span className="ml-auto text-[10px] text-gray-400">{totalUnread} нов.</span>
-          )}
+          <span aria-hidden className="shrink-0">
+            👤
+          </span>
+          <span className="min-w-0 flex-1 truncate">Аккаунт</span>
         </button>
       </div>
     </aside>
