@@ -121,3 +121,29 @@ mail_verify_password() {
   local password="$2"
   doveadm auth test "$email" "$password" >/dev/null 2>&1
 }
+
+mail_pcre_escape_address() {
+  printf '%s' "$1" | sed 's/\./\\./g'
+}
+
+# Postfix PCRE /i keeps capture case in ${1}; emit one rule per mailbox with literal lowercase target.
+mail_regenerate_canonical_pcre() {
+  local dst="${1:-/etc/postfix/recipient_canonical_maps.pcre}"
+  local tmp email escaped
+  tmp="$(mktemp)"
+  {
+    echo "# Auto-generated — case-insensitive recipient rewrite for @${MAIL_DOMAIN}"
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%%#*}"
+      line="${line//$'\r'/}"
+      [ -z "$line" ] && continue
+      email="${line%%:*}"
+      email="${email,,}"
+      [[ "$email" == *"@$MAIL_DOMAIN" ]] || continue
+      escaped="$(mail_pcre_escape_address "$email")"
+      printf '/^(?i)%s$/    %s\n' "$escaped" "$email"
+    done <"$DOVECOT_USERS"
+  } >"$tmp"
+  mv "$tmp" "$dst"
+  chmod 644 "$dst"
+}
