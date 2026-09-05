@@ -40,6 +40,8 @@ tmp="$(mktemp)"
 grep -vi "^${EMAIL}[[:space:]]" "$POSTFIX_VIRTUAL" >"$tmp" || true
 mv "$tmp" "$POSTFIX_VIRTUAL"
 
+mail_regenerate_canonical_pcre
+
 if [ "$PURGE" -eq 1 ] && [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR" ]; then
   rm -rf "$HOME_DIR"
 fi

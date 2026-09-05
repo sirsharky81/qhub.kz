@@ -1,3 +1,2 @@
-# Lowercase @qhub.kz recipients before virtual_mailbox_maps lookup.
-# Fixes delivery when senders type SLT@qhub.kz instead of slt@qhub.kz.
-/^(.*)@qhub\.kz$/i    ${1}@qhub.kz
+# Deprecated template — apply-mail-case-normalize.sh generates per-mailbox rules from /etc/dovecot/users.
+# Postfix ${1} in PCRE replacements keeps original case even with /i, so a generic rule does not work.

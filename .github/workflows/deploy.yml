@@ -153,7 +153,7 @@ jobs:
             bash scripts/mail/mail-init-folders.sh boris@qhub.kz
           fi
           if [ -x scripts/mail/mail-inbound-trace.sh ]; then
-            bash scripts/mail/mail-inbound-trace.sh boris@qhub.kz doping@mail.ru bokhmarnyy@gmail.com || true
+            bash scripts/mail/mail-inbound-trace.sh boris@qhub.kz slt@qhub.kz doping@mail.ru bokhmarnyy@gmail.com || true
           fi
           if [ -x scripts/mail/mail-outbound-trace.sh ]; then
             bash scripts/mail/mail-outbound-trace.sh boris@qhub.kz 48 || true

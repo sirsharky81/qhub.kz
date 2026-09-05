@@ -37,6 +37,8 @@ mail_replace_user "$EMAIL" "$(mail_user_line "$EMAIL" "$HASH" "$MAIL_DEFAULT_QUO
 mail_replace_postfix_entry "$EMAIL" "$(mail_postfix_entry "$EMAIL")"
 grep -qxF "$MAIL_DOMAIN	OK" "$POSTFIX_DOMAINS" 2>/dev/null || echo "$MAIL_DOMAIN	OK" >>"$POSTFIX_DOMAINS"
 
+mail_regenerate_canonical_pcre
+
 mail_reload_services
 
 bash "${SCRIPT_DIR}/mail-init-folders.sh" "$EMAIL"
