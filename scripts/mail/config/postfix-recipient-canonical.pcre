@@ -1,0 +1,3 @@
+# Lowercase @qhub.kz recipients before virtual_mailbox_maps lookup.
+# Fixes delivery when senders type SLT@qhub.kz instead of slt@qhub.kz.
+/^(.*)@qhub\.kz$/i    ${1}@qhub.kz

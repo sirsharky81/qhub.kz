@@ -39,9 +39,10 @@ mail_home_dir() {
 }
 
 mail_postfix_entry() {
+  local email="${1,,}"
   local local
-  local="$(mail_local_part "$1")"
-  printf '%s\t%s/%s/' "$1" "$MAIL_DOMAIN" "$local"
+  local="$(mail_local_part "$email")"
+  printf '%s\t%s/%s/' "$email" "$MAIL_DOMAIN" "$local"
 }
 
 mail_hash_password() {
