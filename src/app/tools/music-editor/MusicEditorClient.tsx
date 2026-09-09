@@ -27,8 +27,8 @@ import {
   createManualSettings,
   DEFAULT_MANUAL_SETTINGS,
   DEFAULT_PROGRAM_TRANSITION,
-  MAX_TRACKS,
 } from "@/lib/music-editor/types";
+import { getEffectiveMaxTracks } from "@/lib/music-editor/mobile-limits";
 
 function createEmptyEditor(): EditorState {
   return {
@@ -186,9 +186,10 @@ export default function MusicEditorClient() {
 
   const handleFilesSelect = useCallback(
     async (files: File[]) => {
-      const remaining = MAX_TRACKS - tracks.length;
+      const maxTracks = getEffectiveMaxTracks();
+      const remaining = maxTracks - tracks.length;
       if (remaining <= 0) {
-        setLoadError(`Можно загрузить не более ${MAX_TRACKS} треков`);
+        setLoadError(`Можно загрузить не более ${maxTracks} треков`);
         return;
       }
       const toLoad = files.slice(0, remaining);
@@ -554,7 +555,7 @@ export default function MusicEditorClient() {
                 </div>
               );
             })}
-            {tracks.length < MAX_TRACKS && (
+            {tracks.length < getEffectiveMaxTracks() && (
               <UploadZone onFilesSelect={handleFilesSelect} compact disabled={loading} />
             )}
           </div>

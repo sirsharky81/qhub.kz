@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
 import { formatTimePrecise, formatTimeMs, clampTime, snapToBeat } from "@/lib/music-editor/format";
+import { prepareCanvas2d } from "@/lib/music-editor/canvas-utils";
+import { getPlaybackRedrawIntervalMs, isLowMemoryPlatform } from "@/lib/music-editor/mobile-limits";
 import { PeaksLodCache, computePeaks } from "@/lib/music-editor/waveform";
 import type { BeatGrid, EditRegion, TrimRegion } from "@/lib/music-editor/types";
 import { describeEditRegion } from "@/lib/music-editor/selection";
@@ -193,14 +195,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
       const dpr = window.devicePixelRatio || 1;
       const width = container.clientWidth;
-      canvas.width = width * dpr;
-      canvas.height = MINIMAP_HEIGHT * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${MINIMAP_HEIGHT}px`;
-
-      const ctx = canvas.getContext("2d");
+      const ctx = prepareCanvas2d(canvas, width, MINIMAP_HEIGHT, dpr);
       if (!ctx) return;
-      ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, MINIMAP_HEIGHT);
 
       const mid = MINIMAP_HEIGHT / 2;
@@ -287,15 +283,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
       const dpr = window.devicePixelRatio || 1;
       const width = container.clientWidth;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-
-      const ctx = canvas.getContext("2d");
+      const ctx = prepareCanvas2d(canvas, width, height, dpr);
       if (!ctx) return;
-
-      ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, height);
 
       const mid = height / 2;
@@ -466,7 +455,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
     const resultPeaks = useMemo(() => {
       if (!processedBuffer) return [];
-      return computePeaks(processedBuffer, 320);
+      return computePeaks(processedBuffer, isLowMemoryPlatform() ? 160 : 320);
     }, [processedBuffer]);
 
     const resultTimeRef = useRef(resultCurrentTime);
@@ -480,14 +469,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       const dpr = window.devicePixelRatio || 1;
       const width = container.clientWidth;
       const stripH = 44;
-      canvas.width = width * dpr;
-      canvas.height = stripH * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${stripH}px`;
-
-      const ctx = canvas.getContext("2d");
+      const ctx = prepareCanvas2d(canvas, width, stripH, dpr);
       if (!ctx) return;
-      ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, stripH);
       ctx.fillStyle = "#fffbeb";
       ctx.fillRect(0, 0, width, stripH);
@@ -543,17 +526,31 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     useEffect(() => {
       if (!isPlaying) return;
       let raf = 0;
-      const loop = () => {
+      let lastRedraw = 0;
+      let lastAutoScroll = 0;
+      const redrawInterval = getPlaybackRedrawIntervalMs();
+      const autoScrollInterval = 250;
+
+      const loop = (now: number) => {
         const playTime = resolvePlayheadTime();
-        setViewStart((v) => {
-          const vis = duration / zoom;
-          const end = v + vis;
-          if (playTime >= v && playTime <= end) return v;
-          return clampViewStart(playTime - vis / 2);
-        });
-        draw();
-        drawMinimap();
-        drawResult();
+
+        if (now - lastAutoScroll >= autoScrollInterval) {
+          lastAutoScroll = now;
+          setViewStart((v) => {
+            const vis = duration / zoom;
+            const end = v + vis;
+            if (playTime >= v && playTime <= end) return v;
+            return clampViewStart(playTime - vis / 2);
+          });
+        }
+
+        if (now - lastRedraw >= redrawInterval) {
+          lastRedraw = now;
+          draw();
+          drawMinimap();
+          drawResult();
+        }
+
         raf = requestAnimationFrame(loop);
       };
       raf = requestAnimationFrame(loop);

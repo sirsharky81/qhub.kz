@@ -5,8 +5,15 @@ import { processSingleTrack, processProgramOutput } from "@/lib/music-editor/pro
 import { settingsFingerprint } from "@/lib/music-editor/history";
 import { getTrackIndexById } from "@/lib/music-editor/history";
 import { mapResumeResultTime } from "@/lib/music-editor/selection";
+import { getProcessingDebounceMs, isLowMemoryPlatform } from "@/lib/music-editor/mobile-limits";
 import type { ActiveObject, AudioTrack, ManualEditSettings, ProgramTransition } from "@/lib/music-editor/types";
 import { DEFAULT_MANUAL_SETTINGS } from "@/lib/music-editor/types";
+
+function yieldToMainThread(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
 
 interface ProcessedPlaybackPlayer {
   load: (buffer: AudioBuffer, opts?: { resetTime?: boolean }) => void;
@@ -43,6 +50,7 @@ export function useProcessedPlayback(
   const lastFingerprint = useRef("");
   const appliedRef = useRef<AppliedPlayback | null>(null);
   const playerRef = useRef(player);
+  const renderGenRef = useRef(0);
   playerRef.current = player;
 
   useEffect(() => {
@@ -59,13 +67,21 @@ export function useProcessedPlayback(
     if (fingerprint === lastFingerprint.current) return;
 
     let cancelled = false;
+    const debounceMs = getProcessingDebounceMs();
 
     const timer = window.setTimeout(() => {
+      const generation = ++renderGenRef.current;
+
       void (async () => {
-        if (cancelled) return;
+        if (cancelled || generation !== renderGenRef.current) return;
         setIsRendering(true);
 
         try {
+          if (isLowMemoryPlatform()) {
+            await yieldToMainThread();
+          }
+          if (cancelled || generation !== renderGenRef.current) return;
+
           let buffer: AudioBuffer;
           let nextApplied: AppliedPlayback;
 
@@ -77,7 +93,8 @@ export function useProcessedPlayback(
               transitions,
               programSettings,
             );
-            if (!cancelled) setProgramDuration(buffer.duration);
+            if (cancelled || generation !== renderGenRef.current) return;
+            setProgramDuration(buffer.duration);
             nextApplied = {
               mode: "program",
               settings: programSettings,
@@ -90,6 +107,7 @@ export function useProcessedPlayback(
             const settings =
               idx >= 0 ? (manualSettings[idx] ?? DEFAULT_MANUAL_SETTINGS) : DEFAULT_MANUAL_SETTINGS;
             buffer = await processSingleTrack(track.buffer, settings);
+            if (cancelled || generation !== renderGenRef.current) return;
             nextApplied = {
               mode: "track",
               settings,
@@ -98,7 +116,7 @@ export function useProcessedPlayback(
             };
           }
 
-          if (cancelled) return;
+          if (cancelled || generation !== renderGenRef.current) return;
 
           const p = playerRef.current;
           const want = p.wantPlayingRef.current;
@@ -127,10 +145,10 @@ export function useProcessedPlayback(
           if (want) p.play(clamped);
           else p.seek?.(clamped);
         } finally {
-          if (!cancelled) setIsRendering(false);
+          if (!cancelled && generation === renderGenRef.current) setIsRendering(false);
         }
       })();
-    }, 140);
+    }, debounceMs);
 
     return () => {
       cancelled = true;
