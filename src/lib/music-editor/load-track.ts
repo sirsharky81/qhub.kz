@@ -1,7 +1,7 @@
 import { decodeFileToWav } from "./ffmpeg";
+import { getEffectiveMaxFileSize, isLowMemoryPlatform } from "./mobile-limits";
 import { computePeaks, decodeAudioBuffer } from "./waveform";
 import type { AudioTrack } from "./types";
-import { MAX_FILE_SIZE } from "./types";
 
 function generateId(): string {
   return `track_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -36,8 +36,9 @@ export async function loadAudioTrack(
   file: File,
   onProgress?: (pct: number) => void,
 ): Promise<AudioTrack> {
-  if (file.size > MAX_FILE_SIZE) {
-    throw new Error(`Файл слишком большой (макс. ${MAX_FILE_SIZE / 1024 / 1024} МБ)`);
+  const maxFileSize = getEffectiveMaxFileSize();
+  if (file.size > maxFileSize) {
+    throw new Error(`Файл слишком большой (макс. ${Math.round(maxFileSize / 1024 / 1024)} МБ)`);
   }
 
   onProgress?.(10);
@@ -57,7 +58,7 @@ export async function loadAudioTrack(
   }
 
   onProgress?.(95);
-  const peaks = computePeaks(buffer);
+  const peaks = computePeaks(buffer, isLowMemoryPlatform() ? 400 : 800);
   onProgress?.(100);
 
   return {
