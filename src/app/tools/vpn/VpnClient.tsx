@@ -272,8 +272,26 @@ export function VpnClient() {
             <h2 className="text-sm font-semibold text-amber-900">Приложение AmneziaVPN (Россия)</h2>
             <p className="text-xs text-amber-800">
               Обычный WireGuard в РФ часто не пускает трафик. AmneziaVPN обходит DPI — используйте QR
-              или ссылку <span className="font-mono">vpn://</span> с этой страницы. Если на 4G долго
-              «Connecting…» — удалите старый профиль в приложении и заново скачайте QR здесь (порт UDP 443).
+              или ссылку <span className="font-mono">vpn://</span> с этой страницы.
+            </p>
+            <ol className="text-xs text-amber-800 space-y-1.5 list-decimal list-inside">
+              <li>
+                <strong>Удалите</strong> старый профиль в AmneziaVPN (Настройки → профиль → удалить).
+              </li>
+              <li>
+                Нажмите «QR-код» или «Скачать» здесь — конфиг обновляется с сервера автоматически.
+              </li>
+              <li>
+                Импортируйте заново. Проверьте IP на{" "}
+                <a href="https://2ip.ru" target="_blank" rel="noopener noreferrer" className="underline">
+                  2ip.ru
+                </a>{" "}
+                — должен быть <span className="font-mono">65.108.215.248</span>.
+              </li>
+            </ol>
+            <p className="text-xs text-amber-700">
+              Если «Подключено», но сайты не открываются — сервер на Hetzner может блокироваться TSPU;
+              мы применяем QUIC-маскировку. После обновления на сервере обязательно переимпортируйте конфиг.
             </p>
             <div className="flex flex-wrap gap-2 text-xs">
               <a

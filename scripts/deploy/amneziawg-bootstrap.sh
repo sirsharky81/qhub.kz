@@ -3,7 +3,7 @@
 # Idempotent — safe to re-run after reboot. Run as root on VPS.
 set -euo pipefail
 
-INSTALLER_VER="${AMNEZIAWG_INSTALLER_VER:-v5.21.2}"
+INSTALLER_VER="${AMNEZIAWG_INSTALLER_VER:-v5.29.0}"
 AWG_PORT="${AMNEZIAWG_PORT:-443}"
 AWG_ENDPOINT="${AMNEZIAWG_ENDPOINT:-}"
 APP_DIR="${APP_DIR:-/var/www/qhub.kz}"

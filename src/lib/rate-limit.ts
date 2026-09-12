@@ -28,6 +28,8 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:family-loc-req-silent": { requests: 1, window: "10 s" },
   "qhub:kz-maps-suggest": { requests: 5, window: "15 m" },
   "qhub:mail-passwd": { requests: 10, window: "1 h" },
+  "qhub:mail-login": { requests: 10, window: "15 m" },
+  "qhub:mail-web": { requests: 120, window: "1 m" },
   "qhub:send": { requests: 30, window: "1 m" },
   "qhub:send-upload": { requests: 10, window: "1 h" },
   "qhub:send-download": { requests: 120, window: "1 m" },

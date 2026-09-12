@@ -56,45 +56,6 @@ jobs:
           bash scripts/deploy/vps-deploy.sh
           EOF
 
-      - name: Configure QHub Send env
-        env:
-          SEND_WEBDAV_USER: ${{ secrets.SEND_WEBDAV_USER }}
-          SEND_WEBDAV_PASS: ${{ secrets.SEND_WEBDAV_PASS }}
-        run: |
-          if [ -z "${SEND_WEBDAV_PASS:-}" ]; then
-            echo "SEND_WEBDAV_PASS secret not set — skip Send env"
-            exit 0
-          fi
-          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<EOF
-          set -euo pipefail
-          cd /var/www/qhub.kz
-          chmod +x scripts/deploy/enable-send-env.sh
-          SEND_WEBDAV_USER='${SEND_WEBDAV_USER:-QHub}' \
-          SEND_WEBDAV_PASS='${SEND_WEBDAV_PASS}' \
-          bash scripts/deploy/enable-send-env.sh
-          pm2 restart qhub --update-env
-          EOF
-
-      - name: Test Send WebDAV to NAS
-        continue-on-error: true
-        run: |
-          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
-          set +e
-          cd /var/www/qhub.kz
-          chmod +x scripts/deploy/test-send-webdav.sh
-          bash scripts/deploy/test-send-webdav.sh
-          EOF
-
-      - name: Nginx upload limit for QHub Send
-        continue-on-error: true
-        run: |
-          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
-          set -euo pipefail
-          cd /var/www/qhub.kz
-          chmod +x scripts/deploy/apply-send-nginx-upload-limit.sh
-          sudo bash scripts/deploy/apply-send-nginx-upload-limit.sh
-          EOF
-
       - name: Migrate VPN ports for Russia (Amnezia UDP 443)
         continue-on-error: true
         run: |
@@ -111,6 +72,17 @@ jobs:
             sudo VPN_LISTEN_PORT=443 bash scripts/vpn/migrate-listen-port.sh \
               || sudo bash scripts/vpn/restart-wg.sh || true
             wg show wg0 2>/dev/null | awk '/listening port:/ {print "WireGuard listen port:", $3}' || echo "wg0 not up"
+          fi
+          EOF
+
+      - name: Repair AmneziaWG for Russia (upgrade + regen)
+        continue-on-error: true
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
+          cd /var/www/qhub.kz
+          chmod +x scripts/vpn/repair-amnezia-russia.sh 2>/dev/null || true
+          if [ -x scripts/vpn/repair-amnezia-russia.sh ]; then
+            sudo bash scripts/vpn/repair-amnezia-russia.sh || true
           fi
           EOF
 
@@ -140,6 +112,23 @@ jobs:
           fi
           EOF
 
+      - name: Final Redis + VPN diagnostics
+        continue-on-error: true
+        run: |
+          ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF' || true
+          cd /var/www/qhub.kz
+          chmod +x scripts/deploy/repair-redis.sh scripts/vpn/diagnose-amnezia.sh \
+            scripts/vpn/amnezia-client.sh scripts/vpn/apply-russia-hetzner-i1.sh \
+            scripts/vpn/generate-quic-i1.mjs 2>/dev/null || true
+          sudo bash scripts/deploy/repair-redis.sh || true
+          if awg show awg0 >/dev/null 2>&1; then
+            sudo bash scripts/vpn/apply-russia-hetzner-i1.sh || true
+            sudo bash scripts/vpn/amnezia-client.sh regen-all || true
+          fi
+          sudo bash scripts/vpn/diagnose-amnezia.sh || true
+          pm2 restart qhub 2>/dev/null || true
+          EOF
+
       - name: Ensure standard mail folders
         continue-on-error: true
         run: |
@@ -147,13 +136,13 @@ jobs:
           set +e
           cd /var/www/qhub.kz
           git fetch origin main
-          git checkout origin/main -- scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/apply-greylist-spf-dkim.sh scripts/mail/mail-inbound-trace.sh scripts/mail/config/dovecot-15-mailboxes.conf scripts/mail/config/rspamd-greylist.conf scripts/mail/config/rspamd-settings-greylist.conf 2>/dev/null || true
-          chmod +x scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/apply-greylist-spf-dkim.sh scripts/mail/mail-inbound-trace.sh 2>/dev/null || true
+          git checkout origin/main -- scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/apply-mail-case-normalize.sh scripts/mail/mail-inbound-trace.sh scripts/mail/mail-outbound-trace.sh scripts/mail/mail-queue-status.sh scripts/mail/config/dovecot-15-mailboxes.conf scripts/mail/config/postfix-recipient-canonical.pcre scripts/mail/config/dovecot-auth-passwdfile.conf.ext 2>/dev/null || true
+          chmod +x scripts/mail/mail-init-folders.sh scripts/mail/apply-fast-submission.sh scripts/mail/apply-mail-case-normalize.sh scripts/mail/mail-inbound-trace.sh scripts/mail/mail-outbound-trace.sh scripts/mail/mail-queue-status.sh 2>/dev/null || true
           if [ -x scripts/mail/apply-fast-submission.sh ]; then
             sudo bash scripts/mail/apply-fast-submission.sh || true
           fi
-          if [ -x scripts/mail/apply-greylist-spf-dkim.sh ]; then
-            sudo bash scripts/mail/apply-greylist-spf-dkim.sh || true
+          if [ -x scripts/mail/apply-mail-case-normalize.sh ]; then
+            sudo bash scripts/mail/apply-mail-case-normalize.sh || true
           fi
           if [ -f scripts/mail/config/dovecot-15-mailboxes.conf ]; then
             cp scripts/mail/config/dovecot-15-mailboxes.conf /etc/dovecot/conf.d/15-mailboxes.conf
@@ -164,7 +153,13 @@ jobs:
             bash scripts/mail/mail-init-folders.sh boris@qhub.kz
           fi
           if [ -x scripts/mail/mail-inbound-trace.sh ]; then
-            bash scripts/mail/mail-inbound-trace.sh boris@qhub.kz doping@mail.ru bokhmarnyy@gmail.com || true
+            bash scripts/mail/mail-inbound-trace.sh boris@qhub.kz slt@qhub.kz doping@mail.ru bokhmarnyy@gmail.com || true
+          fi
+          if [ -x scripts/mail/mail-outbound-trace.sh ]; then
+            bash scripts/mail/mail-outbound-trace.sh boris@qhub.kz 48 || true
+          fi
+          if [ -x scripts/mail/mail-queue-status.sh ]; then
+            bash scripts/mail/mail-queue-status.sh || true
           fi
           echo "==> postfix queue summary"
           mailq 2>/dev/null || postqueue -p 2>/dev/null || true

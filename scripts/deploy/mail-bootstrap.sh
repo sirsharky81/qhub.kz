@@ -76,7 +76,13 @@ milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}
 message_size_limit = 26214400
 mailbox_size_limit = 0
 recipient_delimiter = +
+
+# Case-insensitive local part for @${MAIL_DOMAIN}
+recipient_canonical_maps = pcre:/etc/postfix/recipient_canonical_maps.pcre
+recipient_canonical_classes = envelope_recipient, header_recipient
 EOF
+
+install -m 0644 "${CONFIG_DIR}/postfix-recipient-canonical.pcre" /etc/postfix/recipient_canonical_maps.pcre
 
 cat >/etc/postfix/master.cf <<'EOF'
 smtp      inet  n       -       y       -       -       smtpd
@@ -137,11 +143,11 @@ EOF
 cat >/etc/dovecot/conf.d/auth-passwdfile.conf.ext <<'EOF'
 passdb {
   driver = passwd-file
-  args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/users
+  args = scheme=SHA512-CRYPT username_format=%Lu /etc/dovecot/users
 }
 userdb {
   driver = passwd-file
-  args = username_format=%u /etc/dovecot/users
+  args = username_format=%Lu /etc/dovecot/users
 }
 EOF
 

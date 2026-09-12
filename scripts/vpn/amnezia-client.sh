@@ -6,6 +6,26 @@ MANAGE="/root/awg/manage_amneziawg.sh"
 AWG_DIR="/root/awg"
 APP_DIR="${APP_DIR:-/var/www/qhub.kz}"
 
+# Client names from disk (manage list output has ANSI codes — unreliable for scripts).
+list_client_names() {
+  python3 - "$AWG_DIR" <<'PY'
+import pathlib, re, sys
+awg = pathlib.Path(sys.argv[1])
+names: set[str] = set()
+clients_dir = awg / "clients"
+if clients_dir.is_dir():
+    for d in clients_dir.iterdir():
+        if d.is_dir():
+            names.add(d.name)
+for f in awg.glob("*.conf"):
+    names.add(f.stem)
+valid = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+for n in sorted(names):
+    if valid.match(n):
+        print(n)
+PY
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -15,6 +35,7 @@ Usage:
   amnezia-client.sh remove <name>              Remove client from awg0
   amnezia-client.sh list                       List clients
   amnezia-client.sh regen <name>               Regenerate config + QR
+  amnezia-client.sh regen-all                  Regenerate all clients (after server upgrade)
   amnezia-client.sh status                     Show awg0 status (text)
   amnezia-client.sh status-json                Show awg0 status (JSON)
 EOF
@@ -30,7 +51,15 @@ emit_client_json() {
 import json, pathlib, re, sys
 name, awg_dir = sys.argv[1], pathlib.Path(sys.argv[2])
 conf_path = awg_dir / f"{name}.conf"
+if not conf_path.is_file():
+    alt = awg_dir / "clients" / name / f"{name}.conf"
+    if alt.is_file():
+        conf_path = alt
 vpnuri_path = awg_dir / f"{name}.vpnuri"
+if not vpnuri_path.is_file():
+    alt = awg_dir / "clients" / name / f"{name}.vpnuri"
+    if alt.is_file():
+        vpnuri_path = alt
 config = conf_path.read_text(encoding="utf-8") if conf_path.is_file() else None
 vpn_uri = vpnuri_path.read_text(encoding="utf-8").strip() if vpnuri_path.is_file() else None
 address = None
@@ -80,6 +109,9 @@ case "$cmd" in
     ;;
   export-json)
     [ $# -eq 1 ] || { usage; exit 1; }
+    if [ -x "$MANAGE" ]; then
+      bash "$MANAGE" regen "$1" --yes >&2 || true
+    fi
     emit_client_json "$1"
     ;;
   remove)
@@ -104,6 +136,19 @@ case "$cmd" in
   regen)
     [ $# -ge 1 ] || { usage; exit 1; }
     bash "$MANAGE" regen "$@"
+    ;;
+  regen-all)
+    if [ ! -x "$MANAGE" ]; then
+      echo "AmneziaWG not installed" >&2
+      exit 1
+    fi
+    mapfile -t names < <(list_client_names)
+    for name in "${names[@]}"; do
+      [ -z "$name" ] && continue
+      echo "[regen-all] $name" >&2
+      bash "$MANAGE" regen "$name" --yes >&2 || echo "[regen-all] warn: $name" >&2
+    done
+    echo "[regen-all] done (${#names[@]} clients)"
     ;;
   status)
     if awg show awg0 2>/dev/null; then

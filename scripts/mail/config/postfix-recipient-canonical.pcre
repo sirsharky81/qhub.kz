@@ -1,0 +1,2 @@
+# Deprecated template — apply-mail-case-normalize.sh generates per-mailbox rules from /etc/dovecot/users.
+# Postfix ${1} in PCRE replacements keeps original case even with /i, so a generic rule does not work.
