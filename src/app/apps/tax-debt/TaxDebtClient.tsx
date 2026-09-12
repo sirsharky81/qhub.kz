@@ -255,6 +255,7 @@ export default function TaxDebtClient() {
             enabled={captchaRequired}
             loading={turnstile.loading}
             resetKey={captchaReset}
+            align="start"
             onToken={setCaptchaToken}
             onExpire={() => setCaptchaToken(null)}
             onError={() => setCaptchaToken(null)}

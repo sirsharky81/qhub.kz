@@ -64,6 +64,7 @@ interface Props {
   onExpire?: () => void;
   onError?: () => void;
   resetKey?: number;
+  align?: "start" | "center";
 }
 
 export function TurnstileWidget({
@@ -74,7 +75,10 @@ export function TurnstileWidget({
   onExpire,
   onError,
   resetKey = 0,
+  align = "center",
 }: Props) {
+  const justifyClass = align === "start" ? "justify-start" : "justify-center";
+  const textAlignClass = align === "start" ? "text-left" : "text-center";
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const onTokenRef = useRef(onToken);
@@ -144,7 +148,7 @@ export function TurnstileWidget({
 
   if (loading) {
     return (
-      <div className="w-full min-h-[65px] flex items-center justify-center text-xs text-gray-400">
+      <div className={`w-full min-h-[65px] flex items-center ${justifyClass} text-xs text-gray-400`}>
         Загрузка проверки…
       </div>
     );
@@ -154,7 +158,7 @@ export function TurnstileWidget({
 
   if (!siteKey) {
     return (
-      <p className="text-xs text-amber-700 text-center bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+      <p className={`text-xs text-amber-700 ${textAlignClass} bg-amber-50 border border-amber-200 rounded-xl px-3 py-2`}>
         Проверка CAPTCHA временно недоступна. Попробуйте позже или откройте сайт в браузере.
       </p>
     );
@@ -164,11 +168,11 @@ export function TurnstileWidget({
     <div className="w-full space-y-2">
       <div
         ref={containerRef}
-        className="flex justify-center w-full min-h-[65px] overflow-visible"
+        className={`flex ${justifyClass} w-full min-h-[65px] overflow-visible`}
         aria-live="polite"
       />
       {loadFailed && (
-        <p className="text-xs text-amber-700 text-center">
+        <p className={`text-xs text-amber-700 ${textAlignClass}`}>
           Не удалось загрузить проверку. Обновите страницу или откройте в Safari/Chrome.
         </p>
       )}
