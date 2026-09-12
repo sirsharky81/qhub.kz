@@ -298,6 +298,20 @@ export const apps: App[] = [
     sortOrder: 4,
   },
   {
+    id: "tax-debt",
+    title: "Налоговая задолженность",
+    description: "Проверьте отсутствие или наличие налоговой задолженности по ИИН/БИН.",
+    longDescription:
+      "Сведения с официального портала КГД МФ РК: общая сумма, налоги, ОПВ, соцотчисления, ОСМС и расшифровка по органам доходов и КБК. ИИН/БИН на сервере не сохраняется.",
+    href: "/apps/tax-debt",
+    tags: ["taxes", "finance", "documents"],
+    icon: "🏛️",
+    color: "from-rose-500/10 to-rose-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 5,
+  },
+  {
     id: "messenger",
     title: "Мессенджер",
     description: "Закрытый зашифрованный чат для приглашённых пользователей.",

@@ -33,6 +33,7 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:send-download": { requests: 120, window: "1 m" },
   "qhub:cast-resolve": { requests: 30, window: "1 m" },
   "qhub:cast-upload": { requests: 30, window: "1 h" },
+  "qhub:tax-debt": { requests: 20, window: "15 m" },
 };
 
 let ratelimitCache: Map<string, Ratelimit | null> | undefined;
@@ -267,4 +268,10 @@ export async function checkCastUploadRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:cast-upload", identifier);
+}
+
+export async function checkTaxDebtRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:tax-debt", identifier);
 }
