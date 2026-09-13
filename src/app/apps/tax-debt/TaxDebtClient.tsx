@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { CAPTCHA_REQUIRED_MSG } from "@/lib/captcha/turnstile-client";
 import { useTurnstileConfig } from "@/lib/captcha/useTurnstileConfig";
+import { useIosPwaKeyboardShell } from "@/lib/platform/ios-pwa-keyboard-shell";
+import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import { platformFetch } from "@/lib/platform/api-client";
 import { formatTenge } from "@/lib/tax-debt/format";
 import { LANG_OPTIONS, t } from "@/lib/tax-debt/i18n";
@@ -13,7 +15,7 @@ import type { Lang, TaxDebtLookupError, TaxDebtLookupResponse, TaxDebtResult, Ta
 const KGD_SOURCE_URL = "https://portal.kgd.gov.kz/ru/pages/info-services/info-absence-tax-debt";
 
 const inputClass =
-  "w-full px-3 py-2.5 text-sm text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-900/5 transition-colors tabular-nums tracking-wider";
+  `w-full px-3 py-2.5 text-gray-800 bg-white border border-gray-200 rounded-lg outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-900/5 transition-colors tabular-nums tracking-wider scroll-mt-4 ${MOBILE_SAFE_INPUT_CLASS}`;
 const labelClass = "block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5";
 const btnPrimary =
   "px-4 py-2.5 rounded-xl text-sm font-semibold bg-gray-900 hover:bg-gray-700 text-white transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed";
@@ -144,6 +146,8 @@ export default function TaxDebtClient() {
   const [captchaReset, setCaptchaReset] = useState(0);
   const turnstile = useTurnstileConfig();
   const captchaRequired = turnstile.enabled;
+  const mainRef = useRef<HTMLDivElement>(null);
+  useIosPwaKeyboardShell(mainRef, true);
 
   const code = useMemo(() => normalizeTaxpayerCode(iin), [iin]);
 
@@ -200,7 +204,10 @@ export default function TaxDebtClient() {
   }
 
   return (
-    <div className="flex flex-col flex-1 overflow-y-auto bg-dot-grid print:bg-white">
+    <div
+      ref={mainRef}
+      className="flex flex-col flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch] bg-dot-grid print:bg-white print:overflow-visible"
+    >
       <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:hidden">
           <div>
@@ -238,8 +245,13 @@ export default function TaxDebtClient() {
               id="tax-debt-iin"
               inputMode="numeric"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              enterKeyHint="done"
               maxLength={12}
               className={inputClass}
+              style={{ fontSize: 16 }}
               placeholder={t(lang, "placeholder.iin")}
               value={iin}
               onChange={(event) => setIin(normalizeTaxpayerCode(event.target.value))}

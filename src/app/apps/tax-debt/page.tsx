@@ -13,7 +13,7 @@ export default function TaxDebtPage() {
     <PdfToolLayout
       title="Налоговая задолженность"
       icon="🏛️"
-      shellClassName="h-screen bg-white"
+      shellClassName="fixed inset-x-0 top-[var(--messenger-vv-top,0px)] h-[var(--messenger-vvh,100dvh)] bg-white overflow-hidden print:static print:h-auto print:overflow-visible"
     >
       <TaxDebtClient />
     </PdfToolLayout>
