@@ -1,10 +1,14 @@
-export type WhitelistStatus = "active" | "revoked";
+/** `revoked` is the legacy name for a hard block and is treated as `blocked`. */
+export type WhitelistStatus = "active" | "blocked" | "revoked";
 
 export interface WhitelistEntry {
   phone: string;
   addedBy: string;
   addedAt: number;
   status: WhitelistStatus;
+  /** Completed Flash Call OTP. Legacy self-reg rows are treated as verified. */
+  verified?: boolean;
+  verifiedAt?: number | null;
   /** Разрешён доступ к VPN (WireGuard) через портал */
   vpnEnabled?: boolean;
   /** Разрешён доступ к remote-библиотеке Music (Navidrome на NAS) */

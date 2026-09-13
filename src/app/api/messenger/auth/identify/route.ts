@@ -6,7 +6,7 @@ import {
   getClientIp,
 } from "@/lib/rate-limit";
 import { getPinStatus } from "@/lib/messenger/auth-service";
-import { ACCESS_DENIED_MSG, assertWhitelistedPhone, jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
+import { ACCESS_DENIED_MSG, assertMessengerOpenPhone, jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
 import { maskPhone } from "@/lib/messenger/phone-format";
 import { isValidKzPhone, normalizeKzPhone } from "@/lib/messenger/phone";
 
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { phone } = await assertWhitelistedPhone(raw);
+    const { phone, selfRegistration } = await assertMessengerOpenPhone(raw);
     const pinStatus = await getPinStatus(phone);
     return NextResponse.json({
       ok: true,
@@ -61,6 +61,8 @@ export async function POST(request: Request) {
       maskedPhone: maskPhone(phone),
       passwordSet: pinStatus.passwordSet,
       mustChangePin: pinStatus.mustChangePin,
+      otpRequired: !pinStatus.passwordSet,
+      selfRegistration: selfRegistration && !pinStatus.passwordSet,
       lockedUntil: pinStatus.lockedUntil,
     });
   } catch (err) {

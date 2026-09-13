@@ -7,14 +7,19 @@ import { MessengerInstallModal } from "../components/MessengerInstallModal";
 import { MessengerShell } from "../components/MessengerShell";
 import {
   LAST_PHONE_STORAGE,
+  MAX_DISPLAY_NAME_LENGTH,
   MESSENGER_INSTALL_PROMPT_SHOWN,
+  OTP_DIGITS,
+  OTP_RESEND_COOLDOWN_SEC,
   PIN_LENGTH,
 } from "@/lib/messenger/constants";
 import {
   fetchAccessCheck,
   identifyMessenger,
   loginMessenger,
+  sendMessengerOtp,
   setMessengerPin,
+  verifyMessengerOtp,
 } from "@/lib/messenger/client";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import {
@@ -26,7 +31,7 @@ import { CAPTCHA_REQUIRED_MSG } from "@/lib/captcha/turnstile-client";
 import { useTurnstileConfig } from "@/lib/captcha/useTurnstileConfig";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
-type Step = "phone" | "login" | "setPin";
+type Step = "phone" | "name" | "otp" | "login" | "setPin";
 
 function loadLastPhone(): string {
   if (typeof window === "undefined") return "";
@@ -49,6 +54,12 @@ export function MessengerLoginClient() {
   const [mustChangePin, setMustChangePin] = useState(false);
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [selfRegistration, setSelfRegistration] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpToken, setOtpToken] = useState<string | undefined>(undefined);
+  const [otpSending, setOtpSending] = useState(false);
+  const [resendAfterSec, setResendAfterSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -101,12 +112,67 @@ export function MessengerLoginClient() {
       setMaskedPhone(res.maskedPhone ?? "");
       setPasswordSet(!!res.passwordSet);
       setMustChangePin(!!res.mustChangePin);
+      setSelfRegistration(!!res.selfRegistration);
       saveLastPhone(res.phone ?? phoneInput);
-      if (!res.passwordSet || res.mustChangePin) {
-        setStep("setPin");
+      if (!res.passwordSet || res.otpRequired) {
+        setOtpCode("");
+        setOtpToken(undefined);
+        if (res.selfRegistration) {
+          setStep("name");
+        } else {
+          setStep("otp");
+          void requestOtp(res.phone ?? phoneInput);
+        }
       } else {
         setStep("login");
       }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function requestOtp(targetPhone = phone) {
+    setOtpSending(true);
+    setError(null);
+    try {
+      const res = await sendMessengerOtp(targetPhone);
+      if (!res.ok) {
+        setError(res.error ?? "Не удалось заказать звонок");
+        return;
+      }
+      setResendAfterSec(res.resendAfterSec ?? OTP_RESEND_COOLDOWN_SEC);
+    } finally {
+      setOtpSending(false);
+    }
+  }
+
+  function handleContinueName(e: React.FormEvent) {
+    e.preventDefault();
+    const name = displayName.trim();
+    if (!name) {
+      setError("Введите имя");
+      return;
+    }
+    setError(null);
+    setDisplayName(name);
+    setStep("otp");
+    void requestOtp();
+  }
+
+  async function handleVerifyOtp() {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await verifyMessengerOtp(phone, otpCode);
+      if (!res.ok) {
+        setError(res.error ?? "Неверный код");
+        setOtpCode("");
+        return;
+      }
+      setOtpToken(res.otpToken);
+      setStep("setPin");
+      setPin("");
+      setConfirmPin("");
     } finally {
       setLoading(false);
     }
@@ -164,9 +230,19 @@ export function MessengerLoginClient() {
       setError("PIN не совпадает");
       return;
     }
+    if (selfRegistration && !displayName.trim()) {
+      setError("Введите имя");
+      return;
+    }
     setLoading(true);
     try {
-      const res = await setMessengerPin(phone, pin, confirmPin);
+      const res = await setMessengerPin(
+        phone,
+        pin,
+        confirmPin,
+        otpToken,
+        selfRegistration ? displayName : undefined,
+      );
       if (!res.ok) {
         setError(res.error ?? "Ошибка");
         return;
@@ -183,11 +259,24 @@ export function MessengerLoginClient() {
     setStep("phone");
     setPin("");
     setConfirmPin("");
+    setOtpCode("");
+    setOtpToken(undefined);
+    setDisplayName("");
+    setSelfRegistration(false);
+    setResendAfterSec(0);
     setError(null);
     setPhoneCaptchaToken(null);
     setLoginCaptchaToken(null);
     setPhoneCaptchaReset((k) => k + 1);
   }
+
+  useEffect(() => {
+    if (resendAfterSec <= 0) return;
+    const timer = window.setTimeout(() => {
+      setResendAfterSec((sec) => Math.max(0, sec - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendAfterSec]);
 
   if (checkingSession) {
     return (
@@ -211,8 +300,8 @@ export function MessengerLoginClient() {
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">Вход в мессенджер</h2>
                 <p className="text-xs text-gray-500 mt-2">
-                  Введите номер телефона, который добавил администратор. Ссылку на этот экран вам
-                  должен был выслать админ.
+                  Введите казахстанский номер. Если вы здесь впервые, сразу укажем имя и подтвердим
+                  его коротким звонком — отвечать не нужно.
                 </p>
               </div>
               <form onSubmit={(e) => void handleIdentify(e)} className="space-y-4">
@@ -254,7 +343,7 @@ export function MessengerLoginClient() {
             </>
           )}
 
-          {(step === "login" || step === "setPin") && (
+          {(step === "name" || step === "otp" || step === "login" || step === "setPin") && (
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-xs text-gray-500">Номер</p>
@@ -268,6 +357,77 @@ export function MessengerLoginClient() {
                 Сменить номер
               </button>
             </div>
+          )}
+
+          {step === "name" && (
+            <>
+              <h2 className="text-center text-sm font-semibold">Как вас называть?</h2>
+              <p className="text-xs text-gray-500 text-center">
+                Это имя увидят в чатах. Его нужно указать сразу.
+              </p>
+              <form onSubmit={handleContinueName} className="space-y-4">
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value.slice(0, MAX_DISPLAY_NAME_LENGTH))}
+                  placeholder="Имя"
+                  maxLength={MAX_DISPLAY_NAME_LENGTH}
+                  autoComplete="name"
+                  autoFocus
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-base"
+                  style={{ fontSize: "16px" }}
+                  required
+                />
+                <p className="text-[11px] text-gray-400 text-right">
+                  {displayName.trim().length}/{MAX_DISPLAY_NAME_LENGTH}
+                </p>
+                <button
+                  type="submit"
+                  disabled={!displayName.trim()}
+                  className="w-full rounded-2xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
+                >
+                  Продолжить
+                </button>
+              </form>
+            </>
+          )}
+
+          {step === "otp" && (
+            <>
+              <h2 className="text-center text-sm font-semibold">Подтвердите номер</h2>
+              <p className="text-xs text-gray-500 text-center">
+                Сейчас поступит звонок. Отвечать не нужно — введите последние {OTP_DIGITS} цифры
+                входящего номера.
+              </p>
+              <PinInput
+                value={otpCode}
+                onChange={setOtpCode}
+                length={OTP_DIGITS}
+                masked={false}
+                label="Код из звонка"
+                autoFocus
+              />
+              <button
+                type="button"
+                disabled={loading || otpSending || otpCode.length < OTP_DIGITS}
+                onClick={() => void handleVerifyOtp()}
+                className="w-full rounded-2xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
+              >
+                {loading ? "Проверка…" : "Подтвердить"}
+              </button>
+              <button
+                type="button"
+                disabled={otpSending || resendAfterSec > 0}
+                onClick={() => void requestOtp()}
+                className="w-full text-xs text-gray-500 underline disabled:no-underline disabled:opacity-60"
+              >
+                {otpSending
+                  ? "Звоним…"
+                  : resendAfterSec > 0
+                    ? `Повторить звонок через ${resendAfterSec} с`
+                    : "Позвонить ещё раз"}
+              </button>
+            </>
           )}
 
           {step === "setPin" && (

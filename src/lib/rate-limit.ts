@@ -20,6 +20,9 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:messenger-call-signal": { requests: 800, window: "1 m" },
   "qhub:messenger-call-poll": { requests: 900, window: "1 m" },
   "qhub:messenger-identify-phone": { requests: 10, window: "15 m" },
+  "qhub:messenger-otp-send-phone": { requests: 3, window: "5 m" },
+  "qhub:messenger-otp-send-ip": { requests: 6, window: "15 m" },
+  "qhub:messenger-otp-verify": { requests: 12, window: "15 m" },
   "qhub:family": { requests: 120, window: "1 m" },
   "qhub:share": { requests: 60, window: "1 m" },
   "qhub:share-signal": { requests: 800, window: "1 m" },
@@ -194,6 +197,24 @@ export async function checkMessengerIdentifyPhoneRateLimit(
   phone: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:messenger-identify-phone", phone);
+}
+
+export async function checkMessengerOtpSendPhoneRateLimit(
+  phone: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:messenger-otp-send-phone", phone);
+}
+
+export async function checkMessengerOtpSendIpRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:messenger-otp-send-ip", identifier);
+}
+
+export async function checkMessengerOtpVerifyRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:messenger-otp-verify", identifier);
 }
 
 export async function checkFamilyRateLimit(

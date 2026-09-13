@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ADMIN_INSTALL_PROMPT_SHOWN } from "@/lib/admin/constants";
 import { ADMIN_PANEL_PATH } from "@/lib/admin/panel-path";
+import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
 import { isStandalone } from "@/lib/pwa-utils";
 import { AdminInstallModal } from "./AdminInstallModal";
+
+const fieldClass = `admin-login-input w-full min-h-12 rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 ${MOBILE_SAFE_INPUT_CLASS} focus:outline-none focus:ring-2 focus:ring-gray-900/10`;
 
 export function AdminLoginForm() {
   const router = useRouter();
@@ -14,6 +17,14 @@ export function AdminLoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  function scrollFieldIntoView(el: HTMLInputElement | null) {
+    requestAnimationFrame(() => {
+      el?.scrollIntoView({ block: "center", inline: "nearest" });
+    });
+  }
 
   function goToPanel() {
     router.push(`/${ADMIN_PANEL_PATH}`);
@@ -67,12 +78,19 @@ export function AdminLoginForm() {
             Email
           </label>
           <input
+            ref={emailRef}
             id="admin-email"
             type="email"
+            inputMode="email"
             autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+            onFocus={() => scrollFieldIntoView(emailRef.current)}
+            className={fieldClass}
+            style={{ fontSize: "16px" }}
             required
           />
         </div>
@@ -81,12 +99,15 @@ export function AdminLoginForm() {
             Пароль
           </label>
           <input
+            ref={passwordRef}
             id="admin-password"
             type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+            onFocus={() => scrollFieldIntoView(passwordRef.current)}
+            className={fieldClass}
+            style={{ fontSize: "16px" }}
             required
           />
         </div>

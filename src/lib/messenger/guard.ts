@@ -1,5 +1,6 @@
 import { getMessengerSession } from "./session";
-import { isPhoneWhitelisted, getRoomParticipants } from "./store";
+import { isWhitelistBlocked } from "./access-status";
+import { getWhitelistEntry, isPhoneWhitelisted, getRoomParticipants } from "./store";
 import { isValidKzPhone, normalizeKzPhone, peerFromDmChannel } from "./phone";
 
 export const ACCESS_DENIED_MSG = "Доступ недоступен";
@@ -24,6 +25,22 @@ export async function assertWhitelistedPhone(rawPhone: string): Promise<{ phone:
     throw new MessengerAuthError(ACCESS_DENIED_MSG, 403);
   }
   return { phone };
+}
+
+/** Valid KZ number that is not revoked — existing users or self-registration. */
+export async function assertMessengerOpenPhone(rawPhone: string): Promise<{
+  phone: string;
+  selfRegistration: boolean;
+}> {
+  const phone = normalizeKzPhone(rawPhone);
+  if (!isValidKzPhone(phone)) {
+    throw new MessengerAuthError(ACCESS_DENIED_MSG, 403);
+  }
+  const entry = await getWhitelistEntry(phone);
+  if (isWhitelistBlocked(entry?.status)) {
+    throw new MessengerAuthError(ACCESS_DENIED_MSG, 403);
+  }
+  return { phone, selfRegistration: entry?.status !== "active" };
 }
 
 export async function assertMessengerSession(): Promise<{ phone: string }> {

@@ -29,7 +29,26 @@ export interface IdentifyResult {
   maskedPhone?: string;
   passwordSet?: boolean;
   mustChangePin?: boolean;
+  otpRequired?: boolean;
+  selfRegistration?: boolean;
   lockedUntil?: number | null;
+  error?: string;
+}
+
+export interface MessengerOtpSendResult {
+  ok: boolean;
+  phone?: string;
+  digits?: number;
+  expiresAt?: number;
+  resendAfterSec?: number;
+  error?: string;
+}
+
+export interface MessengerOtpVerifyResult {
+  ok: boolean;
+  phone?: string;
+  otpToken?: string;
+  expiresAt?: number;
   error?: string;
 }
 
@@ -94,13 +113,44 @@ export async function verifyMessengerPin(pin: string): Promise<{
   return res.json() as Promise<{ ok: boolean; error?: string; lockedUntil?: number }>;
 }
 
-export async function setMessengerPin(phone: string, pin: string, confirmPin: string) {
+export async function sendMessengerOtp(phone: string): Promise<MessengerOtpSendResult> {
+  const res = await platformFetch("/api/messenger/auth/otp/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone }),
+  });
+  return res.json() as Promise<MessengerOtpSendResult>;
+}
+
+export async function verifyMessengerOtp(
+  phone: string,
+  code: string,
+): Promise<MessengerOtpVerifyResult> {
+  const res = await platformFetch("/api/messenger/auth/otp/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, code }),
+  });
+  return res.json() as Promise<MessengerOtpVerifyResult>;
+}
+
+export async function setMessengerPin(
+  phone: string,
+  pin: string,
+  confirmPin: string,
+  otpToken?: string,
+  displayName?: string,
+) {
   const res = await platformFetch("/api/messenger/auth/set-pin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, pin, confirmPin }),
+    body: JSON.stringify({ phone, pin, confirmPin, otpToken, displayName }),
   });
-  const data = (await res.json()) as { ok?: boolean; error?: string };
+  const data = (await res.json()) as { ok?: boolean; error?: string; token?: string };
+  if (data.ok && data.token) {
+    await saveMessengerSessionToken(data.token);
+    primeMessengerSessionTokenCache(data.token);
+  }
   if (data.ok) invalidateAccessCache();
   return data;
 }

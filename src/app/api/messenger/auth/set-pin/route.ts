@@ -2,8 +2,21 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { checkMessengerRateLimit, getClientIp } from "@/lib/rate-limit";
 import { setPin } from "@/lib/messenger/auth-service";
-import { assertWhitelistedPhone, jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
+import { MESSENGER_OTP_COOKIE } from "@/lib/messenger/constants";
+import { normalizeDisplayName } from "@/lib/messenger/display-name";
+import { assertMessengerOpenPhone, jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
+import {
+  assertPinSetupAllowed,
+  clearMessengerOtpCookieOptions,
+  consumeVerifiedOtp,
+} from "@/lib/messenger/otp";
 import { isValidKzPhone, normalizeKzPhone } from "@/lib/messenger/phone";
+import {
+  ensureSelfRegisteredWhitelist,
+  getProfile,
+  markWhitelistVerified,
+  saveProfile,
+} from "@/lib/messenger/store";
 import {
   createMessengerSessionToken,
   getMessengerSession,
@@ -21,7 +34,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    let body: { phone?: string; pin?: string; confirmPin?: string };
+    let body: { phone?: string; pin?: string; confirmPin?: string; otpToken?: string; displayName?: string };
     try {
       body = await request.json();
     } catch {
@@ -33,13 +46,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Неверный номер телефона" }, { status: 400 });
     }
 
-    const { phone } = await assertWhitelistedPhone(rawPhone);
+    const { phone, selfRegistration } = await assertMessengerOpenPhone(rawPhone);
     const session = await getMessengerSession();
-    // iOS Safari/PWA can occasionally lose the intermediate identify/login cookie
-    // on first install flow. Allow first-time PIN set for whitelisted phone even
-    // without the transient session, but still block explicit phone mismatch.
     if (session && normalizeKzPhone(session.phone) !== normalizeKzPhone(phone)) {
       throw new MessengerAuthError("Требуется вход в мессенджер", 403);
+    }
+
+    const jar = await cookies();
+    const otpToken =
+      (typeof body.otpToken === "string" && body.otpToken.trim()) ||
+      jar.get(MESSENGER_OTP_COOKIE)?.value ||
+      null;
+    const setup = await assertPinSetupAllowed({
+      phone,
+      sessionPhone: session ? normalizeKzPhone(session.phone) : null,
+      otpToken,
+    });
+
+    const displayName = normalizeDisplayName(
+      typeof body.displayName === "string" ? body.displayName : "",
+    );
+    if (setup.via === "otp" && selfRegistration && !displayName) {
+      throw new MessengerAuthError("Введите имя", 400);
+    }
+
+    if (setup.via === "otp" && selfRegistration) {
+      await ensureSelfRegisteredWhitelist(phone);
+    }
+    if (setup.via === "otp") {
+      await markWhitelistVerified(phone);
     }
 
     const pin = typeof body.pin === "string" ? body.pin : "";
@@ -49,10 +84,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
+    if (setup.via === "otp" && selfRegistration && displayName) {
+      const prev = await getProfile(phone);
+      await saveProfile({
+        phone,
+        displayName,
+        avatarUrl: prev?.avatarUrl ?? null,
+        allowRoomAutoAdd: prev?.allowRoomAutoAdd ?? true,
+        updatedAt: Date.now(),
+      });
+    }
+
+    if (setup.via === "otp" && setup.otpToken) {
+      await consumeVerifiedOtp(setup.otpToken);
+      jar.set(clearMessengerOtpCookieOptions());
+    }
+
     const token = await createMessengerSessionToken(phone);
-    const jar = await cookies();
     jar.set(messengerSessionCookieOptions(token));
-    return NextResponse.json({ ok: true, phone: normalizeKzPhone(phone) });
+    return NextResponse.json({ ok: true, phone: normalizeKzPhone(phone), token });
   } catch (err) {
     return jsonAuthError(err);
   }

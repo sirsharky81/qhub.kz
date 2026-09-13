@@ -8,9 +8,20 @@ interface Props {
   onChange: (value: string) => void;
   disabled?: boolean;
   autoFocus?: boolean;
+  length?: number;
+  masked?: boolean;
+  label?: string;
 }
 
-export function PinInput({ value, onChange, disabled, autoFocus }: Props) {
+export function PinInput({
+  value,
+  onChange,
+  disabled,
+  autoFocus,
+  length = PIN_LENGTH,
+  masked = true,
+  label = "PIN",
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const labelId = useId();
 
@@ -19,17 +30,17 @@ export function PinInput({ value, onChange, disabled, autoFocus }: Props) {
       <input
         ref={inputRef}
         id={labelId}
-        type="password"
+        type={masked ? "password" : "text"}
         inputMode="numeric"
         autoComplete="one-time-code"
         pattern="[0-9]*"
-        maxLength={PIN_LENGTH}
+        maxLength={length}
         autoFocus={autoFocus}
         disabled={disabled}
         value={value}
-        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, PIN_LENGTH))}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, length))}
         className="sr-only"
-        aria-label="PIN"
+        aria-label={label}
       />
       <div
         role="group"
@@ -37,7 +48,7 @@ export function PinInput({ value, onChange, disabled, autoFocus }: Props) {
         className="flex gap-3 justify-center touch-manipulation"
         onClick={() => inputRef.current?.focus()}
       >
-        {Array.from({ length: PIN_LENGTH }).map((_, i) => {
+        {Array.from({ length }).map((_, i) => {
           const filled = i < value.length;
           const active = i === value.length;
           return (
@@ -52,7 +63,7 @@ export function PinInput({ value, onChange, disabled, autoFocus }: Props) {
                     : "border-gray-200"
               } ${disabled ? "opacity-50" : ""}`}
             >
-              {filled ? "•" : ""}
+              {filled ? (masked ? "•" : value[i]) : ""}
             </div>
           );
         })}

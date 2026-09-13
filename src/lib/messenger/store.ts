@@ -7,6 +7,7 @@ import {
   MAX_ROOM_NAME_LENGTH,
   MESSENGER_DIALOG_PREFS_TTL_SEC,
   MESSENGER_MAX_PINNED_DIALOGS,
+  MESSENGER_SELF_ADDED_BY,
   REDIS_AUTH_PREFIX,
   REDIS_AVATAR_ROOM_PREFIX,
   REDIS_AVATAR_USER_PREFIX,
@@ -46,6 +47,7 @@ import {
   redisLtrim,
   redisSet,
 } from "./redis";
+import { isWhitelistBlocked } from "./access-status";
 import { canonicalDmChatId, deriveDmChatId, normalizeKzPhone, peerFromDmChannel } from "./phone";
 import { publishEnvelopesEvent } from "./realtime/publish";
 import { roomAvatarUrl, userAvatarUrl } from "./display";
@@ -103,6 +105,54 @@ export async function getWhitelistEntry(phone: string): Promise<WhitelistEntry |
 export async function isPhoneWhitelisted(phone: string): Promise<boolean> {
   const entry = await getWhitelistEntry(phone);
   return entry?.status === "active";
+}
+
+export async function isPhoneBlocked(phone: string): Promise<boolean> {
+  const entry = await getWhitelistEntry(phone);
+  return isWhitelistBlocked(entry?.status);
+}
+
+/** Adds a self-registered number with extra tools off. Does not overwrite admin flags. */
+export async function ensureSelfRegisteredWhitelist(phone: string): Promise<WhitelistEntry> {
+  const all = await loadWhitelist();
+  const existing = all[phone];
+  if (existing && isWhitelistBlocked(existing.status)) {
+    return existing;
+  }
+  if (existing?.status === "active") {
+    return existing;
+  }
+  const entry: WhitelistEntry = {
+    phone,
+    addedBy: MESSENGER_SELF_ADDED_BY,
+    addedAt: Date.now(),
+    status: "active",
+    verified: true,
+    verifiedAt: Date.now(),
+    vpnEnabled: false,
+    musicEnabled: false,
+    sendEnabled: false,
+  };
+  all[phone] = entry;
+  await saveWhitelist(all);
+  return entry;
+}
+
+export async function markWhitelistVerified(phone: string): Promise<void> {
+  const all = await loadWhitelist();
+  const existing = all[phone];
+  if (!existing || existing.status !== "active") return;
+  if (existing.verified === true) return;
+  all[phone] = { ...existing, verified: true, verifiedAt: Date.now() };
+  await saveWhitelist(all);
+}
+
+export async function removeWhitelistEntry(phone: string): Promise<boolean> {
+  const all = await loadWhitelist();
+  if (!all[phone]) return false;
+  delete all[phone];
+  await saveWhitelist(all);
+  return true;
 }
 
 // --- Auth ---

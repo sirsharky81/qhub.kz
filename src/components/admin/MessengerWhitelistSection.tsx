@@ -1,8 +1,37 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WhitelistEntry } from "@/lib/messenger/types";
 import { maskPhone } from "@/lib/messenger/phone-format";
+import { MOBILE_SAFE_INPUT_CLASS } from "@/lib/platform/mobile-viewport";
+
+type AdminWhitelistRow = WhitelistEntry & {
+  verified?: boolean;
+  origin?: "otp" | "admin";
+  displayName?: string | null;
+  pinSet?: boolean;
+};
+
+function Badge({
+  children,
+  tone,
+}: {
+  children: string;
+  tone: "green" | "red" | "gray" | "sky" | "amber";
+}) {
+  const tones = {
+    green: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    red: "bg-red-50 text-red-800 border-red-200",
+    gray: "bg-gray-100 text-gray-600 border-gray-200",
+    sky: "bg-sky-50 text-sky-800 border-sky-200",
+    amber: "bg-amber-50 text-amber-800 border-amber-200",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${tones[tone]}`}>
+      {children}
+    </span>
+  );
+}
 
 const MESSENGER_ENTRY_PATH = "/tools/messenger";
 const VPN_ENTRY_PATH = "/tools/vpn";
@@ -13,12 +42,13 @@ function messengerInviteUrl(): string {
 }
 
 export function MessengerWhitelistSection() {
-  const [entries, setEntries] = useState<WhitelistEntry[]>([]);
+  const [entries, setEntries] = useState<AdminWhitelistRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [phone, setPhone] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState(`https://qhub.kz${MESSENGER_ENTRY_PATH}`);
+  const phoneInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -26,7 +56,7 @@ export function MessengerWhitelistSection() {
     try {
       const res = await fetch("/api/admin/messenger/whitelist");
       if (!res.ok) throw new Error("load failed");
-      const data = (await res.json()) as { entries?: WhitelistEntry[] };
+      const data = (await res.json()) as { entries?: AdminWhitelistRow[] };
       setEntries(Array.isArray(data.entries) ? data.entries : []);
     } catch {
       setError("Не удалось загрузить whitelist");
@@ -49,7 +79,7 @@ export function MessengerWhitelistSection() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ phone }),
     });
-    const data = (await res.json()) as { error?: string; entry?: WhitelistEntry };
+    const data = (await res.json()) as { error?: string; entry?: AdminWhitelistRow };
     if (!res.ok) {
       setError(data.error ?? "Ошибка");
       return;
@@ -62,7 +92,7 @@ export function MessengerWhitelistSection() {
     await load();
   }
 
-  async function setStatus(entryPhone: string, status: "active" | "revoked") {
+  async function setStatus(entryPhone: string, status: "active" | "blocked") {
     setMsg(null);
     setError(null);
     const res = await fetch("/api/admin/messenger/whitelist", {
@@ -75,6 +105,30 @@ export function MessengerWhitelistSection() {
       setError(data.error ?? "Ошибка");
       return;
     }
+    await load();
+  }
+
+  async function handleDelete(entryPhone: string) {
+    if (
+      !window.confirm(
+        `Удалить ${maskPhone(entryPhone)} из списка? Пользователь сможет снова зарегистрироваться по звонку.`,
+      )
+    ) {
+      return;
+    }
+    setMsg(null);
+    setError(null);
+    const res = await fetch("/api/admin/messenger/whitelist", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: entryPhone }),
+    });
+    if (!res.ok) {
+      const data = (await res.json()) as { error?: string };
+      setError(data.error ?? "Ошибка");
+      return;
+    }
+    setMsg(`Номер ${maskPhone(entryPhone)} удалён — можно зарегистрироваться снова`);
     await load();
   }
 
@@ -216,8 +270,9 @@ export function MessengerWhitelistSection() {
           Мессенджер: доступ
         </h2>
         <p className="text-xs text-gray-400 mt-1">
-          Добавьте номер, затем отправьте пользователю ссылку на вход. Номер в ссылке не передаётся —
-          пользователь введёт его сам.
+          Активен — пользуется мессенджером. Заблокирован — вход и новая регистрация закрыты.
+          Удалить — стереть из списка, человек сможет зарегистрироваться снова. Старый статус
+          «отозван» теперь то же самое, что блок.
         </p>
         <button
           type="button"
@@ -238,11 +293,17 @@ export function MessengerWhitelistSection() {
 
       <form onSubmit={handleAdd} className="p-4 flex flex-col sm:flex-row gap-2 border-b border-gray-100">
         <input
+          ref={phoneInputRef}
           type="tel"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
+          onFocus={() => {
+            requestAnimationFrame(() => {
+              phoneInputRef.current?.scrollIntoView({ block: "center", inline: "nearest" });
+            });
+          }}
           placeholder="+7XXXXXXXXXX"
-          className="flex-1 rounded-xl border border-gray-200 px-4 py-2 text-sm"
+          className={`flex-1 min-h-12 rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 ${MOBILE_SAFE_INPUT_CLASS}`}
           style={{ fontSize: "16px" }}
           inputMode="tel"
           autoComplete="tel"
@@ -280,9 +341,29 @@ export function MessengerWhitelistSection() {
               className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3"
             >
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900">{maskPhone(entry.phone)}</p>
-                <p className="text-xs text-gray-400">
-                  {entry.status === "active" ? "активен" : "отозван"} ·{" "}
+                <p className="text-sm font-semibold text-gray-900">
+                  {entry.displayName?.trim() || maskPhone(entry.phone)}
+                </p>
+                <p className="text-xs text-gray-400 tabular-nums">{maskPhone(entry.phone)}</p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {entry.status === "active" ? (
+                    <Badge tone="green">активен</Badge>
+                  ) : (
+                    <Badge tone="red">заблокирован</Badge>
+                  )}
+                  {entry.verified ? (
+                    <Badge tone="sky">верифицирован</Badge>
+                  ) : (
+                    <Badge tone="amber">не верифицирован</Badge>
+                  )}
+                  {entry.origin === "otp" ? (
+                    <Badge tone="sky">звонок</Badge>
+                  ) : (
+                    <Badge tone="gray">админ</Badge>
+                  )}
+                  {entry.pinSet ? <Badge tone="gray">PIN есть</Badge> : <Badge tone="amber">PIN нет</Badge>}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
                   {entry.vpnEnabled ? "VPN ✓" : "VPN —"} ·{" "}
                   {entry.musicEnabled ? "Music ✓" : "Music —"} ·{" "}
                   {entry.sendEnabled ? "Send ✓" : "Send —"} ·{" "}
@@ -293,10 +374,10 @@ export function MessengerWhitelistSection() {
                 {entry.status === "active" ? (
                   <button
                     type="button"
-                    onClick={() => setStatus(entry.phone, "revoked")}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                    onClick={() => setStatus(entry.phone, "blocked")}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
                   >
-                    Отозвать
+                    Заблокировать
                   </button>
                 ) : (
                   <button
@@ -304,9 +385,16 @@ export function MessengerWhitelistSection() {
                     onClick={() => setStatus(entry.phone, "active")}
                     className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
                   >
-                    Активировать
+                    Разблокировать
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(entry.phone)}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  Удалить
+                </button>
                 {entry.status === "active" && (
                   <button
                     type="button"

@@ -3,6 +3,15 @@ export const MESSENGER_SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7; // 7 days
 
 export const REDIS_WHITELIST_KEY = "qhub:messenger:whitelist";
 export const REDIS_AUTH_PREFIX = "qhub:messenger:auth:";
+export const REDIS_OTP_CHALLENGE_PREFIX = "qhub:messenger:otp:challenge:";
+export const REDIS_OTP_VERIFIED_PREFIX = "qhub:messenger:otp:verified:";
+export const MESSENGER_OTP_COOKIE = "qhub_messenger_otp";
+export const OTP_DIGITS = 4;
+export const OTP_CHALLENGE_TTL_SEC = 180;
+export const OTP_VERIFIED_TTL_SEC = 10 * 60;
+export const OTP_MAX_ATTEMPTS = 5;
+export const OTP_RESEND_COOLDOWN_SEC = 60;
+export const MESSENGER_SELF_ADDED_BY = "self";
 export const REDIS_PUBKEY_PREFIX = "qhub:messenger:pubkey:";
 export const REDIS_DM_PREFIX = "qhub:messenger:dm:";
 export const REDIS_DM_USER_INDEX_PREFIX = "qhub:messenger:dm:user:";
