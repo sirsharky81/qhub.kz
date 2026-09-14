@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("ensureSelfRegisteredWhitelist", () => {
-  it("adds a number with extras off", async () => {
+  it("adds a number with Send on and VPN/Music off", async () => {
     const entry = await ensureSelfRegisteredWhitelist(phone);
     expect(entry).toMatchObject({
       phone,
@@ -31,7 +31,7 @@ describe("ensureSelfRegisteredWhitelist", () => {
       verified: true,
       vpnEnabled: false,
       musicEnabled: false,
-      sendEnabled: false,
+      sendEnabled: true,
     });
     expect(await getWhitelistEntry(phone)).toEqual(entry);
   });

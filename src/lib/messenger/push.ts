@@ -24,7 +24,9 @@ export type PushSupportStatus = "unsupported" | "denied" | "default" | "granted"
 
 export function isMessengerPushEnabledLocally(): boolean {
   if (typeof window === "undefined") return false;
-  return localStorage.getItem(MESSENGER_PUSH_PREFS_KEY) === "1";
+  const stored = localStorage.getItem(MESSENGER_PUSH_PREFS_KEY);
+  if (stored === null) return true;
+  return stored === "1";
 }
 
 export function setMessengerPushEnabledLocally(enabled: boolean): void {

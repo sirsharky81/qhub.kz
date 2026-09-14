@@ -25,6 +25,7 @@ import { maskPhone } from "@/lib/messenger/phone-format";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import {
   ensureMessengerPushSubscription,
+  subscribeMessengerPush,
 } from "@/lib/messenger/push";
 import { isStandalone } from "@/lib/pwa-utils";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
@@ -246,7 +247,13 @@ export function MessengerLoginClient() {
 
   function finishAfterSetPin() {
     const alreadyShown = localStorage.getItem(MESSENGER_INSTALL_PROMPT_SHOWN);
-    void ensureMessengerPushSubscription();
+    const enablePushByDefault =
+      selfRegistration || (!passwordSet && !mustChangePin && otpPurpose !== "pin_recovery");
+    if (enablePushByDefault) {
+      void subscribeMessengerPush().catch(() => {});
+    } else {
+      void ensureMessengerPushSubscription();
+    }
     if (!isStandalone() && !alreadyShown) {
       setShowInstallModal(true);
       return;

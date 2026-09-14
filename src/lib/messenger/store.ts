@@ -112,7 +112,7 @@ export async function isPhoneBlocked(phone: string): Promise<boolean> {
   return isWhitelistBlocked(entry?.status);
 }
 
-/** Adds a self-registered number with extra tools off. Does not overwrite admin flags. */
+/** Adds a self-registered number with Send on; VPN/Music stay off. Does not overwrite admin flags. */
 export async function ensureSelfRegisteredWhitelist(phone: string): Promise<WhitelistEntry> {
   const all = await loadWhitelist();
   const existing = all[phone];
@@ -131,7 +131,7 @@ export async function ensureSelfRegisteredWhitelist(phone: string): Promise<Whit
     verifiedAt: Date.now(),
     vpnEnabled: false,
     musicEnabled: false,
-    sendEnabled: false,
+    sendEnabled: true,
   };
   all[phone] = entry;
   await saveWhitelist(all);
