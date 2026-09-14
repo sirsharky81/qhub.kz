@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
+import { assertTurnstile } from "@/lib/captcha/turnstile";
 import {
+  checkMessengerOtpRecoveryCallRateLimit,
+  checkMessengerOtpRecoveryPushRateLimit,
   checkMessengerOtpSendIpRateLimit,
   checkMessengerOtpSendPhoneRateLimit,
   getClientIp,
 } from "@/lib/rate-limit";
 import { ACCESS_DENIED_MSG, assertMessengerOpenPhone, jsonAuthError, MessengerAuthError } from "@/lib/messenger/guard";
-import { sendMessengerOtp } from "@/lib/messenger/otp";
+import { parseOtpPurpose, resolveOtpChannel, sendMessengerOtp } from "@/lib/messenger/otp";
 import { isValidKzPhone, normalizeKzPhone } from "@/lib/messenger/phone";
 
 export async function POST(request: Request) {
@@ -18,11 +21,26 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { phone?: string };
+  let body: { phone?: string; purpose?: string; captchaToken?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 403 });
+  }
+
+  const purpose = parseOtpPurpose(body.purpose);
+  if (!purpose) {
+    return NextResponse.json({ ok: false, error: ACCESS_DENIED_MSG }, { status: 400 });
+  }
+
+  if (purpose === "pin_recovery") {
+    const captcha = await assertTurnstile(
+      typeof body.captchaToken === "string" ? body.captchaToken : undefined,
+      ip,
+    );
+    if (!captcha.ok) {
+      return NextResponse.json({ ok: false, error: captcha.error }, { status: captcha.status });
+    }
   }
 
   const raw = typeof body.phone === "string" ? body.phone.trim() : "";
@@ -32,24 +50,53 @@ export async function POST(request: Request) {
 
   try {
     const { phone } = await assertMessengerOpenPhone(raw);
-    const phoneLimit = await checkMessengerOtpSendPhoneRateLimit(phone);
-    if (!phoneLimit.allowed) {
-      return NextResponse.json(
-        { ok: false, error: "Слишком много звонков. Подождите несколько минут." },
-        {
-          status: 429,
-          headers: phoneLimit.retryAfterSec ? { "Retry-After": String(phoneLimit.retryAfterSec) } : undefined,
-        },
-      );
+
+    if (purpose === "register") {
+      const phoneLimit = await checkMessengerOtpSendPhoneRateLimit(phone);
+      if (!phoneLimit.allowed) {
+        return NextResponse.json(
+          { ok: false, error: "Слишком много звонков. Подождите несколько минут." },
+          {
+            status: 429,
+            headers: phoneLimit.retryAfterSec ? { "Retry-After": String(phoneLimit.retryAfterSec) } : undefined,
+          },
+        );
+      }
+    } else {
+      const channel = await resolveOtpChannel(phone, purpose);
+      if (channel === "push") {
+        const pushLimit = await checkMessengerOtpRecoveryPushRateLimit(phone);
+        if (!pushLimit.allowed) {
+          return NextResponse.json(
+            { ok: false, error: "Слишком много попыток сброса PIN. Напишите администратору." },
+            {
+              status: 429,
+              headers: pushLimit.retryAfterSec ? { "Retry-After": String(pushLimit.retryAfterSec) } : undefined,
+            },
+          );
+        }
+      } else {
+        const callLimit = await checkMessengerOtpRecoveryCallRateLimit(phone);
+        if (!callLimit.allowed) {
+          return NextResponse.json(
+            { ok: false, error: "Звонок для сброса PIN уже заказывали сегодня. Напишите администратору." },
+            {
+              status: 429,
+              headers: callLimit.retryAfterSec ? { "Retry-After": String(callLimit.retryAfterSec) } : undefined,
+            },
+          );
+        }
+      }
     }
 
-    const result = await sendMessengerOtp(phone);
+    const result = await sendMessengerOtp(phone, purpose);
     return NextResponse.json({
       ok: true,
       phone,
       digits: result.digits,
       expiresAt: result.expiresAt,
       resendAfterSec: result.resendAfterSec,
+      channel: result.channel,
     });
   } catch (err) {
     if (err instanceof MessengerAuthError) {

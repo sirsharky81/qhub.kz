@@ -1,5 +1,5 @@
 import { dispatchPushNotifications } from "@/lib/push/dispatch";
-import { messengerChatCallUrl, messengerChatUrl, messengerRoomUrl } from "@/lib/app-routes";
+import { messengerChatCallUrl, messengerChatUrl, messengerLoginUrl, messengerRoomUrl } from "@/lib/app-routes";
 import { MAX_PUSH_PREVIEW_LENGTH } from "./constants";
 import { displayNameForPhone, getProfile, loadProfiles } from "./store";
 import type { MessageType } from "./types";
@@ -140,4 +140,20 @@ export async function notifyIncomingCall(params: {
     callId: params.callId,
     callMedia: params.media,
   });
+}
+
+/** PIN recovery: always deliver, even if the user is on the login screen. */
+export async function notifyPinRecovery(phone: string, code: string): Promise<boolean> {
+  const subs = await getMessengerPushSubscriptions(phone);
+  if (subs.length === 0) return false;
+
+  await dispatchPushNotifications(subs, {
+    title: "Мессенджер",
+    body: `Код сброса PIN: ${code}`,
+    url: messengerLoginUrl(),
+    icon: MESSENGER_ICON,
+    badge: MESSENGER_ICON,
+    action: "messenger:message",
+  });
+  return true;
 }

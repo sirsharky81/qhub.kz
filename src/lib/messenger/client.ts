@@ -41,6 +41,7 @@ export interface MessengerOtpSendResult {
   digits?: number;
   expiresAt?: number;
   resendAfterSec?: number;
+  channel?: "push" | "call";
   error?: string;
 }
 
@@ -113,11 +114,15 @@ export async function verifyMessengerPin(pin: string): Promise<{
   return res.json() as Promise<{ ok: boolean; error?: string; lockedUntil?: number }>;
 }
 
-export async function sendMessengerOtp(phone: string): Promise<MessengerOtpSendResult> {
+export async function sendMessengerOtp(
+  phone: string,
+  purpose: "register" | "pin_recovery" = "register",
+  captchaToken?: string,
+): Promise<MessengerOtpSendResult> {
   const res = await platformFetch("/api/messenger/auth/otp/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, purpose, captchaToken }),
   });
   return res.json() as Promise<MessengerOtpSendResult>;
 }

@@ -11,6 +11,7 @@ interface Props {
   loading?: boolean;
   error?: string | null;
   onSubmit: (pin: string) => void | Promise<void>;
+  onForgotPin?: () => void;
 }
 
 export function MessengerPinUnlockScreen({
@@ -18,6 +19,7 @@ export function MessengerPinUnlockScreen({
   loading = false,
   error = null,
   onSubmit,
+  onForgotPin,
 }: Props) {
   const [pin, setPin] = useState("");
 
@@ -51,6 +53,16 @@ export function MessengerPinUnlockScreen({
           >
             {loading ? "Проверка…" : "Продолжить"}
           </button>
+          {onForgotPin && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={onForgotPin}
+              className="w-full text-xs text-gray-500 underline disabled:opacity-60"
+            >
+              Забыл PIN?
+            </button>
+          )}
           {error && (
             <p className="text-sm text-red-600 text-center bg-red-50 rounded-xl px-3 py-2">
               {error}

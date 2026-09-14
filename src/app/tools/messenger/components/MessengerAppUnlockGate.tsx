@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchAccessCheck } from "@/lib/messenger/client";
 import { maskPhone } from "@/lib/messenger/phone-format";
+import { messengerLoginUrl } from "@/lib/app-routes";
 import { useMessengerUnlock } from "./MessengerUnlockProvider";
 import { MessengerPinUnlockScreen } from "./MessengerPinUnlockScreen";
 
@@ -110,6 +111,7 @@ export function MessengerAppUnlockGate({ children }: Props) {
       loading={loading}
       error={error}
       onSubmit={handleUnlock}
+      onForgotPin={() => router.replace(messengerLoginUrl(true))}
     />
   );
 }

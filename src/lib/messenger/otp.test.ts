@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OTP_DIGITS, REDIS_OTP_CHALLENGE_PREFIX, REDIS_OTP_VERIFIED_PREFIX } from "./constants";
 import { redisDel } from "./redis";
+import type { MessengerPushSubscription } from "./types";
 
 const sendFlashCall = vi.hoisted(() =>
   vi.fn(async (input: { number: string; digits?: number }) => ({
@@ -10,12 +11,28 @@ const sendFlashCall = vi.hoisted(() =>
   })),
 );
 
+const notifyPinRecovery = vi.hoisted(() =>
+  vi.fn(async (_phone: string, _code: string) => true),
+);
+
+const getMessengerPushSubscriptions = vi.hoisted(() =>
+  vi.fn(async (): Promise<MessengerPushSubscription[]> => []),
+);
+
 vi.mock("@/lib/autocall/client", () => ({
   AutocallError: class AutocallError extends Error {
     status = 502;
     code = "unavailable";
   },
   sendFlashCall,
+}));
+
+vi.mock("./push-notify", () => ({
+  notifyPinRecovery,
+}));
+
+vi.mock("./push-store", () => ({
+  getMessengerPushSubscriptions,
 }));
 
 vi.mock("./auth-service", () => ({
@@ -36,6 +53,10 @@ import {
 } from "./otp";
 
 const phone = "+77011234567";
+const pushSub: MessengerPushSubscription = {
+  endpoint: "https://push.example/sub",
+  keys: { p256dh: "a", auth: "b" },
+};
 
 afterEach(async () => {
   vi.clearAllMocks();
@@ -44,6 +65,8 @@ afterEach(async () => {
     mustChangePin: false,
     lockedUntil: null,
   });
+  getMessengerPushSubscriptions.mockResolvedValue([]);
+  notifyPinRecovery.mockResolvedValue(true);
   await redisDel(`${REDIS_OTP_CHALLENGE_PREFIX}${phone}`);
 });
 
@@ -56,7 +79,9 @@ describe("messenger flash-call OTP", () => {
   it("stores a challenge and accepts the flash-call code", async () => {
     const sent = await sendMessengerOtp(phone);
     expect(sent.digits).toBe(OTP_DIGITS);
+    expect(sent.channel).toBe("call");
     expect(sendFlashCall).toHaveBeenCalledWith({ number: phone, digits: OTP_DIGITS });
+    expect(notifyPinRecovery).not.toHaveBeenCalled();
 
     await expect(verifyMessengerOtp(phone, "0000")).rejects.toThrow("Неверный код");
     const verified = await verifyMessengerOtp(phone, "7482");
@@ -81,6 +106,70 @@ describe("messenger flash-call OTP", () => {
     await expect(
       assertPinSetupAllowed({ phone, otpToken: verified.token }),
     ).resolves.toEqual({ via: "otp", otpToken: verified.token });
+    await redisDel(`${REDIS_OTP_VERIFIED_PREFIX}${verified.token}`);
+  });
+
+  it("does not allow registration OTP to overwrite an existing PIN", async () => {
+    await sendMessengerOtp(phone);
+    const verified = await verifyMessengerOtp(phone, "7482");
+    vi.mocked(getPinStatus).mockResolvedValue({
+      passwordSet: true,
+      mustChangePin: false,
+      lockedUntil: null,
+    });
+    await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).rejects.toThrow(
+      "Войдите с PIN",
+    );
+    await redisDel(`${REDIS_OTP_VERIFIED_PREFIX}${verified.token}`);
+  });
+});
+
+describe("messenger PIN recovery OTP", () => {
+  it("sends recovery by push and skips AutoCall when subscriptions exist", async () => {
+    vi.mocked(getPinStatus).mockResolvedValue({
+      passwordSet: true,
+      mustChangePin: false,
+      lockedUntil: null,
+    });
+    getMessengerPushSubscriptions.mockResolvedValue([pushSub]);
+    let pushCode = "";
+    notifyPinRecovery.mockImplementation(async (_phone, code) => {
+      pushCode = code;
+      return true;
+    });
+
+    const sent = await sendMessengerOtp(phone, "pin_recovery");
+    expect(sent.channel).toBe("push");
+    expect(sendFlashCall).not.toHaveBeenCalled();
+    expect(notifyPinRecovery).toHaveBeenCalledWith(phone, expect.stringMatching(/^\d{4}$/));
+    expect(pushCode).toMatch(/^\d{4}$/);
+
+    const verified = await verifyMessengerOtp(phone, pushCode);
+    await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).resolves.toEqual({
+      via: "otp",
+      otpToken: verified.token,
+    });
+    await redisDel(`${REDIS_OTP_VERIFIED_PREFIX}${verified.token}`);
+  });
+
+  it("falls back to flash-call recovery when there is no push subscription", async () => {
+    vi.mocked(getPinStatus).mockResolvedValue({
+      passwordSet: true,
+      mustChangePin: false,
+      lockedUntil: null,
+    });
+    getMessengerPushSubscriptions.mockResolvedValue([]);
+
+    const sent = await sendMessengerOtp(phone, "pin_recovery");
+    expect(sent.channel).toBe("call");
+    expect(sendFlashCall).toHaveBeenCalledWith({ number: phone, digits: OTP_DIGITS });
+    expect(notifyPinRecovery).not.toHaveBeenCalled();
+
+    const verified = await verifyMessengerOtp(phone, "7482");
+    await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).resolves.toEqual({
+      via: "otp",
+      otpToken: verified.token,
+    });
     await redisDel(`${REDIS_OTP_VERIFIED_PREFIX}${verified.token}`);
   });
 });

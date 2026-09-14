@@ -16,6 +16,10 @@ export function childMapMemberUrl(memberId: string): string {
   return `/tools/family/child/map?member=${encodeURIComponent(memberId)}`;
 }
 
+export function messengerLoginUrl(reset?: boolean): string {
+  return reset ? "/tools/messenger/login?reset=1" : "/tools/messenger/login";
+}
+
 export function messengerChatUrl(peerPhone: string, returnTo?: string): string {
   const base = `/tools/messenger/chat?peer=${encodeURIComponent(peerPhone)}`;
   if (!returnTo) return base;

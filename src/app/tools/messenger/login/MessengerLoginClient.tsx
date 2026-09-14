@@ -21,6 +21,7 @@ import {
   setMessengerPin,
   verifyMessengerOtp,
 } from "@/lib/messenger/client";
+import { maskPhone } from "@/lib/messenger/phone-format";
 import { ensureDeviceKeyPublished } from "@/lib/messenger/device-keys";
 import {
   ensureMessengerPushSubscription,
@@ -32,6 +33,8 @@ import { useTurnstileConfig } from "@/lib/captcha/useTurnstileConfig";
 import { useMessengerUnlock } from "../components/MessengerUnlockProvider";
 
 type Step = "phone" | "name" | "otp" | "login" | "setPin";
+type OtpPurpose = "register" | "pin_recovery";
+type OtpChannel = "push" | "call";
 
 function loadLastPhone(): string {
   if (typeof window === "undefined") return "";
@@ -58,6 +61,8 @@ export function MessengerLoginClient() {
   const [selfRegistration, setSelfRegistration] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState<string | undefined>(undefined);
+  const [otpPurpose, setOtpPurpose] = useState<OtpPurpose>("register");
+  const [otpChannel, setOtpChannel] = useState<OtpChannel>("call");
   const [otpSending, setOtpSending] = useState(false);
   const [resendAfterSec, setResendAfterSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -66,8 +71,10 @@ export function MessengerLoginClient() {
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [phoneCaptchaToken, setPhoneCaptchaToken] = useState<string | null>(null);
   const [loginCaptchaToken, setLoginCaptchaToken] = useState<string | null>(null);
+  const [otpCaptchaToken, setOtpCaptchaToken] = useState<string | null>(null);
   const [phoneCaptchaReset, setPhoneCaptchaReset] = useState(0);
   const [loginCaptchaReset, setLoginCaptchaReset] = useState(0);
+  const [otpCaptchaReset, setOtpCaptchaReset] = useState(0);
   const turnstile = useTurnstileConfig();
   const captchaRequired = turnstile.enabled;
   const phoneInputRef = useRef<HTMLInputElement>(null);
@@ -81,7 +88,19 @@ export function MessengerLoginClient() {
   useEffect(() => {
     setPhoneInput(loadLastPhone());
     void fetchAccessCheck(true).then((data) => {
-      if (data.messengerLoggedIn && !data.mustChangePin) {
+      if (data.messengerLoggedIn && data.phone) {
+        const resetRequested =
+          typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("reset") === "1";
+        if (resetRequested || data.mustChangePin) {
+          setPhone(data.phone);
+          setMaskedPhone(maskPhone(data.phone));
+          setPasswordSet(!!data.passwordSet);
+          setMustChangePin(true);
+          setCheckingSession(false);
+          setStep("setPin");
+          return;
+        }
         router.replace("/tools/messenger/home");
         return;
       }
@@ -114,14 +133,25 @@ export function MessengerLoginClient() {
       setMustChangePin(!!res.mustChangePin);
       setSelfRegistration(!!res.selfRegistration);
       saveLastPhone(res.phone ?? phoneInput);
+      const identifiedPhone = res.phone ?? phoneInput;
       if (!res.passwordSet || res.otpRequired) {
+        const access = await fetchAccessCheck(true).catch(() => null);
+        if (access?.messengerLoggedIn && access.phone === identifiedPhone) {
+          setMustChangePin(true);
+          setPin("");
+          setConfirmPin("");
+          setStep("setPin");
+          return;
+        }
+        setOtpPurpose("register");
+        setOtpChannel("call");
         setOtpCode("");
         setOtpToken(undefined);
         if (res.selfRegistration) {
           setStep("name");
         } else {
           setStep("otp");
-          void requestOtp(res.phone ?? phoneInput);
+          void requestOtp(identifiedPhone, "register");
         }
       } else {
         setStep("login");
@@ -131,18 +161,49 @@ export function MessengerLoginClient() {
     }
   }
 
-  async function requestOtp(targetPhone = phone) {
+  async function requestOtp(
+    targetPhone = phone,
+    purpose: OtpPurpose = otpPurpose,
+    captchaToken?: string | null,
+  ) {
     setOtpSending(true);
     setError(null);
     try {
-      const res = await sendMessengerOtp(targetPhone);
-      if (!res.ok) {
-        setError(res.error ?? "Не удалось заказать звонок");
-        return;
+      const res = await sendMessengerOtp(targetPhone, purpose, captchaToken ?? undefined);
+      if (purpose === "pin_recovery") {
+        setOtpCaptchaToken(null);
+        setOtpCaptchaReset((k) => k + 1);
+        setLoginCaptchaToken(null);
+        setLoginCaptchaReset((k) => k + 1);
       }
+      if (!res.ok) {
+        setError(res.error ?? "Не удалось отправить код");
+        return false;
+      }
+      setOtpPurpose(purpose);
+      setOtpChannel(res.channel ?? "call");
       setResendAfterSec(res.resendAfterSec ?? OTP_RESEND_COOLDOWN_SEC);
+      return true;
     } finally {
       setOtpSending(false);
+    }
+  }
+
+  async function handleForgotPin() {
+    setError(null);
+    if (captchaRequired && !loginCaptchaToken) {
+      setError(CAPTCHA_REQUIRED_MSG);
+      return;
+    }
+    setLoading(true);
+    try {
+      const ok = await requestOtp(phone, "pin_recovery", loginCaptchaToken);
+      if (!ok) return;
+      setOtpCode("");
+      setOtpToken(undefined);
+      setStep("otp");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -155,8 +216,10 @@ export function MessengerLoginClient() {
     }
     setError(null);
     setDisplayName(name);
+    setOtpPurpose("register");
+    setOtpChannel("call");
     setStep("otp");
-    void requestOtp();
+    void requestOtp(phone, "register");
   }
 
   async function handleVerifyOtp() {
@@ -170,6 +233,9 @@ export function MessengerLoginClient() {
         return;
       }
       setOtpToken(res.otpToken);
+      if (otpPurpose === "pin_recovery") {
+        setMustChangePin(true);
+      }
       setStep("setPin");
       setPin("");
       setConfirmPin("");
@@ -261,13 +327,19 @@ export function MessengerLoginClient() {
     setConfirmPin("");
     setOtpCode("");
     setOtpToken(undefined);
+    setOtpPurpose("register");
+    setOtpChannel("call");
     setDisplayName("");
     setSelfRegistration(false);
+    setMustChangePin(false);
     setResendAfterSec(0);
     setError(null);
     setPhoneCaptchaToken(null);
     setLoginCaptchaToken(null);
+    setOtpCaptchaToken(null);
     setPhoneCaptchaReset((k) => k + 1);
+    setLoginCaptchaReset((k) => k + 1);
+    setOtpCaptchaReset((k) => k + 1);
   }
 
   useEffect(() => {
@@ -394,19 +466,40 @@ export function MessengerLoginClient() {
 
           {step === "otp" && (
             <>
-              <h2 className="text-center text-sm font-semibold">Подтвердите номер</h2>
+              <h2 className="text-center text-sm font-semibold">
+                {otpPurpose === "pin_recovery" && otpChannel === "push"
+                  ? "Код сброса PIN"
+                  : "Подтвердите номер"}
+              </h2>
               <p className="text-xs text-gray-500 text-center">
-                Сейчас поступит звонок. Отвечать не нужно — введите последние {OTP_DIGITS} цифры
-                входящего номера.
+                {otpChannel === "push"
+                  ? `Мы отправили код в уведомление. Откройте его и введите ${OTP_DIGITS} цифры.`
+                  : `Сейчас поступит звонок. Отвечать не нужно — введите последние ${OTP_DIGITS} цифры входящего номера.`}
               </p>
+              {otpPurpose === "pin_recovery" && otpChannel === "call" && (
+                <p className="text-xs text-gray-500 text-center">
+                  Если звонка нет — напишите администратору.
+                </p>
+              )}
               <PinInput
                 value={otpCode}
                 onChange={setOtpCode}
                 length={OTP_DIGITS}
                 masked={false}
-                label="Код из звонка"
+                label={otpChannel === "push" ? "Код из уведомления" : "Код из звонка"}
                 autoFocus
               />
+              {otpPurpose === "pin_recovery" && (
+                <TurnstileWidget
+                  siteKey={turnstile.siteKey}
+                  enabled={captchaRequired}
+                  loading={turnstile.loading}
+                  resetKey={otpCaptchaReset}
+                  onToken={setOtpCaptchaToken}
+                  onExpire={() => setOtpCaptchaToken(null)}
+                  onError={() => setOtpCaptchaToken(null)}
+                />
+              )}
               <button
                 type="button"
                 disabled={loading || otpSending || otpCode.length < OTP_DIGITS}
@@ -417,15 +510,31 @@ export function MessengerLoginClient() {
               </button>
               <button
                 type="button"
-                disabled={otpSending || resendAfterSec > 0}
-                onClick={() => void requestOtp()}
+                disabled={
+                  otpSending ||
+                  resendAfterSec > 0 ||
+                  (otpPurpose === "pin_recovery" && captchaRequired && !otpCaptchaToken)
+                }
+                onClick={() =>
+                  void requestOtp(
+                    phone,
+                    otpPurpose,
+                    otpPurpose === "pin_recovery" ? otpCaptchaToken : undefined,
+                  )
+                }
                 className="w-full text-xs text-gray-500 underline disabled:no-underline disabled:opacity-60"
               >
                 {otpSending
-                  ? "Звоним…"
+                  ? otpChannel === "push"
+                    ? "Отправляем…"
+                    : "Звоним…"
                   : resendAfterSec > 0
-                    ? `Повторить звонок через ${resendAfterSec} с`
-                    : "Позвонить ещё раз"}
+                    ? otpChannel === "push"
+                      ? `Повторить отправку через ${resendAfterSec} с`
+                      : `Повторить звонок через ${resendAfterSec} с`
+                    : otpChannel === "push"
+                      ? "Отправить ещё раз"
+                      : "Позвонить ещё раз"}
               </button>
             </>
           )}
@@ -433,9 +542,11 @@ export function MessengerLoginClient() {
           {step === "setPin" && (
             <>
               <h2 className="text-center text-sm font-semibold">
-                {passwordSet || mustChangePin ? "Задайте новый PIN" : "Установите PIN-код"}
+                {passwordSet || mustChangePin || otpPurpose === "pin_recovery"
+                  ? "Задайте новый PIN"
+                  : "Установите PIN-код"}
               </h2>
-              {(passwordSet || mustChangePin) && (
+              {(passwordSet || mustChangePin || otpPurpose === "pin_recovery") && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-center">
                   После смены PIN сохранённая на этом устройстве переписка может стать недоступна.
                 </p>
@@ -481,6 +592,14 @@ export function MessengerLoginClient() {
                 className="w-full rounded-2xl bg-gray-900 text-white py-3 text-sm font-semibold disabled:opacity-50"
               >
                 {loading ? "Вход…" : "Войти"}
+              </button>
+              <button
+                type="button"
+                disabled={loading || otpSending}
+                onClick={() => void handleForgotPin()}
+                className="w-full text-xs text-gray-500 underline disabled:opacity-60"
+              >
+                Забыл PIN?
               </button>
             </>
           )}

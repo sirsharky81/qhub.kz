@@ -23,6 +23,8 @@ const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
   "qhub:messenger-otp-send-phone": { requests: 3, window: "5 m" },
   "qhub:messenger-otp-send-ip": { requests: 6, window: "15 m" },
   "qhub:messenger-otp-verify": { requests: 12, window: "15 m" },
+  "qhub:messenger-otp-recovery-push": { requests: 3, window: "1 d" },
+  "qhub:messenger-otp-recovery-call": { requests: 1, window: "1 d" },
   "qhub:family": { requests: 120, window: "1 m" },
   "qhub:share": { requests: 60, window: "1 m" },
   "qhub:share-signal": { requests: 800, window: "1 m" },
@@ -215,6 +217,18 @@ export async function checkMessengerOtpVerifyRateLimit(
   identifier: string,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
   return checkRateLimit("qhub:messenger-otp-verify", identifier);
+}
+
+export async function checkMessengerOtpRecoveryPushRateLimit(
+  phone: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:messenger-otp-recovery-push", phone);
+}
+
+export async function checkMessengerOtpRecoveryCallRateLimit(
+  phone: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:messenger-otp-recovery-call", phone);
 }
 
 export async function checkFamilyRateLimit(
