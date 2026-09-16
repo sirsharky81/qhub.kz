@@ -1,10 +1,12 @@
 import type { AutoslalomPersisted } from "./autoslalom/types";
 import { DEFAULT_CLOCK } from "./autoslalom/engine";
+import type { ChessAiLevel, ChessColorPref, ChessState } from "./chess/types";
+import { DEFAULT_AI_TIME_CONTROL_ID } from "./chess/types";
 
 const DB_NAME = "qhub-games";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
-type StoreName = "hearts_state" | "spider_state" | "autoslalom_data" | "settings" | "stats";
+type StoreName = "hearts_state" | "spider_state" | "autoslalom_data" | "chess_state" | "settings" | "stats";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -20,6 +22,7 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("hearts_state")) db.createObjectStore("hearts_state");
       if (!db.objectStoreNames.contains("spider_state")) db.createObjectStore("spider_state");
       if (!db.objectStoreNames.contains("autoslalom_data")) db.createObjectStore("autoslalom_data");
+      if (!db.objectStoreNames.contains("chess_state")) db.createObjectStore("chess_state");
       if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings");
       if (!db.objectStoreNames.contains("stats")) db.createObjectStore("stats");
     };
@@ -161,4 +164,63 @@ export async function saveAutoslalomData(data: AutoslalomPersisted): Promise<voi
 export async function loadAutoslalomData(): Promise<AutoslalomPersisted> {
   const value = await tx<IDBValidKey>("autoslalom_data", "readonly", (store) => store.get("current"));
   return { ...DEFAULT_AUTOSLOALOM_DATA, ...(((value as unknown) as AutoslalomPersisted | undefined) ?? {}) };
+}
+
+export interface ChessSettings {
+  aiLevel: ChessAiLevel;
+  colorPref: ChessColorPref;
+  timeControlId: string;
+}
+
+export interface ChessStats {
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  winRate: number;
+}
+
+export const DEFAULT_CHESS_SETTINGS: ChessSettings = {
+  aiLevel: 5,
+  colorPref: "w",
+  timeControlId: DEFAULT_AI_TIME_CONTROL_ID,
+};
+
+export const DEFAULT_CHESS_STATS: ChessStats = {
+  games: 0,
+  wins: 0,
+  losses: 0,
+  draws: 0,
+  winRate: 0,
+};
+
+export async function saveChessState(state: ChessState | null): Promise<void> {
+  if (state === null) {
+    await tx("chess_state", "readwrite", (store) => store.delete("current"));
+    return;
+  }
+  await tx("chess_state", "readwrite", (store) => store.put(state, "current"));
+}
+
+export async function loadChessState(): Promise<ChessState | null> {
+  const value = await tx<IDBValidKey>("chess_state", "readonly", (store) => store.get("current"));
+  return ((value as unknown) as ChessState | undefined) ?? null;
+}
+
+export async function saveChessSettings(settings: ChessSettings): Promise<void> {
+  await tx("settings", "readwrite", (store) => store.put(settings, "chess"));
+}
+
+export async function loadChessSettings(): Promise<ChessSettings> {
+  const value = await tx<IDBValidKey>("settings", "readonly", (store) => store.get("chess"));
+  return { ...DEFAULT_CHESS_SETTINGS, ...(((value as unknown) as ChessSettings | undefined) ?? {}) };
+}
+
+export async function saveChessStats(stats: ChessStats): Promise<void> {
+  await tx("stats", "readwrite", (store) => store.put(stats, "chess"));
+}
+
+export async function loadChessStats(): Promise<ChessStats> {
+  const value = await tx<IDBValidKey>("stats", "readonly", (store) => store.get("chess"));
+  return { ...DEFAULT_CHESS_STATS, ...(((value as unknown) as ChessStats | undefined) ?? {}) };
 }

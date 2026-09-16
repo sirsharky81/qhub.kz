@@ -98,7 +98,41 @@ export default function GamesPage() {
                 Настольные игры
               </h2>
             </div>
-            <div className="p-3">
+            <div className="p-3 space-y-3">
+              <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-amber-50/60 dark:from-gray-900 dark:to-amber-950/20">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Шахматы</h3>
+                    <p className="mt-1 text-xs text-gray-500 leading-relaxed">
+                      Классические шахматы: 10 уровней ИИ, онлайн-комнаты на двоих, рокировка и шахматные часы.
+                    </p>
+                  </div>
+                  <span className="text-[10px] px-2 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 shrink-0">
+                    Board
+                  </span>
+                </div>
+                <div className="mt-3 grid sm:grid-cols-3 gap-2">
+                  <Link
+                    href="/tools/games/chess?mode=offline"
+                    className="inline-flex rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-2"
+                  >
+                    Новая игра против ИИ
+                  </Link>
+                  <Link
+                    href="/tools/games/chess?mode=create-online"
+                    className="inline-flex rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Создать онлайн игру
+                  </Link>
+                  <Link
+                    href="/tools/games/chess?mode=join-online"
+                    className="inline-flex whitespace-nowrap rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Присоединиться к игре
+                  </Link>
+                </div>
+              </article>
+
               <article className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gradient-to-br from-white to-amber-50/60 dark:from-gray-900 dark:to-amber-950/20">
                 <div className="flex items-start justify-between gap-3">
                   <div>

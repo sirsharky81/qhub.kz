@@ -61,6 +61,7 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
     "@zxing/library": "^0.23.0",
+    "chess.js": "^1.4.0",
     "cross-env": "^10.1.0",
     "decimal.js": "^10.6.0",
     "docx": "^9.7.1",
