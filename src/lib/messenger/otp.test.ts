@@ -43,6 +43,12 @@ vi.mock("./auth-service", () => ({
   })),
 }));
 
+const isPhoneWhitelisted = vi.hoisted(() => vi.fn(async () => false));
+
+vi.mock("./store", () => ({
+  isPhoneWhitelisted,
+}));
+
 import { getPinStatus } from "./auth-service";
 import {
   assertPinSetupAllowed,
@@ -67,6 +73,7 @@ afterEach(async () => {
   });
   getMessengerPushSubscriptions.mockResolvedValue([]);
   notifyPinRecovery.mockResolvedValue(true);
+  isPhoneWhitelisted.mockResolvedValue(false);
   await redisDel(`${REDIS_OTP_CHALLENGE_PREFIX}${phone}`);
 });
 
@@ -95,9 +102,17 @@ describe("messenger flash-call OTP", () => {
 
   it("rejects PIN setup without a verified OTP or session", async () => {
     await expect(assertPinSetupAllowed({ phone })).rejects.toThrow("Подтвердите номер звонком");
+    isPhoneWhitelisted.mockResolvedValue(true);
     await expect(assertPinSetupAllowed({ phone, sessionPhone: phone })).resolves.toEqual({
       via: "session",
     });
+  });
+
+  it("does not treat a leftover session as proof after the number was deleted", async () => {
+    isPhoneWhitelisted.mockResolvedValue(false);
+    await expect(assertPinSetupAllowed({ phone, sessionPhone: phone })).rejects.toThrow(
+      "Подтвердите номер звонком",
+    );
   });
 
   it("allows PIN setup after OTP when the number has no PIN yet", async () => {
@@ -117,9 +132,30 @@ describe("messenger flash-call OTP", () => {
       mustChangePin: false,
       lockedUntil: null,
     });
+    isPhoneWhitelisted.mockResolvedValue(true);
     await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).rejects.toThrow(
       "Войдите с PIN",
     );
+    await redisDel(`${REDIS_OTP_VERIFIED_PREFIX}${verified.token}`);
+  });
+
+  it("allows re-registration OTP when a PIN is leftover after whitelist delete", async () => {
+    vi.mocked(getPinStatus).mockResolvedValue({
+      passwordSet: true,
+      mustChangePin: false,
+      lockedUntil: null,
+    });
+    isPhoneWhitelisted.mockResolvedValue(false);
+
+    const sent = await sendMessengerOtp(phone, "register");
+    expect(sent.channel).toBe("call");
+    expect(sendFlashCall).toHaveBeenCalled();
+
+    const verified = await verifyMessengerOtp(phone, "7482");
+    await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).resolves.toEqual({
+      via: "otp",
+      otpToken: verified.token,
+    });
     await redisDel(`${REDIS_OTP_VERIFIED_PREFIX}${verified.token}`);
   });
 });

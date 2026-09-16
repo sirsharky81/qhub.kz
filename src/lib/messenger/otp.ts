@@ -15,6 +15,7 @@ import { MessengerAuthError } from "./guard";
 import { notifyPinRecovery } from "./push-notify";
 import { getMessengerPushSubscriptions } from "./push-store";
 import { redisDel, redisGetJson, redisSet } from "./redis";
+import { isPhoneWhitelisted } from "./store";
 
 export type OtpPurpose = "register" | "pin_recovery";
 export type OtpChannel = "push" | "call";
@@ -115,7 +116,7 @@ export async function sendMessengerOtp(
 }> {
   const pinStatus = await getPinStatus(phone);
   if (purpose === "register") {
-    if (pinStatus.passwordSet) {
+    if (pinStatus.passwordSet && (await isPhoneWhitelisted(phone))) {
       throw new MessengerAuthError("Номер уже зарегистрирован", 409);
     }
   } else if (!pinStatus.passwordSet) {
@@ -249,8 +250,9 @@ export async function assertPinSetupAllowed(input: {
   sessionPhone?: string | null;
   otpToken?: string | null;
 }): Promise<{ via: "session" | "otp"; otpToken?: string }> {
-  const sessionOk = Boolean(input.sessionPhone && input.sessionPhone === input.phone);
-  if (sessionOk) {
+  const sessionMatches = Boolean(input.sessionPhone && input.sessionPhone === input.phone);
+  // A leftover cookie after admin delete is not enough to skip OTP or recreate whitelist.
+  if (sessionMatches && (await isPhoneWhitelisted(input.phone))) {
     return { via: "session" };
   }
 
@@ -260,7 +262,11 @@ export async function assertPinSetupAllowed(input: {
   }
 
   const pinStatus = await getPinStatus(input.phone);
-  if (pinStatus.passwordSet && verified.purpose !== "pin_recovery") {
+  if (
+    pinStatus.passwordSet &&
+    verified.purpose !== "pin_recovery" &&
+    (await isPhoneWhitelisted(input.phone))
+  ) {
     throw new MessengerAuthError("Войдите с PIN", 403);
   }
 

@@ -61,8 +61,8 @@ export async function POST(request: Request) {
       maskedPhone: maskPhone(phone),
       passwordSet: pinStatus.passwordSet,
       mustChangePin: pinStatus.mustChangePin,
-      otpRequired: !pinStatus.passwordSet,
-      selfRegistration: selfRegistration && !pinStatus.passwordSet,
+      otpRequired: !pinStatus.passwordSet || selfRegistration,
+      selfRegistration,
       lockedUntil: pinStatus.lockedUntil,
     });
   } catch (err) {

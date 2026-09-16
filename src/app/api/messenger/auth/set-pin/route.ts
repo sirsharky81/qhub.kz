@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       throw new MessengerAuthError("Введите имя", 400);
     }
 
-    if (setup.via === "otp" && selfRegistration) {
+    if (selfRegistration) {
       await ensureSelfRegisteredWhitelist(phone);
     }
     if (setup.via === "otp") {
