@@ -21,15 +21,15 @@ export function ChessPlayerBar({
 }) {
   return (
     <div
-      className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 ${
-        active
-          ? "border-slate-800 bg-slate-900 text-white dark:border-slate-600"
-          : "border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+      className={`flex items-center gap-2 rounded-xl border bg-white px-2.5 py-1.5 text-slate-900 ${
+        active ? "border-slate-800 shadow-sm" : "border-slate-200"
       }`}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span
-          className={`h-2.5 w-2.5 shrink-0 rounded-full ${color === "w" ? "bg-white" : "bg-zinc-950 ring-1 ring-white/50"}`}
+          className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+            color === "w" ? "bg-white ring-1 ring-slate-400" : "bg-zinc-950"
+          }`}
         />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold leading-tight">

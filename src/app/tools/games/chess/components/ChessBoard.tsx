@@ -1,20 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { matchPieces, type IdentifiedPiece } from "@/lib/games/chess/pieceIdentity";
 import { createChess } from "@/lib/games/chess/rules";
-import type { ChessColor, ChessLastMove, ChessPieceType } from "@/lib/games/chess/types";
+import type { ChessColor, ChessLastMove } from "@/lib/games/chess/types";
 import { ChessPiece } from "./ChessPiece";
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
 const LIGHT = "linear-gradient(165deg, #f7f0e4 0%, #efe4d0 48%, #e7d8c0 100%)";
 const DARK = "linear-gradient(165deg, #8a7663 0%, #6e5b4a 52%, #5f4e3f 100%)";
 
-type BoardPiece = {
-  id: string;
-  square: string;
-  type: ChessPieceType;
-  color: ChessColor;
-};
+type BoardPiece = IdentifiedPiece;
 
 function squareToXY(square: string, orientation: ChessColor): { x: number; y: number } {
   const file = square.charCodeAt(0) - 97;
@@ -41,38 +37,6 @@ function parsePieces(fen: string): Omit<BoardPiece, "id">[] {
   return out;
 }
 
-function fileOf(square: string): number {
-  return square.charCodeAt(0) - 97;
-}
-function rankOf(square: string): number {
-  return Number(square[1]) - 1;
-}
-function dist(a: string, b: string): number {
-  return Math.abs(fileOf(a) - fileOf(b)) + Math.abs(rankOf(a) - rankOf(b));
-}
-
-function matchPieces(prev: BoardPiece[], next: Omit<BoardPiece, "id">[]): BoardPiece[] {
-  const unused = [...prev];
-  let serial = prev.reduce((max, piece) => Math.max(max, Number(piece.id.split("-").at(-1) || 0)), 0);
-  return next.map((piece) => {
-    let bestIndex = -1;
-    let bestDist = 99;
-    unused.forEach((candidate, index) => {
-      if (candidate.type !== piece.type || candidate.color !== piece.color) return;
-      const d = dist(candidate.square, piece.square);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIndex = index;
-      }
-    });
-    if (bestIndex >= 0) {
-      const matched = unused.splice(bestIndex, 1)[0]!;
-      return { ...piece, id: matched.id };
-    }
-    serial += 1;
-    return { ...piece, id: `${piece.color}-${piece.type}-${serial}` };
-  });
-}
 
 function kingSquare(fen: string, color: ChessColor): string | null {
   return parsePieces(fen).find((piece) => piece.type === "k" && piece.color === color)?.square ?? null;
@@ -104,10 +68,10 @@ export function ChessBoard({
   const [selected, setSelected] = useState<string | null>(null);
   const piecesRef = useRef<BoardPiece[]>([]);
   const pieces = useMemo(() => {
-    const next = matchPieces(piecesRef.current, parsePieces(fen));
+    const next = matchPieces(piecesRef.current, parsePieces(fen), lastMove);
     piecesRef.current = next;
     return next;
-  }, [fen]);
+  }, [fen, lastMove]);
 
   useEffect(() => {
     selectedRef.current = null;

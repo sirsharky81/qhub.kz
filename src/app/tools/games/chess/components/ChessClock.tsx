@@ -11,10 +11,10 @@ export function ChessClock({ remainingMs, active }: { remainingMs: number; activ
         active
           ? low
             ? "bg-red-600 text-white"
-            : "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+            : "bg-slate-900 text-white"
           : low
-            ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300"
-            : "bg-black/10 text-zinc-800 dark:bg-white/10 dark:text-zinc-100"
+            ? "bg-red-100 text-red-700"
+            : "bg-slate-200/80 text-slate-800"
       }`}
     >
       {text}
