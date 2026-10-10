@@ -27,9 +27,12 @@ if awg show awg0 >/dev/null 2>&1; then
   echo "peers configured: ${peer_count}"
   echo "handshakes:"
   awg show awg0 | awk '/^peer:|latest handshake|transfer:/' | head -40
-  grep -E '^(ListenPort|Jc|Jmin|Jmax)' /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || true
+  grep -E '^(ListenPort|Jc|Jmin|Jmax|I1)' /etc/amnezia/amneziawg/awg0.conf 2>/dev/null | head -6 || true
+  recent="$(awg show awg0 | awk '/latest handshake:/ {print}' | wc -l)"
+  echo "peers with recent handshake line: ${recent}"
 else
   echo "awg0: NOT RUNNING"
+  systemctl is-active awg-quick@awg0 2>/dev/null || echo "awg-quick@awg0 inactive"
 fi
 
 echo "==> wg0 (WireGuard)"

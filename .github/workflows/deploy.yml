@@ -121,7 +121,10 @@ jobs:
             scripts/vpn/amnezia-client.sh scripts/vpn/apply-russia-hetzner-i1.sh \
             scripts/vpn/generate-quic-i1.mjs 2>/dev/null || true
           sudo bash scripts/deploy/repair-redis.sh || true
+          chmod +x scripts/deploy/ensure-awg0.sh scripts/vpn/maybe-rotate-quic-i1.sh 2>/dev/null || true
+          sudo bash scripts/deploy/ensure-awg0.sh || true
           if awg show awg0 >/dev/null 2>&1; then
+            sudo bash scripts/vpn/maybe-rotate-quic-i1.sh || true
             sudo bash scripts/vpn/apply-russia-hetzner-i1.sh || true
             sudo bash scripts/vpn/amnezia-client.sh regen-all || true
           fi

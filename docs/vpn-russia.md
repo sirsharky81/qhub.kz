@@ -73,9 +73,10 @@ Workflow **AmneziaWG setup (Russia)** → `workflow_dispatch`:
 
 ## Если не подключается
 
-1. Переустановите конфиг через `amnezia-client.sh regen <имя>` или `regen-all`.
+1. Удалите профиль в AmneziaVPN и **заново** скачайте QR/`vpn://` с портала (после деплоя конфиги обновляются на сервере).
 2. Попробуйте мобильный интернет вместо Wi‑Fi (или наоборот).
 3. Убедитесь, что в AmneziaVPN импортирован **AmneziaWG** конфиг, не WireGuard.
+4. На VPS: `sudo bash scripts/deploy/ensure-awg0.sh` и `sudo bash scripts/vpn/diagnose-amnezia.sh` — awg0 должен слушать UDP 443.
 
 ## «Подключено», но WhatsApp и сайты не работают
 

@@ -15,10 +15,16 @@ jobs:
       - name: Add VPS host key
         run: ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Mail folders check
+      - name: VPN + mail check
         run: |
           ssh -o BatchMode=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" <<'EOF'
           set +e
+          cd /var/www/qhub.kz
+          git fetch origin main 2>/dev/null
+          git checkout origin/main -- scripts/vpn/diagnose-amnezia.sh scripts/deploy/ensure-awg0.sh 2>/dev/null || true
+          chmod +x scripts/vpn/diagnose-amnezia.sh scripts/deploy/ensure-awg0.sh 2>/dev/null || true
+          sudo bash scripts/deploy/ensure-awg0.sh 2>/dev/null || true
+          sudo bash scripts/vpn/diagnose-amnezia.sh 2>/dev/null || true
           echo "==> dovecot: $(systemctl is-active dovecot 2>/dev/null)"
           echo "==> doveadm mailbox list boris@qhub.kz"
           doveadm mailbox list -u boris@qhub.kz 2>&1

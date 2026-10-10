@@ -13,8 +13,19 @@ if [ "$(id -u)" -ne 0 ]; then
   exec sudo -n "$0" "$@" 2>/dev/null || exec sudo "$0" "$@"
 fi
 
-if ! command -v awg >/dev/null 2>&1 || ! awg show awg0 >/dev/null 2>&1; then
-  echo "[hetzner-i1] awg0 not running — skip"
+if ! command -v awg >/dev/null 2>&1; then
+  echo "[hetzner-i1] awg not installed — skip"
+  exit 0
+fi
+
+if ! awg show awg0 >/dev/null 2>&1; then
+  if [ -x "${APP_DIR}/scripts/deploy/ensure-awg0.sh" ]; then
+    bash "${APP_DIR}/scripts/deploy/ensure-awg0.sh" || true
+  fi
+fi
+
+if ! awg show awg0 >/dev/null 2>&1; then
+  echo "[hetzner-i1] awg0 not running — skip I1 (run repair-amnezia-russia.sh)" >&2
   exit 0
 fi
 
@@ -44,8 +55,10 @@ if [ "${AWG_FORCE_HETZNER_I1:-0}" != "1" ]; then
 fi
 
 current_i1="$(grep -E '^I1\s*=' "$AWG_CONF" 2>/dev/null | head -1 || true)"
-if [ -n "$current_i1" ] && echo "$current_i1" | grep -qE '<b 0xc[0-9a-fA-F]'; then
-  echo "[hetzner-i1] awg0.conf already has QUIC-mimicry I1 — skip rewrite"
+if [ "${AWG_ROTATE_QUIC_I1:-0}" != "1" ] \
+  && [ -n "$current_i1" ] \
+  && echo "$current_i1" | grep -qE '<b 0xc[0-9a-fA-F]'; then
+  echo "[hetzner-i1] awg0.conf already has QUIC-mimicry I1 — skip rewrite (AWG_ROTATE_QUIC_I1=1 to refresh)"
 else
   echo "[hetzner-i1] generating I1 for SNI ${SNI}"
   i1_value="$(node "$GENERATOR" "$SNI" 3)"
