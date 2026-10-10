@@ -32,12 +32,25 @@ while IFS= read -r line; do
   esac
 done < <(awg show awg0 2>/dev/null || true)
 
-peer_count="$(awg show awg0 2>/dev/null | grep -c '^peer:' || echo 0)"
-handshake_lines="$(awg show awg0 2>/dev/null | grep -c 'latest handshake:' || echo 0)"
+read -r peer_count handshake_lines <<< "$(awg show awg0 2>/dev/null | python3 - <<'PY'
+import re, subprocess, sys
+try:
+    out = subprocess.check_output(["awg", "show", "awg0"], text=True, stderr=subprocess.DEVNULL)
+except (subprocess.CalledProcessError, FileNotFoundError):
+    print("0 0")
+    sys.exit(0)
+peers = len(re.findall(r"^peer:", out, re.M))
+hs = len(re.findall(r"latest handshake:", out))
+print(peers, hs)
+PY
+)"
+peer_count="${peer_count:-0}"
+handshake_lines="${handshake_lines:-0}"
+echo "[quic-rotate] peers=${peer_count} handshake_lines=${handshake_lines}"
 
 if [ "$peer_count" -gt 0 ] && [ "$handshake_lines" -eq 0 ]; then
   needs_rotate=1
-  echo "[quic-rotate] no peer handshakes on record (peers=${peer_count})"
+  echo "[quic-rotate] no peer handshakes on record — will refresh I1"
 fi
 
 if [ "${AWG_ROTATE_QUIC_I1:-0}" = "1" ]; then
