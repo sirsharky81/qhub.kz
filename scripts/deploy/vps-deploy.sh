@@ -49,7 +49,9 @@ fi
 
 echo "==> Ensure Redis"
 chmod +x scripts/deploy/ensure-redis.sh scripts/deploy/repair-redis.sh 2>/dev/null || true
-sudo bash scripts/deploy/repair-redis.sh || sudo bash scripts/deploy/ensure-redis.sh || echo "==> Warning: Redis not ready"
+sudo bash scripts/deploy/ensure-redis.sh \
+  || sudo bash scripts/deploy/repair-redis.sh \
+  || echo "==> Warning: Redis not ready"
 
 echo "==> Restarting PM2"
 pm2 restart qhub
@@ -60,6 +62,10 @@ else
 fi
 
 if command -v wg >/dev/null 2>&1 && [ -f scripts/vpn/wg-sync.mjs ] && [ -f .env.production ]; then
+  if command -v awg >/dev/null 2>&1; then
+    chmod +x scripts/deploy/ensure-awg0.sh 2>/dev/null || true
+    sudo bash scripts/deploy/ensure-awg0.sh || echo "==> Warning: AmneziaWG awg0 not up"
+  fi
   if command -v awg >/dev/null 2>&1 && awg show awg0 >/dev/null 2>&1; then
     echo "==> VPN ports (Amnezia 443 / WireGuard 51820 for Russia)"
     chmod +x scripts/vpn/migrate-russia-ports.sh 2>/dev/null || true
