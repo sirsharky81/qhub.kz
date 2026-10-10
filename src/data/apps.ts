@@ -253,6 +253,21 @@ export const apps: App[] = [
     sortOrder: 5,
   },
   {
+    id: "mitsubishi-diag",
+    title: "Mitsubishi OBD / ETACS",
+    description:
+      "vLinker BLE: подключение к автомобилю, коды OBD, live-параметры и сохранение variant/custom (.con / .cuf) для ETACS.",
+    longDescription:
+      "Пошаговое подключение адаптера vLinker по Bluetooth LE, инициализация ELM327, стандартные коды неисправностей и параметры OBD-II, выгрузка бинарного coding ETACS для дальнейшего редактирования — локально на устройстве, без сервера.",
+    href: "/tools/mitsubishi-diag",
+    tags: ["tools"],
+    icon: "/tools/mitsubishi-diag/icon-192.png",
+    color: "from-emerald-500/10 to-slate-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 3,
+  },
+  {
     id: "code-scanner",
     title: "Сканер кодов",
     description:

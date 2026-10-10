@@ -12,6 +12,16 @@ export interface Tool {
 
 export const tools: Tool[] = [
   {
+    id: "mitsubishi-diag",
+    name: "Mitsubishi OBD / ETACS",
+    description:
+      "vLinker BLE: подключение к авто, коды OBD, параметры и выгрузка coding (.con / .cuf) для ETACS.",
+    icon: "Gauge",
+    category: "utilities",
+    href: "/tools/mitsubishi-diag",
+    isNew: true,
+  },
+  {
     id: "random-picker",
     name: "Генератор случайных чисел",
     description:
