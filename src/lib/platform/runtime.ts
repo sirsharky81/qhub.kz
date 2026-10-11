@@ -13,8 +13,13 @@ function isCapacitorWebOrigin(): boolean {
   return hostname === "localhost" && protocol === "https:";
 }
 
+/** Capacitor bridge can attach shortly after first paint in remote WebView. */
+export function resetNativePlatformCache(): void {
+  nativePlatform = null;
+}
+
 export function isNativePlatform(): boolean {
-  if (nativePlatform !== null) return nativePlatform;
+  if (nativePlatform === true) return true;
 
   try {
     if (Capacitor.isNativePlatform()) {
@@ -23,13 +28,25 @@ export function isNativePlatform(): boolean {
       platformName = p === "ios" || p === "android" ? p : "web";
       return true;
     }
+    const p = Capacitor.getPlatform();
+    if (p === "ios" || p === "android") {
+      nativePlatform = true;
+      platformName = p;
+      return true;
+    }
   } catch {
     /* Capacitor not on window yet */
   }
 
-  nativePlatform = isCapacitorWebOrigin();
-  platformName = nativePlatform ? "android" : "web";
-  return nativePlatform;
+  if (isCapacitorWebOrigin()) {
+    nativePlatform = true;
+    platformName = "android";
+    return true;
+  }
+
+  if (nativePlatform === false) return false;
+  nativePlatform = false;
+  return false;
 }
 
 export function getNativePlatform(): "ios" | "android" | "web" {
