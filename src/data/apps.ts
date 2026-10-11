@@ -253,15 +253,15 @@ export const apps: App[] = [
     sortOrder: 5,
   },
   {
-    id: "mitsubishi-diag",
-    title: "Mitsubishi OBD / ETACS",
+    id: "obd-diag",
+    title: "OBD Scanner (BLE)",
     description:
-      "vLinker BLE: подключение к автомобилю, коды OBD, live-параметры и сохранение variant/custom (.kon / .cuf) для ETACS.",
+      "Универсальный OBD-II: коды и live-параметры через vLinker BLE. Отдельная вкладка — Mitsubishi ETACS (.kon / .cuf).",
     longDescription:
-      "Пошаговое подключение адаптера vLinker по Bluetooth LE, инициализация ELM327, стандартные коды неисправностей и параметры OBD-II, выгрузка бинарного coding ETACS для дальнейшего редактирования — локально на устройстве, без сервера.",
-    href: "/tools/mitsubishi-diag",
+      "Подключение vLinker по Bluetooth LE, стандарт SAE J1979 для любых OBD2-авто (Subaru, Mitsubishi, Toyota и др.): чтение и сброс DTC, live-PID включая топливные коррекции. Вкладка Mitsubishi ETACS — только выгрузка variant/custom для MMCodingWriter, локально на устройстве.",
+    href: "/tools/obd-diag",
     tags: ["tools"],
-    icon: "/tools/mitsubishi-diag/icon-192.png",
+    icon: "/tools/obd-diag/icon-192.png",
     color: "from-emerald-500/10 to-slate-600/5",
     author: "QHub",
     authorType: "qhub",
