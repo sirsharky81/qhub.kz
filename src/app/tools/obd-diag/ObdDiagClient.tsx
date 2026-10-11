@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ObdBleSession, type ObdConnectionPhase } from "@/lib/obd/obd-session";
-import { getObdTransportKind } from "@/lib/obd/create-ble-link";
+import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transport";
 import {
   downloadMitsubishiEtacsCoding,
   listMitsubishiEtacsProfiles,
@@ -34,7 +34,8 @@ export default function ObdDiagClient() {
   const [profileId, setProfileId] = useState(listMitsubishiEtacsProfiles()[0]?.id ?? "");
   const [poll, setPoll] = useState(false);
 
-  const transport = useMemo(() => getObdTransportKind(), []);
+  const { transport, ready: transportReady } = useObdTransportKind();
+  const transportOk = transportReady && transport !== "none";
   const profiles = listMitsubishiEtacsProfiles();
   const searchParams = useSearchParams();
 
@@ -156,21 +157,30 @@ export default function ObdDiagClient() {
       </header>
 
       <ConnectionPanel
-        transport={transport}
+        transport={transportReady ? transport : "…"}
         phase={phase}
         adapterLabel={adapterLabel}
         elmVersion={elmVersion}
         busy={busy}
-        transportOk={transport !== "none"}
+        transportReady={transportReady}
+        transportOk={transportOk}
         onConnectAdapter={connectAdapter}
         onConnectVehicle={connectVehicle}
         onDisconnect={disconnect}
       />
 
-      {transport === "none" ? (
+      {!transportReady ? (
+        <p className="mb-4 text-sm text-slate-500">Проверка Bluetooth…</p>
+      ) : null}
+
+      {transportReady && transport === "none" ? (
         <p className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
-          Bluetooth недоступен. iPhone — Safari + vLinker BLE; Android — приложение QHub.
+          {obdTransportHint("none")}
         </p>
+      ) : null}
+
+      {transportReady && transport !== "none" && obdTransportHint(transport) ? (
+        <p className="mb-4 text-xs text-slate-500">{obdTransportHint(transport)}</p>
       ) : null}
 
       {error ? (
@@ -245,6 +255,7 @@ function ConnectionPanel({
   adapterLabel,
   elmVersion,
   busy,
+  transportReady,
   transportOk,
   onConnectAdapter,
   onConnectVehicle,
@@ -255,6 +266,7 @@ function ConnectionPanel({
   adapterLabel: string | null;
   elmVersion: string | null;
   busy: boolean;
+  transportReady: boolean;
   transportOk: boolean;
   onConnectAdapter: () => void;
   onConnectVehicle: () => void;
@@ -278,13 +290,13 @@ function ConnectionPanel({
       ) : null}
       {elmVersion ? <div className="mt-2 text-xs text-slate-500">{elmVersion}</div> : null}
       <div className="mt-4 flex flex-col gap-2">
-        <ActionButton disabled={busy || !transportOk} onClick={onConnectAdapter}>
+        <ActionButton disabled={busy || !transportReady || !transportOk} onClick={onConnectAdapter}>
           1. Подключить vLinker (BLE)
         </ActionButton>
-        <ActionButton disabled={busy || phase === "idle"} onClick={onConnectVehicle}>
+        <ActionButton disabled={busy || !transportReady || phase === "idle"} onClick={onConnectVehicle}>
           2. Подключиться к автомобилю
         </ActionButton>
-        <ActionButton disabled={busy || phase === "idle"} variant="ghost" onClick={onDisconnect}>
+        <ActionButton disabled={busy || !transportReady || phase === "idle"} variant="ghost" onClick={onDisconnect}>
           Отключить
         </ActionButton>
       </div>
