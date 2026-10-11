@@ -12,13 +12,13 @@ export interface Tool {
 
 export const tools: Tool[] = [
   {
-    id: "mitsubishi-diag",
-    name: "Mitsubishi OBD / ETACS",
+    id: "obd-diag",
+    name: "OBD Scanner (BLE)",
     description:
-      "vLinker BLE: подключение к авто, коды OBD, параметры и выгрузка coding (.kon / .cuf) для ETACS.",
+      "vLinker BLE: универсальные коды и live-параметры OBD-II; вкладка Mitsubishi — выгрузка ETACS (.kon / .cuf).",
     icon: "Gauge",
     category: "utilities",
-    href: "/tools/mitsubishi-diag",
+    href: "/tools/obd-diag",
     isNew: true,
   },
   {
