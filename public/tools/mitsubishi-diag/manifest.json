@@ -1,7 +1,7 @@
 {
   "name": "QHub Mitsubishi Diag",
   "short_name": "Mitsu Diag",
-  "description": "vLinker BLE: OBD коды, параметры, выгрузка ETACS .con / .cuf",
+  "description": "vLinker BLE: OBD коды, параметры, выгрузка ETACS .kon / .cuf",
   "start_url": "/tools/mitsubishi-diag",
   "scope": "/tools/mitsubishi-diag",
   "display": "standalone",

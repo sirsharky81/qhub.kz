@@ -99,19 +99,19 @@ export default function MitsubishiDiagClient() {
     });
 
   const readEtacs = () =>
-    run("Скачивание variant/custom", async () => {
+    run("Скачивание .kon / .cuf", async () => {
       const dump = await sessionRef.current.downloadEtacsCoding(profileId);
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const names = etacsDownloadNames(`etacs_${stamp}`);
       await saveBlobToDevice(
         new Blob([Uint8Array.from(dump.variant)], { type: "application/octet-stream" }),
-        names.variant,
+        names.kon,
       );
       await saveBlobToDevice(
         new Blob([Uint8Array.from(dump.custom)], { type: "application/octet-stream" }),
-        names.custom,
+        names.cuf,
       );
-      pushLog(`Файлы: ${names.variant}, ${names.custom} (${dump.variant.length}+${dump.custom.length} байт)`);
+      pushLog(`Файлы: ${names.kon}, ${names.cuf} (${dump.variant.length}+${dump.custom.length} байт)`);
     });
 
   const disconnect = () =>
@@ -133,7 +133,7 @@ export default function MitsubishiDiagClient() {
         <p className="text-xs uppercase tracking-wide text-emerald-400/90">QHub · Mitsubishi</p>
         <h1 className="mt-1 text-2xl font-semibold">Диагностика vLinker BLE</h1>
         <p className="mt-2 text-sm text-slate-400">
-          Шаг 1 — адаптер, шаг 2 — OBD, затем коды, параметры и выгрузка .con / .cuf (как MMCodingWriter).
+          Шаг 1 — адаптер, шаг 2 — OBD, затем коды, параметры и выгрузка .kon / .cuf (как MMCodingWriter).
         </p>
       </header>
 
@@ -197,7 +197,7 @@ export default function MitsubishiDiagClient() {
         </select>
 
         <ActionButton disabled={busy || phase !== "vehicle"} onClick={readEtacs}>
-          Скачать variant (.con) и custom (.cuf)
+          Скачать variant (.kon) и custom (.cuf)
         </ActionButton>
         <ActionButton disabled={busy || phase === "idle"} variant="ghost" onClick={disconnect}>
           Отключить
@@ -244,7 +244,7 @@ export default function MitsubishiDiagClient() {
 
       <p className="mt-8 text-xs leading-relaxed text-slate-500">
         Зажигание ON, двигатель OFF. Перед записью в ETACS всегда сохраняйте бэкап. Формат .kon для дилерских
-        прошивок — отдельный шаг (редактор); здесь бинарные .con / .cuf как в MMCodingWriter. Если чтение ETACS
+        прошивок — отдельный шаг (редактор); здесь бинарные .kon / .cuf как в MMCodingWriter. Если чтение ETACS
         пустое — смените профиль CAN или сверьте лог с MMCodingWriter на ПК.
       </p>
     </div>

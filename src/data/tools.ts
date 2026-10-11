@@ -15,7 +15,7 @@ export const tools: Tool[] = [
     id: "mitsubishi-diag",
     name: "Mitsubishi OBD / ETACS",
     description:
-      "vLinker BLE: подключение к авто, коды OBD, параметры и выгрузка coding (.con / .cuf) для ETACS.",
+      "vLinker BLE: подключение к авто, коды OBD, параметры и выгрузка coding (.kon / .cuf) для ETACS.",
     icon: "Gauge",
     category: "utilities",
     href: "/tools/mitsubishi-diag",
