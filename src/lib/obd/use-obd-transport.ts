@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { isIOSDevice, isStandalonePWA } from "@/lib/platform/device";
+import { resetNativePlatformCache } from "@/lib/platform/runtime";
 import { getObdTransportKind, type ObdTransportKind } from "./create-ble-link";
 import { webBluetoothSupported } from "./web-ble-link";
 
@@ -14,8 +15,14 @@ export function useObdTransportKind(): { transport: ObdTransportKind; ready: boo
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setTransport(getObdTransportKind());
-    setReady(true);
+    const detect = () => {
+      resetNativePlatformCache();
+      setTransport(getObdTransportKind());
+      setReady(true);
+    };
+    detect();
+    const retry = window.setTimeout(detect, 600);
+    return () => window.clearTimeout(retry);
   }, []);
 
   return { transport, ready };

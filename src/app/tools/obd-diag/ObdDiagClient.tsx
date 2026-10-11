@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ObdBleSession, type ObdConnectionPhase } from "@/lib/obd/obd-session";
+import { formatObdEnvironmentLines, probeObdEnvironment } from "@/lib/obd/obd-environment";
 import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transport";
 import {
   downloadMitsubishiEtacsCoding,
@@ -33,9 +34,9 @@ export default function ObdDiagClient() {
   const [pids, setPids] = useState<{ label: string; value: string; unit: string }[]>([]);
   const [profileId, setProfileId] = useState(listMitsubishiEtacsProfiles()[0]?.id ?? "");
   const [poll, setPoll] = useState(false);
+  const [envLines, setEnvLines] = useState<string[] | null>(null);
 
   const { transport, ready: transportReady } = useObdTransportKind();
-  const transportOk = transportReady && transport !== "none";
   const profiles = listMitsubishiEtacsProfiles();
   const searchParams = useSearchParams();
 
@@ -95,6 +96,7 @@ export default function ObdDiagClient() {
 
   const connectAdapter = () =>
     run("Подключение адаптера", async () => {
+      setEnvLines(formatObdEnvironmentLines(probeObdEnvironment()));
       const { name, elm } = await sessionRef.current.connectAdapter();
       setAdapterLabel(name);
       setElmVersion(elm.versionLine);
@@ -166,7 +168,6 @@ export default function ObdDiagClient() {
         elmVersion={elmVersion}
         busy={busy}
         transportReady={transportReady}
-        transportOk={transportOk}
         onConnectAdapter={connectAdapter}
         onConnectVehicle={connectVehicle}
         onDisconnect={disconnect}
@@ -177,9 +178,19 @@ export default function ObdDiagClient() {
       ) : null}
 
       {transportReady && transport === "none" ? (
-        <p className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
-          {obdTransportHint("none")}
-        </p>
+        <div className="mb-4 space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+          <p>{obdTransportHint("none")}</p>
+          <button
+            type="button"
+            className="text-xs underline text-amber-200/90"
+            onClick={() => setEnvLines(formatObdEnvironmentLines(probeObdEnvironment()))}
+          >
+            Показать диагностику Bluetooth
+          </button>
+          {envLines ? (
+            <pre className="whitespace-pre-wrap text-xs text-amber-100/90">{envLines.join("\n")}</pre>
+          ) : null}
+        </div>
       ) : null}
 
       {transportReady && transport !== "none" && obdTransportHint(transport) ? (
@@ -259,7 +270,6 @@ function ConnectionPanel({
   elmVersion,
   busy,
   transportReady,
-  transportOk,
   onConnectAdapter,
   onConnectVehicle,
   onDisconnect,
@@ -270,7 +280,6 @@ function ConnectionPanel({
   elmVersion: string | null;
   busy: boolean;
   transportReady: boolean;
-  transportOk: boolean;
   onConnectAdapter: () => void;
   onConnectVehicle: () => void;
   onDisconnect: () => void;
@@ -293,7 +302,7 @@ function ConnectionPanel({
       ) : null}
       {elmVersion ? <div className="mt-2 text-xs text-slate-500">{elmVersion}</div> : null}
       <div className="mt-4 flex flex-col gap-2">
-        <ActionButton disabled={busy || !transportReady || !transportOk} onClick={onConnectAdapter}>
+        <ActionButton disabled={busy || !transportReady} onClick={onConnectAdapter}>
           1. Подключить vLinker (BLE)
         </ActionButton>
         <ActionButton disabled={busy || !transportReady || phase === "idle"} onClick={onConnectVehicle}>
