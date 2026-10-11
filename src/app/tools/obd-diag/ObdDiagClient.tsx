@@ -151,6 +151,9 @@ export default function ObdDiagClient() {
       <header className="mb-4">
         <p className="text-xs uppercase tracking-wide text-emerald-400/90">QHub</p>
         <h1 className="mt-1 text-2xl font-semibold">OBD Scanner (BLE)</h1>
+        <p className="mt-1 text-xs text-slate-600">
+          Актуальная страница · вкладки OBD-II и Mitsubishi ETACS
+        </p>
         <p className="mt-2 text-sm text-slate-400">
           Универсальные коды и параметры OBD-II. Раздел Mitsubishi — только выгрузка ETACS.
         </p>
