@@ -97,11 +97,11 @@ export async function readEtacsCoding(
   };
 }
 
-/** MMCodingWriter-style filenames (binary payload). */
-export function etacsDownloadNames(prefix: string): { variant: string; custom: string } {
+/** MMCodingWriter / MUT Coding filenames (binary payload from ECU). */
+export function etacsDownloadNames(prefix: string): { kon: string; cuf: string } {
   const safe = prefix.replace(/[^\w\-]+/g, "_").slice(0, 40);
   return {
-    variant: `${safe}_variant.con`,
-    custom: `${safe}_custom.cuf`,
+    kon: `${safe}_variant.kon`,
+    cuf: `${safe}_custom.cuf`,
   };
 }

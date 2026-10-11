@@ -256,7 +256,7 @@ export const apps: App[] = [
     id: "mitsubishi-diag",
     title: "Mitsubishi OBD / ETACS",
     description:
-      "vLinker BLE: подключение к автомобилю, коды OBD, live-параметры и сохранение variant/custom (.con / .cuf) для ETACS.",
+      "vLinker BLE: подключение к автомобилю, коды OBD, live-параметры и сохранение variant/custom (.kon / .cuf) для ETACS.",
     longDescription:
       "Пошаговое подключение адаптера vLinker по Bluetooth LE, инициализация ELM327, стандартные коды неисправностей и параметры OBD-II, выгрузка бинарного coding ETACS для дальнейшего редактирования — локально на устройстве, без сервера.",
     href: "/tools/mitsubishi-diag",
