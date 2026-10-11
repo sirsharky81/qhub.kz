@@ -12,6 +12,12 @@ export interface LivePidDefinition {
   decode: (bytes: number[]) => number | null;
 }
 
+/** SAE J1979 fuel trim: (A − 128) × 100 / 128 % */
+export function decodeFuelTrimPercent(bytes: number[]): number | null {
+  if (bytes.length < 1) return null;
+  return ((bytes[0]! - 128) * 100) / 128;
+}
+
 export const LIVE_PIDS: LivePidDefinition[] = [
   {
     pid: "010C",
@@ -54,6 +60,30 @@ export const LIVE_PIDS: LivePidDefinition[] = [
     label: "Нагрузка",
     unit: "%",
     decode: (b) => (b.length >= 1 ? (b[0] * 100) / 255 : null),
+  },
+  {
+    pid: "0106",
+    label: "Краткоср. коррекция (банк 1)",
+    unit: "%",
+    decode: decodeFuelTrimPercent,
+  },
+  {
+    pid: "0107",
+    label: "Долгоср. коррекция (банк 1)",
+    unit: "%",
+    decode: decodeFuelTrimPercent,
+  },
+  {
+    pid: "0108",
+    label: "Краткоср. коррекция (банк 2)",
+    unit: "%",
+    decode: decodeFuelTrimPercent,
+  },
+  {
+    pid: "0109",
+    label: "Долгоср. коррекция (банк 2)",
+    unit: "%",
+    decode: decodeFuelTrimPercent,
   },
 ];
 

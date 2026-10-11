@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDtcsFromElmResponse, parseMode01Pid } from "../obd2";
+import { decodeFuelTrimPercent, parseDtcsFromElmResponse, parseMode01Pid } from "../obd2";
 
 describe("parseDtcsFromElmResponse", () => {
   it("parses standard 43 response", () => {
@@ -7,6 +7,16 @@ describe("parseDtcsFromElmResponse", () => {
     const dtcs = parseDtcsFromElmResponse(raw);
     expect(dtcs.length).toBe(1);
     expect(dtcs[0]?.code).toMatch(/^P0133$/);
+  });
+});
+
+describe("decodeFuelTrimPercent", () => {
+  it("decodes zero trim at 128", () => {
+    expect(decodeFuelTrimPercent([128])).toBe(0);
+  });
+
+  it("decodes positive trim", () => {
+    expect(decodeFuelTrimPercent([136])).toBeCloseTo(6.25, 2);
   });
 });
 
