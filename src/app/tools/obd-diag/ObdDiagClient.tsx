@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { formatBleFailure } from "@/lib/obd/ble-error";
 import { ObdBleSession, type ObdConnectionPhase } from "@/lib/obd/obd-session";
 import { formatObdEnvironmentLines, probeObdEnvironment } from "@/lib/obd/obd-environment";
 import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transport";
@@ -63,7 +64,7 @@ export default function ObdDiagClient() {
           })),
         );
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled) setError(formatBleFailure(e));
       }
     };
     void tick();
@@ -83,7 +84,7 @@ export default function ObdDiagClient() {
         await fn();
         pushLog(`✓ ${label}`);
       } catch (e) {
-        const msg = (e as Error).message ?? String(e);
+        const msg = formatBleFailure(e);
         setError(msg);
         pushLog(`✗ ${label}: ${msg}`);
       } finally {
