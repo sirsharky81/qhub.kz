@@ -35,7 +35,7 @@ function delay(ms: number): Promise<void> {
  */
 export async function readElmUntilQuietPrompt(buffer: ElmRxBuffer, timeoutMs: number): Promise<string> {
   const started = Date.now();
-  const quietMs = 120;
+  const quietMs = 70;
   while (Date.now() - started < timeoutMs) {
     if (!buffer.hasPrompt()) {
       await delay(40);
