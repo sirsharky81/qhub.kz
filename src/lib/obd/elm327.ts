@@ -10,6 +10,8 @@ export class Elm327Client {
   private queue: Promise<void> = Promise.resolve();
   private txHeader: number | null = null;
   private rxHeader: number | null = null;
+  /** 7E0 talks to the engine only. 7DF wakes every ECU and waits for each. */
+  private obdTx = 0x7df;
 
   constructor(private readonly link: BleLink) {}
 
@@ -46,7 +48,7 @@ export class Elm327Client {
    * (Pajero / Outlander / Subaru gasoline).
    */
   async initForObd(): Promise<string[]> {
-    const steps = ["ATE0", "ATL0", "ATS1", "ATH0", "ATSP6"];
+    const steps = ["ATE0", "ATL0", "ATS1", "ATH0", "ATAT2", "ATSP6"];
     const logs: string[] = [];
     for (const cmd of steps) {
       logs.push(await this.sendCommand(cmd));
@@ -56,15 +58,30 @@ export class Elm327Client {
     return logs;
   }
 
-  /** 0100 on the current protocol, then auto-search if the ECU stays silent. */
+  /**
+   * Engine address 7E0 first, so a second module does not hold every reply.
+   * Then functional 7DF, then a full protocol search.
+   */
   async probeStandardObd(): Promise<string> {
-    await this.setCanHeader(0x7df);
-    const first = await this.sendPayload("0100", 8_000);
-    if (parseMode01Pid(first, 0x00)) return first;
-    await this.sendCommand("ATSP0");
-    this.txHeader = null;
-    await this.setCanHeader(0x7df);
-    return this.sendPayload("0100", 20_000);
+    const attempts: { tx: number; protocol: string | null; timeout: number }[] = [
+      { tx: 0x7e0, protocol: null, timeout: 5_000 },
+      { tx: 0x7df, protocol: null, timeout: 8_000 },
+      { tx: 0x7df, protocol: "ATSP0", timeout: 20_000 },
+    ];
+    let last = "";
+    for (const attempt of attempts) {
+      if (attempt.protocol) {
+        await this.sendCommand(attempt.protocol);
+        this.txHeader = null;
+      }
+      await this.setCanHeader(attempt.tx);
+      last = await this.sendPayload("0100 1", attempt.timeout);
+      if (parseMode01Pid(last, 0x00)) {
+        this.obdTx = attempt.tx;
+        return last;
+      }
+    }
+    return last;
   }
 
   async setCanHeader(txId: number, rxId?: number): Promise<void> {
@@ -95,7 +112,7 @@ export class Elm327Client {
     return this.sendCommand(compact, timeoutMs);
   }
 
-  async obdMode(command: string, timeoutMs = 10_000): Promise<string> {
+  async obdMode(command: string, timeoutMs = 10_000, broadcast = false): Promise<string> {
     if (this.rxHeader != null) {
       try {
         await this.sendCommand("ATAR");
@@ -104,7 +121,7 @@ export class Elm327Client {
       }
       this.rxHeader = null;
     }
-    await this.setCanHeader(0x7df);
+    await this.setCanHeader(broadcast ? 0x7df : this.obdTx);
     return this.sendPayload(command, timeoutMs);
   }
 }

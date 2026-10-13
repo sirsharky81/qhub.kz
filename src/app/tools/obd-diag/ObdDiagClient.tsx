@@ -62,10 +62,7 @@ export default function ObdDiagClient() {
             readings.map((r) => ({
               label: r.def.label,
               unit: r.def.unit,
-              value:
-                r.value == null && r.raw === "не поддерживается ECU"
-                  ? "н/д"
-                  : formatPidValue(r.value, r.def.unit === "об/мин" ? 0 : 1),
+              value: formatPidValue(r.value, r.def.digits),
             })),
           );
           const anyValue = readings.some((r) => r.value != null);
@@ -73,7 +70,7 @@ export default function ObdDiagClient() {
         } catch (e) {
           if (!cancelled) setError(formatBleFailure(e));
         }
-        await new Promise((resolve) => setTimeout(resolve, 400));
+        await new Promise((resolve) => setTimeout(resolve, 80));
       }
     };
     void tick();
@@ -235,6 +232,11 @@ export default function ObdDiagClient() {
           <ActionButton disabled={busy || phase !== "vehicle"} onClick={() => setPoll((p) => !p)}>
             {poll ? "Остановить live-параметры" : "Live-параметры"}
           </ActionButton>
+          {poll ? (
+            <p className="text-xs text-slate-500">
+              Обороты, скорость и дроссель обновляются каждый проход. Температуры, топливо и пробеги — реже.
+            </p>
+          ) : null}
           {dtcs.length > 0 ? <DtcList dtcs={dtcs} /> : null}
           {pidNote ? (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
