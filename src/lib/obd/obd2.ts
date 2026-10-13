@@ -133,3 +133,30 @@ export function formatPidValue(value: number | null, digits = 0): string {
   if (value == null || Number.isNaN(value)) return "—";
   return digits > 0 ? value.toFixed(digits) : String(Math.round(value));
 }
+
+/**
+ * SAE J1979 support bitmap from mode 01 PID 0x00 / 0x20 / 0x40.
+ * `base` is 0x00 for the 0100 response. Returns false when the ECU said the PID is absent.
+ */
+export function pidSupported(bitmap: number[] | undefined, pid: number, base = 0): boolean | null {
+  if (!bitmap || bitmap.length < 4) return null;
+  const index = pid - base;
+  if (index < 1 || index > 0x20) return null;
+  const byte = bitmap[(index - 1) >> 3];
+  if (byte == null) return false;
+  const bit = 7 - ((index - 1) & 7);
+  return ((byte >> bit) & 1) === 1;
+}
+
+export function explainEmptyPidReadings(raws: string[]): string | null {
+  const useful = raws.map((raw) => raw.trim()).filter((raw) => raw && raw !== "не поддерживается ECU");
+  if (useful.length === 0) return "Нет ответа от адаптера на запрос параметров.";
+  const compact = useful[0]!.replace(/\s+/g, " ").slice(0, 180);
+  if (/Таймаут ELM/i.test(compact)) {
+    return "Адаптер не успел ответить. Остановите live-параметры и снова нажмите «Подключиться к автомобилю».";
+  }
+  if (/NO DATA|UNABLE TO CONNECT|CAN ERROR|BUS INIT/i.test(compact)) {
+    return "ЭБУ не прислал параметры (NO DATA). Включите зажигание, адаптер оставьте в разъёме OBD.";
+  }
+  return `Параметры не разобраны. Ответ адаптера: ${compact}`;
+}

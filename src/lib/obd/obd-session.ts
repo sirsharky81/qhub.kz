@@ -6,6 +6,7 @@ import {
   LIVE_PIDS,
   parseDtcsFromElmResponse,
   parseMode01Pid,
+  pidSupported,
   type ObdDtc,
   type LivePidDefinition,
 } from "./obd2";
@@ -15,6 +16,7 @@ export type ObdConnectionPhase = "idle" | "adapter" | "vehicle";
 export interface VehicleLinkState {
   protocolLog: string[];
   elm: ElmIdentity;
+  probe: string;
 }
 
 export interface LivePidReading {
@@ -28,6 +30,7 @@ export class ObdBleSession {
   private link: BleLink | null = null;
   private elm: Elm327Client | null = null;
   private elmIdentity: ElmIdentity | null = null;
+  private pidBitmap: number[] | null = null;
   phase: ObdConnectionPhase = "idle";
 
   get transport(): ObdTransportKind {
@@ -71,14 +74,19 @@ export class ObdBleSession {
   async linkVehicle(): Promise<VehicleLinkState> {
     if (!this.elm) throw new Error("Сначала подключите адаптер");
     const protocolLog = await this.elm.initForObd();
-    const probe = await this.elm.obdMode("0100");
-    if (/UNABLE TO CONNECT|BUS INIT|CAN ERROR/i.test(probe)) {
+    const probe = await this.elm.probeStandardObd();
+    const supported = parseMode01Pid(probe, 0x00);
+    if (!supported) {
+      const compact = probe.replace(/\s+/g, " ").trim().slice(0, 180);
       throw new Error(
-        "Не удалось связаться с ECU по OBD. Зажигание ON, проверьте предохранители и разъём OBD-II.",
+        compact
+          ? `ЭБУ не ответил на 0100. Зажигание ON. Ответ адаптера: ${compact}`
+          : "ЭБУ не ответил на 0100. Зажигание ON, проверьте разъём OBD-II.",
       );
     }
+    this.pidBitmap = supported.slice(0, 4);
     this.phase = "vehicle";
-    return { protocolLog, elm: this.elmIdentity ?? { raw: probe, versionLine: null } };
+    return { protocolLog, probe, elm: this.elmIdentity ?? { raw: probe, versionLine: null } };
   }
 
   async readObdDtcs(): Promise<ObdDtc[]> {
@@ -96,14 +104,23 @@ export class ObdBleSession {
     this.requireVehicle();
     const readings: LivePidReading[] = [];
     for (const def of LIVE_PIDS) {
-      const raw = await this.elm!.obdMode(def.pid);
       const pidByte = parseInt(def.pid.slice(2, 4), 16);
-      const bytes = parseMode01Pid(raw, pidByte);
-      readings.push({
-        def,
-        value: bytes ? def.decode(bytes) : null,
-        raw,
-      });
+      if (pidByte <= 0x20 && pidSupported(this.pidBitmap ?? undefined, pidByte) === false) {
+        readings.push({ def, value: null, raw: "не поддерживается ECU" });
+        continue;
+      }
+      try {
+        const raw = await this.elm!.obdMode(def.pid, 4_000);
+        const bytes = parseMode01Pid(raw, pidByte);
+        readings.push({
+          def,
+          value: bytes ? def.decode(bytes) : null,
+          raw,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        readings.push({ def, value: null, raw: message });
+      }
     }
     return readings;
   }
@@ -117,6 +134,7 @@ export class ObdBleSession {
     this.link = null;
     this.elm = null;
     this.elmIdentity = null;
+    this.pidBitmap = null;
     this.phase = "idle";
   }
 

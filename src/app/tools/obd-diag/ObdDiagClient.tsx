@@ -11,7 +11,7 @@ import {
   listMitsubishiEtacsProfiles,
 } from "@/lib/obd/mitsubishi-etacs-download";
 import { etacsDownloadNames } from "@/lib/obd/mitsubishi-etacs";
-import { formatPidValue } from "@/lib/obd/obd2";
+import { explainEmptyPidReadings, formatPidValue } from "@/lib/obd/obd2";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
 
 type ToolTab = "obd" | "mitsubishi";
@@ -33,6 +33,7 @@ export default function ObdDiagClient() {
   const [log, setLog] = useState<string[]>([]);
   const [dtcs, setDtcs] = useState<{ code: string }[]>([]);
   const [pids, setPids] = useState<{ label: string; value: string; unit: string }[]>([]);
+  const [pidNote, setPidNote] = useState<string | null>(null);
   const [profileId, setProfileId] = useState(listMitsubishiEtacsProfiles()[0]?.id ?? "");
   const [poll, setPoll] = useState(false);
   const [envLines, setEnvLines] = useState<string[] | null>(null);
@@ -53,25 +54,31 @@ export default function ObdDiagClient() {
     if (!poll || phase !== "vehicle" || tab !== "obd") return;
     let cancelled = false;
     const tick = async () => {
-      try {
-        const readings = await sessionRef.current.readLivePids();
-        if (cancelled) return;
-        setPids(
-          readings.map((r) => ({
-            label: r.def.label,
-            unit: r.def.unit,
-            value: formatPidValue(r.value, r.def.unit === "об/мин" ? 0 : 1),
-          })),
-        );
-      } catch (e) {
-        if (!cancelled) setError(formatBleFailure(e));
+      while (!cancelled) {
+        try {
+          const readings = await sessionRef.current.readLivePids();
+          if (cancelled) return;
+          setPids(
+            readings.map((r) => ({
+              label: r.def.label,
+              unit: r.def.unit,
+              value:
+                r.value == null && r.raw === "не поддерживается ECU"
+                  ? "н/д"
+                  : formatPidValue(r.value, r.def.unit === "об/мин" ? 0 : 1),
+            })),
+          );
+          const anyValue = readings.some((r) => r.value != null);
+          setPidNote(anyValue ? null : explainEmptyPidReadings(readings.map((r) => r.raw)));
+        } catch (e) {
+          if (!cancelled) setError(formatBleFailure(e));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
       }
     };
     void tick();
-    const id = window.setInterval(() => void tick(), 2500);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
     };
   }, [poll, phase, tab]);
 
@@ -106,8 +113,10 @@ export default function ObdDiagClient() {
 
   const connectVehicle = () =>
     run("Связь с автомобилем (OBD-II)", async () => {
-      await sessionRef.current.linkVehicle();
+      const state = await sessionRef.current.linkVehicle();
       setPhase(sessionRef.current.phase);
+      const probe = state.probe.replace(/\s+/g, " ").trim().slice(0, 180);
+      pushLog(`0100: ${probe}`);
     });
 
   const readDtcs = () =>
@@ -145,6 +154,7 @@ export default function ObdDiagClient() {
       setElmVersion(null);
       setDtcs([]);
       setPids([]);
+      setPidNote(null);
       setPoll(false);
       setPhase("idle");
     });
@@ -226,6 +236,11 @@ export default function ObdDiagClient() {
             {poll ? "Остановить live-параметры" : "Live-параметры"}
           </ActionButton>
           {dtcs.length > 0 ? <DtcList dtcs={dtcs} /> : null}
+          {pidNote ? (
+            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+              {pidNote}
+            </p>
+          ) : null}
           {pids.length > 0 ? <PidGrid pids={pids} /> : null}
         </section>
       ) : (
