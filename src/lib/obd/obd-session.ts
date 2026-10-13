@@ -1,4 +1,5 @@
 import type { BleLink } from "./ble-link";
+import { formatBleFailure } from "./ble-error";
 import { requestBleLink, getObdTransportKind, type ObdTransportKind } from "./create-ble-link";
 import { Elm327Client, type ElmIdentity } from "./elm327";
 import {
@@ -44,15 +45,27 @@ export class ObdBleSession {
 
   async connectAdapter(): Promise<{ name: string; elm: ElmIdentity }> {
     await this.disconnect();
-    const link = await requestBleLink();
-    await link.connect();
-    const elm = new Elm327Client(link);
-    const identity = await elm.resetAndIdentify();
-    this.link = link;
-    this.elm = elm;
-    this.elmIdentity = identity;
-    this.phase = "adapter";
-    return { name: link.info.name, elm: identity };
+    let link: BleLink | null = null;
+    try {
+      link = await requestBleLink();
+      await link.connect();
+      const elm = new Elm327Client(link);
+      const identity = await elm.resetAndIdentify();
+      this.link = link;
+      this.elm = elm;
+      this.elmIdentity = identity;
+      this.phase = "adapter";
+      return { name: link.info.name, elm: identity };
+    } catch (error) {
+      if (link && this.link !== link) {
+        try {
+          await link.disconnect();
+        } catch {
+          /* drop a half-open Bluefy session so the next tap can connect */
+        }
+      }
+      throw new Error(formatBleFailure(error));
+    }
   }
 
   async linkVehicle(): Promise<VehicleLinkState> {

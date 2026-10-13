@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { isIOSDevice, isStandalonePWA } from "@/lib/platform/device";
 import { resetNativePlatformCache } from "@/lib/platform/runtime";
+import { isBluefyBrowser } from "./ble-error";
 import { getObdTransportKind, type ObdTransportKind } from "./create-ble-link";
 import { webBluetoothSupported } from "./web-ble-link";
 
@@ -30,7 +31,15 @@ export function useObdTransportKind(): { transport: ObdTransportKind; ready: boo
 
 export function obdTransportHint(kind: ObdTransportKind): string | null {
   if (kind === "capacitor-ble") return null;
-  if (kind === "web-bluetooth") return "Web Bluetooth. vLinker должен быть в режиме BLE.";
+  if (kind === "web-bluetooth") {
+    if (isBluefyBrowser()) {
+      return (
+        "Bluefy: кнопка «2. Подключиться к автомобилю» включается после кнопки 1 на этой странице. " +
+        "Выберите vLinker в списке. Если адаптер уже соединён в меню Bluefy — сначала отключите его там."
+      );
+    }
+    return "Web Bluetooth. vLinker должен быть в режиме BLE.";
+  }
   return explainObdTransportBlocked();
 }
 
