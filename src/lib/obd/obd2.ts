@@ -179,6 +179,139 @@ export function parseMode01Bundle(raw: string, specs: { pid: number; bytes: numb
   return result;
 }
 
+/** Mode 02: `42 PID frame data...`. The frame byte sits between the PID and the value. */
+export function parseMode02Pid(raw: string, pidByte: number): number[] | null {
+  const bytes = extractHexTokens(raw);
+  for (let i = 0; i + 3 < bytes.length; i++) {
+    if (bytes[i] === 0x42 && bytes[i + 1] === pidByte) return bytes.slice(i + 3);
+  }
+  return null;
+}
+
+export function freezeFrameDtc(bytes: number[] | null): string | null {
+  if (!bytes || bytes.length < 2 || (bytes[0] === 0 && bytes[1] === 0)) return null;
+  return dtcFromTwoBytes(bytes[0]!, bytes[1]!);
+}
+
+const CONTINUOUS_MONITORS = [
+  { name: "Пропуски воспламенения", supportBit: 0, incompleteBit: 4 },
+  { name: "Топливная система", supportBit: 1, incompleteBit: 5 },
+  { name: "Компоненты", supportBit: 2, incompleteBit: 6 },
+];
+
+const SPARK_MONITORS = [
+  "Катализатор",
+  "Подогрев катализатора",
+  "Пары топлива",
+  "Вторичный воздух",
+  null,
+  "Датчик кислорода",
+  "Нагреватель датчика кислорода",
+  "EGR / фазы ГРМ",
+];
+
+const COMPRESSION_MONITORS = [
+  "Катализатор NMHC",
+  "Нейтрализация NOx",
+  null,
+  "Наддув",
+  null,
+  "Датчик выхлопа",
+  "Сажевый фильтр",
+  "EGR / фазы ГРМ",
+];
+
+export interface ReadinessReport {
+  mil: boolean;
+  dtcCount: number;
+  ignition: "бензин" | "дизель";
+  lines: string[];
+}
+
+/** SAE J1979 PID 0101. Incomplete bits are 1 when the monitor has not finished. */
+export function parseReadiness(raw: string): ReadinessReport | null {
+  const data = parseMode01Pid(raw, 0x01);
+  if (!data || data.length < 4) return null;
+  const status = data[0]!;
+  const continuous = data[1]!;
+  const available = data[2]!;
+  const incomplete = data[3]!;
+  const compression = (continuous & 0x08) !== 0;
+  const lines: string[] = [];
+  for (const item of CONTINUOUS_MONITORS) {
+    if ((continuous & (1 << item.supportBit)) === 0) continue;
+    const ready = (continuous & (1 << item.incompleteBit)) === 0;
+    lines.push(`${item.name}: ${ready ? "готово" : "не готово"}`);
+  }
+  const named = compression ? COMPRESSION_MONITORS : SPARK_MONITORS;
+  for (let bit = 0; bit < named.length; bit++) {
+    const name = named[bit];
+    if (!name || (available & (1 << bit)) === 0) continue;
+    const ready = (incomplete & (1 << bit)) === 0;
+    lines.push(`${name}: ${ready ? "готово" : "не готово"}`);
+  }
+  return {
+    mil: (status & 0x80) !== 0,
+    dtcCount: status & 0x7f,
+    ignition: compression ? "дизель" : "бензин",
+    lines,
+  };
+}
+
+function mode09Chunks(raw: string, pid: number): number[][] {
+  const bytes = extractHexTokens(raw);
+  const chunks: number[][] = [];
+  for (let i = 0; i + 2 < bytes.length; i++) {
+    if (bytes[i] !== 0x49 || bytes[i + 1] !== pid) continue;
+    const chunk: number[] = [];
+    let cursor = i + 2;
+    while (cursor < bytes.length && !(bytes[cursor] === 0x49 && bytes[cursor + 1] === pid)) {
+      chunk.push(bytes[cursor]!);
+      cursor++;
+    }
+    if (chunk.length > 0) chunks.push(chunk);
+    i = cursor - 1;
+  }
+  return chunks;
+}
+
+function asciiFromBytes(bytes: number[]): string | null {
+  const text = bytes
+    .filter((byte) => byte >= 0x20 && byte <= 0x7e)
+    .map((byte) => String.fromCharCode(byte))
+    .join("")
+    .trim();
+  return text.length >= 4 ? text : null;
+}
+
+/** Mode 09 VIN (02) and calibration id (04). Drops the leading item-count byte on CAN. */
+export function parseMode09Ascii(raw: string, pid: number): string | null {
+  const chunks = mode09Chunks(raw, pid);
+  if (chunks.length === 0) return null;
+  if (chunks.length === 1) {
+    const only = chunks[0]!;
+    const body = only[0] != null && only[0] < 0x20 ? only.slice(1) : only;
+    return asciiFromBytes(body);
+  }
+  const ordered = [...chunks].sort((left, right) => (left[0] ?? 0) - (right[0] ?? 0));
+  return asciiFromBytes(ordered.flatMap((chunk) => chunk.slice(1)));
+}
+
+/** Mode 09 CVN (06): groups of four bytes, shown as hex. */
+export function parseMode09Cvn(raw: string): string | null {
+  const chunks = mode09Chunks(raw, 0x06);
+  if (chunks.length === 0) return null;
+  let data = chunks.length === 1 ? chunks[0]! : chunks.flatMap((chunk) => chunk.slice(1));
+  if (chunks.length === 1 && data[0] != null && data[0] <= 8 && data.length > 4) data = data.slice(1);
+  const groups: string[] = [];
+  for (let i = 0; i + 3 < data.length; i += 4) {
+    const group = data.slice(i, i + 4);
+    if (group.every((byte) => byte === 0)) continue;
+    groups.push(group.map((byte) => byte.toString(16).padStart(2, "0").toUpperCase()).join(""));
+  }
+  return groups.length > 0 ? groups.join(" ") : null;
+}
+
 export function formatPidValue(value: number | null, digits = 0): string {
   if (value == null || Number.isNaN(value)) return "—";
   return digits > 0 ? value.toFixed(digits) : String(Math.round(value));

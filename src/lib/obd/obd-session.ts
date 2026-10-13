@@ -13,10 +13,17 @@ import {
 import {
   LIVE_PIDS,
   formatMode01Request,
+  freezeFrameDtc,
+  formatPidValue,
   parseDtcsFromElmResponse,
   parseMode01Bundle,
   parseMode01Pid,
+  parseMode02Pid,
+  parseMode09Ascii,
+  parseMode09Cvn,
+  parseReadiness,
   pidSupported,
+  type ReadinessReport,
   type ObdDtc,
   type LivePidDefinition,
 } from "./obd2";
@@ -34,6 +41,19 @@ export interface LivePidReading {
   value: number | null;
   raw: string;
 }
+
+export interface FreezeFrameReport {
+  dtc: string | null;
+  readings: { label: string; value: string; unit: string }[];
+}
+
+export interface VehicleIdentity {
+  vin: string | null;
+  calid: string | null;
+  cvn: string | null;
+}
+
+const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
 
 /** Universal OBD-II over ELM327 BLE (any ISO15765/OBD2 vehicle). */
 export class ObdBleSession {
@@ -220,6 +240,60 @@ export class ObdBleSession {
     await this.leaveSpecialMode();
     this.requireVehicle();
     return this.elm!.obdMode("04", 10_000, true);
+  }
+
+  async readPendingDtcs(): Promise<ObdDtc[]> {
+    return this.readDtcMode("07");
+  }
+
+  async readPermanentDtcs(): Promise<ObdDtc[]> {
+    return this.readDtcMode("0A");
+  }
+
+  async readReadiness(): Promise<ReadinessReport | null> {
+    await this.leaveSpecialMode();
+    this.requireVehicle();
+    const raw = await this.elm!.obdMode(formatMode01Request([0x01], 1), 4_000);
+    return parseReadiness(raw);
+  }
+
+  async readFreezeFrame(): Promise<FreezeFrameReport> {
+    await this.leaveSpecialMode();
+    this.requireVehicle();
+    let dtcRaw = "";
+    try {
+      dtcRaw = await this.readMode02(0x02);
+    } catch {
+      dtcRaw = "";
+    }
+    const readings: FreezeFrameReport["readings"] = [];
+    for (const pid of FREEZE_PIDS) {
+      const def = LIVE_PIDS.find((item) => item.pid === pid);
+      if (!def) continue;
+      const pidByte = Number.parseInt(pid.slice(2, 4), 16);
+      try {
+        const raw = await this.readMode02(pidByte);
+        const bytes = parseMode02Pid(raw, pidByte);
+        const value = bytes && bytes.length >= def.bytes ? def.decode(bytes.slice(0, def.bytes)) : null;
+        readings.push({ label: def.label, value: formatPidValue(value, def.digits), unit: def.unit });
+      } catch {
+        readings.push({ label: def.label, value: "—", unit: def.unit });
+      }
+    }
+    return { dtc: freezeFrameDtc(parseMode02Pid(dtcRaw, 0x02)), readings };
+  }
+
+  async readVehicleIdentity(): Promise<VehicleIdentity> {
+    await this.leaveSpecialMode();
+    this.requireVehicle();
+    const vin = await this.readMode09("0902");
+    const calid = await this.readMode09("0904");
+    const cvn = await this.readMode09("0906");
+    return {
+      vin: parseMode09Ascii(vin, 0x02),
+      calid: parseMode09Ascii(calid, 0x04),
+      cvn: parseMode09Cvn(cvn),
+    };
   }
 
   async readLivePids(): Promise<LivePidReading[]> {
@@ -410,6 +484,26 @@ export class ObdBleSession {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.readingCache.set(def.pid, { def, value: null, raw: message });
+    }
+  }
+
+  private async readDtcMode(mode: "07" | "0A"): Promise<ObdDtc[]> {
+    await this.leaveSpecialMode();
+    this.requireVehicle();
+    const raw = await this.elm!.obdMode(mode, 10_000, true);
+    return parseDtcsFromElmResponse(raw);
+  }
+
+  private async readMode02(pid: number): Promise<string> {
+    const body = `02${pid.toString(16).padStart(2, "0").toUpperCase()}00`;
+    return this.elm!.obdMode(body, 4_000);
+  }
+
+  private async readMode09(command: string): Promise<string> {
+    try {
+      return await this.elm!.obdMode(command, 8_000);
+    } catch {
+      return "";
     }
   }
 
