@@ -3,6 +3,7 @@ import type { BleLink } from "../ble-link";
 import { framesToCsv, parseMonitorLine } from "../can-frame";
 import { Elm327Client } from "../elm327";
 import { ObdBleSession } from "../obd-session";
+import { EXTENDED_COMMANDS, decodeExtendedSignals } from "../extended-signals";
 import { assessUdsRequest, exportUdsLog, parseUdsResponse } from "../uds";
 
 class FakeLink implements BleLink {
@@ -84,6 +85,7 @@ describe("framesToCsv", () => {
 describe("assessUdsRequest", () => {
   it("allows read services and blocks writes until developer mode", () => {
     expect(assessUdsRequest("22 F190", false).ok).toBe(true);
+    expect(assessUdsRequest("21 01", false).ok).toBe(true);
     expect(assessUdsRequest("10 03", false).ok).toBe(true);
     expect(assessUdsRequest("10 02", false).ok).toBe(false);
     const blocked = assessUdsRequest("2E F190 00", false);
@@ -115,6 +117,17 @@ describe("exportUdsLog", () => {
       { t: "t", tx: "7E0", rx: "7E8", request: "22 F190", response: "62 F190" },
     ]);
     expect(csv.startsWith("t,tx,rx,request,response\n")).toBe(true);
+  });
+});
+
+describe("extended signal lists", () => {
+  it("decodes a Triton 21 01 frame and keeps write services blocked", () => {
+    const command = EXTENDED_COMMANDS.find((item) => item.hex === "21 01");
+    expect(command).toBeTruthy();
+    const decoded = decodeExtendedSignals(command!, [0x01, 0xaf, 0x00, 0x00, 0x68, 0x41]);
+    expect(decoded.map((row) => row.value)).toEqual(["12.4", "0", "13", "510"]);
+    expect(EXTENDED_COMMANDS.some((item) => item.hex.startsWith("22") && item.tx === "DA15")).toBe(false);
+    expect(assessUdsRequest("2E F190 00", false).ok).toBe(false);
   });
 });
 

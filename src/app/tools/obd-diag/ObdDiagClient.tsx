@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatBleFailure } from "@/lib/obd/ble-error";
-import { ObdBleSession, type ObdConnectionPhase } from "@/lib/obd/obd-session";
+import {
+  ObdBleSession,
+  type FreezeFrameReport,
+  type ObdConnectionPhase,
+  type VehicleIdentity,
+} from "@/lib/obd/obd-session";
+import type { ReadinessReport } from "@/lib/obd/obd2";
 import { formatObdEnvironmentLines, probeObdEnvironment } from "@/lib/obd/obd-environment";
 import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transport";
 import {
@@ -33,6 +39,10 @@ export default function ObdDiagClient() {
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [dtcs, setDtcs] = useState<{ code: string }[]>([]);
+  const [dtcKind, setDtcKind] = useState("Сохранённые");
+  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
+  const [freeze, setFreeze] = useState<FreezeFrameReport | null>(null);
+  const [identity, setIdentity] = useState<VehicleIdentity | null>(null);
   const [pids, setPids] = useState<{ label: string; value: string; unit: string }[]>([]);
   const [pidNote, setPidNote] = useState<string | null>(null);
   const [profileId, setProfileId] = useState(listMitsubishiEtacsProfiles()[0]?.id ?? "");
@@ -134,7 +144,37 @@ export default function ObdDiagClient() {
   const readDtcs = () =>
     run("Чтение кодов OBD", async () => {
       const list = await sessionRef.current.readObdDtcs();
+      setDtcKind("Сохранённые");
       setDtcs(list);
+    });
+
+  const readPending = () =>
+    run("Ожидающие коды", async () => {
+      const list = await sessionRef.current.readPendingDtcs();
+      setDtcKind("Ожидающие");
+      setDtcs(list);
+    });
+
+  const readPermanent = () =>
+    run("Постоянные коды", async () => {
+      const list = await sessionRef.current.readPermanentDtcs();
+      setDtcKind("Постоянные");
+      setDtcs(list);
+    });
+
+  const readReady = () =>
+    run("Готовность мониторов", async () => {
+      setReadiness(await sessionRef.current.readReadiness());
+    });
+
+  const readFreeze = () =>
+    run("Снимок ошибки", async () => {
+      setFreeze(await sessionRef.current.readFreezeFrame());
+    });
+
+  const readIdentity = () =>
+    run("VIN и калибровка", async () => {
+      setIdentity(await sessionRef.current.readVehicleIdentity());
     });
 
   const clearDtcs = () =>
@@ -165,6 +205,9 @@ export default function ObdDiagClient() {
       setAdapterLabel(null);
       setElmVersion(null);
       setDtcs([]);
+      setReadiness(null);
+      setFreeze(null);
+      setIdentity(null);
       setPids([]);
       setPidNote(null);
       setPoll(false);
@@ -251,8 +294,23 @@ export default function ObdDiagClient() {
           <ActionButton disabled={busy || phase !== "vehicle"} onClick={readDtcs}>
             Считать коды ошибок
           </ActionButton>
+          <ActionButton disabled={busy || phase !== "vehicle"} variant="ghost" onClick={readPending}>
+            Ожидающие коды
+          </ActionButton>
+          <ActionButton disabled={busy || phase !== "vehicle"} variant="ghost" onClick={readPermanent}>
+            Постоянные коды
+          </ActionButton>
           <ActionButton disabled={busy || phase !== "vehicle"} variant="ghost" onClick={clearDtcs}>
             Сбросить коды (mode 04)
+          </ActionButton>
+          <ActionButton disabled={busy || phase !== "vehicle"} variant="ghost" onClick={readFreeze}>
+            Снимок на момент ошибки
+          </ActionButton>
+          <ActionButton disabled={busy || phase !== "vehicle"} variant="ghost" onClick={readReady}>
+            Готовность мониторов
+          </ActionButton>
+          <ActionButton disabled={busy || phase !== "vehicle"} variant="ghost" onClick={readIdentity}>
+            VIN и калибровка
           </ActionButton>
           <ActionButton disabled={busy || phase !== "vehicle"} onClick={() => setPoll((p) => !p)}>
             {poll ? "Остановить live-параметры" : "Live-параметры"}
@@ -262,7 +320,10 @@ export default function ObdDiagClient() {
               Обороты, скорость и дроссель обновляются каждый проход. Температуры, топливо и пробеги — реже.
             </p>
           ) : null}
-          {dtcs.length > 0 ? <DtcList dtcs={dtcs} /> : null}
+          {dtcs.length > 0 ? <DtcList title={dtcKind} dtcs={dtcs} /> : null}
+          {readiness ? <ReadinessList report={readiness} /> : null}
+          {freeze ? <FreezeList report={freeze} /> : null}
+          {identity ? <IdentityList report={identity} /> : null}
           {pidNote ? (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
               {pidNote}
@@ -391,10 +452,10 @@ function TabButton({
   );
 }
 
-function DtcList({ dtcs }: { dtcs: { code: string }[] }) {
+function DtcList({ title, dtcs }: { title: string; dtcs: { code: string }[] }) {
   return (
     <div className="mt-4">
-      <h2 className="text-sm font-medium text-slate-300">Коды</h2>
+      <h2 className="text-sm font-medium text-slate-300">{title}</h2>
       <ul className="mt-2 space-y-1 text-sm">
         {dtcs.map((d) => (
           <li key={d.code} className="rounded-md bg-slate-900 px-3 py-2 font-mono">
@@ -403,6 +464,50 @@ function DtcList({ dtcs }: { dtcs: { code: string }[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+function ReadinessList({ report }: { report: ReadinessReport }) {
+  return (
+    <div className="mt-4 rounded-lg bg-slate-900 px-3 py-2 text-sm">
+      <div className="font-medium">
+        {report.mil ? "Лампа ошибки включена" : "Лампа ошибки выключена"}, кодов в счётчике: {report.dtcCount}
+      </div>
+      <p className="mt-1 text-xs text-slate-500">Зажигание: {report.ignition}</p>
+      <ul className="mt-2 space-y-1 text-xs text-slate-300">
+        {report.lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FreezeList({ report }: { report: FreezeFrameReport }) {
+  return (
+    <div className="mt-4">
+      <h2 className="text-sm font-medium text-slate-300">Снимок</h2>
+      <p className="mt-1 text-sm">{report.dtc ?? "Кода в снимке нет"}</p>
+      <PidGrid pids={report.readings.map((row) => ({ label: row.label, value: row.value, unit: row.unit }))} />
+    </div>
+  );
+}
+
+function IdentityList({ report }: { report: VehicleIdentity }) {
+  const rows = [
+    ["VIN", report.vin],
+    ["Калибровка", report.calid],
+    ["Контрольная сумма", report.cvn],
+  ];
+  return (
+    <ul className="mt-4 space-y-1 text-sm">
+      {rows.map(([label, value]) => (
+        <li key={label} className="rounded-md bg-slate-900 px-3 py-2">
+          <span className="text-xs text-slate-500">{label}</span>
+          <div className="break-all font-mono">{value ?? "—"}</div>
+        </li>
+      ))}
+    </ul>
   );
 }
 

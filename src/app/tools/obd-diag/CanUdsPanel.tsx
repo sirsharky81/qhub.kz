@@ -22,6 +22,7 @@ import {
   saveCustomDids,
 } from "@/lib/obd/uds";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
+import { EXTENDED_COMMANDS, decodeExtendedSignals, type DecodedSignal } from "@/lib/obd/extended-signals";
 
 const RECORD_LIMIT = 50_000;
 const TAPE_LIMIT = 40;
@@ -69,6 +70,7 @@ export default function CanUdsPanel({
   const [udsText, setUdsText] = useState<string | null>(null);
   const [udsLog, setUdsLog] = useState<UdsLogEntry[]>([]);
   const [scanRows, setScanRows] = useState<{ address: string; detail: string }[]>([]);
+  const [catalog, setCatalog] = useState<DecodedSignal[]>([]);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -299,6 +301,40 @@ export default function CanUdsPanel({
     setDidLabel("");
   };
 
+  const runCatalog = async (group: "subaru" | "pajero") => {
+    setBusy(true);
+    setLocalError(null);
+    setCatalog([]);
+    const rows: DecodedSignal[] = [];
+    setProtocol("6");
+    try {
+      for (const command of EXTENDED_COMMANDS.filter((item) => item.group === group)) {
+        try {
+          const result = await session.sendUds("6", command.tx, command.rx, command.hex, false);
+          if (result.parsed.kind === "positive") {
+            rows.push(...decodeExtendedSignals(command, result.parsed.payload));
+          } else {
+            rows.push({
+              name: command.label,
+              value: result.parsed.nrcText ?? "нет ответа",
+              unit: "",
+            });
+          }
+        } catch (error) {
+          rows.push({
+            name: command.label,
+            value: error instanceof Error ? error.message : "ошибка",
+            unit: "",
+          });
+        }
+        setCatalog([...rows]);
+      }
+      onLog(group === "subaru" ? "Subaru 22" : "Pajero 21");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const scan = async (kind: "10 01" | "3E 00") => {
     setBusy(true);
     setScanRows([]);
@@ -474,8 +510,41 @@ export default function CanUdsPanel({
       ) : (
         <>
           <p className="text-xs text-slate-500">
-            Чтение разрешено сразу. Запись, сброс и программирование — только в режиме разработчика, до обновления страницы.
+            Чтение разрешено сразу, включая сервис 21. Запись, сброс и программирование — только в режиме разработчика, до обновления страницы.
           </p>
+          <p className="text-xs text-slate-500">
+            Короткие списки: Subaru — бензиновый двигатель, сервис 22. Pajero Sport — сервис 21 01–04, кузов до 2023. Outlander 2022 с 29-битным адресом сюда не входит.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy || monitoring}
+              onClick={() => void runCatalog("subaru")}
+              className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
+            >
+              Subaru 22
+            </button>
+            <button
+              type="button"
+              disabled={busy || monitoring}
+              onClick={() => void runCatalog("pajero")}
+              className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
+            >
+              Pajero 21
+            </button>
+          </div>
+          {catalog.length > 0 ? (
+            <ul className="space-y-1 text-sm">
+              {catalog.map((row) => (
+                <li key={`${row.name}-${row.unit}`} className="flex justify-between gap-2 rounded-md bg-slate-900 px-3 py-2">
+                  <span>{row.name}</span>
+                  <span className="font-mono text-slate-300">
+                    {row.value} {row.unit}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
