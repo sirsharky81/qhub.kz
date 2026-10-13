@@ -5,7 +5,7 @@ import {
 } from "./vlinker-uuids";
 import type { BleAdapterInfo, BleLink } from "./ble-link";
 import { lineToElmBytes } from "./ble-link";
-import { decodeDataView, ElmRxBuffer } from "./elm-buffer";
+import { decodeDataView, ElmRxBuffer, readElmUntilQuietPrompt } from "./elm-buffer";
 import {
   formatBleFailure,
   isBleUserCancel,
@@ -151,23 +151,12 @@ export class WebBleLink implements BleLink {
     throw new Error(formatBleFailure(last));
   }
 
-  async readUntilPrompt(timeoutMs = 8000): Promise<string> {
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-      if (this.rx.hasPrompt()) {
-        const snap = this.rx.snapshot();
-        this.rx.clear();
-        return snap;
-      }
-      await new Promise((r) => setTimeout(r, 40));
-    }
-    const partial = this.rx.snapshot();
+  discardInput(): void {
     this.rx.clear();
-    throw new Error(
-      partial.trim()
-        ? `Таймаут ELM (частичный ответ): ${partial.slice(-120)}`
-        : "Таймаут ELM — нет ответа от адаптера",
-    );
+  }
+
+  async readUntilPrompt(timeoutMs = 8000): Promise<string> {
+    return readElmUntilQuietPrompt(this.rx, timeoutMs);
   }
 
   private async openSerial(): Promise<void> {

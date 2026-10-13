@@ -9,6 +9,8 @@ export interface BleLink {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   writeLine(line: string): Promise<void>;
+  /** Drop bytes left over from the previous command before the next write. */
+  discardInput(): void;
   /** Read ELM response until prompt `>` or timeout. */
   readUntilPrompt(timeoutMs?: number): Promise<string>;
 }
