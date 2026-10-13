@@ -14,6 +14,13 @@ export class ElmRxBuffer {
     return this.text;
   }
 
+  /** Take everything received so far. Used while ATMA streams frames without `>`. */
+  takePending(): string {
+    const snap = this.text;
+    this.text = "";
+    return snap;
+  }
+
   hasPrompt(): boolean {
     return />\s*$/.test(this.text);
   }

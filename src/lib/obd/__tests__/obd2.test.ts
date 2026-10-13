@@ -5,8 +5,13 @@ import {
   explainEmptyPidReadings,
   formatMode01Request,
   parseDtcsFromElmResponse,
+  freezeFrameDtc,
   parseMode01Bundle,
   parseMode01Pid,
+  parseMode02Pid,
+  parseMode09Ascii,
+  parseMode09Cvn,
+  parseReadiness,
   pidSupported,
 } from "../obd2";
 
@@ -26,6 +31,30 @@ describe("decodeFuelTrimPercent", () => {
 
   it("decodes positive trim", () => {
     expect(decodeFuelTrimPercent([136])).toBeCloseTo(6.25, 2);
+  });
+});
+
+describe("extra OBD modes", () => {
+  it("reads a freeze-frame PID and its DTC", () => {
+    expect(parseMode02Pid("42 0C 00 1A F8", 0x0c)).toEqual([0x1a, 0xf8]);
+    expect(freezeFrameDtc(parseMode02Pid("42 02 00 01 33", 0x02))).toBe("P0133");
+    expect(freezeFrameDtc([0, 0])).toBeNull();
+  });
+
+  it("reads readiness for a gasoline ECU", () => {
+    const report = parseReadiness("41 01 83 07 FF 00");
+    expect(report?.mil).toBe(true);
+    expect(report?.dtcCount).toBe(3);
+    expect(report?.ignition).toBe("бензин");
+    expect(report?.lines).toContain("Катализатор: готово");
+    expect(report?.lines).toContain("Пропуски воспламенения: готово");
+  });
+
+  it("reads VIN and calibration checksum from mode 09", () => {
+    const vinBytes = [0x49, 0x02, 0x01, ...Array.from("JMBXTGF3WCJ000001", (char) => char.charCodeAt(0))];
+    const vin = vinBytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    expect(parseMode09Ascii(vin, 0x02)).toBe("JMBXTGF3WCJ000001");
+    expect(parseMode09Cvn("49 06 01 12 34 56 78")).toBe("12345678");
   });
 });
 

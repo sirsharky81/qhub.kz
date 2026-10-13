@@ -50,6 +50,8 @@ type BluetoothDevice = {
   id: string;
   name?: string;
   gatt?: BluetoothGATTServer;
+  addEventListener?(type: string, listener: () => void): void;
+  removeEventListener?(type: string, listener: () => void): void;
 };
 
 type BluetoothNavigator = {
@@ -77,6 +79,12 @@ function shortBluetoothUuid(uuid: string): string | null {
 export class WebBleLink implements BleLink {
   readonly info: BleAdapterInfo;
   private device: BluetoothDevice | null = null;
+  private userClosed = false;
+  private disconnectListener: (() => void) | null = null;
+  private readonly onGattLost = () => {
+    if (this.userClosed) return;
+    this.disconnectListener?.();
+  };
   private notifyChar: BluetoothRemoteGATTCharacteristic | null = null;
   private writeChar: BluetoothRemoteGATTCharacteristic | null = null;
   private useWriteWithoutResponse = false;
@@ -102,7 +110,16 @@ export class WebBleLink implements BleLink {
     return new WebBleLink(info, device);
   }
 
+  setDisconnectListener(listener: (() => void) | null): void {
+    this.disconnectListener = listener;
+  }
+
+  pullPending(): string {
+    return this.rx.takePending();
+  }
+
   async connect(): Promise<void> {
+    this.userClosed = false;
     try {
       await this.openSerial();
     } catch (error) {
@@ -111,6 +128,8 @@ export class WebBleLink implements BleLink {
   }
 
   async disconnect(): Promise<void> {
+    this.userClosed = true;
+    this.device?.removeEventListener?.("gattserverdisconnected", this.onGattLost);
     if (this.notifyChar && this.onNotify) {
       this.notifyChar.removeEventListener("characteristicvaluechanged", this.onNotify);
       try {
@@ -173,6 +192,8 @@ export class WebBleLink implements BleLink {
     };
     this.notifyChar.addEventListener("characteristicvaluechanged", this.onNotify);
     await this.notifyChar.startNotifications();
+    this.device?.removeEventListener?.("gattserverdisconnected", this.onGattLost);
+    this.device?.addEventListener?.("gattserverdisconnected", this.onGattLost);
   }
 
   private async openServer(): Promise<BluetoothGATTServer> {

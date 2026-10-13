@@ -12,12 +12,30 @@ export class Elm327Client {
   private rxHeader: number | null = null;
   /** 7E0 talks to the engine only. 7DF wakes every ECU and waits for each. */
   private obdTx = 0x7df;
+  /** Protocol used by the live OBD profile, restored when leaving CAN/UDS. */
+  private obdProtocol = "6";
 
   constructor(private readonly link: BleLink) {}
 
+  private monitoring = false;
+  private monitorTimer: ReturnType<typeof setInterval> | null = null;
+  private monitorTail = "";
+  private monitorOnLine: ((line: string) => void) | null = null;
+  private stopPromise: Promise<void> | null = null;
+
+  get isMonitoring(): boolean {
+    return this.monitoring;
+  }
+
   /** Serialize commands — ELM327 handles one conversation at a time. */
-  private run<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(fn, fn);
+  private run<T>(fn: () => Promise<T>, allowDuringMonitor = false): Promise<T> {
+    const task = async () => {
+      if (this.monitoring && !allowDuringMonitor) {
+        throw new Error("Остановите CAN-монитор, затем повторите команду");
+      }
+      return fn();
+    };
+    const next = this.queue.then(task, task);
     this.queue = next.then(
       () => undefined,
       () => undefined,
@@ -53,6 +71,7 @@ export class Elm327Client {
     for (const cmd of steps) {
       logs.push(await this.sendCommand(cmd));
     }
+    this.obdProtocol = "6";
     this.txHeader = null;
     this.rxHeader = null;
     return logs;
@@ -72,6 +91,7 @@ export class Elm327Client {
     for (const attempt of attempts) {
       if (attempt.protocol) {
         await this.sendCommand(attempt.protocol);
+        this.obdProtocol = "0";
         this.txHeader = null;
       }
       await this.setCanHeader(attempt.tx);
@@ -123,5 +143,155 @@ export class Elm327Client {
     }
     await this.setCanHeader(broadcast ? 0x7df : this.obdTx);
     return this.sendPayload(command, timeoutMs);
+  }
+
+  /** Live gauges: spaces on, headers off, previous OBD header. Does not reset the adapter. */
+  async useLiveProfile(): Promise<void> {
+    await this.runProfile(["ATE0", "ATL0", "ATS1", "ATH0", "ATAT2", `ATSP${this.obdProtocol}`]);
+    try {
+      await this.sendCommand("ATAR");
+    } catch {
+      /* some clones have no receive filter */
+    }
+    this.rxHeader = null;
+    await this.sendCommand("ATCF000");
+    await this.sendCommand("ATCM000");
+    await this.setCanHeader(this.obdTx);
+  }
+
+  /** Raw CAN monitor. Headers on, spaces off, no ISO-TP formatting. */
+  async useMonitorProfile(protocol: "6" | "7"): Promise<void> {
+    await this.runProfile(["ATE0", "ATL0", "ATH1", "ATS0", `ATSP${protocol}`, "ATCAF0", "ATD1"]);
+  }
+
+  /** UDS console. ELM assembles ISO-TP and sends Flow Control. */
+  async useUdsProfile(protocol: "6" | "7"): Promise<void> {
+    await this.runProfile(["ATE0", "ATL0", "ATH1", "ATS0", `ATSP${protocol}`, "ATCAF1", "ATSTFF"]);
+  }
+
+  async readSupplyVoltage(): Promise<number | null> {
+    const raw = await this.sendCommand("ATRV", 3_000);
+    const match = raw.match(/(\d+(?:[.,]\d+)?)\s*V/i);
+    if (!match?.[1]) return null;
+    const value = Number(match[1].replace(",", "."));
+    return Number.isFinite(value) ? value : null;
+  }
+
+  async clearRxFilter(): Promise<void> {
+    if (this.rxHeader == null) return;
+    try {
+      await this.sendCommand("ATAR");
+    } catch {
+      /* some clones have no receive filter */
+    }
+    this.rxHeader = null;
+  }
+
+  async setMonitorFilter(id: string, mask: string): Promise<void> {
+    await this.sendCommand(`ATCF${id}`);
+    await this.sendCommand(`ATCM${mask}`);
+  }
+
+  async clearMonitorFilter(protocol: "6" | "7"): Promise<void> {
+    const zeros = protocol === "6" ? "000" : "00000000";
+    await this.setMonitorFilter(zeros, zeros);
+  }
+
+  async startMonitor(onLine: (line: string) => void): Promise<void> {
+    if (this.monitoring) return;
+    await this.run(async () => {
+      this.link.discardInput();
+      await this.link.writeLine("ATMA");
+      this.monitoring = true;
+      this.monitorTail = "";
+      this.monitorOnLine = onLine;
+    });
+    this.armMonitorPump();
+  }
+
+  abortMonitor(): void {
+    this.disarmMonitorPump();
+    this.monitoring = false;
+    this.monitorTail = "";
+    this.monitorOnLine = null;
+  }
+
+  async stopMonitor(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    if (!this.monitoring && !this.monitorTimer) return;
+    this.stopPromise = this.finishMonitor().finally(() => {
+      this.stopPromise = null;
+    });
+    return this.stopPromise;
+  }
+
+  private async runProfile(commands: string[]): Promise<void> {
+    for (const command of commands) {
+      await this.sendCommand(command);
+    }
+    this.txHeader = null;
+    this.rxHeader = null;
+  }
+
+  private armMonitorPump(): void {
+    this.disarmMonitorPump();
+    this.monitorTimer = setInterval(() => {
+      if (!this.monitoring) return;
+      const chunk = this.link.pullPending();
+      if (!chunk) return;
+      this.monitorTail += chunk;
+      if (chunk.includes(">")) {
+        const tail = this.monitorTail;
+        this.disarmMonitorPump();
+        this.monitoring = false;
+        this.monitorTail = "";
+        this.emitMonitorText(tail);
+        this.monitorOnLine = null;
+        return;
+      }
+      const parts = this.monitorTail.split(/\r|\n/);
+      this.monitorTail = parts.pop() ?? "";
+      for (const part of parts) this.emitMonitorLine(part);
+    }, 40);
+  }
+
+  private disarmMonitorPump(): void {
+    if (this.monitorTimer) {
+      clearInterval(this.monitorTimer);
+      this.monitorTimer = null;
+    }
+  }
+
+  private async finishMonitor(): Promise<void> {
+    this.disarmMonitorPump();
+    const onLine = this.monitorOnLine;
+    const pending = this.monitorTail + (this.monitoring ? this.link.pullPending() : "");
+    this.monitorTail = "";
+    if (!this.monitoring) {
+      this.emitMonitorText(pending, onLine);
+      this.monitorOnLine = null;
+      return;
+    }
+    let rest = "";
+    try {
+      await this.run(async () => {
+        await this.link.writeLine("");
+        rest = await this.link.readUntilPrompt(5_000);
+      }, true);
+    } finally {
+      this.monitoring = false;
+      this.monitorOnLine = null;
+    }
+    this.emitMonitorText(pending + rest, onLine);
+  }
+
+  private emitMonitorText(text: string, onLine: ((line: string) => void) | null = this.monitorOnLine): void {
+    for (const part of text.split(/\r|\n/)) this.emitMonitorLine(part, onLine);
+  }
+
+  private emitMonitorLine(part: string, onLine: ((line: string) => void) | null = this.monitorOnLine): void {
+    const line = part.replace(/>/g, "").trim();
+    if (!line || /^STOPPED$/i.test(line)) return;
+    onLine?.(line);
   }
 }
