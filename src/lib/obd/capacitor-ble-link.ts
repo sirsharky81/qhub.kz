@@ -13,6 +13,8 @@ export class CapacitorBleLink implements BleLink {
   readonly info: BleAdapterInfo;
   private rx = new ElmRxBuffer();
   private notifyStarted = false;
+  private userClosed = false;
+  private disconnectListener: (() => void) | null = null;
 
   private constructor(info: BleAdapterInfo) {
     this.info = info;
@@ -42,9 +44,20 @@ export class CapacitorBleLink implements BleLink {
     return new CapacitorBleLink(info);
   }
 
+  setDisconnectListener(listener: (() => void) | null): void {
+    this.disconnectListener = listener;
+  }
+
+  pullPending(): string {
+    return this.rx.takePending();
+  }
+
   async connect(): Promise<void> {
+    this.userClosed = false;
     await BleClient.connect(this.info.id, () => {
       this.notifyStarted = false;
+      if (this.userClosed) return;
+      this.disconnectListener?.();
     });
 
     if (!this.notifyStarted) {
@@ -61,6 +74,7 @@ export class CapacitorBleLink implements BleLink {
   }
 
   async disconnect(): Promise<void> {
+    this.userClosed = true;
     try {
       if (this.notifyStarted) {
         await BleClient.stopNotifications(this.info.id, VLINKER_SERVICE, VLINKER_NOTIFY);

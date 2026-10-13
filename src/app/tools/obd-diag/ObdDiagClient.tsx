@@ -13,8 +13,9 @@ import {
 import { etacsDownloadNames } from "@/lib/obd/mitsubishi-etacs";
 import { explainEmptyPidReadings, formatPidValue } from "@/lib/obd/obd2";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
+import CanUdsPanel from "./CanUdsPanel";
 
-type ToolTab = "obd" | "mitsubishi";
+type ToolTab = "obd" | "mitsubishi" | "can";
 
 const phaseLabels: Record<ObdConnectionPhase, string> = {
   idle: "Не подключено",
@@ -36,6 +37,7 @@ export default function ObdDiagClient() {
   const [pidNote, setPidNote] = useState<string | null>(null);
   const [profileId, setProfileId] = useState(listMitsubishiEtacsProfiles()[0]?.id ?? "");
   const [poll, setPoll] = useState(false);
+  const [linkLostTick, setLinkLostTick] = useState(0);
   const [envLines, setEnvLines] = useState<string[] | null>(null);
 
   const { transport, ready: transportReady } = useObdTransportKind();
@@ -45,6 +47,19 @@ export default function ObdDiagClient() {
   useEffect(() => {
     if (searchParams.get("tab") === "mitsubishi") setTab("mitsubishi");
   }, [searchParams]);
+
+  useEffect(() => {
+    const session = sessionRef.current;
+    session.setLinkLostHandler(() => {
+      setPoll(false);
+      setPhase("idle");
+      setAdapterLabel(null);
+      setElmVersion(null);
+      setError("Связь с адаптером прервалась. Нажмите «1. Подключить vLinker» снова.");
+      setLinkLostTick((tick) => tick + 1);
+    });
+    return () => session.setLinkLostHandler(null);
+  }, []);
 
   const pushLog = useCallback((line: string) => {
     setLog((prev) => [...prev.slice(-80), line]);
@@ -162,7 +177,7 @@ export default function ObdDiagClient() {
         <p className="text-xs uppercase tracking-wide text-emerald-400/90">QHub</p>
         <h1 className="mt-1 text-2xl font-semibold">OBD Scanner (BLE)</h1>
         <p className="mt-1 text-xs text-slate-600">
-          Актуальная страница · вкладки OBD-II и Mitsubishi ETACS
+          Актуальная страница · вкладки OBD-II, CAN / UDS и Mitsubishi ETACS
         </p>
         <p className="mt-2 text-sm text-slate-400">
           Универсальные коды и параметры OBD-II. Раздел Mitsubishi — только выгрузка ETACS.
@@ -216,6 +231,16 @@ export default function ObdDiagClient() {
         <TabButton active={tab === "mitsubishi"} onClick={() => setTab("mitsubishi")}>
           Mitsubishi ETACS
         </TabButton>
+        <TabButton
+          active={tab === "can"}
+          disabled={phase === "idle"}
+          onClick={() => {
+            setPoll(false);
+            setTab("can");
+          }}
+        >
+          CAN / UDS
+        </TabButton>
       </div>
 
       {tab === "obd" ? (
@@ -245,7 +270,7 @@ export default function ObdDiagClient() {
           ) : null}
           {pids.length > 0 ? <PidGrid pids={pids} /> : null}
         </section>
-      ) : (
+      ) : tab === "mitsubishi" ? (
         <section className="flex flex-col gap-2">
           <p className="text-xs text-slate-500">
             Только Mitsubishi (MMCodingWriter). Не используйте на Subaru и других марках. Зажигание ON.
@@ -267,6 +292,13 @@ export default function ObdDiagClient() {
             Скачать .kon (variant) и .cuf (custom)
           </ActionButton>
         </section>
+      ) : (
+        <CanUdsPanel
+          session={sessionRef.current}
+          enabled={phase !== "idle"}
+          linkLostTick={linkLostTick}
+          onLog={pushLog}
+        />
       )}
 
       {log.length > 0 ? (
@@ -337,19 +369,22 @@ function ConnectionPanel({
 function TabButton({
   active,
   onClick,
+  disabled,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onClick}
-      className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
+      className={`flex-1 rounded-lg px-1 py-2 text-xs font-medium transition sm:text-sm ${
         active ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
-      }`}
+      } disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {children}
     </button>
