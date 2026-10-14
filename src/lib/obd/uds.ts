@@ -19,6 +19,11 @@ export const UDS_TEMPLATES: UdsTemplate[] = [
 
 export const MODULE_SCAN_ADDRESSES = [0x7e0, 0x7e1, 0x7e2, 0x7e3, 0x7e4, 0x7e5, 0x7e6, 0x7e7, 0x7df] as const;
 
+/** Identification DIDs. 128 ids, one ECU, service 22 only. */
+export const DID_SCAN_FROM = 0xf180;
+export const DID_SCAN_TO = 0xf1ff;
+export const DID_SCAN_SILENCE = 40;
+
 const READ_SERVICES = new Set([
   0x10, 0x3e, 0x19, 0x21, 0x22, 0x23, 0x09, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0a,
 ]);
@@ -95,8 +100,49 @@ export function nrcText(nrc: number): string {
   return NRC_TEXT[nrc] ?? `NRC ${nrc.toString(16).padStart(2, "0").toUpperCase()}`;
 }
 
+/**
+ * ELM327 ISO-TP text, as printed with headers off:
+ * `014` then `0:62F190...` / `1:...`. Line numbers are not payload.
+ * A spaced one-line reply (`62 F1 90 ...`) is accepted too.
+ */
+export function elmDiagnosticBytes(raw: string): number[] | null {
+  const frames: string[] = [];
+  const single: string[] = [];
+  let declaredLen: number | null = null;
+  for (const line of raw.split(/\r|\n/)) {
+    const compact = line.replace(/>/g, "").replace(/\s+/g, "").toUpperCase();
+    if (!compact) continue;
+    const indexed = compact.match(/^[0-9A-F]:([0-9A-F]+)$/);
+    if (indexed?.[1]) {
+      frames.push(indexed[1]);
+      continue;
+    }
+    if (/^[0-9A-F]{3}$/.test(compact)) {
+      declaredLen = Number.parseInt(compact, 16);
+      continue;
+    }
+    if (/^[0-9A-F]+$/.test(compact) && compact.length % 2 === 0) single.push(compact);
+  }
+  const hex = frames.length > 0 ? frames.join("") : single[0];
+  if (!hex) return null;
+  let bytes = hex.match(/../g)!.map((pair) => Number.parseInt(pair, 16));
+  if (declaredLen != null && declaredLen > 0 && declaredLen < bytes.length) bytes = bytes.slice(0, declaredLen);
+  return bytes;
+}
+
+function bytesForUds(raw: string, requestSid: number): number[] {
+  const positive = (requestSid + 0x40) & 0xff;
+  const useful = (bytes: number[] | null) =>
+    Boolean(bytes?.some((byte, index) => byte === positive || (byte === 0x7f && bytes[index + 1] === requestSid)));
+  const fromElm = elmDiagnosticBytes(raw);
+  if (useful(fromElm)) return fromElm!;
+  const tokens = extractHexTokens(raw);
+  if (useful(tokens)) return tokens;
+  return fromElm ?? tokens;
+}
+
 export function parseUdsResponse(raw: string, requestSid: number): UdsParsed {
-  const bytes = extractHexTokens(raw);
+  const bytes = bytesForUds(raw, requestSid);
   const positiveSid = (requestSid + 0x40) & 0xff;
   let pending = false;
   let negative: number | null = null;

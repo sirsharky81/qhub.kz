@@ -276,7 +276,6 @@ export default function ObdDiagClient() {
         </TabButton>
         <TabButton
           active={tab === "can"}
-          disabled={phase === "idle"}
           onClick={() => {
             setPoll(false);
             setTab("can");
