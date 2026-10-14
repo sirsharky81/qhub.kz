@@ -317,7 +317,7 @@ export default function ObdDiagClient() {
           </ActionButton>
           {poll ? (
             <p className="text-xs text-slate-500">
-              Обороты, скорость и дроссель обновляются каждый проход. Температуры, топливо и пробеги — реже.
+              Обороты, скорость и дроссель обновляются каждый проход. Остальные стандартные датчики OBD — реже, и только если их заявляет ЭБУ.
             </p>
           ) : null}
           {dtcs.length > 0 ? <DtcList title={dtcKind} dtcs={dtcs} /> : null}
