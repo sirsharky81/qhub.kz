@@ -159,17 +159,26 @@ export function formatMode01Request(pids: number[], responses = 1): string {
 }
 
 /**
- * Walk a mode 01 bundle (`41 0C .. 0D ..`). Stops at the next ECU's `41`
- * or at a PID that was not requested, so data lengths stay aligned.
+ * Walk a mode 01 bundle. ELM often prints each PID as its own `41 XX` line.
+ * A repeated `41` continues the same reply when the next PID was requested and
+ * is still missing. The same PID a second time is another ECU, so the walk stops.
  */
 export function parseMode01Bundle(raw: string, specs: { pid: number; bytes: number }[]): Map<number, number[]> {
   const all = extractHexTokens(raw);
   const result = new Map<number, number[]>();
-  const start = all.findIndex((byte, index) => byte === 0x41 && index + 1 < all.length);
-  if (start < 0) return result;
   const wanted = new Map(specs.map((spec) => [spec.pid, spec.bytes]));
-  let index = start + 1;
+  let index = all.findIndex((byte, at) => byte === 0x41 && wanted.has(all[at + 1] ?? -1));
+  if (index < 0) return result;
+  index += 1;
   while (index < all.length) {
+    if (all[index] === 0x41) {
+      const next = all[index + 1];
+      if (next != null && wanted.has(next) && !result.has(next)) {
+        index += 1;
+        continue;
+      }
+      break;
+    }
     const pid = all[index]!;
     const length = wanted.get(pid);
     if (length == null || index + 1 + length > all.length) break;

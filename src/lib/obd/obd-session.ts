@@ -456,15 +456,21 @@ export class ObdBleSession {
       );
       const parsed = parseMode01Bundle(raw, specs);
       if (parsed.size === 0) return false;
+      const missing: LivePidDefinition[] = [];
       for (const def of defs) {
         const pid = Number.parseInt(def.pid.slice(2, 4), 16);
         const bytes = parsed.get(pid);
+        if (!bytes) {
+          missing.push(def);
+          continue;
+        }
         this.readingCache.set(def.pid, {
           def,
-          value: bytes ? def.decode(bytes) : null,
+          value: def.decode(bytes),
           raw,
         });
       }
+      for (const def of missing) await this.readSingle(def);
       return true;
     } catch {
       return false;
