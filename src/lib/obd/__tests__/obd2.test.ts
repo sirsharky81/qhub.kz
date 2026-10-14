@@ -105,6 +105,20 @@ describe("parseMode01Bundle", () => {
     expect(parsed.get(0x0d)).toEqual([0x00]);
     expect(parsed.get(0x04)).toEqual([0x5a]);
   });
+
+  it("keeps each 41 line from the same ECU and stops when a PID repeats", () => {
+    const specs = [
+      { pid: 0x0c, bytes: 2 },
+      { pid: 0x0d, bytes: 1 },
+      { pid: 0x04, bytes: 1 },
+      { pid: 0x11, bytes: 1 },
+    ];
+    const parsed = parseMode01Bundle("41 0C 1A F8\r41 0D 00\r41 04 5A\r41 11 20\r41 0C 00 00\r>", specs);
+    expect(parsed.get(0x0c)).toEqual([0x1a, 0xf8]);
+    expect(parsed.get(0x0d)).toEqual([0x00]);
+    expect(parsed.get(0x04)).toEqual([0x5a]);
+    expect(parsed.get(0x11)).toEqual([0x20]);
+  });
 });
 
 describe("formatMode01Request", () => {
