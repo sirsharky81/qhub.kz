@@ -164,9 +164,9 @@ export class Elm327Client {
     await this.runProfile(["ATE0", "ATL0", "ATH1", "ATS0", `ATSP${protocol}`, "ATCAF0", "ATD1"]);
   }
 
-  /** UDS console. ELM assembles ISO-TP and sends Flow Control. */
+  /** UDS console. Headers off so a long reply is `0:` / `1:` data, not a CAN id mixed into the bytes. */
   async useUdsProfile(protocol: "6" | "7"): Promise<void> {
-    await this.runProfile(["ATE0", "ATL0", "ATH1", "ATS0", `ATSP${protocol}`, "ATCAF1", "ATSTFF"]);
+    await this.runProfile(["ATE0", "ATL0", "ATH0", "ATS0", `ATSP${protocol}`, "ATCAF1", "ATSTFF"]);
   }
 
   async readSupplyVoltage(): Promise<number | null> {

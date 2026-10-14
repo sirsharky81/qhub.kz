@@ -7,6 +7,10 @@ import { Elm327Client, type ElmIdentity } from "./elm327";
 import {
   MODULE_SCAN_ADDRESSES,
   assessUdsRequest,
+  DID_SCAN_FROM,
+  DID_SCAN_SILENCE,
+  DID_SCAN_TO,
+  formatUdsPayload,
   parseUdsResponse,
   type UdsParsed,
 } from "./uds";
@@ -155,6 +159,7 @@ export class ObdBleSession {
     protocol: CanProtocol,
     request: "10 01" | "3E 00",
     onProgress: (address: string, detail: string) => void,
+    options?: { addresses?: number[]; shouldStop?: () => boolean },
   ): Promise<void> {
     const gate = assessUdsRequest(request, false);
     if (!gate.ok) throw new Error(gate.message);
@@ -162,25 +167,100 @@ export class ObdBleSession {
     await this.waitLeave();
     if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед сканером");
     await this.ensureUdsProfile(protocol);
-    for (const address of MODULE_SCAN_ADDRESSES) {
-      const label = address.toString(16).toUpperCase();
-      onProgress(label, "запрос");
-      await this.elm!.setCanHeader(address);
-      let detail = "нет ответа";
+    const addresses = options?.addresses ?? [...MODULE_SCAN_ADDRESSES];
+    if (addresses.length > 16) {
       try {
-        const raw = await this.udsExchange(address, undefined, request);
-        const parsed = parseUdsResponse(raw, gate.sid);
-        detail =
-          parsed.kind === "positive"
-            ? "ответил"
-            : parsed.kind === "negative"
-              ? `NRC ${parsed.nrcText ?? ""}`.trim()
-              : raw.replace(/\s+/g, " ").trim().slice(0, 80) || "пустой ответ";
-      } catch (error) {
-        detail = error instanceof Error ? error.message : "ошибка";
+        await this.elm!.sendCommand("ATST20");
+      } catch {
+        /* clone keeps the previous timeout */
       }
-      onProgress(label, detail);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    try {
+      for (const address of addresses) {
+        if (options?.shouldStop?.()) return;
+        const label = address.toString(16).toUpperCase();
+        onProgress(label, "запрос");
+        await this.elm!.setCanHeader(address);
+        let detail = "нет ответа";
+        try {
+          const raw = await this.udsExchange(address, address === 0x7df ? undefined : address + 8, request, 1_200);
+          const parsed = parseUdsResponse(raw, gate.sid);
+          detail =
+            parsed.kind === "positive"
+              ? "ответил"
+              : parsed.kind === "negative"
+                ? `NRC ${parsed.nrcText ?? ""}`.trim()
+                : "нет ответа";
+        } catch (error) {
+          detail = error instanceof Error ? error.message : "ошибка";
+        }
+        onProgress(label, detail);
+      }
+    } finally {
+      if (addresses.length > 16) {
+        try {
+          await this.elm!.sendCommand("ATSTFF");
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  /** Service 22 over F180–F1FF on the selected ECU. Stops after a long run of NO DATA. */
+  async scanIdentificationDids(
+    protocol: CanProtocol,
+    tx: string,
+    rx: string,
+    onProgress: (done: number, total: number, hit: { did: string; text: string } | null) => void,
+    shouldStop: () => boolean,
+  ): Promise<void> {
+    const txId = normalizeCanToken(tx, protocol);
+    const rxId = normalizeCanToken(rx, protocol);
+    if (!txId || !rxId) throw new Error("Нужны адреса запроса и ответа");
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед сканером");
+    await this.ensureUdsProfile(protocol);
+    try {
+      await this.elm!.sendCommand("ATST20");
+    } catch {
+      /* clone keeps the previous timeout */
+    }
+    const total = DID_SCAN_TO - DID_SCAN_FROM + 1;
+    let done = 0;
+    let silence = 0;
+    try {
+      for (let did = DID_SCAN_FROM; did <= DID_SCAN_TO; did++) {
+        if (shouldStop()) return;
+        const request = `22${did.toString(16).padStart(4, "0").toUpperCase()}`;
+        let hit: { did: string; text: string } | null = null;
+        try {
+          const raw = await this.udsExchange(Number.parseInt(txId, 16), Number.parseInt(rxId, 16), request, 1_200);
+          const parsed = parseUdsResponse(raw, 0x22);
+          if (parsed.kind === "positive") {
+            silence = 0;
+            hit = { did: request.slice(2), text: formatUdsPayload(parsed.payload) };
+          } else if (parsed.kind === "negative") {
+            silence = 0;
+          } else if (++silence >= DID_SCAN_SILENCE) {
+            throw new Error(`Блок молчит (${silence} подряд без ответа). Проверьте адреса и зажигание.`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (/молчит/i.test(message)) throw error;
+          if (++silence >= DID_SCAN_SILENCE) {
+            throw new Error(`Блок молчит (${silence} подряд без ответа). Проверьте адреса и зажигание.`);
+          }
+        }
+        onProgress(++done, total, hit);
+      }
+    } finally {
+      try {
+        await this.elm!.sendCommand("ATSTFF");
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -384,11 +464,11 @@ export class ObdBleSession {
     this.lineMode = "obd";
   }
 
-  private async udsExchange(tx: number, rx: number | undefined, request: string): Promise<string> {
+  private async udsExchange(tx: number, rx: number | undefined, request: string, timeoutMs = 5_000): Promise<string> {
     const send = async () => {
       if (rx == null) await this.elm!.clearRxFilter();
       await this.elm!.setCanHeader(tx, rx);
-      return this.elm!.sendPayload(request, 5_000);
+      return this.elm!.sendPayload(request, timeoutMs);
     };
     try {
       return await send();

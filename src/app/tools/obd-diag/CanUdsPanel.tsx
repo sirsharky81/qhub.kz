@@ -49,7 +49,7 @@ export default function CanUdsPanel({
   onLog: (line: string) => void;
 }) {
   const [protocol, setProtocol] = useState<CanProtocol>("6");
-  const [view, setView] = useState<"monitor" | "uds">("monitor");
+  const [view, setView] = useState<"monitor" | "uds">("uds");
   const [monitoring, setMonitoring] = useState(false);
   const [rows, setRows] = useState<FrameRow[]>([]);
   const [tape, setTape] = useState<string[]>([]);
@@ -71,9 +71,13 @@ export default function CanUdsPanel({
   const [udsLog, setUdsLog] = useState<UdsLogEntry[]>([]);
   const [scanRows, setScanRows] = useState<{ address: string; detail: string }[]>([]);
   const [catalog, setCatalog] = useState<DecodedSignal[]>([]);
+  const [didHits, setDidHits] = useState<{ did: string; text: string }[]>([]);
+  const [didProgress, setDidProgress] = useState("");
+  const [scanNote, setScanNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  const stopScanRef = useRef(false);
   const recordsRef = useRef<CsvRow[]>([]);
   const recordingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
@@ -335,20 +339,52 @@ export default function CanUdsPanel({
     }
   };
 
-  const scan = async (kind: "10 01" | "3E 00") => {
+  const scan = async (kind: "10 01" | "3E 00", wide = false) => {
     setBusy(true);
+    stopScanRef.current = false;
     setScanRows([]);
+    setScanNote("");
     setLocalError(null);
+    const addresses = wide
+      ? Array.from({ length: 0x7e8 - 0x700 }, (_, index) => 0x700 + index)
+      : undefined;
     try {
       await session.scanModules(protocol, kind, (address, detail) => {
+        setScanNote(`${address}: ${detail}`);
         setScanRows((prev) => {
           const without = prev.filter((row) => row.address !== address);
+          if (wide && detail !== "ответил" && !detail.startsWith("NRC")) return without;
           return [...without, { address, detail }];
         });
-      });
-      onLog(`Сканер блоков ${kind}`);
+      }, { addresses, shouldStop: () => stopScanRef.current });
+      onLog(wide ? `Поиск блоков 700–7E7 ${kind}` : `Сканер блоков ${kind}`);
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Сканер остановлен");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const scanDids = async () => {
+    setBusy(true);
+    stopScanRef.current = false;
+    setDidHits([]);
+    setDidProgress("0");
+    setLocalError(null);
+    try {
+      await session.scanIdentificationDids(
+        protocol,
+        tx,
+        rx,
+        (done, total, hit) => {
+          setDidProgress(`${done} / ${total}`);
+          if (hit) setDidHits((prev) => [...prev, hit]);
+        },
+        () => stopScanRef.current,
+      );
+      onLog("Сканер DID F180–F1FF");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Сканер DID остановлен");
     } finally {
       setBusy(false);
     }
@@ -374,6 +410,9 @@ export default function CanUdsPanel({
 
   return (
     <section className="flex flex-col gap-3">
+      <p className="text-xs text-slate-500">
+        Монитор пуст, пока не нажато «Слушать шину». На диагностической шине кадры часто появляются только после запроса к блоку. Ответы блоков — в UDS.
+      </p>
       <div className="flex gap-2">
         <ProtocolButton active={protocol === "6"} disabled={monitoring || busy} onClick={() => setProtocol("6")}>
           CAN 11 бит / 500k
@@ -621,6 +660,37 @@ export default function CanUdsPanel({
             <button
               type="button"
               disabled={busy || monitoring}
+              onClick={() => void scanDids()}
+              className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
+            >
+              Сканер DID F180–F1FF
+            </button>
+            <button
+              type="button"
+              disabled={!busy}
+              onClick={() => {
+                stopScanRef.current = true;
+              }}
+              className="rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
+            >
+              Стоп
+            </button>
+          </div>
+          {didProgress ? <p className="text-xs text-slate-500">DID: {didProgress}. Найдено: {didHits.length}</p> : null}
+          {didHits.length > 0 ? (
+            <ul className="space-y-1 text-xs">
+              {didHits.map((row) => (
+                <li key={row.did} className="rounded-md bg-slate-900 px-3 py-2">
+                  <span className="font-mono text-slate-400">{row.did}</span>
+                  <div className="break-all font-mono">{row.text}</div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy || monitoring}
               onClick={() => void scan("3E 00")}
               className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
             >
@@ -635,6 +705,15 @@ export default function CanUdsPanel({
               Сканер 10 01
             </button>
           </div>
+          <button
+            type="button"
+            disabled={busy || monitoring}
+            onClick={() => void scan("3E 00", true)}
+            className="rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
+          >
+            Поиск блоков 700–7E7
+          </button>
+          {scanNote ? <p className="text-xs text-slate-500">{scanNote}</p> : null}
           {scanRows.length > 0 ? (
             <ul className="space-y-1 text-xs">
               {scanRows.map((row) => (

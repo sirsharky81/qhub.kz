@@ -109,6 +109,14 @@ describe("parseUdsResponse", () => {
     expect(pending.pendingOnly).toBe(true);
     expect(pending.nrcText).toMatch(/приглашение/);
   });
+
+  it("reassembles an ELM multiline VIN without eating the line numbers", () => {
+    const raw = "014\r0: 62 F1 90 34 53 34\r1: 42 54 47 55 44 31 52\r2: 33 32 37 30 32 32 33\r>";
+    const vin = parseUdsResponse(raw, 0x22);
+    expect(vin.kind).toBe("positive");
+    expect(vin.payload.slice(0, 3)).toEqual([0xf1, 0x90, 0x34]);
+    expect(String.fromCharCode(...vin.payload.slice(2))).toBe("4S4BTGUD1R3270223");
+  });
 });
 
 describe("exportUdsLog", () => {
