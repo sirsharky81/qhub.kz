@@ -56,6 +56,16 @@ describe("extra OBD modes", () => {
     expect(parseMode09Ascii(vin, 0x02)).toBe("JMBXTGF3WCJ000001");
     expect(parseMode09Cvn("49 06 01 12 34 56 78")).toBe("12345678");
   });
+
+  it("ignores ELM line numbers when they would shift the VIN nibbles", () => {
+    const raw = "014\r0: 49 02 01 34 53 34\r1: 42 54 47 55 44 31 52\r2: 33 32 37 30 32 32 33\r>";
+    expect(parseMode09Ascii(raw, 0x02)).toBe("4S4BTGUD1R3270223");
+  });
+
+  it("still joins mode 09 segments that are not ELM line indexes", () => {
+    const raw = ["49020134533442", "49020254475544", "49020331523332", "49020437303232", "49020533"].join("\r");
+    expect(parseMode09Ascii(raw, 0x02)).toBe("4S4BTGUD1R3270223");
+  });
 });
 
 describe("parseMode01Pid", () => {
