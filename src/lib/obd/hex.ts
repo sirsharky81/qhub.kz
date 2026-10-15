@@ -24,7 +24,7 @@ function bytesFromHex(hex: string, offset: number): number[] {
 function responseScore(bytes: number[]): number {
   for (let i = 0; i + 1 < bytes.length; i++) {
     const b = bytes[i];
-    if (b === 0x41 || b === 0x43 || b === 0x47 || b === 0x49 || b === 0x61 || b === 0x62) return 2;
+    if (b === 0x41 || b === 0x43 || b === 0x47 || b === 0x49 || b === 0x61 || b === 0x62 || b === 0x7f) return 2;
   }
   return bytes.length > 0 ? 1 : 0;
 }

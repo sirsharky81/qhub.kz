@@ -314,9 +314,10 @@ export default function CanUdsPanel({
           if (result.parsed.kind === "positive") {
             rows.push(...decodeExtendedSignals(command, result.parsed.payload));
           } else {
+            const raw = result.raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
             rows.push({
               name: command.label,
-              value: result.parsed.nrcText ?? "нет ответа",
+              value: result.parsed.nrcText ?? (raw ? raw.slice(0, 60) : "нет ответа"),
               unit: "",
             });
           }
@@ -329,7 +330,7 @@ export default function CanUdsPanel({
         }
         setCatalog([...rows]);
       }
-      onLog(group === "subaru" ? "Subaru 22" : "Pajero 21");
+      onLog(group === "subaru" ? "Subaru SSM" : "Pajero 21");
     } finally {
       setBusy(false);
     }
@@ -513,7 +514,7 @@ export default function CanUdsPanel({
             Чтение разрешено сразу, включая сервис 21. Запись, сброс и программирование — только в режиме разработчика, до обновления страницы.
           </p>
           <p className="text-xs text-slate-500">
-            Короткие списки: Subaru — бензиновый двигатель, сервис 22. Pajero Sport — сервис 21 01–04, кузов до 2023. Outlander 2022 с 29-битным адресом сюда не входит.
+            Короткие списки: Subaru — SSM, команда A8, адрес 7E0. Pajero Sport — сервис 21 01–04, кузов до 2023. Outlander 2022 с 29-битным адресом сюда не входит.
           </p>
           <div className="flex gap-2">
             <button
@@ -522,7 +523,7 @@ export default function CanUdsPanel({
               onClick={() => void runCatalog("subaru")}
               className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
             >
-              Subaru 22
+              Subaru SSM
             </button>
             <button
               type="button"

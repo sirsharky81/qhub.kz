@@ -386,8 +386,9 @@ export class ObdBleSession {
 
   private async udsExchange(tx: number, rx: number | undefined, request: string): Promise<string> {
     const send = async () => {
-      if (rx == null) await this.elm!.clearRxFilter();
-      await this.elm!.setCanHeader(tx, rx);
+      const standardRx = rx == null || rx === ((tx + 8) & 0x7ff);
+      if (standardRx) await this.elm!.clearRxFilter();
+      await this.elm!.setCanHeader(tx, standardRx ? undefined : rx);
       return this.elm!.sendPayload(request, 5_000);
     };
     try {
