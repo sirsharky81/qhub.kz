@@ -164,9 +164,20 @@ export class Elm327Client {
     await this.runProfile(["ATE0", "ATL0", "ATH1", "ATS0", `ATSP${protocol}`, "ATCAF0", "ATD1"]);
   }
 
-  /** UDS console. ELM assembles ISO-TP and sends Flow Control. */
+  /**
+   * UDS / SSM. Headers off: a 3-nibble CAN id would shift `7F` off the byte grid.
+   * Forget the cached header — ATSP can leave the adapter on 7DF while we still think it is 7E0.
+   * ATAR drops ATCRA. On a vLinker that filter turns a real reply into NO DATA; ELM already accepts tx+8.
+   */
   async useUdsProfile(protocol: "6" | "7"): Promise<void> {
-    await this.runProfile(["ATE0", "ATL0", "ATH1", "ATS0", `ATSP${protocol}`, "ATCAF1", "ATSTFF"]);
+    await this.runProfile(["ATE0", "ATL0", "ATH0", "ATS0", `ATSP${protocol}`, "ATCAF1", "ATSTFF"]);
+    this.txHeader = null;
+    try {
+      await this.sendCommand("ATAR");
+    } catch {
+      /* some clones have no receive filter */
+    }
+    this.rxHeader = null;
   }
 
   async readSupplyVoltage(): Promise<number | null> {

@@ -104,6 +104,12 @@ describe("parseUdsResponse", () => {
     const nrc = parseUdsResponse("7F 22 31", 0x22);
     expect(nrc.kind).toBe("negative");
     expect(nrc.nrc).toBe(0x31);
+    const hidden = parseUdsResponse("7E8037F2231", 0x22);
+    expect(hidden.kind).toBe("negative");
+    expect(hidden.nrc).toBe(0x31);
+    const coolant = parseUdsResponse("E85F", 0xa8);
+    expect(coolant.kind).toBe("positive");
+    expect(coolant.payload).toEqual([0x5f]);
     expect(nrc.nrcText).toMatch(/диапазона/);
     const pending = parseUdsResponse("7F 22 78", 0x22);
     expect(pending.pendingOnly).toBe(true);
@@ -127,6 +133,14 @@ describe("extended signal lists", () => {
     const decoded = decodeExtendedSignals(command!, [0x01, 0xaf, 0x00, 0x00, 0x68, 0x41]);
     expect(decoded.map((row) => row.value)).toEqual(["12.4", "0", "13", "510"]);
     expect(EXTENDED_COMMANDS.some((item) => item.hex.startsWith("22") && item.tx === "DA15")).toBe(false);
+    expect(assessUdsRequest("A8 00 00 00 08", false).ok).toBe(true);
+    expect(assessUdsRequest("B8 00 00 00 08", false).ok).toBe(false);
+    const coolant = EXTENDED_COMMANDS.find((item) => item.hex === "A8 00 00 00 08");
+    expect(decodeExtendedSignals(coolant!, [0x5f]).map((row) => row.value)).toEqual(["55"]);
+    const clutch = EXTENDED_COMMANDS.find((item) => item.label === "Сцепление");
+    const brake = EXTENDED_COMMANDS.find((item) => item.label === "Тормоз");
+    expect(decodeExtendedSignals(clutch!, [0x88])[0]?.value).toBe("вкл");
+    expect(decodeExtendedSignals(brake!, [0x00])[0]?.value).toBe("выкл");
     expect(assessUdsRequest("2E F190 00", false).ok).toBe(false);
   });
 });
@@ -146,6 +160,19 @@ describe("CAN monitor stream", () => {
     expect(link.written).toContain("ATMA");
     expect(link.written).toContain("");
     await expect(elm.sendCommand("ATI")).resolves.toMatch(/OK/);
+  });
+
+  it("forgets the CAN header when entering UDS so the next request sets ATSH", async () => {
+    const link = new FakeLink();
+    const elm = new Elm327Client(link);
+    await elm.setCanHeader(0x7e0, 0x7e8);
+    await elm.useUdsProfile("6");
+    expect(link.written).toContain("ATH0");
+    expect(link.written).toContain("ATAR");
+    const mark = link.written.length;
+    await elm.setCanHeader(0x7e0);
+    expect(link.written.slice(mark)).toContain("ATSH7E0");
+    expect(link.written.slice(mark).some((line) => line.startsWith("ATCRA"))).toBe(false);
   });
 });
 
