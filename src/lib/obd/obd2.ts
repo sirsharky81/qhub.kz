@@ -267,8 +267,24 @@ export function parseReadiness(raw: string): ReadinessReport | null {
   };
 }
 
+/**
+ * ELM327 prints a long CAN reply on several lines:
+ * `014` / `0: 49 02 01 34 53 34` / `1: ...` / `2: ...`.
+ * The length and the `N:` indexes are not payload. Folded into the hex
+ * stream they shift every following nibble, so a VIN gains characters like `%`.
+ */
+function withoutElmLineNumbers(raw: string): string {
+  const lines = raw
+    .split(/\r|\n/)
+    .map((line) => line.replace(/>/g, "").trim())
+    .filter((line) => line.length > 0);
+  const indexed = lines.filter((line) => /^[0-9A-Fa-f]+\s*:/.test(line));
+  if (indexed.length < 2) return raw;
+  return indexed.map((line) => line.replace(/^[0-9A-Fa-f]+\s*:\s*/, "")).join(" ");
+}
+
 function mode09Chunks(raw: string, pid: number): number[][] {
-  const bytes = extractHexTokens(raw);
+  const bytes = extractHexTokens(withoutElmLineNumbers(raw));
   const chunks: number[][] = [];
   for (let i = 0; i + 2 < bytes.length; i++) {
     if (bytes[i] !== 0x49 || bytes[i + 1] !== pid) continue;
@@ -293,14 +309,22 @@ function asciiFromBytes(bytes: number[]): string | null {
   return text.length >= 4 ? text : null;
 }
 
+function completeMode09Text(chunk: number[]): string | null {
+  const body = chunk[0] != null && chunk[0] < 0x20 ? chunk.slice(1) : chunk;
+  return asciiFromBytes(body);
+}
+
 /** Mode 09 VIN (02) and calibration id (04). Drops the leading item-count byte on CAN. */
 export function parseMode09Ascii(raw: string, pid: number): string | null {
   const chunks = mode09Chunks(raw, pid);
   if (chunks.length === 0) return null;
-  if (chunks.length === 1) {
-    const only = chunks[0]!;
-    const body = only[0] != null && only[0] < 0x20 ? only.slice(1) : only;
-    return asciiFromBytes(body);
+  const indexed = raw.split(/\r|\n/).filter((line) => /^[0-9A-Fa-f]+\s*:/.test(line.trim())).length >= 2;
+  if (chunks.length === 1 || indexed) {
+    for (const chunk of chunks) {
+      const text = completeMode09Text(chunk);
+      if (text) return text;
+    }
+    return null;
   }
   const ordered = [...chunks].sort((left, right) => (left[0] ?? 0) - (right[0] ?? 0));
   return asciiFromBytes(ordered.flatMap((chunk) => chunk.slice(1)));
