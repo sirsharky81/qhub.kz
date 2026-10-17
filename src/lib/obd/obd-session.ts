@@ -509,30 +509,44 @@ export class ObdBleSession {
         ? supported.filter(
             (def) =>
               onlyPids.has(def.pid) ||
-              (wantsBoost && (def.pid === "010B" || def.pid === "0133")),
+              (wantsBoost && (def.pid === "010B" || def.pid === "0187" || def.pid === "0170" || def.pid === "0133")),
           )
         : supported;
     const visible = filtered.length > 0 ? filtered : supported;
     const refreshSlow = (onlyPids && onlyPids.size > 0) || this.sweep % 4 === 0;
     this.sweep += 1;
     const todo = visible.filter((def) => def.pace === "fast" || refreshSlow);
+
+    // If neither 010B nor 0187 is in the supported bitmap (e.g. FA24F hides 010B in 0100), probe 0187 and 010B directly
+    const hasMapTodo = todo.some((d) => d.pid === "010B" || d.pid === "0187");
+    if (wantsBoost && !hasMapTodo) {
+      const def87 = LIVE_PIDS.find((d) => d.pid === "0187");
+      const def0B = LIVE_PIDS.find((d) => d.pid === "010B");
+      if (def87) todo.push(def87);
+      if (def0B) todo.push(def0B);
+    }
+
     await this.fillReadings(todo);
 
     const out = visible
       .filter((def) => !onlyPids || onlyPids.size === 0 || onlyPids.has(def.pid))
       .map((def) => this.readingCache.get(def.pid) ?? { def, value: null, raw: "" });
 
-    // Compute live Turbo Boost / Vacuum in bar from MAP (010B) and Barometric Pressure (0133, default 101 kPa)
-    const mapReading = this.readingCache.get("010B");
-    if (wantsBoost && mapReading && mapReading.value != null) {
+    // Compute live Turbo Boost / Vacuum in bar from 0187 (wide-range MAP), 010B (standard MAP), or 0170 (boost control)
+    const mapReading =
+      (this.readingCache.get("0187")?.value != null ? this.readingCache.get("0187") : null) ??
+      (this.readingCache.get("010B")?.value != null ? this.readingCache.get("010B") : null) ??
+      (this.readingCache.get("0170")?.value != null ? this.readingCache.get("0170") : null);
+    if (wantsBoost) {
       const baro = this.readingCache.get("0133")?.value ?? 101;
-      const boostBar = (mapReading.value - baro) / 100;
+      const boostBar =
+        mapReading && mapReading.value != null ? (mapReading.value - baro) / 100 : null;
       const boostEntry: LivePidReading = {
         def: BOOST_DERIVED_PID,
         value: boostBar,
-        raw: mapReading.raw,
+        raw: mapReading?.raw ?? "",
       };
-      const mapIdx = out.findIndex((item) => item.def.pid === "010B");
+      const mapIdx = out.findIndex((item) => item.def.pid === "0187" || item.def.pid === "010B");
       if (mapIdx >= 0) {
         out.splice(mapIdx + 1, 0, boostEntry);
       } else {
@@ -642,7 +656,7 @@ export class ObdBleSession {
   private async loadSupportBitmaps(first: number[]): Promise<void> {
     this.bitmaps.set(0x00, first.slice(0, 4));
     let base = 0x00;
-    for (const next of [0x20, 0x40, 0x60, 0x80]) {
+    for (const next of [0x20, 0x40, 0x60, 0x80, 0xa0]) {
       if (pidSupported(this.bitmaps.get(base), next, base) !== true) break;
       try {
         const raw = await this.elm!.obdMode(formatMode01Request([next], 1), 4_000);

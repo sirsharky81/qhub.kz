@@ -86,9 +86,21 @@ export const LIVE_PIDS: LivePidDefinition[] = [
     return value == null ? null : value / 100;
   }),
   gauge("010B", "Давление во впуске (MAP)", "кПа", 1, 0, "fast", (b) => (b.length >= 1 ? b[0]! : null)),
+  gauge("0187", "Давление во впуске (MAP турбо)", "кПа", 5, 1, "fast", (b) => {
+    // SAE J1979 PID 87: [supportMask, A1, A2, B1, B2], kPa = (256*A1 + A2) * 0.03125
+    if (b.length >= 3 && (b[0]! & 0x01) !== 0) {
+      return ((b[1]! * 256 + b[2]!) * 10) / 320;
+    }
+    if (b.length >= 5 && (b[0]! & 0x02) !== 0) {
+      return ((b[3]! * 256 + b[4]!) * 10) / 320;
+    }
+    if (b.length >= 3) return ((b[1]! * 256 + b[2]!) * 10) / 320;
+    return null;
+  }),
   gauge("0170", "Управление наддувом / Wastegate", "%", 1, 0, "fast", (b) => {
-    // 0170: byte 0 = support mask, bytes 4..5 or last active byte = wastegate duty. Fallback to byte 5 / byte 1.
-    if (b.length >= 6) return (b[5]! * 100) / 255;
+    // SAE J1979 PID 70: [supportMask, cmdA(2), actA(2), cmdB(2), actB(2)] or kPa = (256*A + B)*0.03125
+    if (b.length >= 5) return ((b[3]! * 256 + b[4]!) * 10) / 320;
+    if (b.length >= 3) return ((b[1]! * 256 + b[2]!) * 10) / 320;
     if (b.length >= 2) return (b[1]! * 100) / 255;
     return null;
   }),
