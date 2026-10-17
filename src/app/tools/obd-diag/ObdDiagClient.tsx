@@ -58,6 +58,40 @@ export default function ObdDiagClient() {
     if (searchParams.get("tab") === "mitsubishi") setTab("mitsubishi");
   }, [searchParams]);
 
+  const scrollingRef = useRef(false);
+  const pendingLive = useRef<{ pids: { label: string; value: string; unit: string }[]; note: string | null } | null>(null);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflowX;
+    const prevBody = body.style.overflowX;
+    // overflow-x: hidden on the document makes iOS treat the page as a nested scroller and it shakes.
+    html.style.overflowX = "clip";
+    body.style.overflowX = "clip";
+    let timer = 0;
+    const flush = () => {
+      scrollingRef.current = false;
+      const pending = pendingLive.current;
+      pendingLive.current = null;
+      if (!pending) return;
+      setPids(pending.pids);
+      setPidNote(pending.note);
+    };
+    const onScroll = () => {
+      scrollingRef.current = true;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(flush, 180);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      html.style.overflowX = prevHtml;
+      body.style.overflowX = prevBody;
+      window.removeEventListener("scroll", onScroll);
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   useEffect(() => {
     const session = sessionRef.current;
     session.setLinkLostHandler(() => {
@@ -83,15 +117,22 @@ export default function ObdDiagClient() {
         try {
           const readings = await sessionRef.current.readLivePids();
           if (cancelled) return;
-          setPids(
-            readings.map((r) => ({
+          const next = {
+            pids: readings.map((r) => ({
               label: r.def.label,
               unit: r.def.unit,
               value: formatPidValue(r.value, r.def.digits),
             })),
-          );
-          const anyValue = readings.some((r) => r.value != null);
-          setPidNote(anyValue ? null : explainEmptyPidReadings(readings.map((r) => r.raw)));
+            note: readings.some((r) => r.value != null)
+              ? null
+              : explainEmptyPidReadings(readings.map((r) => r.raw)),
+          };
+          if (scrollingRef.current) {
+            pendingLive.current = next;
+          } else {
+            setPids(next.pids);
+            setPidNote(next.note);
+          }
         } catch (e) {
           if (!cancelled) setError(formatBleFailure(e));
         }
@@ -215,7 +256,7 @@ export default function ObdDiagClient() {
     });
 
   return (
-    <div className="mx-auto min-h-dvh max-w-lg bg-slate-950 px-4 py-6 text-slate-100">
+    <div className="mx-auto min-h-svh max-w-lg touch-pan-y bg-slate-950 px-4 py-6 text-slate-100">
       <header className="mb-4">
         <p className="text-xs uppercase tracking-wide text-emerald-400/90">QHub</p>
         <h1 className="mt-1 text-2xl font-semibold">OBD Scanner (BLE)</h1>
@@ -474,6 +515,9 @@ function ReadinessList({ report }: { report: ReadinessReport }) {
         {report.mil ? "Лампа ошибки включена" : "Лампа ошибки выключена"}, кодов в счётчике: {report.dtcCount}
       </div>
       <p className="mt-1 text-xs text-slate-500">Зажигание: {report.ignition}</p>
+      <p className="mt-2 text-xs text-slate-500">
+        «Готово» — блок закончил самопроверку этой системы. «Не готово» — проверка ещё не завершена, обычно нужна поездка. Это не показания датчиков. Живые цифры по топливу, смеси и катализатору — в параметрах ниже.
+      </p>
       <ul className="mt-2 space-y-1 text-xs text-slate-300">
         {report.lines.map((line) => (
           <li key={line}>{line}</li>
@@ -517,9 +561,9 @@ function PidGrid({ pids }: { pids: { label: string; value: string; unit: string 
       <h2 className="text-sm font-medium text-slate-300">Параметры</h2>
       <ul className="mt-2 grid grid-cols-2 gap-2 text-sm">
         {pids.map((p) => (
-          <li key={p.label} className="rounded-md bg-slate-900 px-3 py-2">
+          <li key={p.label} className="min-h-[4.25rem] rounded-md bg-slate-900 px-3 py-2">
             <div className="text-xs text-slate-500">{p.label}</div>
-            <div className="font-medium">
+            <div className="font-medium tabular-nums">
               {p.value} {p.unit}
             </div>
           </li>
