@@ -278,9 +278,9 @@ export default function CanUdsPanel({
       const cleanRaw = result.raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
       const summary =
         result.parsed.kind === "positive"
-          ? formatUdsPayload(result.parsed.payload)
+          ? formatUdsPayload(result.parsed.payload, result.parsed.sid)
           : result.parsed.kind === "negative"
-            ? `7F ${result.parsed.nrcText ?? ""}`.trim()
+            ? `Отказ блока (7F): ${result.parsed.nrcText ?? ""}`.trim()
             : cleanRaw.slice(0, 180) || "пустой ответ";
       setUdsText(summary);
       setUdsRaw(cleanRaw || null);

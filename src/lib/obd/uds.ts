@@ -1,4 +1,5 @@
 import { extractHexTokens, stripElmMultiline } from "./hex";
+import { describeDtcCode } from "./dtc-descriptions";
 
 export interface UdsTemplate {
   id: string;
@@ -271,13 +272,50 @@ export function parseTaggedUdsReplies(raw: string, requestSid: number): TaggedCa
   return [];
 }
 
-export function formatUdsPayload(payload: number[]): string {
+export function formatUdsPayload(payload: number[], requestSid?: number): string {
   const hex = payload.map((byte) => byte.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+  if (requestSid === 0x3e) {
+    return `${hex} (Блок на связи — TesterPresent OK)`;
+  }
+  if (requestSid === 0x10 && payload.length >= 1) {
+    const sub = payload[0]!;
+    const sName =
+      sub === 0x01
+        ? "Сессия по умолчанию открыта"
+        : sub === 0x03
+          ? "Расширенная диагностическая сессия открыта"
+          : `Сессия 0x${sub.toString(16).padStart(2, "0").toUpperCase()} открыта`;
+    if (payload.length >= 5) {
+      const p2 = (payload[1]! << 8) | payload[2]!;
+      const p2Star = ((payload[3]! << 8) | payload[4]!) * 10;
+      return `${sName} · таймаут P2=${p2} мс, P2*=${p2Star} мс (${hex})`;
+    }
+    return `${sName} (${hex})`;
+  }
+  if (requestSid === 0x19 && payload.length >= 2 && payload[0] === 0x02) {
+    // 59 02 <statusAvailabilityMask> [<dtcHigh> <dtcMid> <dtcLow> <status>]*
+    const records = payload.slice(2);
+    const dtcs: string[] = [];
+    for (let i = 0; i + 3 < records.length; i += 4) {
+      const b0 = records[i]!;
+      const b1 = records[i + 1]!;
+      const status = records[i + 3]!;
+      if (b0 === 0 && b1 === 0) continue;
+      const prefix = ["P", "C", "B", "U"][(b0 >> 6) & 0x03]!;
+      const code = `${prefix}${((b0 & 0x3f) << 8 | b1).toString(16).padStart(4, "0").toUpperCase()}`;
+      const active = (status & 0x01) !== 0 ? "активна" : "в памяти";
+      dtcs.push(`${code} (${active}) — ${describeDtcCode(code)}`);
+    }
+    if (dtcs.length === 0) {
+      return `Ошибок в блоке нет (0 DTC) · [${hex}]`;
+    }
+    return `Найдено ошибок (${dtcs.length}): ${dtcs.join("; ")} · [${hex}]`;
+  }
   const text = payload
     .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : ""))
     .join("");
   const printable = text.replace(/\0/g, "").trim();
-  if (printable.length >= 4 && printable.length >= payload.length / 2) return `${hex} (${printable})`;
+  if (printable.length >= 4 && printable.length >= payload.length / 2) return `${printable} (${hex})`;
   return hex;
 }
 
