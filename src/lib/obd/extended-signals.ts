@@ -20,7 +20,7 @@ export interface ExtendedSignal {
 }
 
 export interface ExtendedCommand {
-  group: "subaru" | "pajero";
+  group: "subaru" | "subaru-tcm" | "pajero";
   label: string;
   tx: string;
   rx: string;
@@ -104,6 +104,51 @@ export const EXTENDED_COMMANDS: ExtendedCommand[] = [
     hex: "A8 00 00 01 21",
     echo: "none",
     signals: [signal("Педаль тормоза", "", 0, 8, { bit: 3 })],
+  },
+  {
+    group: "subaru-tcm",
+    label: "Температура жидкости CVT / ATF",
+    tx: "7E1",
+    rx: "7E9",
+    hex: "A8 00 00 00 3E",
+    echo: "none",
+    signals: [signal("Темп. жидкости CVT / ATF (003E)", "°C", 0, 8, { add: -50 })],
+  },
+  {
+    group: "subaru-tcm",
+    label: "Температура ATF (канал 2 / 0008)",
+    tx: "7E1",
+    rx: "7E9",
+    hex: "A8 00 00 00 08",
+    echo: "none",
+    signals: [signal("Температура ATF / Блока КПП (0008)", "°C", 0, 8, { add: -40 })],
+  },
+  {
+    group: "subaru-tcm",
+    label: "Напряжение питания TCM",
+    tx: "7E1",
+    rx: "7E9",
+    hex: "A8 00 00 00 1C",
+    echo: "none",
+    signals: [signal("Питание блока КПП (TCM)", "В", 1, 8, { mul: 8, div: 100 })],
+  },
+  {
+    group: "subaru-tcm",
+    label: "Обороты турбины / первичного вала",
+    tx: "7E1",
+    rx: "7E9",
+    hex: "A8 00 00 00 0E",
+    echo: "none",
+    signals: [signal("Первичный вал / Турбина", "об/мин", 0, 16, { div: 4 })],
+  },
+  {
+    group: "subaru-tcm",
+    label: "Скорость выходного вала КПП",
+    tx: "7E1",
+    rx: "7E9",
+    hex: "A8 00 00 00 10",
+    echo: "none",
+    signals: [signal("Скорость по КПП", "км/ч", 0, 8)],
   },
   {
     group: "pajero",

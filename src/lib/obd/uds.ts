@@ -10,12 +10,17 @@ export const UDS_TEMPLATES: UdsTemplate[] = [
   { id: "1001", label: "Сессия по умолчанию", hex: "10 01" },
   { id: "1003", label: "Расширенная сессия", hex: "10 03" },
   { id: "3e00", label: "TesterPresent", hex: "3E 00" },
-  { id: "1902", label: "Коды DTC", hex: "19 02 FF" },
+  { id: "0904", label: "Прошивка CalID (09 04)", hex: "09 04" },
+  { id: "03", label: "Ошибки блока (03)", hex: "03" },
+  { id: "a808", label: "Subaru SSM ОЖ/АТФ", hex: "A8 00 00 00 08" },
+  { id: "a83e", label: "Subaru SSM темп. CVT/ATF", hex: "A8 00 00 00 3E" },
+  { id: "1902", label: "Коды DTC (UDS)", hex: "19 02 FF" },
   { id: "190a", label: "Поддержанные DTC", hex: "19 0A" },
-  { id: "f190", label: "VIN", hex: "22 F190" },
+  { id: "f190", label: "VIN (UDS)", hex: "22 F190" },
   { id: "f187", label: "Номер детали", hex: "22 F187" },
   { id: "f18c", label: "Серийный номер", hex: "22 F18C" },
   { id: "2180", label: "KWP ID (21 80)", hex: "21 80" },
+  { id: "2101", label: "Mitsubishi 21 01", hex: "21 01" },
 ];
 
 export const MODULE_SCAN_ADDRESSES = [0x7e0, 0x7e1, 0x7e2, 0x7e3, 0x7e4, 0x7e5, 0x7e6, 0x7e7, 0x7df] as const;

@@ -128,8 +128,14 @@ export class Elm327Client {
 
   /** Send OBD/UDS payload bytes (without CAN ID — header must be set). */
   async sendPayload(hexPayload: string, timeoutMs = 10_000): Promise<string> {
-    const compact = hexPayload.replace(/\s+/g, " ").trim();
-    return this.sendCommand(compact, timeoutMs);
+    const trimmed = hexPayload.replace(/\s+/g, " ").trim();
+    // Preserve trailing frame-count digit in OBD mode (e.g. "010C0D 1"),
+    // otherwise strip internal spaces so ELM327 clones never misparse multi-byte UDS/SSM hex.
+    const frameMatch = trimmed.match(/^([0-9A-Fa-f\s]+?)\s+([1-9])$/);
+    const command = frameMatch
+      ? `${frameMatch[1]!.replace(/\s+/g, "").toUpperCase()} ${frameMatch[2]}`
+      : trimmed.replace(/\s+/g, "").toUpperCase();
+    return this.sendCommand(command, timeoutMs);
   }
 
   async obdMode(command: string, timeoutMs = 10_000, broadcast = false): Promise<string> {

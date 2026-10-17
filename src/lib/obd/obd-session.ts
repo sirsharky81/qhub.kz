@@ -244,7 +244,7 @@ export class ObdBleSession {
             const parts: string[] = [];
             for (const reply of tagged) {
               const rxInfo = reply.rxAddress != null ? describeCanModule(reply.rxAddress) : null;
-              if (rxInfo) {
+              if (rxInfo && address !== 0x7df) {
                 resolvedName = rxInfo.name;
                 resolvedTx = rxInfo.txHex;
                 resolvedRx = rxInfo.rxHex;
@@ -260,6 +260,16 @@ export class ObdBleSession {
               parts.push(`${tagPrefix}${status}`);
             }
             detail = parts.join("; ");
+            if (address === 0x7df && tagged.length > 1) {
+              resolvedName = `Широковещательный 7DF (ответило блоков: ${tagged.length})`;
+              const nonEngine = tagged.find((r) => r.rxAddress != null && r.rxAddress !== 0x7e8);
+              const pick = nonEngine ?? tagged[0]!;
+              if (pick.rxAddress != null) {
+                const info = describeCanModule(pick.rxAddress);
+                resolvedTx = info.txHex;
+                resolvedRx = info.rxHex;
+              }
+            }
           } else {
             const compact = raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
             detail = compact ? compact.slice(0, 80) : "нет ответа";

@@ -308,12 +308,19 @@ export default function CanUdsPanel({
     setDidLabel("");
   };
 
-  const runCatalog = async (group: "subaru" | "pajero") => {
+  const runCatalog = async (group: "subaru" | "subaru-tcm" | "pajero") => {
     setBusy(true);
     setLocalError(null);
     setCatalog([]);
     const rows: DecodedSignal[] = [];
     setProtocol("6");
+    if (group === "subaru-tcm") {
+      setTx("7E1");
+      setRx("7E9");
+    } else {
+      setTx("7E0");
+      setRx("7E8");
+    }
     try {
       for (const command of EXTENDED_COMMANDS.filter((item) => item.group === group)) {
         try {
@@ -337,7 +344,13 @@ export default function CanUdsPanel({
         }
         setCatalog([...rows]);
       }
-      onLog(group === "subaru" ? "Subaru SSM" : "Pajero 21");
+      onLog(
+        group === "subaru"
+          ? "Subaru ДВС (7E0)"
+          : group === "subaru-tcm"
+            ? "Subaru КПП (7E1)"
+            : "Pajero 21 (7E0)",
+      );
     } finally {
       setBusy(false);
     }
@@ -567,24 +580,32 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
             <div className="text-xs font-medium text-slate-300">Заводские таблицы (1 нажатие)</div>
             <p className="mt-1 text-xs text-slate-500">
-              Subaru — протокол SSM (`A8`, адрес `7E0`). Pajero Sport — таблицы `21 01–04` (`7E0`).
+              Subaru ДВС (`7E0`) и Коробка TCM/CVT (`7E1`) — протокол SSM (`A8`). Pajero Sport — таблицы `21 01–04` (`7E0`).
             </p>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 grid grid-cols-3 gap-2">
               <button
                 type="button"
                 disabled={busy || monitoring}
                 onClick={() => void runCatalog("subaru")}
-                className="flex-1 rounded-xl bg-emerald-600/90 px-3 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+                className="rounded-xl bg-emerald-600/90 px-2.5 py-2.5 text-xs font-medium text-white disabled:opacity-40"
               >
-                Subaru SSM
+                Subaru ДВС (7E0)
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void runCatalog("subaru-tcm")}
+                className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
+              >
+                Subaru КПП (7E1)
               </button>
               <button
                 type="button"
                 disabled={busy || monitoring}
                 onClick={() => void runCatalog("pajero")}
-                className="flex-1 rounded-xl border border-slate-600 px-3 py-2.5 text-sm disabled:opacity-40"
+                className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
               >
-                Pajero 21
+                Pajero 21 (7E0)
               </button>
             </div>
             {catalog.length > 0 ? (
