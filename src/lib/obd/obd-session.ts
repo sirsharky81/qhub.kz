@@ -79,6 +79,24 @@ export interface ModuleScanItem {
   dtcCount?: number | null;
 }
 
+export interface SubaruRegionModuleReport {
+  txHex: string;
+  rxHex: string;
+  title: string;
+  responded: boolean;
+  systemName: string | null;
+  partNumber: string | null;
+  softwareVersion: string | null;
+  calId: string | null;
+  dids: { did: string; label: string; hex: string; decoded: string }[];
+}
+
+export interface SubaruRegionConfigDump {
+  capturedAt: string;
+  vin: string | null;
+  modules: SubaruRegionModuleReport[];
+}
+
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
 
 /** Universal OBD-II over ELM327 BLE (any ISO15765/OBD2 vehicle). */
@@ -466,6 +484,165 @@ export class ObdBleSession {
         /* ignore */
       }
     }
+  }
+
+  /**
+   * Strictly READ-ONLY (UDS Service 22 + TesterPresent 3E 00 + Session 10 03/10 01)
+   * reader for Subaru Combination Meter (783 / 7C0), EyeSight (787 / 784), BIU (740), and Climate (7C4).
+   * Never sends 27 (SecurityAccess), 2E (WriteDataByIdentifier), 31 (RoutineControl), or 11 (ECUReset).
+   */
+  async readSubaruMeterEyesightConfig(
+    protocol: CanProtocol,
+    onProgress?: (status: string, partial: SubaruRegionModuleReport[]) => void,
+    shouldStop?: () => boolean,
+  ): Promise<SubaruRegionConfigDump> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед выгрузкой");
+    await this.ensureUdsProfile(protocol);
+
+    const targets: { tx: number; rx: number; title: string }[] = [
+      { tx: 0x783, rx: 0x78b, title: "Приборка SGP (METER 783 → 78B)" },
+      { tx: 0x787, rx: 0x78f, title: "Камера EyeSight SGP (787 → 78F)" },
+      { tx: 0x740, rx: 0x748, title: "Боди-модуль BIU (740 → 748)" },
+      { tx: 0x7c4, rx: 0x7cc, title: "Климат-контроль A/C (7C4 → 7CC)" },
+      { tx: 0x7c0, rx: 0x7c8, title: "Приборка / MFD (7C0 → 7C8)" },
+      { tx: 0x786, rx: 0x78e, title: "Сонары / Парктроник RAB (786 → 78E)" },
+    ];
+
+    const configDids = [
+      0xf182, 0xf186, 0xf187, 0xf188, 0xf189, 0xf18a, 0xf18b, 0xf18c, 0xf18e, 0xf190, 0xf191,
+      0xf192, 0xf193, 0xf194, 0xf195, 0xf197, 0xf198, 0xf199, 0xf19e,
+      0x1000, 0x1001, 0x1002, 0x1003, 0x1004, 0x1005, 0x1006, 0x1007, 0x1008, 0x1009, 0x100a,
+      0x1010, 0x1011, 0x1012, 0x1020, 0x1021,
+      0x1100, 0x1101, 0x1102, 0x1103, 0x1104, 0x1105,
+      0x2100, 0x2101, 0x2102, 0x2103, 0x2104,
+      0xd001, 0xd002, 0xd003, 0xd004,
+    ];
+
+    let vin: string | null = null;
+    const reports: SubaruRegionModuleReport[] = [];
+
+    try {
+      await this.elm!.sendCommand("ATST20");
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      for (const target of targets) {
+        if (shouldStop?.()) break;
+        const txHex = target.tx.toString(16).toUpperCase();
+        const rxHex = target.rx.toString(16).toUpperCase();
+        onProgress?.(`Опрос ${target.title}…`, [...reports]);
+
+        let responded = false;
+        let sessionOpened = false;
+
+        try {
+          const raw3e = await this.udsExchange(target.tx, target.rx, "3E00", 800);
+          if (parseUdsResponse(raw3e, 0x3e).kind !== "empty") {
+            responded = true;
+          }
+        } catch {
+          /* ignore */
+        }
+
+        try {
+          const raw10 = await this.udsExchange(target.tx, target.rx, "1003", 900);
+          const p10 = parseUdsResponse(raw10, 0x10);
+          if (p10.kind !== "empty") {
+            responded = true;
+            if (p10.kind === "positive") sessionOpened = true;
+          }
+        } catch {
+          /* ignore */
+        }
+
+        const dids: { did: string; label: string; hex: string; decoded: string }[] = [];
+        let systemName: string | null = null;
+        let partNumber: string | null = null;
+        let softwareVersion: string | null = null;
+        let calId: string | null = null;
+
+        if (responded) {
+          let step = 0;
+          for (const didNum of configDids) {
+            if (shouldStop?.()) break;
+            step += 1;
+            if (step % 8 === 0) {
+              try {
+                await this.udsExchange(target.tx, target.rx, "3E00", 700);
+              } catch {
+                /* ignore */
+              }
+            }
+            const didHex = didNum.toString(16).padStart(4, "0").toUpperCase();
+            try {
+              const raw22 = await this.udsExchange(target.tx, target.rx, `22${didHex}`, 900);
+              const parsed = parseUdsResponse(raw22, 0x22);
+              if (parsed.kind === "positive") {
+                const body =
+                  parsed.payload.length >= 2 &&
+                  parsed.payload[0] === ((didNum >> 8) & 0xff) &&
+                  parsed.payload[1] === (didNum & 0xff)
+                    ? parsed.payload.slice(2)
+                    : parsed.payload;
+                const hex = body.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+                const decoded = formatUdsPayload(parsed.payload, 0x22);
+                const ascii = body
+                  .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+                  .join("")
+                  .replace(/\s+/g, " ")
+                  .trim();
+                const label = DID_LABELS[didHex] ?? `DID ${didHex}`;
+                dids.push({ did: didHex, label, hex, decoded });
+                if (didHex === "F197" && ascii) systemName = ascii;
+                if ((didHex === "F18E" || didHex === "F187") && ascii) partNumber = ascii;
+                if ((didHex === "F189" || didHex === "F195") && ascii) softwareVersion = ascii;
+                if (didHex === "F182") calId = ascii || hex;
+                if (didHex === "F190" && ascii.length >= 11) vin = ascii;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+
+          if (sessionOpened) {
+            try {
+              await this.udsExchange(target.tx, target.rx, "1001", 700);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+
+        reports.push({
+          txHex,
+          rxHex,
+          title: target.title,
+          responded: responded || dids.length > 0,
+          systemName,
+          partNumber,
+          softwareVersion,
+          calId,
+          dids,
+        });
+        onProgress?.(`Проверен ${target.title}`, [...reports]);
+      }
+    } finally {
+      try {
+        await this.elm!.sendCommand("ATSTFF");
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return {
+      capturedAt: new Date().toISOString(),
+      vin,
+      modules: reports,
+    };
   }
 
   async connectAdapter(): Promise<{ name: string; elm: ElmIdentity }> {

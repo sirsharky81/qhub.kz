@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ModuleScanItem, ObdBleSession } from "@/lib/obd/obd-session";
+import type {
+  ModuleScanItem,
+  ObdBleSession,
+  SubaruRegionConfigDump,
+  SubaruRegionModuleReport,
+} from "@/lib/obd/obd-session";
 import {
   type CanProtocol,
   type CsvRow,
@@ -86,6 +91,9 @@ export default function CanUdsPanel({
     }[]
   >([]);
   const [catalog, setCatalog] = useState<DecodedSignal[]>([]);
+  const [subaruDump, setSubaruDump] = useState<SubaruRegionConfigDump | null>(null);
+  const [subaruProgress, setSubaruProgress] = useState("");
+  const [subaruPartial, setSubaruPartial] = useState<SubaruRegionModuleReport[]>([]);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -366,6 +374,45 @@ export default function CanUdsPanel({
     } finally {
       setBusy(false);
     }
+  };
+
+  const runSubaruRegionDump = async () => {
+    setBusy(true);
+    stopScanRef.current = false;
+    setLocalError(null);
+    setSubaruDump(null);
+    setSubaruPartial([]);
+    setSubaruProgress("Старт безопасного чтения (Read-Only Service 22)…");
+    try {
+      const dump = await session.readSubaruMeterEyesightConfig(
+        protocol,
+        (status, partial) => {
+          setSubaruProgress(status);
+          setSubaruPartial(partial);
+        },
+        () => stopScanRef.current,
+      );
+      setSubaruDump(dump);
+      setSubaruProgress("");
+      const answered = dump.modules.filter((m) => m.responded).length;
+      onLog(`Subaru Приборка/EyeSight/BIU (Read-Only): ответило ${answered} блоков`);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Не удалось прочитать блоки Subaru");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportSubaruDump = async () => {
+    if (!subaruDump) return;
+    const stamp = subaruDump.capturedAt.slice(0, 19).replace(/[:T]/g, "-");
+    const vinPart = subaruDump.vin ? `-${subaruDump.vin}` : "";
+    const json = JSON.stringify(subaruDump, null, 2);
+    await saveBlobToDevice(
+      new Blob([json], { type: "application/json" }),
+      `subaru-meter-eyesight${vinPart}-${stamp}.json`,
+    );
+    onLog("Сохранён JSON-дамп конфигурации Subaru (Приборка / EyeSight / BIU)");
   };
 
   const scan = async (
@@ -735,6 +782,92 @@ export default function CanUdsPanel({
                   </li>
                 ))}
               </ul>
+            ) : null}
+          </div>
+
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-emerald-200">
+                Subaru SGP: Безопасное чтение паспорта Приборки (783) + EyeSight (787) + BIU (740)
+              </span>
+              {busy && subaruProgress ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopScanRef.current = true;
+                  }}
+                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                >
+                  Стоп
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-300">
+              Строго <strong>только чтение (`Service 22 ReadDataByIdentifier`)</strong> — без единой команды записи (`2E`), сброса (`11`) или входа в защиту (`27`). Настройки приборки, пробег и калибровка EyeSight гарантированно не затрагиваются. После чтения каждого блока сразу отправляется `10 01`.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void runSubaruRegionDump()}
+                className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Считать паспорт и конфигурацию (783 / 787 / 740 / 7C4)
+              </button>
+              {subaruDump ? (
+                <button
+                  type="button"
+                  onClick={() => void exportSubaruDump()}
+                  className="rounded-xl border border-emerald-400/60 bg-slate-900 px-3 py-2.5 text-xs font-semibold text-emerald-200"
+                >
+                  Скачать дамп (.json)
+                </button>
+              ) : null}
+            </div>
+            {subaruProgress ? (
+              <p className="mt-1.5 text-xs text-emerald-300">{subaruProgress}</p>
+            ) : null}
+            {(subaruDump?.modules ?? subaruPartial).length > 0 ? (
+              <div className="mt-2.5 space-y-2 text-xs">
+                {(subaruDump?.modules ?? subaruPartial).map((mod) => (
+                  <div
+                    key={mod.txHex}
+                    className={`rounded-lg border p-2.5 ${
+                      mod.responded
+                        ? "border-emerald-500/40 bg-slate-950/90 text-slate-100"
+                        : "border-slate-800 bg-slate-950/50 text-slate-500"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono font-semibold text-emerald-300">
+                        {mod.title}
+                      </span>
+                      <span className="text-[11px]">
+                        {mod.responded ? `Ответил (${mod.dids.length} DID)` : "Нет ответа"}
+                      </span>
+                    </div>
+                    {mod.responded ? (
+                      <>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-300">
+                          {mod.systemName ? <span>Система: <strong>{mod.systemName}</strong></span> : null}
+                          {mod.partNumber ? <span>Деталь OEM: <strong>{mod.partNumber}</strong></span> : null}
+                          {mod.softwareVersion ? <span>Софт: <strong>{mod.softwareVersion}</strong></span> : null}
+                          {mod.calId ? <span>CalID: <strong>{mod.calId}</strong></span> : null}
+                        </div>
+                        {mod.dids.length > 0 ? (
+                          <ul className="mt-1.5 max-h-40 space-y-1 overflow-y-auto border-t border-slate-800 pt-1.5 font-mono text-[11px]">
+                            {mod.dids.map((item) => (
+                              <li key={`${mod.txHex}-${item.did}`} className="text-slate-300">
+                                <span className="text-emerald-400">22 {item.did}</span> · {item.decoded}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             ) : null}
           </div>
 
