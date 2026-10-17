@@ -74,11 +74,23 @@ export default function CanUdsPanel({
   const [scanRows, setScanRows] = useState<ModuleScanItem[]>([]);
   const [didHits, setDidHits] = useState<{ did: string; text: string }[]>([]);
   const [didProgress, setDidProgress] = useState("");
+  const [watchedDids, setWatchedDids] = useState<string[]>(["F18E", "F197"]);
+  const [liveUdsRunning, setLiveUdsRunning] = useState(false);
+  const [liveUdsRows, setLiveUdsRows] = useState<
+    {
+      did: string;
+      text: string;
+      initialText: string;
+      changed: boolean;
+      count: number;
+    }[]
+  >([]);
   const [catalog, setCatalog] = useState<DecodedSignal[]>([]);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const stopScanRef = useRef(false);
+  const stopLiveUdsRef = useRef(false);
   const recordsRef = useRef<CsvRow[]>([]);
   const recordingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
@@ -356,7 +368,10 @@ export default function CanUdsPanel({
     }
   };
 
-  const scan = async (kind: "10 01" | "3E 00", preset: "standard" | "extended" = "standard") => {
+  const scan = async (
+    kind: "10 01" | "3E 00",
+    preset: "standard" | "extended" | "wide" = "extended",
+  ) => {
     setBusy(true);
     stopScanRef.current = false;
     setScanRows([]);
@@ -381,12 +396,28 @@ export default function CanUdsPanel({
         },
         { preset, shouldStop: () => stopScanRef.current },
       );
-      onLog(`Сканер блоков ${kind} (${preset === "extended" ? "Subaru/Mitsubishi" : "7E0–7DF"})`);
+      onLog(
+        `Сканер блоков ${kind} (${
+          preset === "wide"
+            ? "Вся шина 700–7E7"
+            : preset === "extended"
+              ? "Полный опрос Launch"
+              : "7E0–7DF"
+        })`,
+      );
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Сканер остановлен");
     } finally {
       setBusy(false);
     }
+  };
+
+  const toggleWatchedDid = (didHex: string) => {
+    const clean = didHex.replace(/^22\s*/i, "").replace(/\s+/g, "").toUpperCase();
+    if (!/^[0-9A-F]{4}$/.test(clean)) return;
+    setWatchedDids((prev) =>
+      prev.includes(clean) ? prev.filter((item) => item !== clean) : [...prev, clean],
+    );
   };
 
   const scanDids = async (range?: { from: number; to: number; label: string; stopOnSilence?: boolean }) => {
@@ -403,7 +434,13 @@ export default function CanUdsPanel({
         rx,
         (done, total, hit) => {
           setDidProgress(`${done} / ${total}`);
-          if (hit) setDidHits((prev) => [...prev, hit]);
+          if (hit) {
+            setDidHits((prev) => [...prev, hit]);
+            setWatchedDids((prev) => {
+              if (prev.includes(hit.did) || prev.length >= 12) return prev;
+              return [...prev, hit.did];
+            });
+          }
         },
         () => stopScanRef.current,
         range,
@@ -414,6 +451,80 @@ export default function CanUdsPanel({
     } finally {
       setBusy(false);
     }
+  };
+
+  const startLiveUds = async () => {
+    if (watchedDids.length === 0) {
+      setLocalError("Выберите хотя бы один DID для Live-потока (или запустите поиск датчиков ниже).");
+      return;
+    }
+    stopLiveUdsRef.current = false;
+    setLiveUdsRunning(true);
+    setBusy(true);
+    setLocalError(null);
+    onLog(`Live-поток UDS [${tx}→${rx}]: ${watchedDids.join(", ")}`);
+    try {
+      // Open extended session once so sensor DIDs stay accessible
+      try {
+        await session.sendUds(protocol, tx, rx, "1003", false);
+      } catch {
+        // Ignore if ECU works in default session
+      }
+      let step = 0;
+      while (!stopLiveUdsRef.current) {
+        for (const did of watchedDids) {
+          if (stopLiveUdsRef.current) break;
+          step += 1;
+          if (step % 6 === 0) {
+            try {
+              await session.sendUds(protocol, tx, rx, "3E00", false);
+            } catch {
+              // Ignore keepalive failure
+            }
+          }
+          try {
+            const res = await session.sendUds(protocol, tx, rx, `22${did}`, false);
+            if (res.parsed.kind === "positive") {
+              const text = formatUdsPayload(res.parsed.payload, res.parsed.sid);
+              setLiveUdsRows((prev) => {
+                const existing = prev.find((r) => r.did === did);
+                if (!existing) {
+                  return [
+                    ...prev,
+                    {
+                      did,
+                      text,
+                      initialText: text,
+                      changed: false,
+                      count: 1,
+                    },
+                  ];
+                }
+                const changed = existing.changed || existing.initialText !== text;
+                return prev.map((r) =>
+                  r.did === did ? { ...r, text, changed, count: r.count + 1 } : r,
+                );
+              });
+            }
+          } catch {
+            // Continue polling next DID
+          }
+        }
+      }
+    } finally {
+      try {
+        await session.sendUds(protocol, tx, rx, "1001", false);
+      } catch {
+        // Ignore
+      }
+      setLiveUdsRunning(false);
+      setBusy(false);
+      onLog(`Live-поток UDS [${tx}] остановлен (возврат в 10 01)`);
+    }
+  };
+
+  const stopLiveUds = () => {
+    stopLiveUdsRef.current = true;
   };
 
   if (!enabled) {
@@ -643,32 +754,32 @@ export default function CanUdsPanel({
               ) : null}
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              Определяет реальный CAN-адрес ответившего блока (даже на `7DF`). Нажмите на найденный блок, чтобы подставить его `TX / RX`.
+              Будит все блоки (`3E 00` → `10 03` → `09 04`), автоматически читает их заводской номер (`F18E`) и имя системы (`F197`), а после опроса закрывает сессию (`10 01`), чтобы на приборке сразу гасли лампы ABS/VDC.
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button
                 type="button"
                 disabled={busy || monitoring}
-                onClick={() => void scan("3E 00", "standard")}
-                className="rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
-              >
-                Сканер 3E 00 (7E0–7DF)
-              </button>
-              <button
-                type="button"
-                disabled={busy || monitoring}
-                onClick={() => void scan("10 01", "standard")}
-                className="rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
-              >
-                Сканер 10 01 (сессия)
-              </button>
-              <button
-                type="button"
-                disabled={busy || monitoring}
                 onClick={() => void scan("3E 00", "extended")}
-                className="col-span-2 rounded-xl border border-emerald-600/60 bg-emerald-950/30 px-3 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                className="col-span-2 rounded-xl bg-emerald-600 px-3 py-3 text-xs font-semibold text-white disabled:opacity-40"
               >
-                Расширенный поиск (Двигатель, КПП, ABS, ETACS, SRS)
+                Полный опрос всех блоков (как в Launch: ДВС, CVT, ABS, SRS, Климат, Кузов)
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void scan("3E 00", "standard")}
+                className="rounded-xl border border-slate-600 px-3 py-2 text-xs font-medium disabled:opacity-40"
+              >
+                Быстрый 7E0–7DF
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void scan("3E 00", "wide")}
+                className="rounded-xl border border-amber-500/50 bg-amber-950/20 px-3 py-2 text-xs font-medium text-amber-200 disabled:opacity-40"
+              >
+                Полный перебор 700–7E7
               </button>
             </div>
             {scanRows.length > 0 ? (
@@ -807,39 +918,198 @@ export default function CanUdsPanel({
               </button>
             </div>
 
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                disabled={busy || monitoring}
-                onClick={() => void scanDids({ from: 0xf180, to: 0xf1ff, label: "F180–F1FF", stopOnSilence: true })}
-                className="rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
-              >
-                Сканер паспорта блока (DID F180–F1FF)
-              </button>
-              <button
-                type="button"
-                disabled={busy || monitoring}
-                onClick={() => void scanDids({ from: 0x1000, to: 0x104f, label: "1000–104F", stopOnSilence: false })}
-                className="rounded-xl border border-emerald-600/60 bg-emerald-950/30 px-3 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
-              >
-                Поиск датчиков блока (DID 1000–104F)
-              </button>
-            </div>
-            {didProgress ? (
-              <p className="mt-1 text-xs text-slate-500">
-                Проверено DID: {didProgress} · найдено ответов: {didHits.length}
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-emerald-300">
+                  Поиск датчиков и паспорта выбранного блока ({tx})
+                </span>
+                {busy && !liveUdsRunning ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopScanRef.current = true;
+                    }}
+                    className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                  >
+                    Стоп
+                  </button>
+                ) : null}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Открывает сессию `10 03`, удерживает её через `3E 00`, находит рабочие DID на блоке (например CVT `7E1` или ABS `7B0`) и в конце отправляет `10 01`, чтобы погасить лампы на панели.
               </p>
-            ) : null}
-            {didHits.length > 0 ? (
-              <ul className="mt-2 space-y-1 text-xs">
-                {didHits.map((row) => (
-                  <li key={row.did} className="rounded-md bg-slate-950 px-3 py-2">
-                    <span className="font-mono text-emerald-400">22 {row.did}</span>
-                    <div className="break-all font-mono text-slate-200">{row.text}</div>
-                  </li>
+              <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                <button
+                  type="button"
+                  disabled={busy || monitoring}
+                  onClick={() => void scanDids({ from: 0xf180, to: 0xf1ff, label: "F180–F1FF", stopOnSilence: true })}
+                  className="rounded-lg border border-slate-600 px-2.5 py-2 text-xs font-medium disabled:opacity-40"
+                >
+                  Паспорт (F180–F1FF)
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || monitoring}
+                  onClick={() => void scanDids({ from: 0x1000, to: 0x107f, label: "1000–107F", stopOnSilence: false })}
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                >
+                  Датчики 1000–107F
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || monitoring}
+                  onClick={() => void scanDids({ from: 0x1100, to: 0x117f, label: "1100–117F", stopOnSilence: false })}
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                >
+                  Датчики 1100–117F
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || monitoring}
+                  onClick={() => void scanDids({ from: 0x2000, to: 0x207f, label: "2000–207F", stopOnSilence: false })}
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                >
+                  Датчики 2000–207F
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || monitoring}
+                  onClick={() => void scanDids({ from: 0x2100, to: 0x217f, label: "2100–217F", stopOnSilence: false })}
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                >
+                  Датчики 2100–217F
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || monitoring}
+                  onClick={() => void scanDids({ from: 0xd000, to: 0xd07f, label: "D000–D07F", stopOnSilence: false })}
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                >
+                  Датчики D000–D07F
+                </button>
+              </div>
+              {didProgress ? (
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Проверено DID: {didProgress} · найдено ответов: {didHits.length}
+                </p>
+              ) : null}
+              {didHits.length > 0 ? (
+                <ul className="mt-2 max-h-60 space-y-1 overflow-y-auto text-xs">
+                  {didHits.map((row) => {
+                    const inWatch = watchedDids.includes(row.did);
+                    return (
+                      <li
+                        key={row.did}
+                        className="flex items-start justify-between gap-2 rounded-md bg-slate-900 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="font-mono font-semibold text-emerald-400">22 {row.did}</span>
+                          <div className="break-all font-mono text-slate-200">{row.text}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleWatchedDid(row.did)}
+                          className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-medium ${
+                            inWatch
+                              ? "bg-emerald-600 text-white"
+                              : "border border-slate-600 text-slate-300"
+                          }`}
+                        >
+                          {inWatch ? "В Live ✓" : "+ В Live"}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </div>
+
+            <div className="mt-3 rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-emerald-200">
+                  Live-монитор UDS (поток данных блока {tx} как в Launch)
+                </span>
+                <button
+                  type="button"
+                  disabled={busy && !liveUdsRunning}
+                  onClick={() => void sendRequest("10 01")}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2.5 py-1 text-[11px] text-slate-200 disabled:opacity-40"
+                >
+                  Погасить лампы (10 01)
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Непрерывно опрашивает выбранные DID (`22 XXXX`) с удержанием сессии `10 03` / `3E 00`. Переключайте селектор КПП (`P-R-N-D`), нажимайте тормоз или газ — изменившиеся параметры подсветятся жёлтым.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {watchedDids.map((did) => (
+                  <button
+                    key={did}
+                    type="button"
+                    disabled={liveUdsRunning}
+                    onClick={() => toggleWatchedDid(did)}
+                    className="rounded-md border border-emerald-500/50 bg-emerald-900/40 px-2 py-1 font-mono text-xs text-emerald-100 disabled:opacity-60"
+                  >
+                    22 {did} ×
+                  </button>
                 ))}
-              </ul>
-            ) : null}
+                <button
+                  type="button"
+                  disabled={liveUdsRunning}
+                  onClick={() => toggleWatchedDid(request)}
+                  className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-300 disabled:opacity-40"
+                >
+                  + Добавить текущую команду ({request})
+                </button>
+              </div>
+              <div className="mt-2.5 flex gap-2">
+                {!liveUdsRunning ? (
+                  <button
+                    type="button"
+                    disabled={busy || monitoring || watchedDids.length === 0}
+                    onClick={() => void startLiveUds()}
+                    className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                  >
+                    Запустить Live-поток ({watchedDids.length} DID)
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={stopLiveUds}
+                    className="flex-1 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white"
+                  >
+                    Остановить Live-поток (и погасить лампы 10 01)
+                  </button>
+                )}
+              </div>
+              {liveUdsRows.length > 0 ? (
+                <ul className="mt-2.5 space-y-1.5 text-xs">
+                  {liveUdsRows.map((row) => (
+                    <li
+                      key={row.did}
+                      className={`rounded-lg border px-3 py-2 ${
+                        row.changed
+                          ? "border-amber-400/60 bg-amber-950/30"
+                          : "border-slate-800 bg-slate-950/90"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-semibold text-emerald-300">22 {row.did}</span>
+                        <div className="flex items-center gap-1.5">
+                          {row.changed ? (
+                            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+                              ИЗМЕНИЛСЯ
+                            </span>
+                          ) : null}
+                          <span className="font-mono text-[11px] text-slate-500">#{row.count}</span>
+                        </div>
+                      </div>
+                      <div className="mt-0.5 break-all font-mono text-slate-100">{row.text}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
 
             <label className="mt-3 flex items-center gap-2 text-xs text-slate-400">
               <input

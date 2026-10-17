@@ -9,8 +9,10 @@ import {
   assessUdsRequest,
   describeCanModule,
   exportUdsLog,
+  formatUdsPayload,
   parseTaggedUdsReplies,
   parseUdsResponse,
+  summarizeNumericUdsBytes,
 } from "../uds";
 
 class FakeLink implements BleLink {
@@ -245,5 +247,15 @@ describe("sendUds gate", () => {
     const session = new ObdBleSession();
     await expect(session.sendUds("6", "7E0", "7E8", "2E F190 00", false)).rejects.toThrow(/2E/);
     await expect(session.sendUds("6", "7E0", "7E8", "27 01", false)).rejects.toThrow(/27/);
+  });
+
+  it("summarizes numeric UDS sensor bytes and maps Subaru SGP CAN modules", () => {
+    expect(describeCanModule(0x7c0).name).toContain("Приборная");
+    expect(describeCanModule(0x784).name).toContain("EyeSight");
+    const summary = summarizeNumericUdsBytes([0x00, 0x78], "00 78");
+    expect(summary).toContain("16бит=120");
+    const formatted = formatUdsPayload([0x10, 0x01, 0x82], 0x22);
+    expect(formatted).toContain("число=130");
+    expect(formatted).toContain("темп=90°C");
   });
 });

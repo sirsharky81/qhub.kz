@@ -62,9 +62,15 @@ export const KNOWN_MODULE_TARGETS: readonly KnownModuleTarget[] = [
   { tx: 0x7e5, rx: 0x7ed, name: "Шасси / Электроусилитель", brand: "common" },
   { tx: 0x7e6, rx: 0x7ee, name: "Климат / Доп. модуль", brand: "common" },
   { tx: 0x7e7, rx: 0x7ef, name: "Модуль 7E7", brand: "common" },
-  { tx: 0x7b0, rx: 0x7b8, name: "ABS / VDC (Subaru / Mitsubishi)", brand: "subaru" },
-  { tx: 0x780, rx: 0x788, name: "Подушки SRS / Приборка", brand: "subaru" },
-  { tx: 0x7c0, rx: 0x7c8, name: "Приборная панель / Боди", brand: "subaru" },
+  { tx: 0x7b0, rx: 0x7b8, name: "ABS / VDC / Ручник (EPB)", brand: "subaru" },
+  { tx: 0x780, rx: 0x788, name: "Подушки SRS (Airbag)", brand: "subaru" },
+  { tx: 0x7c0, rx: 0x7c8, name: "Приборная панель (Meter)", brand: "subaru" },
+  { tx: 0x7c4, rx: 0x7cc, name: "Климат-контроль (A/C)", brand: "subaru" },
+  { tx: 0x740, rx: 0x748, name: "Боди-модуль BIU / Кузов", brand: "subaru" },
+  { tx: 0x746, rx: 0x74e, name: "Электроусилитель руля (EPS)", brand: "subaru" },
+  { tx: 0x750, rx: 0x758, name: "Шлюз / бесключевой доступ (Keyless)", brand: "subaru" },
+  { tx: 0x752, rx: 0x75a, name: "Датчики давления шин (TPMS)", brand: "subaru" },
+  { tx: 0x784, rx: 0x78c, name: "Камера EyeSight / Ассистенты", brand: "subaru" },
   { tx: 0x7a1, rx: 0x7a0, name: "Mitsubishi ETACS (7A1 → 7A0)", brand: "mitsubishi" },
   { tx: 0x710, rx: 0x718, name: "Mitsubishi ETACS / Кузов (710 → 718)", brand: "mitsubishi" },
   { tx: 0x7df, name: "Общий широковещательный (7DF)", brand: "common" },
@@ -79,9 +85,15 @@ const RX_MODULE_NAMES: Record<number, { name: string; tx: number }> = {
   0x7ed: { name: "Рулевое / Шасси", tx: 0x7e5 },
   0x7ee: { name: "Доп. блок 7EE", tx: 0x7e6 },
   0x7ef: { name: "Доп. блок 7EF", tx: 0x7e7 },
-  0x7b8: { name: "ABS / VDC", tx: 0x7b0 },
-  0x788: { name: "Подушки SRS / Приборка", tx: 0x780 },
-  0x7c8: { name: "Приборная панель / Боди", tx: 0x7c0 },
+  0x7b8: { name: "ABS / VDC / Ручник (EPB)", tx: 0x7b0 },
+  0x788: { name: "Подушки SRS (Airbag)", tx: 0x780 },
+  0x7c8: { name: "Приборная панель (Meter)", tx: 0x7c0 },
+  0x7cc: { name: "Климат-контроль (A/C)", tx: 0x7c4 },
+  0x748: { name: "Боди-модуль BIU / Кузов", tx: 0x740 },
+  0x74e: { name: "Электроусилитель руля (EPS)", tx: 0x746 },
+  0x758: { name: "Шлюз / бесключевой доступ", tx: 0x750 },
+  0x75a: { name: "Датчики давления шин (TPMS)", tx: 0x752 },
+  0x78c: { name: "Камера EyeSight / Ассистенты", tx: 0x784 },
   0x7a0: { name: "Mitsubishi ETACS", tx: 0x7a1 },
   0x718: { name: "Mitsubishi ETACS / Кузов", tx: 0x710 },
 };
@@ -344,12 +356,60 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
       return `Калибровка (CalID): ${parts.join(" · ")} (${hex})`;
     }
   }
+  if (requestSid === 0x22 && payload.length >= 3) {
+    const didHex = payload
+      .slice(0, 2)
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+    const dataBytes = payload.slice(2);
+    const dataHex = dataBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+    const label = DID_LABELS[didHex];
+    const text = dataBytes
+      .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text.length >= 3 && /[A-Za-z0-9]{3}/.test(text)) {
+      return `${label ? `${label}: ` : ""}${text} (${dataHex})`;
+    }
+    return `${label ? `${label}: ` : ""}${summarizeNumericUdsBytes(dataBytes, dataHex)}`;
+  }
   const text = payload
     .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
     .join("");
   const printable = text.replace(/\s+/g, " ").trim();
-  if (printable.length >= 4) return `${printable} (${hex})`;
-  return hex;
+  if (printable.length >= 4 && /[A-Za-z0-9]{3}/.test(printable)) return `${printable} (${hex})`;
+  return summarizeNumericUdsBytes(payload, hex);
+}
+
+/**
+ * Provides Launch-style numeric interpretation hints alongside raw hex bytes
+ * so live UDS DIDs (temperatures, pressures, RPM, voltages, flags) are readable immediately.
+ */
+export function summarizeNumericUdsBytes(payload: number[], hex?: string): string {
+  const hexStr = hex ?? payload.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+  if (payload.length === 0) return "пусто";
+  if (payload.length === 1) {
+    const a = payload[0]!;
+    const temp40 = a - 40;
+    const temp50 = a - 50;
+    const pct = Math.round((a * 100) / 255);
+    return `${hexStr}  [число=${a} · темп=${temp40}°C/${temp50}°C · ${pct}%]`;
+  }
+  if (payload.length === 2) {
+    const u16 = (payload[0]! << 8) | payload[1]!;
+    const s16 = u16 >= 0x8000 ? u16 - 0x10000 : u16;
+    const div4 = (u16 / 4).toFixed(0);
+    const temp10 = (u16 / 10 - 40).toFixed(1);
+    return `${hexStr}  [16бит=${u16} (знак=${s16}) · /4=${div4} · темп=${temp10}°C]`;
+  }
+  if (payload.length <= 6) {
+    const u16 = (payload[0]! << 8) | payload[1]!;
+    const b0 = payload[0]!;
+    const b1 = payload[1]!;
+    return `${hexStr}  [B0=${b0} (${b0 - 40}°C), B1=${b1} (${b1 - 40}°C), W0=${u16}]`;
+  }
+  return hexStr;
 }
 
 export interface CustomDid {

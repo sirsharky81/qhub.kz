@@ -74,6 +74,9 @@ export interface ModuleScanItem {
   responded: boolean;
   txHex: string;
   rxHex: string;
+  partNumber?: string | null;
+  systemName?: string | null;
+  dtcCount?: number | null;
 }
 
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
@@ -237,10 +240,21 @@ export class ObdBleSession {
         let resolvedName = meta.name;
         let resolvedTx = meta.txHex;
         let resolvedRx = target.rx ? target.rx.toString(16).toUpperCase() : meta.rxHex;
+        let partNumber: string | null = null;
+        let systemName: string | null = null;
 
         try {
-          const raw = await this.udsExchange(address, target.rx, request, wide ? 1_200 : 2_800);
-          const tagged = parseTaggedUdsReplies(raw, gate.sid);
+          let raw = await this.udsExchange(address, target.rx, request, wide ? 1_000 : 2_200);
+          let tagged = parseTaggedUdsReplies(raw, gate.sid);
+          // Many Subaru / Mitsubishi ECUs (especially TCM 7E1) stay silent on 3E 00 until 10 03 or 22 F18E / 09 04 is sent.
+          if (tagged.length === 0 && !wide && address !== 0x7df) {
+            raw = await this.udsExchange(address, target.rx, "1003", 1_500);
+            tagged = parseTaggedUdsReplies(raw, 0x10);
+            if (tagged.length === 0 && (address === 0x7e0 || address === 0x7e1)) {
+              raw = await this.udsExchange(address, target.rx, "0904", 1_800);
+              tagged = parseTaggedUdsReplies(raw, 0x09);
+            }
+          }
           if (tagged.length > 0) {
             responded = true;
             const parts: string[] = [];
@@ -272,6 +286,53 @@ export class ObdBleSession {
                 resolvedRx = info.rxHex;
               }
             }
+
+            // Launch-style passport enrichment for physical modules: fetch OEM Part# (22 F18E / F187) and System Name (22 F197)
+            if (!wide && address !== 0x7df) {
+              try {
+                const pRaw = await this.udsExchange(address, target.rx, "22F18E", 1_100);
+                const pParsed = parseUdsResponse(pRaw, 0x22);
+                if (pParsed.kind === "positive" && pParsed.payload.length > 2) {
+                  const ascii = pParsed.payload
+                    .slice(2)
+                    .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
+                    .join("")
+                    .trim();
+                  if (ascii.length >= 4) partNumber = ascii;
+                }
+                const sRaw = await this.udsExchange(address, target.rx, "22F197", 1_100);
+                const sParsed = parseUdsResponse(sRaw, 0x22);
+                if (sParsed.kind === "positive" && sParsed.payload.length > 2) {
+                  const ascii = sParsed.payload
+                    .slice(2)
+                    .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
+                    .join("")
+                    .trim();
+                  if (ascii.length >= 3) systemName = ascii;
+                }
+                if (!partNumber && (address === 0x7e0 || address === 0x7e1)) {
+                  const cRaw = await this.udsExchange(address, target.rx, "0904", 1_500);
+                  const cParsed = parseUdsResponse(cRaw, 0x09);
+                  if (cParsed.kind === "positive" && cParsed.payload.length > 2) {
+                    const ascii = cParsed.payload
+                      .slice(2)
+                      .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+                      .join("")
+                      .replace(/\s+/g, " ")
+                      .trim();
+                    if (ascii.length >= 4) partNumber = `CalID: ${ascii}`;
+                  }
+                }
+              } catch {
+                /* optional enrichment */
+              }
+              // Return module to default session (10 01) so ABS/VDC/EyeSight warning lights turn off immediately
+              try {
+                await this.udsExchange(address, target.rx, "1001", 900);
+              } catch {
+                /* ignore */
+              }
+            }
           } else {
             const compact = raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
             detail = compact ? compact.slice(0, 80) : "нет ответа";
@@ -280,13 +341,22 @@ export class ObdBleSession {
           detail = error instanceof Error ? error.message : "ошибка";
         }
 
+        const extra: string[] = [];
+        if (systemName) extra.push(systemName);
+        if (partNumber) extra.push(`№ ${partNumber}`);
+        if (extra.length > 0) {
+          detail = `${detail} · ${extra.join(" · ")}`;
+        }
+
         onProgress(label, detail, {
           address: label,
-          name: resolvedName,
+          name: systemName ? `${resolvedName} (${systemName})` : resolvedName,
           detail,
           responded,
           txHex: resolvedTx,
           rxHex: resolvedRx,
+          partNumber,
+          systemName,
         });
         if (!wide) {
           await new Promise((resolve) => setTimeout(resolve, 60));
@@ -337,18 +407,23 @@ export class ObdBleSession {
     const total = toDid - fromDid + 1;
     let done = 0;
     let silence = 0;
+    const txNum = Number.parseInt(txId, 16);
+    const rxNum = rxId ? Number.parseInt(rxId, 16) : undefined;
     try {
       for (let did = fromDid; did <= toDid; did++) {
         if (shouldStop()) return;
+        // Send TesterPresent (3E 00) every 12 DIDs so extended session 10 03 never times out during a scan
+        if (done > 0 && done % 12 === 0) {
+          try {
+            await this.udsExchange(txNum, rxNum, "3E00", 800);
+          } catch {
+            /* ignore */
+          }
+        }
         const request = `22${did.toString(16).padStart(4, "0").toUpperCase()}`;
         let hit: { did: string; text: string } | null = null;
         try {
-          const raw = await this.udsExchange(
-            Number.parseInt(txId, 16),
-            rxId ? Number.parseInt(rxId, 16) : undefined,
-            request,
-            1_200,
-          );
+          const raw = await this.udsExchange(txNum, rxNum, request, 1_100);
           const parsed = parseUdsResponse(raw, 0x22);
           if (parsed.kind === "positive") {
             silence = 0;
@@ -379,6 +454,12 @@ export class ObdBleSession {
         onProgress(done, total, hit);
       }
     } finally {
+      try {
+        // Return ECU to default session (10 01) so ABS/VDC/EyeSight warning lights turn off immediately
+        await this.udsExchange(txNum, rxNum, "1001", 800);
+      } catch {
+        /* ignore */
+      }
       try {
         await this.elm!.sendCommand("ATSTFF");
       } catch {
