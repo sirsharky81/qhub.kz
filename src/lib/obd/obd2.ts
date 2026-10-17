@@ -38,6 +38,32 @@ function word(bytes: number[]): number | null {
   return bytes[0]! * 256 + bytes[1]!;
 }
 
+function signedWord(bytes: number[]): number | null {
+  const value = word(bytes);
+  if (value == null) return null;
+  return value >= 0x8000 ? value - 0x10000 : value;
+}
+
+function narrowO2Volts(bytes: number[]): number | null {
+  return bytes.length >= 1 ? bytes[0]! / 200 : null;
+}
+
+function equivalenceRatio(bytes: number[]): number | null {
+  const value = word(bytes);
+  return value == null ? null : value / 32768;
+}
+
+/** PID 0x34–0x3B: current sits in bytes C and D. */
+function widebandCurrent(bytes: number[]): number | null {
+  if (bytes.length < 4) return null;
+  return (bytes[2]! * 256 + bytes[3]!) / 256 - 128;
+}
+
+function catalystTemp(bytes: number[]): number | null {
+  const value = word(bytes);
+  return value == null ? null : value / 10 - 40;
+}
+
 function gauge(
   pid: string,
   label: string,
@@ -59,7 +85,12 @@ export const LIVE_PIDS: LivePidDefinition[] = [
   gauge("0104", "Нагрузка", "%", 1, 0, "fast", percentOf255),
   gauge("0111", "Дроссель", "%", 1, 0, "fast", percentOf255),
   gauge("0145", "Дроссель относит.", "%", 1, 0, "slow", percentOf255),
+  gauge("0147", "Дроссель B", "%", 1, 0, "slow", percentOf255),
+  gauge("0148", "Дроссель C", "%", 1, 0, "slow", percentOf255),
   gauge("0149", "Педаль газа", "%", 1, 0, "fast", percentOf255),
+  gauge("014A", "Педаль E", "%", 1, 0, "slow", percentOf255),
+  gauge("014B", "Педаль F", "%", 1, 0, "slow", percentOf255),
+  gauge("014C", "Дроссель заданный", "%", 1, 0, "slow", percentOf255),
   gauge("0105", "Темп. ОЖ", "°C", 1, 0, "slow", tempOffset40),
   gauge("010F", "Темп. всасывания", "°C", 1, 0, "slow", tempOffset40),
   gauge("015C", "Темп. масла", "°C", 1, 0, "slow", tempOffset40),
@@ -75,6 +106,10 @@ export const LIVE_PIDS: LivePidDefinition[] = [
   }),
   gauge("010B", "Давление во впуске", "кПа", 1, 0, "fast", (b) => (b.length >= 1 ? b[0]! : null)),
   gauge("010A", "Давление топлива", "кПа", 1, 0, "slow", (b) => (b.length >= 1 ? b[0]! * 3 : null)),
+  gauge("0122", "Рампа к вакууму", "кПа", 2, 1, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value * 0.079;
+  }),
   gauge("0123", "Давление в рампе", "кПа", 2, 0, "slow", (b) => {
     const value = word(b);
     return value == null ? null : value * 10;
@@ -83,8 +118,27 @@ export const LIVE_PIDS: LivePidDefinition[] = [
     const value = word(b);
     return value == null ? null : value / 32768;
   }),
-  gauge("0114", "Лямбда B1S1", "В", 2, 3, "slow", (b) => (b.length >= 1 ? b[0]! / 200 : null)),
+  gauge("0114", "Лямбда B1S1", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("0115", "Лямбда B1S2", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("0116", "Лямбда B1S3", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("0117", "Лямбда B1S4", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("0118", "Лямбда B2S1", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("0119", "Лямбда B2S2", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("011A", "Лямбда B2S3", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("011B", "Лямбда B2S4", "В", 2, 3, "slow", narrowO2Volts),
+  gauge("0124", "λ ШДК 1", "", 4, 3, "slow", equivalenceRatio),
+  gauge("0125", "λ ШДК 2", "", 4, 3, "slow", equivalenceRatio),
+  gauge("0126", "λ ШДК 3", "", 4, 3, "slow", equivalenceRatio),
+  gauge("0127", "λ ШДК 4", "", 4, 3, "slow", equivalenceRatio),
+  gauge("0128", "λ ШДК 5", "", 4, 3, "slow", equivalenceRatio),
+  gauge("0129", "λ ШДК 6", "", 4, 3, "slow", equivalenceRatio),
+  gauge("012A", "λ ШДК 7", "", 4, 3, "slow", equivalenceRatio),
+  gauge("012B", "λ ШДК 8", "", 4, 3, "slow", equivalenceRatio),
+  gauge("012C", "EGR заданный", "%", 1, 0, "slow", percentOf255),
+  gauge("012D", "Ошибка EGR", "%", 1, 1, "slow", decodeFuelTrimPercent),
+  gauge("012E", "Продувка адсорбера", "%", 1, 0, "slow", percentOf255),
   gauge("012F", "Топливо", "%", 1, 0, "slow", percentOf255),
+  gauge("0130", "Прогревы", "", 1, 0, "slow", (b) => (b.length >= 1 ? b[0]! : null)),
   gauge("015E", "Расход топлива", "л/ч", 2, 1, "slow", (b) => {
     const value = word(b);
     return value == null ? null : value / 20;
@@ -97,17 +151,54 @@ export const LIVE_PIDS: LivePidDefinition[] = [
     const value = word(b);
     return value == null ? null : (value * 100) / 255;
   }),
-  gauge("0133", "Атмосферное давление", "кПа", 1, 0, "slow", (b) => (b.length >= 1 ? b[0]! : null)),
-  gauge("013C", "Темп. катализатора", "°C", 2, 0, "slow", (b) => {
-    const value = word(b);
-    return value == null ? null : value / 10 - 40;
+  gauge("0132", "Давление паров", "Па", 2, 0, "slow", (b) => {
+    const value = signedWord(b);
+    return value == null ? null : value / 4;
   }),
+  gauge("0133", "Атмосферное давление", "кПа", 1, 0, "slow", (b) => (b.length >= 1 ? b[0]! : null)),
+  gauge("0134", "Ток ШДК 1", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("0135", "Ток ШДК 2", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("0136", "Ток ШДК 3", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("0137", "Ток ШДК 4", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("0138", "Ток ШДК 5", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("0139", "Ток ШДК 6", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("013A", "Ток ШДК 7", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("013B", "Ток ШДК 8", "мА", 4, 1, "slow", widebandCurrent),
+  gauge("013C", "Темп. катализатора", "°C", 2, 0, "slow", catalystTemp),
+  gauge("013D", "Катализатор B2S1", "°C", 2, 0, "slow", catalystTemp),
+  gauge("013E", "Катализатор B1S2", "°C", 2, 0, "slow", catalystTemp),
+  gauge("013F", "Катализатор B2S2", "°C", 2, 0, "slow", catalystTemp),
   gauge("011F", "Время работы", "мин", 2, 1, "slow", (b) => {
     const value = word(b);
     return value == null ? null : value / 60;
   }),
   gauge("0121", "Пробег с ошибкой", "км", 2, 0, "slow", (b) => word(b)),
   gauge("0131", "Пробег после сброса", "км", 2, 0, "slow", (b) => word(b)),
+  gauge("014D", "Время с ошибкой", "мин", 2, 0, "slow", (b) => word(b)),
+  gauge("014E", "Время после сброса", "мин", 2, 0, "slow", (b) => word(b)),
+  gauge("0152", "Этанол", "%", 1, 0, "slow", percentOf255),
+  gauge("0153", "Пары абсолютные", "кПа", 2, 2, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value / 200;
+  }),
+  gauge("0154", "Давление паров B", "Па", 2, 0, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value - 32767;
+  }),
+  gauge("0155", "Краткоср. доп. O2 (банк 1)", "%", 2, 1, "slow", decodeFuelTrimPercent),
+  gauge("0156", "Долгоср. доп. O2 (банк 1)", "%", 2, 1, "slow", decodeFuelTrimPercent),
+  gauge("0157", "Краткоср. доп. O2 (банк 2)", "%", 2, 1, "slow", decodeFuelTrimPercent),
+  gauge("0158", "Долгоср. доп. O2 (банк 2)", "%", 2, 1, "slow", decodeFuelTrimPercent),
+  gauge("0159", "Рампа абсолютная", "кПа", 2, 0, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value * 10;
+  }),
+  gauge("015A", "Педаль относит.", "%", 1, 0, "slow", percentOf255),
+  gauge("015B", "Батарея гибрида", "%", 1, 0, "slow", percentOf255),
+  gauge("015D", "Угол впрыска", "°", 2, 1, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : (value - 26880) / 128;
+  }),
 ];
 
 const DTC_LETTERS = "PCBU";

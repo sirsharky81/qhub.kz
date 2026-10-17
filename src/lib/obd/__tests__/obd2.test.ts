@@ -145,4 +145,28 @@ describe("expanded gasoline PIDs", () => {
     expect(maf?.decode([0x01, 0x90])).toBeCloseTo(4);
     expect(pidSupported([0x00, 0x02, 0x00, 0x00], 0x2f, 0x20)).toBe(true);
   });
+
+  it("covers the numeric SAE mode 01 set through 015D", () => {
+    const pids = LIVE_PIDS.map((item) => item.pid);
+    expect(new Set(pids).size).toBe(pids.length);
+    expect(pids).toHaveLength(80);
+    expect(pids).toEqual(expect.arrayContaining(["012E", "0132", "014D", "0152", "015D"]));
+    const fast = new Set(["010C", "010D", "0104", "0111", "0149", "0106", "010E", "0110", "010B", "0144"]);
+    for (const item of LIVE_PIDS) {
+      if (!fast.has(item.pid)) expect(item.pace).toBe("slow");
+    }
+  });
+
+  it("decodes the added SAE formulas", () => {
+    const decode = (pid: string, bytes: number[]) => LIVE_PIDS.find((item) => item.pid === pid)?.decode(bytes);
+    expect(decode("012C", [128])).toBeCloseTo((128 * 100) / 255);
+    expect(decode("012D", [128])).toBe(0);
+    expect(decode("0122", [0x01, 0x00])).toBeCloseTo(256 * 0.079);
+    expect(decode("0124", [0x80, 0x00, 0x00, 0x00])).toBe(1);
+    expect(decode("0132", [0xff, 0xfc])).toBe(-1);
+    expect(decode("0134", [0x00, 0x00, 0x80, 0x00])).toBe(0);
+    expect(decode("014D", [0x01, 0x2c])).toBe(300);
+    expect(decode("0154", [0x80, 0x00])).toBe(1);
+    expect(decode("015D", [0x69, 0x00])).toBe(0);
+  });
 });

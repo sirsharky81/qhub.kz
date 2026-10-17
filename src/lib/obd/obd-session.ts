@@ -27,6 +27,15 @@ import {
   type ObdDtc,
   type LivePidDefinition,
 } from "./obd2";
+import {
+  DEFAULT_EXTRA_POLL_MS,
+  EXTRA_PIDS,
+  PID_SUPPORT_PAGES,
+  pidApplies,
+  tilesFromPid,
+  type PidFuel,
+  type PidTile,
+} from "./pids";
 
 export type ObdConnectionPhase = "idle" | "adapter" | "vehicle";
 
@@ -62,6 +71,11 @@ export class ObdBleSession {
   private elmIdentity: ElmIdentity | null = null;
   private bitmaps = new Map<number, number[]>();
   private readingCache = new Map<string, LivePidReading>();
+  private extraTiles = new Map<string, PidTile>();
+  private extraCursor = 0;
+  private lastExtraAt = 0;
+  private extraPollMs = DEFAULT_EXTRA_POLL_MS;
+  private fuel: PidFuel | null = null;
   private sweep = 0;
   private batching: boolean | null = null;
   private lineMode: "obd" | "monitor" | "uds" = "obd";
@@ -210,9 +224,18 @@ export class ObdBleSession {
     }
   }
 
+  /** How often one extra registry PID is requested. The fast gauges are not slowed to this. */
+  setExtraPollMs(ms: number): void {
+    this.extraPollMs = Math.max(200, ms);
+  }
+
   async linkVehicle(): Promise<VehicleLinkState> {
     await this.leaveSpecialMode();
     if (!this.elm) throw new Error("Сначала подключите адаптер");
+    this.fuel = null;
+    this.extraTiles.clear();
+    this.extraCursor = 0;
+    this.lastExtraAt = 0;
     const protocolLog = await this.elm.initForObd();
     const probe = await this.elm.probeStandardObd();
     const supported = parseMode01Pid(probe, 0x00);
@@ -225,6 +248,7 @@ export class ObdBleSession {
       );
     }
     await this.loadSupportBitmaps(supported.slice(0, 4));
+    await this.detectFuel();
     this.phase = "vehicle";
     return { protocolLog, probe, elm: this.elmIdentity ?? { raw: probe, versionLine: null } };
   }
@@ -304,9 +328,12 @@ export class ObdBleSession {
     this.sweep += 1;
     const todo = visible.filter((def) => def.pace === "fast" || refreshSlow);
     await this.fillReadings(todo);
-    return visible.map(
+    await this.pollOneExtra();
+    const standard = visible.map(
       (def) => this.readingCache.get(def.pid) ?? { def, value: null, raw: "" },
     );
+    const extra = [...this.extraTiles.values()].map((tile) => readingFromTile(tile));
+    return [...standard, ...extra];
   }
 
   async disconnect(): Promise<void> {
@@ -325,6 +352,7 @@ export class ObdBleSession {
     this.elmIdentity = null;
     this.bitmaps.clear();
     this.readingCache.clear();
+    this.resetExtra();
     this.sweep = 0;
     this.batching = null;
     this.lineMode = "obd";
@@ -346,6 +374,7 @@ export class ObdBleSession {
     this.elmIdentity = null;
     this.bitmaps.clear();
     this.readingCache.clear();
+    this.resetExtra();
     this.sweep = 0;
     this.batching = null;
     this.linkLost?.();
@@ -403,7 +432,8 @@ export class ObdBleSession {
   private async loadSupportBitmaps(first: number[]): Promise<void> {
     this.bitmaps.set(0x00, first.slice(0, 4));
     let base = 0x00;
-    for (const next of [0x20, 0x40, 0x60]) {
+    for (const next of PID_SUPPORT_PAGES) {
+      if (next === 0x00) continue;
       if (pidSupported(this.bitmaps.get(base), next, base) !== true) break;
       try {
         const raw = await this.elm!.obdMode(formatMode01Request([next], 1), 4_000);
@@ -414,6 +444,52 @@ export class ObdBleSession {
       } catch {
         break;
       }
+    }
+  }
+
+  private resetExtra(): void {
+    this.extraTiles.clear();
+    this.extraCursor = 0;
+    this.lastExtraAt = 0;
+    this.fuel = null;
+  }
+
+  private async detectFuel(): Promise<void> {
+    try {
+      const raw = await this.elm!.obdMode(formatMode01Request([0x01], 1), 4_000);
+      const report = parseReadiness(raw);
+      this.fuel = report ? (report.ignition === "дизель" ? "diesel" : "gasoline") : null;
+    } catch {
+      this.fuel = null;
+    }
+  }
+
+  /** One registry PID per turn, and not faster than extraPollMs. Unsupported PIDs are never requested. */
+  private async pollOneExtra(): Promise<void> {
+    const visible = EXTRA_PIDS.filter((item) => pidApplies(item, this.fuel, this.bitmaps)).sort(
+      (left, right) => left.priority - right.priority || left.pid.localeCompare(right.pid),
+    );
+    if (visible.length === 0) return;
+    const now = Date.now();
+    if (now - this.lastExtraAt < this.extraPollMs) return;
+    this.lastExtraAt = now;
+    const item = visible[this.extraCursor % visible.length]!;
+    this.extraCursor += 1;
+    const pid = Number.parseInt(item.pid.slice(2), 16);
+    let bytes: number[] | null = null;
+    try {
+      const raw = await this.elm!.obdMode(formatMode01Request([pid], 1), 1_500);
+      const parsed = parseMode01Pid(raw, pid);
+      bytes = parsed && parsed.length >= item.bytes ? parsed.slice(0, item.bytes) : null;
+    } catch {
+      return;
+    }
+    for (const key of [...this.extraTiles.keys()]) {
+      if (key.startsWith(`${item.pid}:`)) this.extraTiles.delete(key);
+    }
+    if (!bytes) return;
+    for (const tile of tilesFromPid(item, bytes)) {
+      this.extraTiles.set(`${item.pid}:${tile.label}`, tile);
     }
   }
 
@@ -519,4 +595,20 @@ export class ObdBleSession {
       throw new Error("Сначала выполните «Подключиться к автомобилю»");
     }
   }
+}
+
+function readingFromTile(tile: PidTile): LivePidReading {
+  return {
+    def: {
+      pid: "extra",
+      label: tile.label,
+      unit: tile.unit,
+      bytes: 0,
+      digits: tile.digits,
+      pace: "slow",
+      decode: () => tile.value,
+    },
+    value: tile.value,
+    raw: "",
+  };
 }
