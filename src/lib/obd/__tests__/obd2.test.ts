@@ -16,11 +16,12 @@ import {
 } from "../obd2";
 
 describe("parseDtcsFromElmResponse", () => {
-  it("parses standard 43 response", () => {
+  it("parses standard 43 response and attaches Russian description", () => {
     const raw = "43 02 01 33 00 00 \r\n>";
     const dtcs = parseDtcsFromElmResponse(raw);
     expect(dtcs.length).toBe(1);
     expect(dtcs[0]?.code).toMatch(/^P0133$/);
+    expect(dtcs[0]?.description).toMatch(/кислород/i);
   });
 });
 

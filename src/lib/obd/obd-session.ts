@@ -5,8 +5,20 @@ import { normalizeCanToken } from "./can-frame";
 import { requestBleLink, getObdTransportKind, type ObdTransportKind } from "./create-ble-link";
 import { Elm327Client, type ElmIdentity } from "./elm327";
 import {
+  ETACS_PROFILES,
+  readEtacsCoding,
+  type EtacsCodingDump,
+} from "./mitsubishi-etacs";
+import {
+  DID_SCAN_FROM,
+  DID_SCAN_SILENCE,
+  DID_SCAN_TO,
+  KNOWN_MODULE_TARGETS,
   MODULE_SCAN_ADDRESSES,
   assessUdsRequest,
+  describeCanModule,
+  formatUdsPayload,
+  parseTaggedUdsReplies,
   parseUdsResponse,
   type UdsParsed,
 } from "./uds";
@@ -51,6 +63,15 @@ export interface VehicleIdentity {
   vin: string | null;
   calid: string | null;
   cvn: string | null;
+}
+
+export interface ModuleScanItem {
+  address: string;
+  name: string;
+  detail: string;
+  responded: boolean;
+  txHex: string;
+  rxHex: string;
 }
 
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
@@ -147,14 +168,28 @@ export class ObdBleSession {
     if (!txId) throw new Error("Неверный адрес запроса");
     const rxId = rx.trim() ? normalizeCanToken(rx, protocol) : null;
     if (rx.trim() && !rxId) throw new Error("Неверный адрес ответа");
-    const raw = await this.udsExchange(Number.parseInt(txId, 16), rxId ? Number.parseInt(rxId, 16) : undefined, request);
+    const raw = await this.udsExchange(
+      Number.parseInt(txId, 16),
+      rxId ? Number.parseInt(rxId, 16) : undefined,
+      request,
+    );
     return { raw, parsed: parseUdsResponse(raw, gate.sid) };
+  }
+
+  async readEtacsDump(profileId?: string): Promise<EtacsCodingDump> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    const profile = ETACS_PROFILES.find((item) => item.id === profileId) ?? ETACS_PROFILES[0]!;
+    return readEtacsCoding(this.elm!, profile);
   }
 
   async scanModules(
     protocol: CanProtocol,
     request: "10 01" | "3E 00",
-    onProgress: (address: string, detail: string) => void,
+    onProgress: (address: string, detail: string, item?: ModuleScanItem) => void,
+    options?: { preset?: "standard" | "extended" | "wide"; shouldStop?: () => boolean },
   ): Promise<void> {
     const gate = assessUdsRequest(request, false);
     if (!gate.ok) throw new Error(gate.message);
@@ -162,25 +197,167 @@ export class ObdBleSession {
     await this.waitLeave();
     if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед сканером");
     await this.ensureUdsProfile(protocol);
-    for (const address of MODULE_SCAN_ADDRESSES) {
-      const label = address.toString(16).toUpperCase();
-      onProgress(label, "запрос");
-      await this.elm!.setCanHeader(address);
-      let detail = "нет ответа";
-      try {
-        const raw = await this.udsExchange(address, undefined, request);
-        const parsed = parseUdsResponse(raw, gate.sid);
-        detail =
-          parsed.kind === "positive"
-            ? "ответил"
-            : parsed.kind === "negative"
-              ? `NRC ${parsed.nrcText ?? ""}`.trim()
-              : raw.replace(/\s+/g, " ").trim().slice(0, 80) || "пустой ответ";
-      } catch (error) {
-        detail = error instanceof Error ? error.message : "ошибка";
+
+    const targets: { tx: number; rx?: number }[] =
+      options?.preset === "wide"
+        ? Array.from({ length: 0x7e8 - 0x700 }, (_, i) => ({ tx: 0x700 + i }))
+        : options?.preset === "extended"
+          ? KNOWN_MODULE_TARGETS.map((t) => ({ tx: t.tx, rx: t.rx }))
+          : MODULE_SCAN_ADDRESSES.map((tx) => ({ tx }));
+
+    const wide = options?.preset === "wide";
+    // Turn headers and spaces on during scan so a 7DF reply or physical probe reveals the responder's CAN ID.
+    try {
+      await this.elm!.sendCommand("ATH1");
+      await this.elm!.sendCommand("ATS1");
+      if (wide) await this.elm!.sendCommand("ATST20");
+    } catch {
+      /* clone keeps defaults */
+    }
+
+    try {
+      for (const target of targets) {
+        if (options?.shouldStop?.()) return;
+        const address = target.tx;
+        const label = address.toString(16).toUpperCase();
+        const meta = describeCanModule(address);
+        onProgress(label, "запрос", {
+          address: label,
+          name: meta.name,
+          detail: "запрос…",
+          responded: false,
+          txHex: meta.txHex,
+          rxHex: target.rx ? target.rx.toString(16).toUpperCase() : meta.rxHex,
+        });
+
+        let detail = "нет ответа";
+        let responded = false;
+        let resolvedName = meta.name;
+        let resolvedTx = meta.txHex;
+        let resolvedRx = target.rx ? target.rx.toString(16).toUpperCase() : meta.rxHex;
+
+        try {
+          const raw = await this.udsExchange(address, target.rx, request, wide ? 1_200 : 2_800);
+          const tagged = parseTaggedUdsReplies(raw, gate.sid);
+          if (tagged.length > 0) {
+            responded = true;
+            const parts: string[] = [];
+            for (const reply of tagged) {
+              const rxInfo = reply.rxAddress != null ? describeCanModule(reply.rxAddress) : null;
+              if (rxInfo) {
+                resolvedName = rxInfo.name;
+                resolvedTx = rxInfo.txHex;
+                resolvedRx = rxInfo.rxHex;
+              }
+              const tagPrefix =
+                reply.rxAddress != null
+                  ? `${reply.rxAddress.toString(16).toUpperCase()} (${rxInfo?.name ?? "блок"}): `
+                  : "";
+              const status =
+                reply.parsed.kind === "positive"
+                  ? "ответил"
+                  : `ответил (NRC ${reply.parsed.nrcText ?? ""})`.trim();
+              parts.push(`${tagPrefix}${status}`);
+            }
+            detail = parts.join("; ");
+          } else {
+            const compact = raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
+            detail = compact ? compact.slice(0, 80) : "нет ответа";
+          }
+        } catch (error) {
+          detail = error instanceof Error ? error.message : "ошибка";
+        }
+
+        onProgress(label, detail, {
+          address: label,
+          name: resolvedName,
+          detail,
+          responded,
+          txHex: resolvedTx,
+          rxHex: resolvedRx,
+        });
+        if (!wide) {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
       }
-      onProgress(label, detail);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      try {
+        await this.elm!.sendCommand("ATH0");
+        await this.elm!.sendCommand("ATS0");
+        if (wide) await this.elm!.sendCommand("ATSTFF");
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /** Service 22 over F180–F1FF on the selected ECU. Stops after a long run of NO DATA. */
+  async scanIdentificationDids(
+    protocol: CanProtocol,
+    tx: string,
+    rx: string,
+    onProgress: (done: number, total: number, hit: { did: string; text: string } | null) => void,
+    shouldStop: () => boolean,
+  ): Promise<void> {
+    const txId = normalizeCanToken(tx, protocol);
+    const rxId = rx.trim() ? normalizeCanToken(rx, protocol) : null;
+    if (!txId) throw new Error("Нужен адрес запроса TX");
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед сканером");
+    await this.ensureUdsProfile(protocol);
+    try {
+      await this.elm!.sendCommand("ATST20");
+    } catch {
+      /* clone keeps the previous timeout */
+    }
+    const total = DID_SCAN_TO - DID_SCAN_FROM + 1;
+    let done = 0;
+    let silence = 0;
+    try {
+      for (let did = DID_SCAN_FROM; did <= DID_SCAN_TO; did++) {
+        if (shouldStop()) return;
+        const request = `22${did.toString(16).padStart(4, "0").toUpperCase()}`;
+        let hit: { did: string; text: string } | null = null;
+        try {
+          const raw = await this.udsExchange(
+            Number.parseInt(txId, 16),
+            rxId ? Number.parseInt(rxId, 16) : undefined,
+            request,
+            1_200,
+          );
+          const parsed = parseUdsResponse(raw, 0x22);
+          if (parsed.kind === "positive") {
+            silence = 0;
+            // Skip echoed 2-byte DID if present
+            const body =
+              parsed.payload.length >= 2 &&
+              parsed.payload[0] === ((did >> 8) & 0xff) &&
+              parsed.payload[1] === (did & 0xff)
+                ? parsed.payload.slice(2)
+                : parsed.payload;
+            hit = { did: request.slice(2), text: formatUdsPayload(body) };
+          } else if (parsed.kind === "negative") {
+            silence = 0;
+          } else if (++silence >= DID_SCAN_SILENCE) {
+            throw new Error(`Блок молчит (${silence} подряд без ответа). Проверьте адреса и зажигание.`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (/молчит/i.test(message)) throw error;
+          if (++silence >= DID_SCAN_SILENCE) {
+            throw new Error(`Блок молчит (${silence} подряд без ответа). Проверьте адреса и зажигание.`);
+          }
+        }
+        done += 1;
+        onProgress(done, total, hit);
+      }
+    } finally {
+      try {
+        await this.elm!.sendCommand("ATSTFF");
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -296,11 +473,16 @@ export class ObdBleSession {
     };
   }
 
-  async readLivePids(): Promise<LivePidReading[]> {
+  async readLivePids(onlyPids?: ReadonlySet<string>): Promise<LivePidReading[]> {
     await this.leaveSpecialMode();
     this.requireVehicle();
-    const visible = LIVE_PIDS.filter((def) => this.pidIsSupported(def));
-    const refreshSlow = this.sweep % 4 === 0;
+    const supported = LIVE_PIDS.filter((def) => this.pidIsSupported(def));
+    const filtered =
+      onlyPids && onlyPids.size > 0
+        ? supported.filter((def) => onlyPids.has(def.pid))
+        : supported;
+    const visible = filtered.length > 0 ? filtered : supported;
+    const refreshSlow = (onlyPids && onlyPids.size > 0) || this.sweep % 4 === 0;
     this.sweep += 1;
     const todo = visible.filter((def) => def.pace === "fast" || refreshSlow);
     await this.fillReadings(todo);
@@ -384,12 +566,17 @@ export class ObdBleSession {
     this.lineMode = "obd";
   }
 
-  private async udsExchange(tx: number, rx: number | undefined, request: string): Promise<string> {
+  private async udsExchange(
+    tx: number,
+    rx: number | undefined,
+    request: string,
+    timeoutMs = 5_000,
+  ): Promise<string> {
     const send = async () => {
       const standardRx = rx == null || rx === ((tx + 8) & 0x7ff);
       if (standardRx) await this.elm!.clearRxFilter();
       await this.elm!.setCanHeader(tx, standardRx ? undefined : rx);
-      return this.elm!.sendPayload(request, 5_000);
+      return this.elm!.sendPayload(request, timeoutMs);
     };
     try {
       return await send();

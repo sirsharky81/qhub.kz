@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ObdBleSession } from "@/lib/obd/obd-session";
+import type { ModuleScanItem, ObdBleSession } from "@/lib/obd/obd-session";
 import {
   type CanProtocol,
   type CsvRow,
@@ -10,6 +10,7 @@ import {
   parseMonitorLine,
 } from "@/lib/obd/can-frame";
 import {
+  KNOWN_MODULE_TARGETS,
   UDS_TEMPLATES,
   type CustomDid,
   type UdsLogEntry,
@@ -49,7 +50,7 @@ export default function CanUdsPanel({
   onLog: (line: string) => void;
 }) {
   const [protocol, setProtocol] = useState<CanProtocol>("6");
-  const [view, setView] = useState<"monitor" | "uds">("monitor");
+  const [view, setView] = useState<"monitor" | "uds">("uds");
   const [monitoring, setMonitoring] = useState(false);
   const [rows, setRows] = useState<FrameRow[]>([]);
   const [tape, setTape] = useState<string[]>([]);
@@ -68,12 +69,16 @@ export default function CanUdsPanel({
   const [customDids, setCustomDids] = useState<CustomDid[]>([]);
   const [didLabel, setDidLabel] = useState("");
   const [udsText, setUdsText] = useState<string | null>(null);
+  const [udsRaw, setUdsRaw] = useState<string | null>(null);
   const [udsLog, setUdsLog] = useState<UdsLogEntry[]>([]);
-  const [scanRows, setScanRows] = useState<{ address: string; detail: string }[]>([]);
+  const [scanRows, setScanRows] = useState<ModuleScanItem[]>([]);
+  const [didHits, setDidHits] = useState<{ did: string; text: string }[]>([]);
+  const [didProgress, setDidProgress] = useState("");
   const [catalog, setCatalog] = useState<DecodedSignal[]>([]);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  const stopScanRef = useRef(false);
   const recordsRef = useRef<CsvRow[]>([]);
   const recordingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
@@ -270,15 +275,17 @@ export default function CanUdsPanel({
     setLocalError(null);
     try {
       const result = await session.sendUds(protocol, tx, rx, hex, developer);
+      const cleanRaw = result.raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
       const summary =
         result.parsed.kind === "positive"
           ? formatUdsPayload(result.parsed.payload)
           : result.parsed.kind === "negative"
             ? `7F ${result.parsed.nrcText ?? ""}`.trim()
-            : result.raw.replace(/\s+/g, " ").trim().slice(0, 180) || "пустой ответ";
+            : cleanRaw.slice(0, 180) || "пустой ответ";
       setUdsText(summary);
+      setUdsRaw(cleanRaw || null);
       remember({ t: new Date().toISOString(), tx, rx, request: hex, response: summary });
-      onLog(`UDS ${hex}: ${summary.slice(0, 120)}`);
+      onLog(`UDS ${hex} [${tx}→${rx || "auto"}]: ${summary.slice(0, 120)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Ошибка UDS";
       setLocalError(message);
@@ -336,20 +343,59 @@ export default function CanUdsPanel({
     }
   };
 
-  const scan = async (kind: "10 01" | "3E 00") => {
+  const scan = async (kind: "10 01" | "3E 00", preset: "standard" | "extended" = "standard") => {
     setBusy(true);
+    stopScanRef.current = false;
     setScanRows([]);
     setLocalError(null);
     try {
-      await session.scanModules(protocol, kind, (address, detail) => {
-        setScanRows((prev) => {
-          const without = prev.filter((row) => row.address !== address);
-          return [...without, { address, detail }];
-        });
-      });
-      onLog(`Сканер блоков ${kind}`);
+      await session.scanModules(
+        protocol,
+        kind,
+        (address, detail, item) => {
+          setScanRows((prev) => {
+            const without = prev.filter((row) => row.address !== address);
+            const entry: ModuleScanItem = item ?? {
+              address,
+              name: `Блок ${address}`,
+              detail,
+              responded: detail.includes("ответил"),
+              txHex: address === "7DF" ? "7E0" : address,
+              rxHex: address === "7DF" ? "7E8" : "",
+            };
+            return [...without, entry];
+          });
+        },
+        { preset, shouldStop: () => stopScanRef.current },
+      );
+      onLog(`Сканер блоков ${kind} (${preset === "extended" ? "Subaru/Mitsubishi" : "7E0–7DF"})`);
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Сканер остановлен");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const scanDids = async () => {
+    setBusy(true);
+    stopScanRef.current = false;
+    setDidHits([]);
+    setDidProgress("0 / 128");
+    setLocalError(null);
+    try {
+      await session.scanIdentificationDids(
+        protocol,
+        tx,
+        rx,
+        (done, total, hit) => {
+          setDidProgress(`${done} / ${total}`);
+          if (hit) setDidHits((prev) => [...prev, hit]);
+        },
+        () => stopScanRef.current,
+      );
+      onLog(`Сканер DID F180–F1FF (${tx})`);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Сканер DID остановлен");
     } finally {
       setBusy(false);
     }
@@ -358,7 +404,7 @@ export default function CanUdsPanel({
   if (!enabled) {
     return (
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-slate-400">Сначала подключите адаптер кнопкой 1.</p>
+        <p className="text-sm text-slate-400">Сначала подключите адаптер сверху.</p>
         {localError ? <p className="text-sm text-red-200">{localError}</p> : null}
         {recordCount > 0 ? (
           <button
@@ -375,23 +421,7 @@ export default function CanUdsPanel({
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex gap-2">
-        <ProtocolButton active={protocol === "6"} disabled={monitoring || busy} onClick={() => setProtocol("6")}>
-          CAN 11 бит / 500k
-        </ProtocolButton>
-        <ProtocolButton active={protocol === "7"} disabled={monitoring || busy} onClick={() => setProtocol("7")}>
-          CAN 29 бит / 500k
-        </ProtocolButton>
-      </div>
-      {volts != null && volts < 11.5 ? (
-        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
-          Напряжение борта {volts.toFixed(1)} В. Для заглушённого двигателя это мало: возможны обрывы связи с блоками.
-        </p>
-      ) : null}
       <div className="flex rounded-xl border border-slate-800 bg-slate-900/50 p-1">
-        <ProtocolButton active={view === "monitor"} onClick={() => setView("monitor")}>
-          Монитор
-        </ProtocolButton>
         <ProtocolButton
           active={view === "uds"}
           onClick={() => {
@@ -401,13 +431,37 @@ export default function CanUdsPanel({
             })();
           }}
         >
-          UDS
+          Запросы к блокам (UDS / SSM / KWP)
+        </ProtocolButton>
+        <ProtocolButton active={view === "monitor"} onClick={() => setView("monitor")}>
+          Прослушка шины (ATMA)
         </ProtocolButton>
       </div>
-      {localError ? <p className="text-sm text-red-200">{localError}</p> : null}
+
+      <div className="flex gap-2">
+        <ProtocolButton active={protocol === "6"} disabled={monitoring || busy} onClick={() => setProtocol("6")}>
+          CAN 11 бит / 500k
+        </ProtocolButton>
+        <ProtocolButton active={protocol === "7"} disabled={monitoring || busy} onClick={() => setProtocol("7")}>
+          CAN 29 бит / 500k
+        </ProtocolButton>
+      </div>
+
+      {volts != null && volts < 11.5 ? (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+          Напряжение борта {volts.toFixed(1)} В. Для заглушённого двигателя это мало: возможны обрывы связи с блоками.
+        </p>
+      ) : null}
+
+      {localError ? (
+        <p className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">{localError}</p>
+      ) : null}
 
       {view === "monitor" ? (
         <>
+          <p className="text-xs text-slate-400">
+            Пассивная прослушка шины (`ATMA`). На машинах с межсетевым шлюзом (Gateway) в разъёме OBD-II тишина, пока не идёт опрос. Для чтения параметров и блоков используйте вкладку «Запросы к блокам».
+          </p>
           <p className="text-xs text-slate-500">
             Потери адаптера: {losses}. Фильтр и протокол меняются только когда монитор остановлен.
           </p>
@@ -510,142 +564,271 @@ export default function CanUdsPanel({
         </>
       ) : (
         <>
-          <p className="text-xs text-slate-500">
-            Чтение разрешено сразу, включая сервис 21. Запись, сброс и программирование — только в режиме разработчика, до обновления страницы.
-          </p>
-          <p className="text-xs text-slate-500">
-            Короткие списки: Subaru — SSM, команда A8, адрес 7E0. Pajero Sport — сервис 21 01–04, кузов до 2023. Outlander 2022 с 29-битным адресом сюда не входит.
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={busy || monitoring}
-              onClick={() => void runCatalog("subaru")}
-              className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
-            >
-              Subaru SSM
-            </button>
-            <button
-              type="button"
-              disabled={busy || monitoring}
-              onClick={() => void runCatalog("pajero")}
-              className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
-            >
-              Pajero 21
-            </button>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+            <div className="text-xs font-medium text-slate-300">Заводские таблицы (1 нажатие)</div>
+            <p className="mt-1 text-xs text-slate-500">
+              Subaru — протокол SSM (`A8`, адрес `7E0`). Pajero Sport — таблицы `21 01–04` (`7E0`).
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void runCatalog("subaru")}
+                className="flex-1 rounded-xl bg-emerald-600/90 px-3 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+              >
+                Subaru SSM
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void runCatalog("pajero")}
+                className="flex-1 rounded-xl border border-slate-600 px-3 py-2.5 text-sm disabled:opacity-40"
+              >
+                Pajero 21
+              </button>
+            </div>
+            {catalog.length > 0 ? (
+              <ul className="mt-3 space-y-1 text-sm">
+                {catalog.map((row) => (
+                  <li
+                    key={`${row.name}-${row.unit}`}
+                    className="flex justify-between gap-2 rounded-md bg-slate-950/80 px-3 py-2"
+                  >
+                    <span>{row.name}</span>
+                    <span className="font-mono text-slate-200">
+                      {row.value} {row.unit}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
-          {catalog.length > 0 ? (
-            <ul className="space-y-1 text-sm">
-              {catalog.map((row) => (
-                <li key={`${row.name}-${row.unit}`} className="flex justify-between gap-2 rounded-md bg-slate-900 px-3 py-2">
-                  <span>{row.name}</span>
-                  <span className="font-mono text-slate-300">
-                    {row.value} {row.unit}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={developer}
-              onChange={(event) => {
-                if (!event.target.checked) {
-                  setDeveloper(false);
-                  return;
-                }
-                const confirmed = window.confirm(
-                  "Режим разработчика разрешает сервисы записи, сброса и программирования. Случайная команда может нарушить работу блока. Включить только до обновления страницы?",
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-slate-300">Поиск блоков на шине CAN</span>
+              {busy ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopScanRef.current = true;
+                  }}
+                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                >
+                  Стоп
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Определяет реальный CAN-адрес ответившего блока (даже на `7DF`). Нажмите на найденный блок, чтобы подставить его `TX / RX`.
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void scan("3E 00", "standard")}
+                className="rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
+              >
+                Сканер 3E 00 (7E0–7DF)
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void scan("10 01", "standard")}
+                className="rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
+              >
+                Сканер 10 01 (сессия)
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void scan("3E 00", "extended")}
+                className="col-span-2 rounded-xl border border-emerald-600/60 bg-emerald-950/30 px-3 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
+              >
+                Расширенный поиск (Двигатель, КПП, ABS, ETACS, SRS)
+              </button>
+            </div>
+            {scanRows.length > 0 ? (
+              <ul className="mt-3 space-y-1.5 text-xs">
+                {scanRows.map((row) => (
+                  <li
+                    key={row.address}
+                    className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2 ${
+                      row.responded
+                        ? "border border-emerald-500/40 bg-emerald-950/30 text-slate-100"
+                        : "bg-slate-950/60 text-slate-400"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="font-mono font-medium">
+                        {row.address} · <span className="font-sans text-slate-300">{row.name}</span>
+                      </div>
+                      <div className="truncate text-slate-400">{row.detail}</div>
+                    </div>
+                    {row.responded ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTx(row.txHex);
+                          setRx(row.rxHex);
+                        }}
+                        className="shrink-0 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white"
+                      >
+                        Выбрать {row.txHex}
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+            <div className="text-xs font-medium text-slate-300">Ручной запрос к блоку</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {KNOWN_MODULE_TARGETS.filter((t) => t.rx != null).map((target) => {
+                const txHex = target.tx.toString(16).toUpperCase();
+                const rxHex = target.rx!.toString(16).toUpperCase();
+                const active = tx.toUpperCase() === txHex && rx.toUpperCase() === rxHex;
+                return (
+                  <button
+                    key={`${txHex}-${rxHex}`}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setTx(txHex);
+                      setRx(rxHex);
+                    }}
+                    className={`rounded-lg border px-2.5 py-1 text-xs ${
+                      active
+                        ? "border-emerald-500 bg-emerald-600/20 text-emerald-200"
+                        : "border-slate-700 text-slate-400"
+                    }`}
+                  >
+                    {txHex} {target.name.split(" ")[0]}
+                  </button>
                 );
-                if (confirmed) setDeveloper(true);
-              }}
-            />
-            Режим разработчика
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Адрес запроса" value={tx} disabled={busy} onChange={setTx} />
-            <Field label="Адрес ответа" value={rx} disabled={busy} onChange={setRx} />
-          </div>
-          <Field label="Запрос hex" value={request} disabled={busy} onChange={setRequest} />
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void sendRequest(request)}
-            className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
-          >
-            Отправить
-          </button>
-          {udsText ? <p className="break-all font-mono text-sm text-slate-200">{udsText}</p> : null}
-          <div className="flex flex-wrap gap-2">
-            {UDS_TEMPLATES.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setRequest(item.hex);
-                  void sendRequest(item.hex);
-                }}
-                className="rounded-lg border border-slate-600 px-3 py-2 text-xs disabled:opacity-40"
-              >
-                {item.label}
-              </button>
-            ))}
-            {customDids.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setRequest(item.hex);
-                  void sendRequest(item.hex);
-                }}
-                className="rounded-lg border border-slate-600 px-3 py-2 text-xs disabled:opacity-40"
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              value={didLabel}
-              placeholder="Название своего DID"
-              onChange={(event) => setDidLabel(event.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-            />
-            <button type="button" onClick={saveDid} className="rounded-lg border border-slate-600 px-3 text-sm">
-              Сохранить
-            </button>
-          </div>
-          <div className="flex gap-2">
+              })}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Field label="Адрес запроса (TX)" value={tx} disabled={busy} onChange={setTx} />
+              <Field label="Адрес ответа (RX)" value={rx} disabled={busy} onChange={setRx} />
+            </div>
+            <div className="mt-2">
+              <Field label="Команда (hex)" value={request} disabled={busy} onChange={setRequest} />
+            </div>
             <button
               type="button"
-              disabled={busy || monitoring}
-              onClick={() => void scan("3E 00")}
-              className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
+              disabled={busy}
+              onClick={() => void sendRequest(request)}
+              className="mt-2 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
             >
-              Сканер 3E 00
+              Отправить
             </button>
-            <button
-              type="button"
-              disabled={busy || monitoring}
-              onClick={() => void scan("10 01")}
-              className="flex-1 rounded-xl border border-slate-600 px-3 py-3 text-sm disabled:opacity-40"
-            >
-              Сканер 10 01
-            </button>
-          </div>
-          {scanRows.length > 0 ? (
-            <ul className="space-y-1 text-xs">
-              {scanRows.map((row) => (
-                <li key={row.address} className="flex justify-between gap-2 rounded-md bg-slate-900 px-3 py-2">
-                  <span className="font-mono">{row.address}</span>
-                  <span className="text-slate-400">{row.detail}</span>
-                </li>
+
+            {udsText ? (
+              <div className="mt-2 rounded-lg bg-slate-950 p-2.5 text-xs">
+                <div className="text-slate-400">Ответ блока:</div>
+                <p className="mt-0.5 break-all font-mono text-sm text-emerald-300">{udsText}</p>
+                {udsRaw && udsRaw !== udsText ? (
+                  <p className="mt-1 break-all font-mono text-[11px] text-slate-500">Сырой ответ: {udsRaw}</p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {UDS_TEMPLATES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setRequest(item.hex);
+                    void sendRequest(item.hex);
+                  }}
+                  className="rounded-lg border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-xs text-slate-200 disabled:opacity-40"
+                >
+                  {item.label} ({item.hex})
+                </button>
               ))}
-            </ul>
-          ) : null}
+              {customDids.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setRequest(item.hex);
+                    void sendRequest(item.hex);
+                  }}
+                  className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-2.5 py-1.5 text-xs text-emerald-200 disabled:opacity-40"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <input
+                value={didLabel}
+                placeholder="Сохранить текущую команду как кнопку…"
+                onChange={(event) => setDidLabel(event.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs"
+              />
+              <button
+                type="button"
+                onClick={saveDid}
+                className="rounded-lg border border-slate-600 px-3 py-2 text-xs"
+              >
+                Сохранить
+              </button>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void scanDids()}
+                className="flex-1 rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
+              >
+                Сканер паспорта блока (DID F180–F1FF)
+              </button>
+            </div>
+            {didProgress ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Проверено DID: {didProgress} · найдено ответов: {didHits.length}
+              </p>
+            ) : null}
+            {didHits.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-xs">
+                {didHits.map((row) => (
+                  <li key={row.did} className="rounded-md bg-slate-950 px-3 py-2">
+                    <span className="font-mono text-emerald-400">22 {row.did}</span>
+                    <div className="break-all font-mono text-slate-200">{row.text}</div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            <label className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={developer}
+                onChange={(event) => {
+                  if (!event.target.checked) {
+                    setDeveloper(false);
+                    return;
+                  }
+                  const confirmed = window.confirm(
+                    "Режим разработчика разрешает сервисы записи, сброса и программирования. Случайная команда может нарушить работу блока. Включить только до обновления страницы?",
+                  );
+                  if (confirmed) setDeveloper(true);
+                }}
+              />
+              Режим разработчика (разрешить команды записи до перезагрузки страницы)
+            </label>
+          </div>
+
           <button
             type="button"
             disabled={udsLog.length === 0}

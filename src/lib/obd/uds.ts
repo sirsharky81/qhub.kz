@@ -1,4 +1,4 @@
-import { extractHexTokens } from "./hex";
+import { extractHexTokens, stripElmMultiline } from "./hex";
 
 export interface UdsTemplate {
   id: string;
@@ -15,9 +15,88 @@ export const UDS_TEMPLATES: UdsTemplate[] = [
   { id: "f190", label: "VIN", hex: "22 F190" },
   { id: "f187", label: "Номер детали", hex: "22 F187" },
   { id: "f18c", label: "Серийный номер", hex: "22 F18C" },
+  { id: "2180", label: "KWP ID (21 80)", hex: "21 80" },
 ];
 
 export const MODULE_SCAN_ADDRESSES = [0x7e0, 0x7e1, 0x7e2, 0x7e3, 0x7e4, 0x7e5, 0x7e6, 0x7e7, 0x7df] as const;
+
+export interface KnownModuleTarget {
+  tx: number;
+  rx?: number;
+  name: string;
+  brand?: "common" | "subaru" | "mitsubishi";
+}
+
+export const KNOWN_MODULE_TARGETS: readonly KnownModuleTarget[] = [
+  { tx: 0x7e0, rx: 0x7e8, name: "Двигатель (ECM)", brand: "common" },
+  { tx: 0x7e1, rx: 0x7e9, name: "Коробка передач (TCM / CVT)", brand: "common" },
+  { tx: 0x7e2, rx: 0x7ea, name: "ABS / VDC / Тормоза", brand: "common" },
+  { tx: 0x7e3, rx: 0x7eb, name: "Полный привод / 4WD", brand: "common" },
+  { tx: 0x7e4, rx: 0x7ec, name: "Кузов / Гибрид / Доп. блок", brand: "common" },
+  { tx: 0x7e5, rx: 0x7ed, name: "Шасси / Электроусилитель", brand: "common" },
+  { tx: 0x7e6, rx: 0x7ee, name: "Климат / Доп. модуль", brand: "common" },
+  { tx: 0x7e7, rx: 0x7ef, name: "Модуль 7E7", brand: "common" },
+  { tx: 0x7b0, rx: 0x7b8, name: "ABS / VDC (Subaru / Mitsubishi)", brand: "subaru" },
+  { tx: 0x780, rx: 0x788, name: "Подушки SRS / Приборка", brand: "subaru" },
+  { tx: 0x7c0, rx: 0x7c8, name: "Приборная панель / Боди", brand: "subaru" },
+  { tx: 0x7a1, rx: 0x7a0, name: "Mitsubishi ETACS (7A1 → 7A0)", brand: "mitsubishi" },
+  { tx: 0x710, rx: 0x718, name: "Mitsubishi ETACS / Кузов (710 → 718)", brand: "mitsubishi" },
+  { tx: 0x7df, name: "Общий широковещательный (7DF)", brand: "common" },
+];
+
+const RX_MODULE_NAMES: Record<number, { name: string; tx: number }> = {
+  0x7e8: { name: "Двигатель (ECM)", tx: 0x7e0 },
+  0x7e9: { name: "Коробка передач (TCM / CVT)", tx: 0x7e1 },
+  0x7ea: { name: "ABS / VDC / Шасси", tx: 0x7e2 },
+  0x7eb: { name: "Полный привод / 4WD", tx: 0x7e3 },
+  0x7ec: { name: "Кузовной / Доп. блок", tx: 0x7e4 },
+  0x7ed: { name: "Рулевое / Шасси", tx: 0x7e5 },
+  0x7ee: { name: "Доп. блок 7EE", tx: 0x7e6 },
+  0x7ef: { name: "Доп. блок 7EF", tx: 0x7e7 },
+  0x7b8: { name: "ABS / VDC", tx: 0x7b0 },
+  0x788: { name: "Подушки SRS / Приборка", tx: 0x780 },
+  0x7c8: { name: "Приборная панель / Боди", tx: 0x7c0 },
+  0x7a0: { name: "Mitsubishi ETACS", tx: 0x7a1 },
+  0x718: { name: "Mitsubishi ETACS / Кузов", tx: 0x710 },
+};
+
+export function describeCanModule(txOrRx: number): { name: string; txHex: string; rxHex: string } {
+  const byRx = RX_MODULE_NAMES[txOrRx];
+  if (byRx) {
+    return {
+      name: byRx.name,
+      txHex: byRx.tx.toString(16).toUpperCase(),
+      rxHex: txOrRx.toString(16).toUpperCase(),
+    };
+  }
+  const known = KNOWN_MODULE_TARGETS.find((item) => item.tx === txOrRx);
+  if (known) {
+    const rx = known.rx ?? (txOrRx === 0x7df ? 0x7e8 : (txOrRx + 8) & 0x7ff);
+    return {
+      name: known.name,
+      txHex: txOrRx.toString(16).toUpperCase(),
+      rxHex: rx.toString(16).toUpperCase(),
+    };
+  }
+  if (txOrRx >= 0x7e8 && txOrRx <= 0x7ef) {
+    const tx = txOrRx - 8;
+    return {
+      name: `Блок ${txOrRx.toString(16).toUpperCase()}`,
+      txHex: tx.toString(16).toUpperCase(),
+      rxHex: txOrRx.toString(16).toUpperCase(),
+    };
+  }
+  const rx = txOrRx === 0x7df ? 0x7e8 : (txOrRx + 8) & 0x7ff;
+  return {
+    name: `Блок ${txOrRx.toString(16).toUpperCase()}`,
+    txHex: txOrRx.toString(16).toUpperCase(),
+    rxHex: rx.toString(16).toUpperCase(),
+  };
+}
+
+export const DID_SCAN_FROM = 0xf180;
+export const DID_SCAN_TO = 0xf1ff;
+export const DID_SCAN_SILENCE = 24;
 
 const READ_SERVICES = new Set([
   0x10, 0x3e, 0x19, 0x21, 0x22, 0x23, 0xa8, 0x09, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0a,
@@ -96,6 +175,7 @@ export function nrcText(nrc: number): string {
 }
 
 export function parseUdsResponse(raw: string, requestSid: number): UdsParsed {
+  const { declaredLength } = stripElmMultiline(raw);
   const bytes = extractHexTokens(raw);
   const positiveSid = (requestSid + 0x40) & 0xff;
   let pending = false;
@@ -109,10 +189,14 @@ export function parseUdsResponse(raw: string, requestSid: number): UdsParsed {
       continue;
     }
     if (bytes[i] === positiveSid) {
+      let payload = bytes.slice(i + 1);
+      if (declaredLength != null && declaredLength > 1 && payload.length >= declaredLength - 1) {
+        payload = payload.slice(0, declaredLength - 1);
+      }
       return {
         kind: "positive",
         sid: requestSid,
-        payload: bytes.slice(i + 1),
+        payload,
         pendingOnly: false,
       };
     }
@@ -138,6 +222,48 @@ export function parseUdsResponse(raw: string, requestSid: number): UdsParsed {
     };
   }
   return { kind: "empty", sid: requestSid, payload: [], pendingOnly: false };
+}
+
+export interface TaggedCanReply {
+  rxAddress: number | null;
+  parsed: UdsParsed;
+}
+
+/**
+ * Parses lines returned while `ATH1 ATS1` is active (e.g. `7E8 02 7E 00` or `7E9 03 7F 3E 11`)
+ * so a functional broadcast on `7DF` or a physical probe reveals the responder's CAN ID.
+ */
+export function parseTaggedUdsReplies(raw: string, requestSid: number): TaggedCanReply[] {
+  const lines = raw
+    .split(/\r|\n/)
+    .map((line) => line.replace(/>/g, "").trim())
+    .filter((line) => line.length > 0 && !/^(NO DATA|STOPPED|OK|SEARCHING|\?)$/i.test(line));
+
+  const out: TaggedCanReply[] = [];
+  for (const line of lines) {
+    const tokens = line.toUpperCase().match(/[0-9A-F]+/g);
+    if (tokens && tokens.length >= 3 && (tokens[0]!.length === 3 || tokens[0]!.length === 8)) {
+      const rxAddress = Number.parseInt(tokens[0]!, 16);
+      const restBytes = tokens
+        .slice(1)
+        .filter((tok) => tok.length === 2)
+        .map((tok) => Number.parseInt(tok, 16));
+      // First byte after CAN ID in ATH1+ATCAF1 is PCI length (02 7E 00)
+      const bodyHex = restBytes.map((b) => b.toString(16).padStart(2, "0")).join(" ");
+      const parsed = parseUdsResponse(bodyHex, requestSid);
+      if (parsed.kind !== "empty") {
+        out.push({ rxAddress, parsed });
+        continue;
+      }
+    }
+  }
+
+  if (out.length > 0) return out;
+  const fallback = parseUdsResponse(raw, requestSid);
+  if (fallback.kind !== "empty") {
+    return [{ rxAddress: null, parsed: fallback }];
+  }
+  return [];
 }
 
 export function formatUdsPayload(payload: number[]): string {

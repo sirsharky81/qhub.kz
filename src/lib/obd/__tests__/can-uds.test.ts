@@ -4,7 +4,14 @@ import { framesToCsv, parseMonitorLine } from "../can-frame";
 import { Elm327Client } from "../elm327";
 import { ObdBleSession } from "../obd-session";
 import { EXTENDED_COMMANDS, decodeExtendedSignals } from "../extended-signals";
-import { assessUdsRequest, exportUdsLog, parseUdsResponse } from "../uds";
+import { ETACS_PROFILES, positiveEtacsPayload, readEtacsCoding } from "../mitsubishi-etacs";
+import {
+  assessUdsRequest,
+  describeCanModule,
+  exportUdsLog,
+  parseTaggedUdsReplies,
+  parseUdsResponse,
+} from "../uds";
 
 class FakeLink implements BleLink {
   readonly info = { id: "fake", name: "fake", transport: "web-bluetooth" as const };
@@ -114,6 +121,63 @@ describe("parseUdsResponse", () => {
     const pending = parseUdsResponse("7F 22 78", 0x22);
     expect(pending.pendingOnly).toBe(true);
     expect(pending.nrcText).toMatch(/приглашение/);
+  });
+
+  it("strips ELM multiline indexes and trims trailing ISO-TP padding", () => {
+    const raw =
+      "014\r0: 62 F1 90 57 41 55\r1: 5A 5A 5A 34 42 30\r2: 4E 30 30 30 30 30 31\r3: 32 33 00 00 00 00 00\r>";
+    const parsed = parseUdsResponse(raw, 0x22);
+    expect(parsed.kind).toBe("positive");
+    expect(parsed.payload.slice(0, 2)).toEqual([0xf1, 0x90]);
+    expect(parsed.payload.length).toBe(0x14 - 1);
+  });
+
+  it("identifies responding ECU CAN IDs from ATH1 ATS1 scan replies", () => {
+    const raw = "7E8 02 7E 00\r7E9 03 7F 3E 11\r7A0 02 7E 00\r>";
+    const replies = parseTaggedUdsReplies(raw, 0x3e);
+    expect(replies.map((item) => item.rxAddress)).toEqual([0x7e8, 0x7e9, 0x7a0]);
+    expect(replies[0]?.parsed.kind).toBe("positive");
+    expect(replies[1]?.parsed.kind).toBe("negative");
+    expect(describeCanModule(0x7e8)?.txHex).toBe("7E0");
+    expect(describeCanModule(0x7a0)?.txHex).toBe("7A1");
+  });
+});
+
+describe("Mitsubishi ETACS .kon / .cuf dump", () => {
+  it("strips ELM multiline framing and trailing padding from 21 30 / 21 31", () => {
+    const raw =
+      "00A\r0: 61 30 11 22 33 44\r1: 55 66 77 88 AA AA AA\r>";
+    const bytes = positiveEtacsPayload(raw, 0x21, [0x30]);
+    expect(Array.from(bytes ?? [])).toEqual([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+  });
+
+  it("reads .kon and .cuf without disabling ISO-TP (ATCAF0)", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    link.writeLine = async (line: string) => {
+      if (line === "2130" || line === "21 30") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "006\r0: 61 30 A1 B2 C3 D4 00\r>";
+        return;
+      }
+      if (line === "2131" || line === "21 31") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "005\r0: 61 31 01 02 03 00 00\r>";
+        return;
+      }
+      if (line === "2180" || line === "21 80") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "61 80 38 36 33 37 41 36 34 35\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+    const elm = new Elm327Client(link);
+    const dump = await readEtacsCoding(elm, ETACS_PROFILES[1]!);
+    expect(link.written).not.toContain("ATCAF0");
+    expect(Array.from(dump.variant)).toEqual([0xa1, 0xb2, 0xc3, 0xd4]);
+    expect(Array.from(dump.custom)).toEqual([0x01, 0x02, 0x03]);
+    expect(dump.partNumber).toBe("8637A645");
   });
 });
 

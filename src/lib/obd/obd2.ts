@@ -1,7 +1,9 @@
-import { extractHexTokens } from "./hex";
+import { describeDtcCode } from "./dtc-descriptions";
+import { extractHexTokens, withoutElmLineNumbers } from "./hex";
 
 export interface ObdDtc {
   code: string;
+  description: string;
   raw: number[];
 }
 
@@ -136,7 +138,8 @@ export function parseDtcsFromElmResponse(raw: string): ObdDtc[] {
     const a = payload[i]!;
     const b = payload[i + 1]!;
     if (a === 0 && b === 0) continue;
-    out.push({ code: dtcFromTwoBytes(a, b), raw: [a, b] });
+    const code = dtcFromTwoBytes(a, b);
+    out.push({ code, description: describeDtcCode(code), raw: [a, b] });
   }
   return out;
 }
@@ -265,22 +268,6 @@ export function parseReadiness(raw: string): ReadinessReport | null {
     ignition: compression ? "дизель" : "бензин",
     lines,
   };
-}
-
-/**
- * ELM327 prints a long CAN reply on several lines:
- * `014` / `0: 49 02 01 34 53 34` / `1: ...` / `2: ...`.
- * The length and the `N:` indexes are not payload. Folded into the hex
- * stream they shift every following nibble, so a VIN gains characters like `%`.
- */
-function withoutElmLineNumbers(raw: string): string {
-  const lines = raw
-    .split(/\r|\n/)
-    .map((line) => line.replace(/>/g, "").trim())
-    .filter((line) => line.length > 0);
-  const indexed = lines.filter((line) => /^[0-9A-Fa-f]+\s*:/.test(line));
-  if (indexed.length < 2) return raw;
-  return indexed.map((line) => line.replace(/^[0-9A-Fa-f]+\s*:\s*/, "")).join(" ");
 }
 
 function mode09Chunks(raw: string, pid: number): number[][] {
