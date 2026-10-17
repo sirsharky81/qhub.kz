@@ -59,16 +59,34 @@ export default function ObdDiagClient() {
   }, [searchParams]);
 
   const scrollingRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const pendingLive = useRef<{ pids: { label: string; value: string; unit: string }[]; note: string | null } | null>(null);
 
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
-    const prevHtml = html.style.overflowX;
-    const prevBody = body.style.overflowX;
-    // overflow-x: hidden on the document makes iOS treat the page as a nested scroller and it shakes.
-    html.style.overflowX = "clip";
-    body.style.overflowX = "clip";
+    const saved: { el: HTMLElement; prop: string; value: string; priority: string }[] = [];
+    const lock = (el: HTMLElement, prop: string, value: string) => {
+      saved.push({
+        el,
+        prop,
+        value: el.style.getPropertyValue(prop),
+        priority: el.style.getPropertyPriority(prop),
+      });
+      el.style.setProperty(prop, value, "important");
+    };
+    // overflow-x:hidden on html/body forces a second scrollport. iOS shakes when that
+    // port and the page both move. Pin the document and scroll only the inner pane.
+    for (const el of [html, body]) {
+      lock(el, "position", "fixed");
+      lock(el, "inset", "0");
+      lock(el, "width", "100%");
+      lock(el, "height", "100%");
+      lock(el, "overflow", "hidden");
+      lock(el, "overscroll-behavior", "none");
+      lock(el, "background-color", "#020617");
+    }
+    const el = scrollRef.current;
     let timer = 0;
     const flush = () => {
       scrollingRef.current = false;
@@ -83,11 +101,13 @@ export default function ObdDiagClient() {
       window.clearTimeout(timer);
       timer = window.setTimeout(flush, 180);
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    el?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
-      html.style.overflowX = prevHtml;
-      body.style.overflowX = prevBody;
-      window.removeEventListener("scroll", onScroll);
+      for (const item of saved.reverse()) {
+        if (item.value) item.el.style.setProperty(item.prop, item.value, item.priority);
+        else item.el.style.removeProperty(item.prop);
+      }
+      el?.removeEventListener("scroll", onScroll);
       window.clearTimeout(timer);
     };
   }, []);
@@ -256,7 +276,20 @@ export default function ObdDiagClient() {
     });
 
   return (
-    <div className="mx-auto min-h-svh max-w-lg touch-pan-y bg-slate-950 px-4 py-6 text-slate-100">
+    <div
+      ref={scrollRef}
+      className="bg-slate-950 text-slate-100"
+      style={{
+        position: "fixed",
+        inset: 0,
+        overflowX: "hidden",
+        overflowY: "auto",
+        overscrollBehaviorY: "contain",
+        WebkitOverflowScrolling: "touch",
+        touchAction: "pan-y",
+      }}
+    >
+    <div className="mx-auto max-w-lg px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <header className="mb-4">
         <p className="text-xs uppercase tracking-wide text-emerald-400/90">QHub</p>
         <h1 className="mt-1 text-2xl font-semibold">OBD Scanner (BLE)</h1>
@@ -411,6 +444,7 @@ export default function ObdDiagClient() {
           </pre>
         </section>
       ) : null}
+    </div>
     </div>
   );
 }
