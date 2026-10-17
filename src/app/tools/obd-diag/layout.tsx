@@ -18,6 +18,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#059669",
+  // Keep the layout height still while the browser chrome shows and hides.
+  interactiveWidget: "resizes-visual",
 };
 
 export default function ObdDiagLayout({ children }: { children: ReactNode }) {
