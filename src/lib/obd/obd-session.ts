@@ -24,6 +24,7 @@ import {
   type UdsParsed,
 } from "./uds";
 import {
+  BOOST_DERIVED_PID,
   LIVE_PIDS,
   formatMode01Request,
   freezeFrameDtc,
@@ -502,18 +503,44 @@ export class ObdBleSession {
     await this.leaveSpecialMode();
     this.requireVehicle();
     const supported = LIVE_PIDS.filter((def) => this.pidIsSupported(def));
+    const wantsBoost = !onlyPids || onlyPids.size === 0 || onlyPids.has("01BOOST");
     const filtered =
       onlyPids && onlyPids.size > 0
-        ? supported.filter((def) => onlyPids.has(def.pid))
+        ? supported.filter(
+            (def) =>
+              onlyPids.has(def.pid) ||
+              (wantsBoost && (def.pid === "010B" || def.pid === "0133")),
+          )
         : supported;
     const visible = filtered.length > 0 ? filtered : supported;
     const refreshSlow = (onlyPids && onlyPids.size > 0) || this.sweep % 4 === 0;
     this.sweep += 1;
     const todo = visible.filter((def) => def.pace === "fast" || refreshSlow);
     await this.fillReadings(todo);
-    return visible.map(
-      (def) => this.readingCache.get(def.pid) ?? { def, value: null, raw: "" },
-    );
+
+    const out = visible
+      .filter((def) => !onlyPids || onlyPids.size === 0 || onlyPids.has(def.pid))
+      .map((def) => this.readingCache.get(def.pid) ?? { def, value: null, raw: "" });
+
+    // Compute live Turbo Boost / Vacuum in bar from MAP (010B) and Barometric Pressure (0133, default 101 kPa)
+    const mapReading = this.readingCache.get("010B");
+    if (wantsBoost && mapReading && mapReading.value != null) {
+      const baro = this.readingCache.get("0133")?.value ?? 101;
+      const boostBar = (mapReading.value - baro) / 100;
+      const boostEntry: LivePidReading = {
+        def: BOOST_DERIVED_PID,
+        value: boostBar,
+        raw: mapReading.raw,
+      };
+      const mapIdx = out.findIndex((item) => item.def.pid === "010B");
+      if (mapIdx >= 0) {
+        out.splice(mapIdx + 1, 0, boostEntry);
+      } else {
+        out.unshift(boostEntry);
+      }
+    }
+
+    return out;
   }
 
   async disconnect(): Promise<void> {
@@ -615,7 +642,7 @@ export class ObdBleSession {
   private async loadSupportBitmaps(first: number[]): Promise<void> {
     this.bitmaps.set(0x00, first.slice(0, 4));
     let base = 0x00;
-    for (const next of [0x20, 0x40, 0x60]) {
+    for (const next of [0x20, 0x40, 0x60, 0x80]) {
       if (pidSupported(this.bitmaps.get(base), next, base) !== true) break;
       try {
         const raw = await this.elm!.obdMode(formatMode01Request([next], 1), 4_000);

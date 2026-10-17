@@ -52,6 +52,16 @@ function gauge(
   return { pid, label, unit, bytes, digits, pace, decode };
 }
 
+export const BOOST_DERIVED_PID: LivePidDefinition = gauge(
+  "01BOOST",
+  "Наддув турбины (Boost)",
+  "бар",
+  0,
+  2,
+  "fast",
+  () => null,
+);
+
 export const LIVE_PIDS: LivePidDefinition[] = [
   gauge("010C", "Обороты", "об/мин", 2, 0, "fast", (b) => {
     const value = word(b);
@@ -75,7 +85,35 @@ export const LIVE_PIDS: LivePidDefinition[] = [
     const value = word(b);
     return value == null ? null : value / 100;
   }),
-  gauge("010B", "Давление во впуске", "кПа", 1, 0, "fast", (b) => (b.length >= 1 ? b[0]! : null)),
+  gauge("010B", "Давление во впуске (MAP)", "кПа", 1, 0, "fast", (b) => (b.length >= 1 ? b[0]! : null)),
+  gauge("0170", "Управление наддувом / Wastegate", "%", 1, 0, "fast", (b) => {
+    // 0170: byte 0 = support mask, bytes 4..5 or last active byte = wastegate duty. Fallback to byte 5 / byte 1.
+    if (b.length >= 6) return (b[5]! * 100) / 255;
+    if (b.length >= 2) return (b[1]! * 100) / 255;
+    return null;
+  }),
+  gauge("016F", "Давление на входе турбины", "кПа", 1, 0, "fast", (b) => {
+    if (b.length >= 2) return b[1]!;
+    if (b.length >= 1) return b[0]!;
+    return null;
+  }),
+  gauge("0174", "Обороты турбины (RPM)", "об/мин", 2, 0, "fast", (b) => {
+    if (b.length >= 3) return (b[1]! * 256 + b[2]!) * 10;
+    const v = word(b);
+    return v == null ? null : v * 10;
+  }),
+  gauge("0175", "Темп. турбины A", "°C", 2, 0, "slow", (b) => {
+    if (b.length >= 3) return (b[1]! * 256 + b[2]!) / 10 - 40;
+    return null;
+  }),
+  gauge("0177", "Темп. интеркулера (CACT)", "°C", 1, 0, "slow", (b) => {
+    if (b.length >= 2) return b[1]! - 40;
+    return b.length >= 1 ? b[0]! - 40 : null;
+  }),
+  gauge("0178", "Темп. выхлопа EGT (B1)", "°C", 2, 0, "slow", (b) => {
+    if (b.length >= 3) return (b[1]! * 256 + b[2]!) / 10 - 40;
+    return null;
+  }),
   gauge("010A", "Давление топлива", "кПа", 1, 0, "slow", (b) => (b.length >= 1 ? b[0]! * 3 : null)),
   gauge("0123", "Давление в рампе", "кПа", 2, 0, "slow", (b) => {
     const value = word(b);
