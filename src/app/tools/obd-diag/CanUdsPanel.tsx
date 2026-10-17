@@ -389,11 +389,12 @@ export default function CanUdsPanel({
     }
   };
 
-  const scanDids = async () => {
+  const scanDids = async (range?: { from: number; to: number; label: string; stopOnSilence?: boolean }) => {
     setBusy(true);
     stopScanRef.current = false;
     setDidHits([]);
-    setDidProgress("0 / 128");
+    const totalCount = range ? range.to - range.from + 1 : 128;
+    setDidProgress(`0 / ${totalCount}`);
     setLocalError(null);
     try {
       await session.scanIdentificationDids(
@@ -405,8 +406,9 @@ export default function CanUdsPanel({
           if (hit) setDidHits((prev) => [...prev, hit]);
         },
         () => stopScanRef.current,
+        range,
       );
-      onLog(`Сканер DID F180–F1FF (${tx})`);
+      onLog(`Сканер DID ${range?.label ?? "F180–F1FF"} (${tx})`);
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Сканер DID остановлен");
     } finally {
@@ -805,14 +807,22 @@ export default function CanUdsPanel({
               </button>
             </div>
 
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
                 disabled={busy || monitoring}
-                onClick={() => void scanDids()}
-                className="flex-1 rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
+                onClick={() => void scanDids({ from: 0xf180, to: 0xf1ff, label: "F180–F1FF", stopOnSilence: true })}
+                className="rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-medium disabled:opacity-40"
               >
                 Сканер паспорта блока (DID F180–F1FF)
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void scanDids({ from: 0x1000, to: 0x104f, label: "1000–104F", stopOnSilence: false })}
+                className="rounded-xl border border-emerald-600/60 bg-emerald-950/30 px-3 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
+              >
+                Поиск датчиков блока (DID 1000–104F)
               </button>
             </div>
             {didProgress ? (

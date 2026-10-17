@@ -13,16 +13,36 @@ export const UDS_TEMPLATES: UdsTemplate[] = [
   { id: "3e00", label: "TesterPresent", hex: "3E 00" },
   { id: "0904", label: "Прошивка CalID (09 04)", hex: "09 04" },
   { id: "03", label: "Ошибки блока (03)", hex: "03" },
-  { id: "a808", label: "Subaru SSM ОЖ/АТФ", hex: "A8 00 00 00 08" },
-  { id: "a83e", label: "Subaru SSM темп. CVT/ATF", hex: "A8 00 00 00 3E" },
   { id: "1902", label: "Коды DTC (UDS)", hex: "19 02 FF" },
   { id: "190a", label: "Поддержанные DTC", hex: "19 0A" },
+  { id: "f18e", label: "Каталожный № Subaru (22 F18E)", hex: "22 F18E" },
+  { id: "f197", label: "Имя системы (22 F197)", hex: "22 F197" },
   { id: "f190", label: "VIN (UDS)", hex: "22 F190" },
-  { id: "f187", label: "Номер детали", hex: "22 F187" },
-  { id: "f18c", label: "Серийный номер", hex: "22 F18C" },
+  { id: "f187", label: "Номер детали (F187)", hex: "22 F187" },
   { id: "2180", label: "KWP ID (21 80)", hex: "21 80" },
   { id: "2101", label: "Mitsubishi 21 01", hex: "21 01" },
 ];
+
+export const DID_LABELS: Record<string, string> = {
+  F180: "Версия загрузчика (Boot SW)",
+  F181: "Идентификатор ПО (App SW)",
+  F182: "Калибровка данных (Data ID)",
+  F186: "Активная диагностическая сессия",
+  F187: "Каталожный номер детали",
+  F188: "Номер ПО ЭБУ",
+  F189: "Версия ПО ЭБУ",
+  F18A: "Код поставщика блока",
+  F18B: "Дата производства блока",
+  F18C: "Серийный номер блока",
+  F18E: "Заводской номер детали (Part Number)",
+  F190: "VIN автомобиля",
+  F191: "Аппаратный номер ЭБУ (HW)",
+  F194: "Версия ПО поставщика",
+  F195: "Версия прошивки",
+  F197: "Название системы / блока",
+  F198: "Код сканера / сервиса (Repair Shop)",
+  F199: "Дата программирования",
+};
 
 export const MODULE_SCAN_ADDRESSES = [0x7e0, 0x7e1, 0x7e2, 0x7e3, 0x7e4, 0x7e5, 0x7e6, 0x7e7, 0x7df] as const;
 
@@ -311,11 +331,24 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
     }
     return `Найдено ошибок (${dtcs.length}): ${dtcs.join("; ")} · [${hex}]`;
   }
+  if (requestSid === 0x09 && payload.length >= 2 && payload[0] === 0x04) {
+    // Mode 09 PID 04: [04, count, ...16-byte ASCII CalID blocks]
+    const rawChars = payload.slice(2);
+    const parts = rawChars
+      .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "\0"))
+      .join("")
+      .split(/\0+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 3);
+    if (parts.length > 0) {
+      return `Калибровка (CalID): ${parts.join(" · ")} (${hex})`;
+    }
+  }
   const text = payload
-    .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : ""))
+    .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
     .join("");
-  const printable = text.replace(/\0/g, "").trim();
-  if (printable.length >= 4 && printable.length >= payload.length / 2) return `${printable} (${hex})`;
+  const printable = text.replace(/\s+/g, " ").trim();
+  if (printable.length >= 4) return `${printable} (${hex})`;
   return hex;
 }
 

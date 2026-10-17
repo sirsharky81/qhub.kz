@@ -10,6 +10,7 @@ import {
   type EtacsCodingDump,
 } from "./mitsubishi-etacs";
 import {
+  DID_LABELS,
   DID_SCAN_FROM,
   DID_SCAN_SILENCE,
   DID_SCAN_TO,
@@ -308,6 +309,7 @@ export class ObdBleSession {
     rx: string,
     onProgress: (done: number, total: number, hit: { did: string; text: string } | null) => void,
     shouldStop: () => boolean,
+    range?: { from: number; to: number; stopOnSilence?: boolean },
   ): Promise<void> {
     const txId = normalizeCanToken(tx, protocol);
     const rxId = rx.trim() ? normalizeCanToken(rx, protocol) : null;
@@ -316,16 +318,26 @@ export class ObdBleSession {
     await this.waitLeave();
     if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед сканером");
     await this.ensureUdsProfile(protocol);
+    const fromDid = range?.from ?? DID_SCAN_FROM;
+    const toDid = range?.to ?? DID_SCAN_TO;
+    const stopOnSilence = range?.stopOnSilence ?? true;
     try {
       await this.elm!.sendCommand("ATST20");
+      // Open extended diagnostic session (10 03) first so 2020+ Subaru/Mitsubishi ECUs unlock live & ID DIDs.
+      await this.udsExchange(
+        Number.parseInt(txId, 16),
+        rxId ? Number.parseInt(rxId, 16) : undefined,
+        "1003",
+        1_200,
+      );
     } catch {
       /* clone keeps the previous timeout */
     }
-    const total = DID_SCAN_TO - DID_SCAN_FROM + 1;
+    const total = toDid - fromDid + 1;
     let done = 0;
     let silence = 0;
     try {
-      for (let did = DID_SCAN_FROM; did <= DID_SCAN_TO; did++) {
+      for (let did = fromDid; did <= toDid; did++) {
         if (shouldStop()) return;
         const request = `22${did.toString(16).padStart(4, "0").toUpperCase()}`;
         let hit: { did: string; text: string } | null = null;
@@ -346,16 +358,19 @@ export class ObdBleSession {
               parsed.payload[1] === (did & 0xff)
                 ? parsed.payload.slice(2)
                 : parsed.payload;
-            hit = { did: request.slice(2), text: formatUdsPayload(body) };
+            const didHex = request.slice(2);
+            const label = DID_LABELS[didHex];
+            const formatted = formatUdsPayload(body, 0x22);
+            hit = { did: label ? `${didHex} · ${label}` : didHex, text: formatted };
           } else if (parsed.kind === "negative") {
             silence = 0;
-          } else if (++silence >= DID_SCAN_SILENCE) {
+          } else if (stopOnSilence && ++silence >= DID_SCAN_SILENCE) {
             throw new Error(`Блок молчит (${silence} подряд без ответа). Проверьте адреса и зажигание.`);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : "";
           if (/молчит/i.test(message)) throw error;
-          if (++silence >= DID_SCAN_SILENCE) {
+          if (stopOnSilence && ++silence >= DID_SCAN_SILENCE) {
             throw new Error(`Блок молчит (${silence} подряд без ответа). Проверьте адреса и зажигание.`);
           }
         }
