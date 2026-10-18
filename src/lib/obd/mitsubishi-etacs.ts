@@ -89,7 +89,7 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   },
   {
     id: "engine-7e0-kwp",
-    label: "Двигатель (ECM 7E0 → 7E8) · KWP 21 (1860D362 Pajero Sport III 4N15 / L200 / Outlander)",
+    label: "Двигатель (ECM 7E0 → 7E8) · KWP 21 (1860D362 Pajero Sport V6 бензин / Outlander / L200)",
     moduleKind: "engine",
     txId: 0x7e0,
     rxId: 0x7e8,
