@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type {
+  ModuleDtcReport,
   ModuleScanItem,
   ObdBleSession,
   SubaruRegionConfigDump,
@@ -35,6 +36,8 @@ import { EXTENDED_COMMANDS, decodeExtendedSignals, type DecodedSignal } from "@/
 const RECORD_LIMIT = 50_000;
 const TAPE_LIMIT = 40;
 
+type CanSubView = "dashboard" | "steering" | "safety" | "dtcs" | "expert" | "monitor";
+
 interface FrameRow {
   id: string;
   dlc: number;
@@ -61,7 +64,7 @@ export default function CanUdsPanel({
   scrollFlushRef?: RefObject<(() => void) | null>;
 }) {
   const [protocol, setProtocol] = useState<CanProtocol>("6");
-  const [view, setView] = useState<"monitor" | "uds">("uds");
+  const [view, setView] = useState<CanSubView>("dashboard");
   const [monitoring, setMonitoring] = useState(false);
   const [rows, setRows] = useState<FrameRow[]>([]);
   const [tape, setTape] = useState<string[]>([]);
@@ -103,11 +106,34 @@ export default function CanUdsPanel({
   const [diffDumpA, setDiffDumpA] = useState<{ name: string; dump: SubaruRegionConfigDump } | null>(null);
   const [diffDumpB, setDiffDumpB] = useState<{ name: string; dump: SubaruRegionConfigDump } | null>(null);
   const [diffRows, setDiffRows] = useState<SubaruDidDiffEntry[] | null>(null);
+
+  // Steering alignment (746 EPS) state
+  const [steeringRunning, setSteeringRunning] = useState(false);
+  const [steeringData, setSteeringData] = useState<{
+    angleDeg: number;
+    rawHex: string;
+    torqueRaw: number | null;
+    loadRaw: number | null;
+    supplyVolts: number | null;
+    ticks: number;
+  } | null>(null);
+
+  // Safety modules (7B0 ABS/VDC/EPB & 780 SRS Airbag) read-only state
+  const [safetyRows, setSafetyRows] = useState<
+    { group: "abs" | "srs"; label: string; value: string }[]
+  >([]);
+
+  // Multi-module DTC scan & safe clear state
+  const [dtcReports, setDtcReports] = useState<ModuleDtcReport[]>([]);
+  const [dtcProgress, setDtcProgress] = useState("");
+  const [dtcBanner, setDtcBanner] = useState<string | null>(null);
+
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const stopScanRef = useRef(false);
   const stopLiveUdsRef = useRef(false);
+  const stopSteeringRef = useRef(false);
   const recordsRef = useRef<CsvRow[]>([]);
   const recordingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
@@ -337,7 +363,7 @@ export default function CanUdsPanel({
       const cleanRaw = result.raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
       const summary =
         result.parsed.kind === "positive"
-          ? formatUdsPayload(result.parsed.payload, result.parsed.sid)
+          ? formatUdsPayload(result.parsed.payload, result.parsed.sid, tx)
           : result.parsed.kind === "negative"
             ? `Отказ блока (7F): ${result.parsed.nrcText ?? ""}`.trim()
             : cleanRaw.slice(0, 180) || "пустой ответ";
@@ -425,20 +451,19 @@ export default function CanUdsPanel({
 
         const sgp7A2Dids: { did: string; label: string }[] = [
           { did: "F197", label: "Блок силовой установки (7A2)" },
-          { did: "1001", label: "7A2 · Датчик 1001" },
-          { did: "1002", label: "7A2 · Датчик 1002" },
-          { did: "1005", label: "7A2 · Датчик 1005" },
-          { did: "103C", label: "7A2 · Датчик 103C" },
-          { did: "103D", label: "7A2 · Датчик 103D" },
-          { did: "10CB", label: "7A2 · Датчик 10CB" },
-          { did: "10CC", label: "7A2 · Датчик 10CC" },
-          { did: "1121", label: "7A2 · Датчик 1121" },
+          { did: "1297", label: "7A2 · Темп. ДВС / масла (1297)" },
+          { did: "1298", label: "7A2 · Темп. впуска (1298)" },
+          { did: "103D", label: "7A2 · Темп. КПП / узла (103D)" },
+          { did: "1001", label: "7A2 · Темп. агрегата 1 (1001)" },
+          { did: "1005", label: "7A2 · Темп. агрегата 2 (1005)" },
+          { did: "10CB", label: "7A2 · Темп. контура A (10CB)" },
+          { did: "10CC", label: "7A2 · Темп. контура B (10CC)" },
           { did: "2021", label: "7A2 · Канал 2021" },
           { did: "2022", label: "7A2 · Канал 2022" },
           { did: "2023", label: "7A2 · Канал 2023" },
           { did: "2024", label: "7A2 · Канал 2024" },
-          { did: "2027", label: "7A2 · Канал 2027" },
-          { did: "101E", label: "7A2 · Таймер зажигания (101E)" },
+          { did: "2027", label: "7A2 · Нагрузка привода (2027)" },
+          { did: "101E", label: "7A2 · Счётчик и таймер зажигания (101E)" },
         ];
         for (const item of sgp7A2Dids) {
           try {
@@ -446,7 +471,7 @@ export default function CanUdsPanel({
             if (res.parsed.kind === "positive") {
               udsRows.push({
                 name: item.label,
-                value: formatUdsPayload(res.parsed.payload, 0x22),
+                value: formatUdsPayload(res.parsed.payload, 0x22, "7A2"),
                 unit: "",
               });
               setCatalog([...udsRows]);
@@ -516,7 +541,7 @@ export default function CanUdsPanel({
             if (res.parsed.kind === "positive") {
               udsRows.push({
                 name: item.label,
-                value: formatUdsPayload(res.parsed.payload, 0x22),
+                value: formatUdsPayload(res.parsed.payload, 0x22, "783"),
                 unit: "",
               });
               setCatalog([...udsRows]);
@@ -758,7 +783,7 @@ export default function CanUdsPanel({
           try {
             const res = await session.sendUds(protocol, tx, rx, `22${did}`, false);
             if (res.parsed.kind === "positive") {
-              const text = formatUdsPayload(res.parsed.payload, res.parsed.sid);
+              const text = formatUdsPayload(res.parsed.payload, res.parsed.sid, tx);
               if (isScrollingRef?.current) continue;
               setLiveUdsRows((prev) => {
                 const existing = prev.find((r) => r.did === did);
@@ -801,6 +826,261 @@ export default function CanUdsPanel({
     stopLiveUdsRef.current = true;
   };
 
+  const startSteeringMonitor = async () => {
+    stopSteeringRef.current = false;
+    setSteeringRunning(true);
+    setBusy(true);
+    setLocalError(null);
+    onLog("Старт мониторинга угла поворота руля (746 → 74E · DID 1041)");
+    try {
+      try {
+        await session.sendUds(protocol, "746", "74E", "10 03", false);
+      } catch {
+        /* ignore */
+      }
+      let ticks = 0;
+      let supplyVolts: number | null = null;
+      let torqueRaw: number | null = null;
+      let loadRaw: number | null = null;
+      while (!stopSteeringRef.current) {
+        ticks += 1;
+        if (ticks % 8 === 0) {
+          try {
+            await session.sendUds(protocol, "746", "74E", "3E 00", false);
+          } catch {
+            /* ignore */
+          }
+        }
+        try {
+          const resAngle = await session.sendUds(protocol, "746", "74E", "22 1041", false);
+          if (resAngle.parsed.kind === "positive" && resAngle.parsed.payload.length >= 4) {
+            const b0 = resAngle.parsed.payload[2]!;
+            const b1 = resAngle.parsed.payload[3]!;
+            const u16 = (b0 << 8) | b1;
+            const s16 = u16 >= 0x8000 ? u16 - 0x10000 : u16;
+            const angleDeg = s16 / 10;
+            const rawHex = `${b0.toString(16).padStart(2, "0").toUpperCase()} ${b1.toString(16).padStart(2, "0").toUpperCase()}`;
+
+            if (ticks === 1 || ticks % 5 === 0) {
+              try {
+                const resTorque = await session.sendUds(protocol, "746", "74E", "22 1006", false);
+                if (resTorque.parsed.kind === "positive" && resTorque.parsed.payload.length >= 4) {
+                  const u = (resTorque.parsed.payload[2]! << 8) | resTorque.parsed.payload[3]!;
+                  torqueRaw = u >= 0x8000 ? u - 0x10000 : u;
+                }
+                const resLoad = await session.sendUds(protocol, "746", "74E", "22 1007", false);
+                if (resLoad.parsed.kind === "positive" && resLoad.parsed.payload.length >= 4) {
+                  const u = (resLoad.parsed.payload[2]! << 8) | resLoad.parsed.payload[3]!;
+                  loadRaw = u >= 0x8000 ? u - 0x10000 : u;
+                }
+                const resV = await session.sendUds(protocol, "746", "74E", "22 101B", false);
+                if (resV.parsed.kind === "positive" && resV.parsed.payload.length >= 4) {
+                  const mv = (resV.parsed.payload[2]! << 8) | resV.parsed.payload[3]!;
+                  supplyVolts = mv / 1000;
+                }
+              } catch {
+                /* ignore auxiliary DIDs */
+              }
+            }
+
+            if (!isScrollingRef?.current) {
+              setSteeringData({
+                angleDeg,
+                rawHex,
+                torqueRaw,
+                loadRaw,
+                supplyVolts,
+                ticks,
+              });
+            }
+          }
+        } catch {
+          /* continue polling */
+        }
+      }
+    } finally {
+      try {
+        await session.sendUds(protocol, "746", "74E", "10 01", false);
+      } catch {
+        /* ignore */
+      }
+      setSteeringRunning(false);
+      setBusy(false);
+      onLog("Мониторинг угла руля остановлен (EPS 746 возвращён в 10 01)");
+    }
+  };
+
+  const stopSteeringMonitor = () => {
+    stopSteeringRef.current = true;
+  };
+
+  const readSafetyModulesOnce = async (targetGroup: "all" | "abs" | "srs" = "all") => {
+    setBusy(true);
+    setLocalError(null);
+    const out: { group: "abs" | "srs"; label: string; value: string }[] = [];
+    setSafetyRows([]);
+    try {
+      if (targetGroup === "all" || targetGroup === "abs") {
+        let opened7B0 = false;
+        try {
+          const r10 = await session.sendUds(protocol, "7B0", "7B8", "10 03", false);
+          if (r10.parsed.kind === "positive") opened7B0 = true;
+        } catch {
+          /* ignore */
+        }
+        const absDids: { did: string; label: string }[] = [
+          { did: "F197", label: "Система тормозов (F197)" },
+          { did: "F18E", label: "Номер блока OEM (F18E)" },
+          { did: "F182", label: "Калибровка Data ID (F182)" },
+          { did: "101B", label: "Напряжение питания ABS (101B)" },
+          { did: "1019", label: "Опорное питание датчиков (1019)" },
+          { did: "1001", label: "Давление в тормозной магистрали (1001)" },
+          { did: "1006", label: "Датчик ускорения G (1006)" },
+          { did: "200D", label: "Усилие затяжки электроручника EPB (200D)" },
+          { did: "2012", label: "Статус актуатора EPB (2012)" },
+          { did: "200A", label: "Счётчик срабатываний EPB (200A)" },
+          { did: "101E", label: "Счётчик запусков и таймер (101E)" },
+        ];
+        for (const item of absDids) {
+          try {
+            const res = await session.sendUds(protocol, "7B0", "7B8", `22 ${item.did}`, false);
+            if (res.parsed.kind === "positive") {
+              out.push({
+                group: "abs",
+                label: item.label,
+                value: formatUdsPayload(res.parsed.payload, 0x22, "7B0"),
+              });
+              setSafetyRows([...out]);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (opened7B0) {
+          try {
+            await session.sendUds(protocol, "7B0", "7B8", "10 01", false);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      if (targetGroup === "all" || targetGroup === "srs") {
+        let opened780 = false;
+        try {
+          const r10 = await session.sendUds(protocol, "780", "788", "10 03", false);
+          if (r10.parsed.kind === "positive") opened780 = true;
+        } catch {
+          /* ignore */
+        }
+        const srsDids: { did: string; label: string }[] = [
+          { did: "F197", label: "Система подушек (F197)" },
+          { did: "F18E", label: "Номер блока OEM (F18E)" },
+          { did: "1022", label: "Код модели SRS (1022)" },
+          { did: "105F", label: "Серийный номер блока SRS (105F)" },
+          { did: "101B", label: "Напряжение питания SRS (101B)" },
+          { did: "1007", label: "Внутренняя температура SRS (1007)" },
+          { did: "1044", label: "Замок ремня водителя (1044)" },
+          { did: "1045", label: "Замок ремня пассажира (1045)" },
+          { did: "1047", label: "Датчик присутствия пассажира (1047)" },
+          { did: "1023", label: "Пиропатрон 1 — водитель (1023)" },
+          { did: "1024", label: "Пиропатрон 2 — пассажир (1024)" },
+          { did: "1026", label: "Пиропатрон 3 — боковой Л (1026)" },
+          { did: "1027", label: "Пиропатрон 4 — боковой П (1027)" },
+          { did: "1028", label: "Пиропатрон 5 — шторка Л (1028)" },
+          { did: "1029", label: "Пиропатрон 6 — шторка П (1029)" },
+          { did: "102C", label: "Пиропатрон 7 — колени (102C)" },
+          { did: "102E", label: "Преднатяжитель ремня 1 (102E)" },
+          { did: "102F", label: "Преднатяжитель ремня 2 (102F)" },
+          { did: "101E", label: "Счётчик запусков и таймер (101E)" },
+        ];
+        for (const item of srsDids) {
+          try {
+            const res = await session.sendUds(protocol, "780", "788", `22 ${item.did}`, false);
+            if (res.parsed.kind === "positive") {
+              out.push({
+                group: "srs",
+                label: item.label,
+                value: formatUdsPayload(res.parsed.payload, 0x22, "780"),
+              });
+              setSafetyRows([...out]);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (opened780) {
+          try {
+            await session.sendUds(protocol, "780", "788", "10 01", false);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      onLog("Чтение блоков безопасности ABS/EPB (7B0) и SRS Airbag (780) завершено (Read-Only)");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Ошибка чтения блоков безопасности");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runAllModuleDtcScan = async () => {
+    setBusy(true);
+    stopScanRef.current = false;
+    setLocalError(null);
+    setDtcBanner(null);
+    setDtcReports([]);
+    setDtcProgress("Опрос ошибок по всем блокам…");
+    try {
+      const list = await session.scanAllModuleDtcs(
+        protocol,
+        (status, partial) => {
+          setDtcProgress(status);
+          setDtcReports(partial);
+        },
+        () => stopScanRef.current,
+      );
+      setDtcReports(list);
+      setDtcProgress("");
+      const totalDtcs = list.reduce((sum, item) => sum + item.dtcs.length, 0);
+      const answered = list.filter((item) => item.responded).length;
+      onLog(`Диагностика DTC по блокам: ответило ${answered} блоков, найдено ошибок: ${totalDtcs}`);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Не удалось опросить ошибки блоков");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSafeClearModuleDtc = async (mod: ModuleDtcReport) => {
+    if (!mod.canSafeClear || mod.safetyCritical) {
+      setLocalError(
+        `Блок ${mod.title} относится к системам безопасности (SRS / ABS / EPS / EyeSight) — сброс заблокирован, разрешено только чтение.`,
+      );
+      return;
+    }
+    const confirmed = window.confirm(
+      `Стереть коды ошибок в блоке «${mod.title}» (${mod.txHex} → ${mod.rxHex})?\n\nЗажигание должно быть включено (ON), двигатель заглушен.`,
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setLocalError(null);
+    setDtcBanner(null);
+    try {
+      const msg = await session.clearModuleDtcsSafe(protocol, mod.txHex, mod.rxHex);
+      setDtcBanner(msg);
+      onLog(msg);
+      // Re-scan to confirm cleared status
+      const updated = await session.scanAllModuleDtcs(protocol);
+      setDtcReports(updated);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Ошибка сброса DTC");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!enabled) {
     return (
       <div className="flex flex-col gap-3">
@@ -819,22 +1099,41 @@ export default function CanUdsPanel({
     );
   }
 
+  const switchCanSubView = (nextView: CanSubView) => {
+    void (async () => {
+      if (monitoring && nextView !== "monitor") {
+        await stopMonitor();
+      }
+      if (steeringRunning && nextView !== "steering") {
+        stopSteeringRef.current = true;
+      }
+      if (liveUdsRunning && nextView !== "expert") {
+        stopLiveUdsRef.current = true;
+      }
+      setView(nextView);
+    })();
+  };
+
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex rounded-xl border border-slate-800 bg-slate-900/50 p-1">
-        <ProtocolButton
-          active={view === "uds"}
-          onClick={() => {
-            void (async () => {
-              if (monitoring) await stopMonitor();
-              setView("uds");
-            })();
-          }}
-        >
-          Запросы к блокам (UDS / SSM / KWP)
+      <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-1.5">
+        <ProtocolButton active={view === "dashboard"} onClick={() => switchCanSubView("dashboard")}>
+          Показатели UDS
         </ProtocolButton>
-        <ProtocolButton active={view === "monitor"} onClick={() => setView("monitor")}>
-          Прослушка шины (ATMA)
+        <ProtocolButton active={view === "steering"} onClick={() => switchCanSubView("steering")}>
+          Угол руля (0°)
+        </ProtocolButton>
+        <ProtocolButton active={view === "safety"} onClick={() => switchCanSubView("safety")}>
+          Подушки / Тормоза
+        </ProtocolButton>
+        <ProtocolButton active={view === "dtcs"} onClick={() => switchCanSubView("dtcs")}>
+          Ошибки блоков
+        </ProtocolButton>
+        <ProtocolButton active={view === "expert"} onClick={() => switchCanSubView("expert")}>
+          Сканер / Дампы
+        </ProtocolButton>
+        <ProtocolButton active={view === "monitor"} onClick={() => switchCanSubView("monitor")}>
+          Сниффер CAN
         </ProtocolButton>
       </div>
 
@@ -857,7 +1156,376 @@ export default function CanUdsPanel({
         <p className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">{localError}</p>
       ) : null}
 
-      {view === "monitor" ? (
+      {view === "dashboard" ? (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-emerald-200">
+                Безопасные CAN / UDS показатели (только чтение Service 22 / A8 / 21)
+              </div>
+              <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+                READ-ONLY
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-300">
+              Сводка полезных рабочих параметров без затрагивания подушек (SRS) и тормозов (ABS): давление в 4 шинах TPMS (`752`), температуры ДВС/КПП и каналы силовой установки (`7A2` / `7E1`), напряжение бортсети и датчики обоих полубаков (`783`), а также параметры ДВС (`7E0`).
+            </p>
+            <div className="mt-2.5 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void runCatalog("subaru-tcm")}
+                className="rounded-xl bg-emerald-600 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Subaru SGP + Шины
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void runCatalog("subaru")}
+                className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
+              >
+                Subaru ДВС (7E0)
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void runCatalog("pajero")}
+                className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
+              >
+                Pajero 21 (7E0)
+              </button>
+            </div>
+            {catalog.length > 0 ? (
+              <ul className="mt-3 space-y-1.5 text-sm">
+                {catalog.map((row) => (
+                  <li
+                    key={`${row.name}-${row.unit}`}
+                    className="flex flex-col gap-0.5 rounded-lg border border-slate-800/80 bg-slate-950/90 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <span className="text-xs font-medium text-slate-300">{row.name}</span>
+                    <span className="font-mono text-xs text-emerald-300 sm:text-right">
+                      {row.value} {row.unit}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2.5 text-xs text-slate-400">
+                Нажмите <strong>«Subaru SGP + Шины»</strong> для мгновенного чтения давления шин, температур агрегатов, уровня обоих полубаков и калибровок КПП.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : view === "steering" ? (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-semibold text-emerald-300">
+                  Датчик угла поворота руля (SAS / EPS `746 → 74E` · DID `1041`)
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  Для точного выставления руля строго в <strong>0.0°</strong> на стенде развал-схождения (точность 0.1°). Только чтение (`22 1041`).
+                </p>
+              </div>
+              <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+                0.1° SAS
+              </span>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950 p-4 text-center">
+              {steeringData ? (
+                <>
+                  <div className="text-[11px] uppercase tracking-wider text-slate-400">
+                    Текущее положение рулевого колеса
+                  </div>
+                  <div
+                    className={`mt-1 font-mono text-4xl font-bold tabular-nums ${
+                      Math.abs(steeringData.angleDeg) <= 0.5
+                        ? "text-emerald-400"
+                        : Math.abs(steeringData.angleDeg) <= 2.5
+                          ? "text-amber-300"
+                          : "text-rose-400"
+                    }`}
+                  >
+                    {steeringData.angleDeg > 0 ? `+${steeringData.angleDeg.toFixed(1)}` : steeringData.angleDeg.toFixed(1)}°
+                  </div>
+                  <div className="mt-1 text-xs font-medium">
+                    {Math.abs(steeringData.angleDeg) <= 0.3 ? (
+                      <span className="text-emerald-400">РУЛЬ СТОИТ РОВНО ПО ЦЕНТРУ (±0.3°)</span>
+                    ) : steeringData.angleDeg < 0 ? (
+                      <span className="text-amber-300">
+                        Повёрнут ВПРАВО на {Math.abs(steeringData.angleDeg).toFixed(1)}° — поверните чуть влево к 0.0°
+                      </span>
+                    ) : (
+                      <span className="text-amber-300">
+                        Повёрнут ВЛЕВО на {steeringData.angleDeg.toFixed(1)}° — поверните чуть вправо к 0.0°
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Visual alignment bar (-30° .. 0° .. +30°) */}
+                  <div className="mt-3">
+                    <div className="flex justify-between font-mono text-[10px] text-slate-500">
+                      <span>Влево +15°</span>
+                      <span className="text-emerald-400">0.0° Центр</span>
+                      <span>Вправо -15°</span>
+                    </div>
+                    <div className="relative mt-1 h-3 w-full overflow-hidden rounded-full bg-slate-800">
+                      <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-emerald-400/80" />
+                      <div
+                        className={`absolute top-0.5 h-2 w-3 -translate-x-1/2 rounded-full transition-all ${
+                          Math.abs(steeringData.angleDeg) <= 0.5 ? "bg-emerald-400" : "bg-amber-400"
+                        }`}
+                        style={{
+                          left: `${Math.max(4, Math.min(96, 50 - (steeringData.angleDeg / 15) * 45))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-800/80 pt-2.5 text-left font-mono text-[11px]">
+                    <div>
+                      <div className="font-sans text-[10px] text-slate-500">Сырой код (1041)</div>
+                      <div className="text-slate-200">{steeringData.rawHex}</div>
+                    </div>
+                    <div>
+                      <div className="font-sans text-[10px] text-slate-500">Момент на валу (1006)</div>
+                      <div className="text-slate-200">
+                        {steeringData.torqueRaw != null ? steeringData.torqueRaw : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-sans text-[10px] text-slate-500">Питание EPS (101B)</div>
+                      <div className="text-slate-200">
+                        {steeringData.supplyVolts != null ? `${steeringData.supplyVolts.toFixed(2)} В` : "—"}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="py-4 text-xs text-slate-400">
+                  Нажмите кнопку ниже, чтобы запустить живой поток датчика угла руля (`746 · 22 1041`).
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              {!steeringRunning ? (
+                <button
+                  type="button"
+                  disabled={busy || monitoring}
+                  onClick={() => void startSteeringMonitor()}
+                  className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Запустить живой уровень руля (0.0°)
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopSteeringMonitor}
+                  className="flex-1 rounded-xl bg-amber-600 px-4 py-3 text-xs font-semibold text-white"
+                >
+                  Остановить опрос руля (и закрыть сессию 10 01)
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : view === "safety" ? (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-xl border border-amber-500/40 bg-amber-950/15 p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-amber-200">
+                Системы безопасности: Тормоза ABS / VDC / EPB (`7B0`) и Подушки SRS Airbag (`780`)
+              </span>
+              <span className="shrink-0 rounded border border-amber-400/50 bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-200">
+                STRICT READ-ONLY
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-300">
+              Эти блоки вынесены отдельно. Разрешено <strong>только чтение паспорта и состояния датчиков (`Service 22`)</strong> с обязательным возвратом в штатную сессию (`10 01`). Любые команды сброса, адаптации или записи для `7B0` и `780` аппаратно заблокированы.
+            </p>
+            <div className="mt-2.5 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void readSafetyModulesOnce("all")}
+                className="rounded-xl bg-amber-600 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Опросить оба блока
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void readSafetyModulesOnce("abs")}
+                className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
+              >
+                Тормоза ABS / EPB (7B0)
+              </button>
+              <button
+                type="button"
+                disabled={busy || monitoring}
+                onClick={() => void readSafetyModulesOnce("srs")}
+                className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
+              >
+                Подушки SRS (780)
+              </button>
+            </div>
+
+            {safetyRows.length > 0 ? (
+              <div className="mt-3 space-y-3">
+                {(["abs", "srs"] as const).map((grp) => {
+                  const items = safetyRows.filter((r) => r.group === grp);
+                  if (items.length === 0) return null;
+                  return (
+                    <div key={grp} className="rounded-lg border border-slate-800 bg-slate-950/90 p-2.5">
+                      <div className="text-xs font-semibold text-amber-300">
+                        {grp === "abs"
+                          ? "Тормозная система ABS / VDC / Электроручник EPB (7B0 → 7B8)"
+                          : "Подушки безопасности и преднатяжители SRS Airbag (780 → 788)"}
+                      </div>
+                      <ul className="mt-2 space-y-1 text-xs">
+                        {items.map((item) => (
+                          <li
+                            key={`${grp}-${item.label}`}
+                            className="flex flex-col gap-0.5 border-t border-slate-800/80 pt-1.5 sm:flex-row sm:justify-between"
+                          >
+                            <span className="text-slate-400">{item.label}</span>
+                            <span className="font-mono text-slate-100 sm:text-right">{item.value}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : view === "dtcs" ? (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-emerald-300">
+                Диагностика кодов ошибок (DTC) по всем блокам автомобиля
+              </span>
+              {busy && dtcProgress ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopScanRef.current = true;
+                  }}
+                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                >
+                  Стоп
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              Опрашивает все 11 блоков (`UDS 19 02 FF` и `OBD Mode 03`). Для <strong>обычных блоков</strong> (ДВС `7E0`, КПП `7E1`, Силовая `7A2`, Приборка `783`, Кузов/Шины `752`, Климат `7C4`, Сонары `786`) доступен безопасный сброс ошибок. Для <strong>блоков безопасности</strong> (Подушки `780`, Тормоза `7B0`, Руль `746`, Камера EyeSight `787`) разрешено <strong>только чтение</strong> без риска сбить калибровки.
+            </p>
+
+            <button
+              type="button"
+              disabled={busy || monitoring}
+              onClick={() => void runAllModuleDtcScan()}
+              className="mt-2.5 w-full rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
+            >
+              Проверить ошибки во всех блоках (11 ЭБУ)
+            </button>
+
+            {dtcProgress ? <p className="mt-2 text-xs text-emerald-300">{dtcProgress}</p> : null}
+            {dtcBanner ? (
+              <p className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-2.5 text-xs text-emerald-200">
+                {dtcBanner}
+              </p>
+            ) : null}
+
+            {dtcReports.length > 0 ? (
+              <div className="mt-3 space-y-2 text-xs">
+                {dtcReports.map((mod) => (
+                  <div
+                    key={mod.txHex}
+                    className={`rounded-lg border p-2.5 ${
+                      !mod.responded
+                        ? "border-slate-800 bg-slate-950/40 text-slate-500"
+                        : mod.dtcs.length > 0
+                          ? "border-amber-500/60 bg-amber-950/20 text-slate-100"
+                          : "border-emerald-500/30 bg-slate-950/80 text-slate-100"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-semibold text-emerald-300">{mod.title}</span>
+                          {mod.safetyCritical ? (
+                            <span className="rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200">
+                              Безопасность · Только чтение
+                            </span>
+                          ) : (
+                            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                              Сброс разрешён
+                            </span>
+                          )}
+                        </div>
+                        {mod.systemName || mod.partNumber ? (
+                          <div className="mt-0.5 text-[11px] text-slate-400">
+                            {[mod.systemName, mod.partNumber ? `OEM ${mod.partNumber}` : null]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        ) : null}
+                      </div>
+                      <span
+                        className={`shrink-0 font-mono text-[11px] font-semibold ${
+                          !mod.responded
+                            ? "text-slate-500"
+                            : mod.dtcs.length === 0
+                              ? "text-emerald-400"
+                              : "text-amber-300"
+                        }`}
+                      >
+                        {mod.rawStatus}
+                      </span>
+                    </div>
+
+                    {mod.dtcs.length > 0 ? (
+                      <ul className="mt-2 space-y-1 border-t border-slate-800 pt-2">
+                        {mod.dtcs.map((d) => (
+                          <li key={`${mod.txHex}-${d.code}`} className="rounded bg-slate-900/90 px-2.5 py-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono font-semibold text-amber-300">{d.code}</span>
+                              <span className="text-[10px] text-slate-400">
+                                {d.active ? "Активна / подтверждена" : "В памяти (история)"}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-200">{d.description}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+
+                    {mod.responded && mod.canSafeClear && !mod.safetyCritical ? (
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void handleSafeClearModuleDtc(mod)}
+                          className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-[11px] text-slate-200 hover:border-amber-500/50 hover:text-amber-200 disabled:opacity-40"
+                        >
+                          Стереть ошибки в блоке {mod.txHex}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : view === "monitor" ? (
         <>
           <p className="text-xs text-slate-400">
             Пассивная прослушка шины (`ATMA`). На машинах с межсетевым шлюзом (Gateway) в разъёме OBD-II тишина, пока не идёт опрос. Для чтения параметров и блоков используйте вкладку «Запросы к блокам».

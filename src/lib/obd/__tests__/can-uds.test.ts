@@ -13,7 +13,9 @@ import {
   exportUdsLog,
   formatUdsPayload,
   parseTaggedUdsReplies,
+  parseUdsDtcs1902,
   parseUdsResponse,
+  resolveDidLabel,
   summarizeNumericUdsBytes,
 } from "../uds";
 
@@ -314,4 +316,35 @@ describe("sendUds gate", () => {
     expect(diffs[0]?.beforeHex).toBe("FF");
     expect(diffs[0]?.afterHex).toBe("00");
   });
+
+  it("resolves module-scoped DID labels, steering angle on 746, and blocks DTC clearing on safety modules", async () => {
+    expect(resolveDidLabel("1041", "746")).toContain("Угол поворота рулевого колеса");
+    expect(resolveDidLabel("1041", "783")).toContain("Датчик уровня топлива");
+    expect(resolveDidLabel("1042", "7B0")).toContain("Клапаны / статус тормозного контура");
+
+    // 746 DID 1041: 0x0019 = +2.5°, 0xFFE2 = -3.0°, 0x0000 = 0.0°
+    expect(formatUdsPayload([0x10, 0x41, 0x00, 0x19], 0x22, "746")).toContain("+2.5°");
+    expect(formatUdsPayload([0x10, 0x41, 0xff, 0xe2], 0x22, "746")).toContain("-3.0°");
+    expect(formatUdsPayload([0x10, 0x41, 0x00, 0x00], 0x22, "746")).toContain("0.0°");
+
+    // 752 DID 1021: 0xA4 = 2.26 bar (32.8 PSI)
+    expect(formatUdsPayload([0x10, 0x21, 0xa4], 0x22, "752")).toContain("2.26 бар");
+
+    // 783 DID 1041: 0x52 (82/255 = 32%)
+    expect(formatUdsPayload([0x10, 0x41, 0x52], 0x22, "783")).toContain("32%");
+
+    // UDS 19 02 DTC payload: [0x02, 0xFF, 0x01, 0x71, 0x00, 0x2F] -> P0171
+    const dtcs = parseUdsDtcs1902([0x02, 0xff, 0x01, 0x71, 0x00, 0x2f]);
+    expect(dtcs).toHaveLength(1);
+    expect(dtcs[0]?.code).toBe("P0171");
+    expect(dtcs[0]?.statusByte).toBe(0x2f);
+    expect(dtcs[0]?.active).toBe(true);
+
+    // Safety modules (SRS 780, ABS/VDC 7B0, EPS 746, EyeSight 787) must refuse DTC clearing
+    const session = new ObdBleSession();
+    for (const blockedTx of ["780", "7B0", "746", "787"]) {
+      await expect(session.clearModuleDtcsSafe("6", blockedTx, "788")).rejects.toThrow(/заблокирован/i);
+    }
+  });
 });
+
