@@ -376,34 +376,7 @@ export default function CanUdsPanel({
       setRx("7E8");
     }
     try {
-      let ssmSuccessCount = 0;
-      for (const command of EXTENDED_COMMANDS.filter((item) => item.group === group)) {
-        try {
-          const result = await session.sendUds("6", command.tx, command.rx, command.hex, false);
-          if (result.parsed.kind === "positive") {
-            ssmSuccessCount += 1;
-            rows.push(...decodeExtendedSignals(command, result.parsed.payload));
-          } else {
-            const raw = result.raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
-            rows.push({
-              name: command.label,
-              value: result.parsed.nrcText ?? (raw ? raw.slice(0, 60) : "нет ответа"),
-              unit: "",
-            });
-          }
-        } catch (error) {
-          rows.push({
-            name: command.label,
-            value: error instanceof Error ? error.message : "ошибка",
-            unit: "",
-          });
-        }
-        setCatalog([...rows]);
-      }
-
-      // On 6th-gen Subaru SGP (Outback BT / Legacy BW 2020+), legacy SSM A8 is disabled on TCM (7E1).
-      // Automatically switch to UDS (10 03 + 09 04 + 22 bitmaps 1000/1020/1100/2100/F18E/F197) and read all supported CVT DIDs!
-      if (group === "subaru-tcm" && ssmSuccessCount === 0) {
+      if (group === "subaru-tcm") {
         const udsRows: DecodedSignal[] = [];
         try {
           const res09 = await session.sendUds("6", "7E1", "7E9", "09 04", false);
@@ -490,18 +463,39 @@ export default function CanUdsPanel({
           }
         }
 
-        if (udsRows.length > 0) {
-          setCatalog(udsRows);
-        } else {
-          setCatalog([
-            ...rows,
-            {
-              name: "Подсказка для Subaru SGP (2020+)",
-              value:
-                "На SGP старый протокол SSM (A8) в TCM 7E1 отключён. Нажмите «Полное чтение по битовым картам» ниже или «Поиск датчиков 1000–107F» для 7E1.",
+        setCatalog(
+          udsRows.length > 0
+            ? udsRows
+            : [
+                {
+                  name: "Subaru КПП (7E1)",
+                  value: "Нет ответа от 7E1 — проверьте зажигание ON",
+                  unit: "",
+                },
+              ],
+        );
+      } else {
+        for (const command of EXTENDED_COMMANDS.filter((item) => item.group === group)) {
+          try {
+            const result = await session.sendUds("6", command.tx, command.rx, command.hex, false);
+            if (result.parsed.kind === "positive") {
+              rows.push(...decodeExtendedSignals(command, result.parsed.payload));
+            } else {
+              const raw = result.raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
+              rows.push({
+                name: command.label,
+                value: result.parsed.nrcText ?? (raw ? raw.slice(0, 60) : "нет ответа"),
+                unit: "",
+              });
+            }
+          } catch (error) {
+            rows.push({
+              name: command.label,
+              value: error instanceof Error ? error.message : "ошибка",
               unit: "",
-            },
-          ]);
+            });
+          }
+          setCatalog([...rows]);
         }
       }
 
@@ -882,7 +876,7 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
             <div className="text-xs font-medium text-slate-300">Заводские таблицы (1 нажатие)</div>
             <p className="mt-1 text-xs text-slate-500">
-              Subaru ДВС (`7E0` SSM `A8`), Subaru КПП (`7E1` SSM `A8` + автопереход на UDS `22` / `09 04` для 6-го поколения SGP). Pajero Sport — таблицы `21 01–04` (`7E0`).
+              Subaru ДВС (`7E0` SSM `A8`), Subaru КПП SGP (`7E1` UDS `22` / `09 04`), Pajero Sport (`7E0` `21 01–04`).
             </p>
             <div className="mt-2 grid grid-cols-3 gap-2">
               <button
