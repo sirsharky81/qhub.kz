@@ -279,12 +279,15 @@ export default function ObdDiagClient() {
       setDtcChecked(true);
     });
 
-  const readEtacs = () =>
-    run("Чтение кодировки ETACS (.kon / .cuf)", async () => {
-      const dump = await downloadMitsubishiEtacsCoding(sessionRef.current, profileId);
+  const readEtacs = (overrideProfileId?: string) =>
+    run("Чтение кодировки Mitsubishi (.kon / .cuf)", async () => {
+      const targetId = overrideProfileId ?? profileId;
+      if (overrideProfileId) setProfileId(overrideProfileId);
+      const dump = await downloadMitsubishiEtacsCoding(sessionRef.current, targetId);
       setEtacsDump(dump);
+      const unitTag = dump.moduleKind === "engine" ? "ДВС (ECM)" : "ETACS";
       pushLog(
-        `ETACS ${dump.txHex}→${dump.rxHex}: variant ${dump.variant.length} байт, custom ${dump.custom.length} байт${
+        `${unitTag} ${dump.txHex}→${dump.rxHex}: variant ${dump.variant.length} байт, custom ${dump.custom.length} байт${
           dump.partNumber ? `, блок ${dump.partNumber}` : ""
         }`,
       );
@@ -293,7 +296,10 @@ export default function ObdDiagClient() {
   const saveEtacsFile = async (kind: "kon" | "cuf" | "json") => {
     if (!etacsDump) return;
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    const prefix = etacsDump.partNumber ? `etacs_${etacsDump.partNumber}_${stamp}` : `etacs_${stamp}`;
+    const moduleTag = etacsDump.moduleKind === "engine" ? "engine" : "etacs";
+    const prefix = etacsDump.partNumber
+      ? `${moduleTag}_${etacsDump.partNumber}_${stamp}`
+      : `${moduleTag}_${stamp}`;
     const names = etacsDownloadNames(prefix);
     if (kind === "kon") {
       await saveBlobToDevice(
@@ -563,14 +569,33 @@ export default function ObdDiagClient() {
           <section className="flex flex-col gap-3">
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
               <div className="text-xs font-medium text-slate-200">
-                Выгрузка кодировки Mitsubishi ETACS (`.kon` и `.cuf`)
+                Выгрузка кодировки Mitsubishi ETACS и ДВС (`.kon` и `.cuf`)
               </div>
               <p className="mt-1 text-xs text-slate-400">
-                Совместимо с MMCodingWriter и MUT Coding. Читает Variant Coding (`LID 30`) и Custom Coding (`LID 31`) без удаления номеров строк и без обрезки длинных ISO-TP кадров. Зажигание должно быть в положении ON.
+                Совместимо с MMCodingWriter и MUT Coding. Читает Variant Coding (`LID 30 / 32 / 42` → `.kon`) из кузовного блока ETACS (`8637xxxx`) и ЭБУ двигателя (`1860xxxx`, `7E0 → 7E8`), а также Custom Coding (`LID 31` → `.cuf`). Зажигание должно быть в положении ON (двигатель заглушен).
               </p>
 
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={busy || phase === "idle"}
+                  onClick={() => readEtacs("auto")}
+                  className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Считать ETACS (.kon + .cuf)
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || phase === "idle"}
+                  onClick={() => readEtacs("engine-auto")}
+                  className="rounded-xl bg-sky-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Считать ДВС 7E0 (.kon)
+                </button>
+              </div>
+
               <label className="mt-3 block text-xs text-slate-400">
-                Профиль адресации CAN ETACS
+                Ручной выбор профиля CAN (ETACS / Двигатель)
                 <select
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
                   value={profileId}
@@ -585,9 +610,9 @@ export default function ObdDiagClient() {
                 </select>
               </label>
 
-              <div className="mt-3">
-                <ActionButton disabled={busy || phase === "idle"} onClick={readEtacs}>
-                  Считать кодировку из блока ETACS
+              <div className="mt-2.5">
+                <ActionButton disabled={busy || phase === "idle"} onClick={() => readEtacs()}>
+                  Считать по выбранному профилю
                 </ActionButton>
               </div>
             </div>
