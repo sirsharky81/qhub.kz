@@ -24,6 +24,7 @@ import {
 } from "@/lib/obd/mitsubishi-etacs-download";
 import { etacsDownloadNames, type EtacsCodingDump } from "@/lib/obd/mitsubishi-etacs";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
+import { useIosSingleScrollPane } from "@/hooks/useIosSingleScrollPane";
 import CanUdsPanel from "./CanUdsPanel";
 
 type ToolTab = "obd" | "mitsubishi" | "can";
@@ -86,59 +87,25 @@ export default function ObdDiagClient() {
     pinnedRef.current = onlyPinned && pinnedPids.length > 0 ? new Set(pinnedPids) : new Set();
   }, [onlyPinned, pinnedPids]);
 
-  const scrollingRef = useRef(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollRef, scrollingRef, onScrollEndRef } = useIosSingleScrollPane();
   const pendingLive = useRef<{ pids: LiveTile[]; note: string | null } | null>(null);
+  const canUdsFlushRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
-    const saved: { el: HTMLElement; prop: string; value: string; priority: string }[] = [];
-    const lock = (el: HTMLElement, prop: string, value: string) => {
-      saved.push({
-        el,
-        prop,
-        value: el.style.getPropertyValue(prop),
-        priority: el.style.getPropertyPriority(prop),
-      });
-      el.style.setProperty(prop, value, "important");
-    };
-    // overflow-x:hidden on html/body forces a second scrollport. iOS shakes when that
-    // port and the page both move. Pin the document and scroll only the inner pane.
-    for (const el of [html, body]) {
-      lock(el, "position", "fixed");
-      lock(el, "inset", "0");
-      lock(el, "width", "100%");
-      lock(el, "height", "100%");
-      lock(el, "overflow", "hidden");
-      lock(el, "overscroll-behavior", "none");
-      lock(el, "background-color", "#020617");
-    }
-    const el = scrollRef.current;
-    let timer = 0;
-    const flush = () => {
-      scrollingRef.current = false;
+    const flushLive = () => {
       const pending = pendingLive.current;
       pendingLive.current = null;
-      if (!pending) return;
-      setPids(pending.pids);
-      setPidNote(pending.note);
-    };
-    const onScroll = () => {
-      scrollingRef.current = true;
-      window.clearTimeout(timer);
-      timer = window.setTimeout(flush, 180);
-    };
-    el?.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      for (const item of saved.reverse()) {
-        if (item.value) item.el.style.setProperty(item.prop, item.value, item.priority);
-        else item.el.style.removeProperty(item.prop);
+      if (pending) {
+        setPids(pending.pids);
+        setPidNote(pending.note);
       }
-      el?.removeEventListener("scroll", onScroll);
-      window.clearTimeout(timer);
+      canUdsFlushRef.current?.();
     };
-  }, []);
+    onScrollEndRef.current = flushLive;
+    return () => {
+      if (onScrollEndRef.current === flushLive) onScrollEndRef.current = null;
+    };
+  }, [onScrollEndRef]);
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -391,9 +358,9 @@ export default function ObdDiagClient() {
       style={{
         position: "fixed",
         inset: 0,
-        overflowX: "hidden",
+        overflowX: "clip",
         overflowY: "auto",
-        overscrollBehaviorY: "contain",
+        overscrollBehavior: "none",
         WebkitOverflowScrolling: "touch",
         touchAction: "pan-y",
       }}
@@ -679,13 +646,15 @@ export default function ObdDiagClient() {
             enabled={phase !== "idle"}
             linkLostTick={linkLostTick}
             onLog={pushLog}
+            isScrollingRef={scrollingRef}
+            scrollFlushRef={canUdsFlushRef}
           />
         )}
 
         {log.length > 0 ? (
           <section className="mt-5">
             <h2 className="text-xs font-medium text-slate-400">Журнал обмена</h2>
-            <pre className="mt-1.5 max-h-40 overflow-auto rounded-md bg-black/40 p-2 text-xs text-slate-400">
+            <pre className="mt-1.5 max-h-40 overflow-y-auto overflow-x-clip overscroll-y-contain rounded-md bg-black/40 p-2 text-xs text-slate-400">
               {log.join("\n")}
             </pre>
           </section>
