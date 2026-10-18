@@ -9,6 +9,7 @@ import {
   assessUdsRequest,
   decodeUdsDidSupportBitmap,
   describeCanModule,
+  diffSubaruDumps,
   exportUdsLog,
   formatUdsPayload,
   parseTaggedUdsReplies,
@@ -265,5 +266,52 @@ describe("sendUds gate", () => {
     const bitmapText = formatUdsPayload([0x10, 0x00, 0x06, 0x00, 0x00, 0xf5], 0x22);
     expect(bitmapText).toContain("1019");
     expect(bitmapText).toContain("1020");
+
+    // ATH1 multi-frame ISO-TP response on 74E (Power Steering System)
+    const ath1EpsRaw = [
+      "74E 10 18 62 F1 97 50 6F 77",
+      "74E 21 65 72 20 53 74 65 65",
+      "74E 22 72 69 6E 67 20 53 79",
+      "74E 23 73 74 65 6D 20 20 20",
+    ].join("\r");
+    const epsParsed = parseUdsResponse(ath1EpsRaw, 0x22);
+    expect(epsParsed.kind).toBe("positive");
+    expect(formatUdsPayload(epsParsed.payload, 0x22)).toContain("Power Steering System");
+
+    // 101B voltage (14.40 V) and 101E ignition timer
+    expect(formatUdsPayload([0x10, 0x1b, 0x38, 0x45], 0x22)).toContain("14.40 В (14405 мВ)");
+    expect(formatUdsPayload([0x10, 0x1e, 0x0b, 0x47, 0x00, 0x00, 0x05, 0xab], 0x22)).toContain("145.1 с");
+
+    // Diff between two Subaru SGP JSON dumps
+    const diffs = diffSubaruDumps(
+      {
+        modules: [
+          {
+            txHex: "752",
+            title: "BIU / TPMS",
+            dids: [
+              { did: "1021", label: "DID 1021", hex: "A4", decoded: "A4" },
+              { did: "110B", label: "DID 110B", hex: "FF", decoded: "FF" },
+            ],
+          },
+        ],
+      },
+      {
+        modules: [
+          {
+            txHex: "752",
+            title: "BIU / TPMS",
+            dids: [
+              { did: "1021", label: "DID 1021", hex: "A4", decoded: "A4" },
+              { did: "110B", label: "DID 110B", hex: "00", decoded: "00" },
+            ],
+          },
+        ],
+      },
+    );
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]?.did).toBe("110B");
+    expect(diffs[0]?.beforeHex).toBe("FF");
+    expect(diffs[0]?.afterHex).toBe("00");
   });
 });
