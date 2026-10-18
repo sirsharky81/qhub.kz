@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useObdScroll } from "./ObdScrollContext";
 import type {
   ModuleDtcReport,
   ModuleScanItem,
@@ -53,16 +54,14 @@ export default function CanUdsPanel({
   enabled,
   linkLostTick,
   onLog,
-  isScrollingRef,
-  scrollFlushRef,
 }: {
   session: ObdBleSession;
   enabled: boolean;
   linkLostTick: number;
   onLog: (line: string) => void;
-  isScrollingRef?: RefObject<boolean>;
-  scrollFlushRef?: RefObject<(() => void) | null>;
 }) {
+  const obdScroll = useObdScroll();
+  const deferUi = obdScroll?.deferUiUpdate ?? ((apply: () => void) => apply());
   const [protocol, setProtocol] = useState<CanProtocol>("6");
   const [view, setView] = useState<CanSubView>("dashboard");
   const [monitoring, setMonitoring] = useState(false);
@@ -139,22 +138,6 @@ export default function CanUdsPanel({
   const queueRef = useRef<string[]>([]);
   const rowsRef = useRef<FrameRow[]>([]);
   const tapeRef = useRef<string[]>([]);
-  const pendingUiRef = useRef(false);
-
-  const flushDeferredUi = useCallback(() => {
-    if (!pendingUiRef.current) return;
-    pendingUiRef.current = false;
-    setRows([...rowsRef.current]);
-    setTape([...tapeRef.current]);
-  }, []);
-
-  useEffect(() => {
-    if (!scrollFlushRef) return;
-    scrollFlushRef.current = flushDeferredUi;
-    return () => {
-      if (scrollFlushRef.current === flushDeferredUi) scrollFlushRef.current = null;
-    };
-  }, [flushDeferredUi, scrollFlushRef]);
 
   useEffect(() => {
     tapeRef.current = tape;
@@ -210,11 +193,7 @@ export default function CanUdsPanel({
           now - row.flashAt > 500 ? { ...row, changed: row.changed.map(() => false) } : row,
         );
         rowsRef.current = faded;
-        if (isScrollingRef?.current) {
-          pendingUiRef.current = true;
-        } else {
-          setRows(faded);
-        }
+        deferUi(() => setRows(faded));
         return;
       }
       let lossAdd = 0;
@@ -263,17 +242,15 @@ export default function CanUdsPanel({
       if (tapeAdd.length) {
         tapeRef.current = [...tapeRef.current, ...tapeAdd].slice(-TAPE_LIMIT);
       }
-      if (isScrollingRef?.current) {
-        pendingUiRef.current = true;
-      } else {
+      deferUi(() => {
         setRows(next);
         if (tapeAdd.length) setTape(tapeRef.current);
-      }
-      if (lossAdd) setLosses((count) => count + lossAdd);
-      if (recordingRef.current) setRecordCount(recordsRef.current.length);
+        if (lossAdd) setLosses((count) => count + lossAdd);
+        if (recordingRef.current) setRecordCount(recordsRef.current.length);
+      });
     }, 100);
     return () => window.clearInterval(id);
-  }, [onLog, protocol]);
+  }, [deferUi, onLog, protocol]);
 
   const remember = (entry: UdsLogEntry) => {
     setUdsLog(appendUdsLog(entry));
@@ -617,8 +594,10 @@ export default function CanUdsPanel({
       const dump = await session.readSubaruMeterEyesightConfig(
         protocol,
         (status, partial) => {
-          setSubaruProgress(status);
-          setSubaruPartial(partial);
+          deferUi(() => {
+            setSubaruProgress(status);
+            setSubaruPartial(partial);
+          });
         },
         () => stopScanRef.current,
       );
@@ -679,17 +658,19 @@ export default function CanUdsPanel({
         protocol,
         kind,
         (address, detail, item) => {
-          setScanRows((prev) => {
-            const without = prev.filter((row) => row.address !== address);
-            const entry: ModuleScanItem = item ?? {
-              address,
-              name: `Блок ${address}`,
-              detail,
-              responded: detail.includes("ответил"),
-              txHex: address === "7DF" ? "7E0" : address,
-              rxHex: address === "7DF" ? "7E8" : "",
-            };
-            return [...without, entry];
+          deferUi(() => {
+            setScanRows((prev) => {
+              const without = prev.filter((row) => row.address !== address);
+              const entry: ModuleScanItem = item ?? {
+                address,
+                name: `Блок ${address}`,
+                detail,
+                responded: detail.includes("ответил"),
+                txHex: address === "7DF" ? "7E0" : address,
+                rxHex: address === "7DF" ? "7E8" : "",
+              };
+              return [...without, entry];
+            });
           });
         },
         { preset, shouldStop: () => stopScanRef.current },
@@ -731,14 +712,16 @@ export default function CanUdsPanel({
         tx,
         rx,
         (done, total, hit) => {
-          setDidProgress(`${done} / ${total}`);
-          if (hit) {
-            setDidHits((prev) => [...prev, hit]);
-            setWatchedDids((prev) => {
-              if (prev.includes(hit.did) || prev.length >= 12) return prev;
-              return [...prev, hit.did];
-            });
-          }
+          deferUi(() => {
+            setDidProgress(`${done} / ${total}`);
+            if (hit) {
+              setDidHits((prev) => [...prev, hit]);
+              setWatchedDids((prev) => {
+                if (prev.includes(hit.did) || prev.length >= 12) return prev;
+                return [...prev, hit.did];
+              });
+            }
+          });
         },
         () => stopScanRef.current,
         range,
@@ -784,25 +767,26 @@ export default function CanUdsPanel({
             const res = await session.sendUds(protocol, tx, rx, `22${did}`, false);
             if (res.parsed.kind === "positive") {
               const text = formatUdsPayload(res.parsed.payload, res.parsed.sid, tx);
-              if (isScrollingRef?.current) continue;
-              setLiveUdsRows((prev) => {
-                const existing = prev.find((r) => r.did === did);
-                if (!existing) {
-                  return [
-                    ...prev,
-                    {
-                      did,
-                      text,
-                      initialText: text,
-                      changed: false,
-                      count: 1,
-                    },
-                  ];
-                }
-                const changed = existing.changed || existing.initialText !== text;
-                return prev.map((r) =>
-                  r.did === did ? { ...r, text, changed, count: r.count + 1 } : r,
-                );
+              deferUi(() => {
+                setLiveUdsRows((prev) => {
+                  const existing = prev.find((r) => r.did === did);
+                  if (!existing) {
+                    return [
+                      ...prev,
+                      {
+                        did,
+                        text,
+                        initialText: text,
+                        changed: false,
+                        count: 1,
+                      },
+                    ];
+                  }
+                  const changed = existing.changed || existing.initialText !== text;
+                  return prev.map((r) =>
+                    r.did === did ? { ...r, text, changed, count: r.count + 1 } : r,
+                  );
+                });
               });
             }
           } catch {
@@ -883,7 +867,7 @@ export default function CanUdsPanel({
               }
             }
 
-            if (!isScrollingRef?.current) {
+            deferUi(() => {
               setSteeringData({
                 angleDeg,
                 rawHex,
@@ -892,7 +876,7 @@ export default function CanUdsPanel({
                 supplyVolts,
                 ticks,
               });
-            }
+            });
           }
         } catch {
           /* continue polling */
@@ -950,7 +934,7 @@ export default function CanUdsPanel({
                 label: item.label,
                 value: formatUdsPayload(res.parsed.payload, 0x22, "7B0"),
               });
-              setSafetyRows([...out]);
+              deferUi(() => setSafetyRows([...out]));
             }
           } catch {
             /* ignore */
@@ -1003,7 +987,7 @@ export default function CanUdsPanel({
                 label: item.label,
                 value: formatUdsPayload(res.parsed.payload, 0x22, "780"),
               });
-              setSafetyRows([...out]);
+              deferUi(() => setSafetyRows([...out]));
             }
           } catch {
             /* ignore */
@@ -1036,8 +1020,10 @@ export default function CanUdsPanel({
       const list = await session.scanAllModuleDtcs(
         protocol,
         (status, partial) => {
-          setDtcProgress(status);
-          setDtcReports(partial);
+          deferUi(() => {
+            setDtcProgress(status);
+            setDtcReports(partial);
+          });
         },
         () => stopScanRef.current,
       );
@@ -1115,7 +1101,7 @@ export default function CanUdsPanel({
   };
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex min-w-0 flex-col gap-3">
       <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-1.5">
         <ProtocolButton active={view === "dashboard"} onClick={() => switchCanSubView("dashboard")}>
           Показатели UDS
@@ -1626,7 +1612,7 @@ export default function CanUdsPanel({
               </tbody>
             </table>
           </div>
-          <pre className="max-h-40 overflow-y-auto overflow-x-clip overscroll-y-contain break-all rounded-md bg-black/40 p-2 text-xs text-slate-400">
+          <pre className="max-h-48 overflow-x-clip break-all rounded-md bg-black/40 p-2 text-xs text-slate-400">
             {tape.join("\n")}
           </pre>
         </>
@@ -1750,7 +1736,7 @@ export default function CanUdsPanel({
                           {mod.calId ? <span>CalID: <strong>{mod.calId}</strong></span> : null}
                         </div>
                         {mod.dids.length > 0 ? (
-                          <ul className="mt-1.5 max-h-40 space-y-1 overflow-y-auto border-t border-slate-800 pt-1.5 font-mono text-[11px]">
+                          <ul className="mt-1.5 space-y-1 border-t border-slate-800 pt-1.5 font-mono text-[11px]">
                             {mod.dids.map((item) => (
                               <li key={`${mod.txHex}-${item.did}`} className="text-slate-300">
                                 <span className="text-emerald-400">22 {item.did}</span> · {item.decoded}
@@ -1824,7 +1810,7 @@ export default function CanUdsPanel({
                     Найдено изменившихся параметров: <strong>{diffRows.length}</strong>
                   </div>
                   {diffRows.length > 0 ? (
-                    <ul className="mt-1.5 max-h-56 space-y-1.5 overflow-y-auto font-mono text-[11px]">
+                    <ul className="mt-1.5 space-y-1.5 font-mono text-[11px]">
                       {diffRows.map((d) => (
                         <li
                           key={`${d.txHex}-${d.did}`}
@@ -2112,7 +2098,7 @@ export default function CanUdsPanel({
                 </p>
               ) : null}
               {didHits.length > 0 ? (
-                <ul className="mt-2 max-h-60 space-y-1 overflow-y-auto text-xs">
+                <ul className="mt-2 space-y-1 text-xs">
                   {didHits.map((row) => {
                     const inWatch = watchedDids.includes(row.did);
                     return (

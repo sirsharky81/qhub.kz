@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 type SavedInlineStyle = {
   el: HTMLElement;
@@ -50,7 +50,7 @@ export function useIosSingleScrollPane(options?: { pinDocument?: boolean; scroll
     };
   }, [pinDocument]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 

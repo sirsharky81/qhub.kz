@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { ObdScrollShell } from "./ObdScrollShell";
 
 const ICON_BASE = "/tools/obd-diag";
 
@@ -23,5 +24,5 @@ export const viewport: Viewport = {
 };
 
 export default function ObdDiagLayout({ children }: { children: ReactNode }) {
-  return children;
+  return <ObdScrollShell>{children}</ObdScrollShell>;
 }
