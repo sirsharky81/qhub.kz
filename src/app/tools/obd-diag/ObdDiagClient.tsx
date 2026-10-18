@@ -317,8 +317,19 @@ export default function ObdDiagClient() {
       tx: etacsDump.txHex,
       rx: etacsDump.rxHex,
       partNumber: etacsDump.partNumber,
+      swVersion: etacsDump.swVersion ?? null,
+      vin: etacsDump.vin ?? null,
+      variantUsedId: etacsDump.variantUsedId ?? null,
+      customUsedId: etacsDump.customUsedId ?? null,
       variantHex: bytesToHex(etacsDump.variant, ""),
       customHex: bytesToHex(etacsDump.custom, ""),
+      extraLids: (etacsDump.extraLids ?? []).map((item) => ({
+        lidHex: item.lidHex,
+        label: item.label,
+        length: item.payload.length,
+        hex: bytesToHex(item.payload, " "),
+        ascii: item.ascii,
+      })),
     };
     await saveBlobToDevice(
       new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }),
@@ -592,11 +603,26 @@ export default function ObdDiagClient() {
                 {etacsDump.partNumber ? (
                   <p className="mt-1 text-xs text-slate-300">
                     Номер блока / SW: <span className="font-mono text-emerald-300">{etacsDump.partNumber}</span>
+                    {etacsDump.swVersion ? (
+                      <span className="ml-2 font-mono text-slate-400">({etacsDump.swVersion})</span>
+                    ) : null}
+                  </p>
+                ) : null}
+                {etacsDump.vin ? (
+                  <p className="mt-0.5 text-xs text-slate-300">
+                    VIN в ETACS: <span className="font-mono text-cyan-300">{etacsDump.vin}</span>
+                  </p>
+                ) : null}
+                {etacsDump.customStatusNote ? (
+                  <p className="mt-1.5 rounded-lg border border-amber-500/30 bg-amber-950/30 px-2.5 py-1.5 text-[11px] text-amber-200">
+                    {etacsDump.customStatusNote}
                   </p>
                 ) : null}
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-lg bg-slate-950/80 p-2">
-                    <div className="text-slate-400">Variant (`.kon`)</div>
+                    <div className="text-slate-400">
+                      Variant (`.kon`){etacsDump.variantUsedId ? ` · ${etacsDump.variantUsedId}` : ""}
+                    </div>
                     <div className="font-mono text-sm font-medium text-slate-100">
                       {etacsDump.variant.length} байт
                     </div>
@@ -605,12 +631,16 @@ export default function ObdDiagClient() {
                     </div>
                   </div>
                   <div className="rounded-lg bg-slate-950/80 p-2">
-                    <div className="text-slate-400">Custom (`.cuf`)</div>
+                    <div className="text-slate-400">
+                      Custom (`.cuf`){etacsDump.customUsedId ? ` · ${etacsDump.customUsedId}` : ""}
+                    </div>
                     <div className="font-mono text-sm font-medium text-slate-100">
-                      {etacsDump.custom.length} байт
+                      {etacsDump.custom.length > 0 ? `${etacsDump.custom.length} байт` : "не отдан (7F 21 12)"}
                     </div>
                     <div className="mt-1 truncate font-mono text-[11px] text-slate-500">
-                      {bytesToHex(etacsDump.custom.slice(0, 12))}…
+                      {etacsDump.custom.length > 0
+                        ? `${bytesToHex(etacsDump.custom.slice(0, 12))}…`
+                        : etacsDump.rawCustomResponse.slice(0, 48)}
                     </div>
                   </div>
                 </div>
@@ -624,19 +654,68 @@ export default function ObdDiagClient() {
                   </button>
                   <button
                     type="button"
+                    disabled={etacsDump.custom.length === 0}
                     onClick={() => void saveEtacsFile("cuf")}
-                    className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-medium text-white"
+                    className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-medium text-white disabled:opacity-40"
                   >
-                    Скачать .cuf ({etacsDump.custom.length} Б)
+                    {etacsDump.custom.length > 0
+                      ? `Скачать .cuf (${etacsDump.custom.length} Б)`
+                      : "Нет .cuf в блоке"}
                   </button>
                   <button
                     type="button"
                     onClick={() => void saveEtacsFile("json")}
                     className="col-span-2 rounded-xl border border-slate-600 px-3 py-2 text-xs text-slate-200"
                   >
-                    Сохранить резервную копию (.json с обоими дампами)
+                    Сохранить резервную копию (.json с дампом)
                   </button>
                 </div>
+
+                {etacsDump.extraLids && etacsDump.extraLids.length > 0 ? (
+                  <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5 text-xs">
+                    <div className="font-medium text-slate-300">
+                      Дополнительные регистры блока ({etacsDump.extraLids.length} LID) — нажмите, чтобы использовать как `.cuf`:
+                    </div>
+                    <div className="mt-1.5 flex flex-col gap-1.5">
+                      {etacsDump.extraLids.map((extra) => (
+                        <div
+                          key={extra.lidHex}
+                          className="flex items-center justify-between gap-2 rounded bg-slate-900/80 px-2 py-1.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-slate-200">
+                              <span className="font-mono text-emerald-300">{extra.lidHex}</span> · {extra.label} (
+                              {extra.payload.length} Б)
+                            </div>
+                            <div className="truncate font-mono text-[10px] text-slate-400">
+                              {extra.ascii ? `${extra.ascii} · ` : ""}
+                              {bytesToHex(extra.payload.slice(0, 16))}
+                              {extra.payload.length > 16 ? "…" : ""}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEtacsDump((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      custom: extra.payload,
+                                      customUsedId: extra.lidHex,
+                                      customStatusNote: null,
+                                    }
+                                  : prev,
+                              )
+                            }
+                            className="shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200"
+                          >
+                            В .cuf
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </section>
