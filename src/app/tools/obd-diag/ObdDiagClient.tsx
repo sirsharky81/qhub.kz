@@ -594,9 +594,16 @@ export default function ObdDiagClient() {
                     Номер блока / SW: <span className="font-mono text-emerald-300">{etacsDump.partNumber}</span>
                   </p>
                 ) : null}
+                {etacsDump.customStatusNote ? (
+                  <p className="mt-1.5 rounded-lg border border-amber-500/30 bg-amber-950/30 px-2.5 py-1.5 text-[11px] text-amber-200">
+                    {etacsDump.customStatusNote}
+                  </p>
+                ) : null}
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-lg bg-slate-950/80 p-2">
-                    <div className="text-slate-400">Variant (`.kon`)</div>
+                    <div className="text-slate-400">
+                      Variant (`.kon`){etacsDump.variantUsedId ? ` · ${etacsDump.variantUsedId}` : ""}
+                    </div>
                     <div className="font-mono text-sm font-medium text-slate-100">
                       {etacsDump.variant.length} байт
                     </div>
@@ -605,12 +612,16 @@ export default function ObdDiagClient() {
                     </div>
                   </div>
                   <div className="rounded-lg bg-slate-950/80 p-2">
-                    <div className="text-slate-400">Custom (`.cuf`)</div>
+                    <div className="text-slate-400">
+                      Custom (`.cuf`){etacsDump.customUsedId ? ` · ${etacsDump.customUsedId}` : ""}
+                    </div>
                     <div className="font-mono text-sm font-medium text-slate-100">
-                      {etacsDump.custom.length} байт
+                      {etacsDump.custom.length > 0 ? `${etacsDump.custom.length} байт` : "не отдан (7F 21 12)"}
                     </div>
                     <div className="mt-1 truncate font-mono text-[11px] text-slate-500">
-                      {bytesToHex(etacsDump.custom.slice(0, 12))}…
+                      {etacsDump.custom.length > 0
+                        ? `${bytesToHex(etacsDump.custom.slice(0, 12))}…`
+                        : etacsDump.rawCustomResponse.slice(0, 48)}
                     </div>
                   </div>
                 </div>
@@ -624,17 +635,20 @@ export default function ObdDiagClient() {
                   </button>
                   <button
                     type="button"
+                    disabled={etacsDump.custom.length === 0}
                     onClick={() => void saveEtacsFile("cuf")}
-                    className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-medium text-white"
+                    className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-medium text-white disabled:opacity-40"
                   >
-                    Скачать .cuf ({etacsDump.custom.length} Б)
+                    {etacsDump.custom.length > 0
+                      ? `Скачать .cuf (${etacsDump.custom.length} Б)`
+                      : "Нет .cuf в блоке"}
                   </button>
                   <button
                     type="button"
                     onClick={() => void saveEtacsFile("json")}
                     className="col-span-2 rounded-xl border border-slate-600 px-3 py-2 text-xs text-slate-200"
                   >
-                    Сохранить резервную копию (.json с обоими дампами)
+                    Сохранить резервную копию (.json с дампом)
                   </button>
                 </div>
               </div>
