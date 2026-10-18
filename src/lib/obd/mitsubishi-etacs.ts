@@ -78,7 +78,7 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   },
   {
     id: "engine-auto",
-    label: "Двигатель (ECM 7E0 → 7E8) · Автопоиск .kon (KWP 21 30/32/42 и UDS 22)",
+    label: "Двигатель (ECM 7E0 → 7E8) · Автопоиск .kon (1860D362 / KWP 21 и UDS 22)",
     moduleKind: "engine",
     txId: 0x7e0,
     rxId: 0x7e8,
@@ -89,7 +89,7 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   },
   {
     id: "engine-7e0-kwp",
-    label: "Двигатель (ECM 7E0 → 7E8) · KWP 21 (1860B/C/D Pajero Sport / L200 / Outlander / ASX)",
+    label: "Двигатель (ECM 7E0 → 7E8) · KWP 21 (1860D362 Pajero Sport III 4N15 / L200 / Outlander)",
     moduleKind: "engine",
     txId: 0x7e0,
     rxId: 0x7e8,
@@ -363,9 +363,9 @@ async function readSingleEtacsProfile(
   const variantCandidates =
     profile.service === 0x21
       ? isEngine
-        ? [profile.variantId, [0x32], [0x42], [0x50], [0x31], [0xb0]]
+        ? [profile.variantId, [0x32], [0x50], [0x51], [0x52], [0x42], [0x40], [0x31], [0xb0]]
         : [profile.variantId, [0x42], [0x50], [0xb0]]
-      : [profile.variantId, [0x01, 0x32], [0x01, 0x42], [0xb0, 0x01]];
+      : [profile.variantId, [0x01, 0x32], [0x01, 0x42], [0x01, 0x50], [0xb0, 0x01]];
 
   const customCandidates =
     profile.service === 0x21
