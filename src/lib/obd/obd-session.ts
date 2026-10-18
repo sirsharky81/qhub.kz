@@ -10,7 +10,6 @@ import {
   type EtacsCodingDump,
 } from "./mitsubishi-etacs";
 import {
-  DID_LABELS,
   DID_SCAN_FROM,
   DID_SCAN_SILENCE,
   DID_SCAN_TO,
@@ -22,7 +21,10 @@ import {
   formatUdsPayload,
   isUdsBitmapDid,
   parseTaggedUdsReplies,
+  parseUdsDtcs1902,
   parseUdsResponse,
+  resolveDidLabel,
+  type ParsedUdsDtc,
   type UdsParsed,
 } from "./uds";
 import {
@@ -97,6 +99,26 @@ export interface SubaruRegionConfigDump {
   capturedAt: string;
   vin: string | null;
   modules: SubaruRegionModuleReport[];
+}
+
+export interface ModuleDtcItem {
+  code: string;
+  active: boolean;
+  description: string;
+  statusByte?: number;
+}
+
+export interface ModuleDtcReport {
+  txHex: string;
+  rxHex: string;
+  title: string;
+  safetyCritical: boolean;
+  canSafeClear: boolean;
+  responded: boolean;
+  systemName: string | null;
+  partNumber: string | null;
+  dtcs: ModuleDtcItem[];
+  rawStatus: string;
 }
 
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
@@ -466,8 +488,8 @@ export class ObdBleSession {
                 ? parsed.payload.slice(2)
                 : parsed.payload;
             const didHex = request.slice(2);
-            const label = DID_LABELS[didHex];
-            const formatted = formatUdsPayload(parsed.payload, 0x22);
+            const label = resolveDidLabel(didHex, txId);
+            const formatted = formatUdsPayload(parsed.payload, 0x22, txId);
             hit = { did: label ? `${didHex} · ${label}` : didHex, text: formatted };
             done += 1;
             onProgress(done, total, hit);
@@ -641,7 +663,7 @@ export class ObdBleSession {
                     ? parsed.payload.slice(2)
                     : parsed.payload;
                 const hex = body.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-                const decoded = formatUdsPayload(parsed.payload, 0x22);
+                const decoded = formatUdsPayload(parsed.payload, 0x22, txHex);
                 const ascii = body
                   .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
                   .join("")
@@ -654,7 +676,7 @@ export class ObdBleSession {
                 const isEmptyOrPointerOnlyBitmap = isBitmap && dataChildren.length === 0;
 
                 if (!isEmptyOrPointerOnlyBitmap) {
-                  const label = DID_LABELS[didHex] ?? `DID ${didHex}`;
+                  const label = resolveDidLabel(didHex, txHex) ?? `DID ${didHex}`;
                   dids.push({ did: didHex, label, hex, decoded });
                 }
                 if (didHex === "F197" && ascii) systemName = ascii;
@@ -718,6 +740,320 @@ export class ObdBleSession {
       vin,
       modules: reports,
     };
+  }
+
+  /**
+   * Reads DTCs across all major vehicle ECUs (OBD Mode 03 on 7E0/7E1 + UDS Service 19 02 FF on SGP/Mitsubishi modules).
+   * Always returns every module to default session `10 01` afterwards so warning lamps extinguish.
+   */
+  async scanAllModuleDtcs(
+    protocol: CanProtocol,
+    onProgress?: (status: string, partial: ModuleDtcReport[]) => void,
+    shouldStop?: () => boolean,
+  ): Promise<ModuleDtcReport[]> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед чтением ошибок");
+    await this.ensureUdsProfile(protocol);
+
+    const targets: {
+      tx: number;
+      rx: number;
+      title: string;
+      safetyCritical: boolean;
+      canSafeClear: boolean;
+      mode03Fallback?: boolean;
+    }[] = [
+      {
+        tx: 0x7e0,
+        rx: 0x7e8,
+        title: "Двигатель ECM (7E0 → 7E8)",
+        safetyCritical: false,
+        canSafeClear: true,
+        mode03Fallback: true,
+      },
+      {
+        tx: 0x7e1,
+        rx: 0x7e9,
+        title: "Коробка передач / Вариатор CVT (7E1 → 7E9)",
+        safetyCritical: false,
+        canSafeClear: true,
+        mode03Fallback: true,
+      },
+      {
+        tx: 0x7a2,
+        rx: 0x7aa,
+        title: "Силовая установка 2.4 TURBO SGP (7A2 → 7AA)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x783,
+        rx: 0x78b,
+        title: "Приборка METER (783 → 78B)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x752,
+        rx: 0x75a,
+        title: "Боди-модуль BIU / TPMS (752 → 75A)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x7c4,
+        rx: 0x7cc,
+        title: "Климат-контроль A/C (7C4 → 7CC)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x786,
+        rx: 0x78e,
+        title: "Сонары / Парктроник RAB (786 → 78E)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x746,
+        rx: 0x74e,
+        title: "Электроусилитель руля EPS (746 → 74E)",
+        safetyCritical: true,
+        canSafeClear: false,
+      },
+      {
+        tx: 0x787,
+        rx: 0x78f,
+        title: "Камера и ассистенты EyeSight (787 → 78F)",
+        safetyCritical: true,
+        canSafeClear: false,
+      },
+      {
+        tx: 0x7b0,
+        rx: 0x7b8,
+        title: "Тормоза ABS / VDC / Электроручник EPB (7B0 → 7B8)",
+        safetyCritical: true,
+        canSafeClear: false,
+      },
+      {
+        tx: 0x780,
+        rx: 0x788,
+        title: "Подушки безопасности SRS Airbag (780 → 788)",
+        safetyCritical: true,
+        canSafeClear: false,
+      },
+    ];
+
+    const out: ModuleDtcReport[] = [];
+    try {
+      await this.elm!.sendCommand("ATST20");
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      for (const target of targets) {
+        if (shouldStop?.()) break;
+        const txHex = target.tx.toString(16).toUpperCase();
+        const rxHex = target.rx.toString(16).toUpperCase();
+        onProgress?.(`Проверка ошибок ${target.title}…`, [...out]);
+
+        let responded = false;
+        let sessionOpened = false;
+        let systemName: string | null = null;
+        let partNumber: string | null = null;
+        const dtcs: ModuleDtcItem[] = [];
+        let rawStatus = "Нет ответа";
+
+        try {
+          const raw10 = await this.udsExchange(target.tx, target.rx, "1003", 900);
+          const p10 = parseUdsResponse(raw10, 0x10);
+          if (p10.kind !== "empty") {
+            responded = true;
+            if (p10.kind === "positive") sessionOpened = true;
+          }
+        } catch {
+          /* ignore */
+        }
+
+        // Try reading UDS 19 02 FF (ReadDTCInformation: reportDTCByStatusMask)
+        try {
+          const raw19 = await this.udsExchange(target.tx, target.rx, "1902FF", 1_400);
+          const p19 = parseUdsResponse(raw19, 0x19);
+          if (p19.kind === "positive") {
+            responded = true;
+            const parsedDtcs: ParsedUdsDtc[] = parseUdsDtcs1902(p19.payload);
+            for (const d of parsedDtcs) {
+              if (!dtcs.some((existing) => existing.code === d.code)) {
+                dtcs.push({
+                  code: d.code,
+                  active: d.active,
+                  description: d.description,
+                  statusByte: d.statusByte,
+                });
+              }
+            }
+            rawStatus =
+              dtcs.length === 0
+                ? "0 ошибок (UDS 19 02)"
+                : `Найдено ошибок: ${dtcs.length} (UDS 19 02)`;
+          } else if (p19.kind === "negative") {
+            responded = true;
+            rawStatus = `UDS 19 02: ${p19.nrcText ?? "не поддерживается"}`;
+          }
+        } catch {
+          /* ignore */
+        }
+
+        // Fallback or supplement with OBD Mode 03 on ECM/TCM (7E0/7E1) or when 19 02 was unsupported
+        if (target.mode03Fallback || !responded || rawStatus.startsWith("UDS 19 02:")) {
+          try {
+            const raw03 = await this.udsExchange(target.tx, target.rx, "03", 1_400);
+            const p03 = parseUdsResponse(raw03, 0x03);
+            if (p03.kind === "positive") {
+              responded = true;
+              const obdList = parseDtcsFromElmResponse(raw03);
+              for (const d of obdList) {
+                if (!dtcs.some((existing) => existing.code === d.code)) {
+                  dtcs.push({
+                    code: d.code,
+                    active: true,
+                    description: d.description,
+                  });
+                }
+              }
+              rawStatus =
+                dtcs.length === 0
+                  ? "0 ошибок (Mode 03)"
+                  : `Найдено ошибок: ${dtcs.length} (Mode 03)`;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        // If responded, quickly read F197 / F18E if available
+        if (responded) {
+          try {
+            const raw97 = await this.udsExchange(target.tx, target.rx, "22F197", 800);
+            const p97 = parseUdsResponse(raw97, 0x22);
+            if (p97.kind === "positive" && p97.payload.length > 2) {
+              const txt = p97.payload
+                .slice(2)
+                .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+                .join("")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (txt.length >= 3) systemName = txt;
+            }
+          } catch {
+            /* ignore */
+          }
+          try {
+            const raw8e = await this.udsExchange(target.tx, target.rx, "22F18E", 800);
+            const p8e = parseUdsResponse(raw8e, 0x22);
+            if (p8e.kind === "positive" && p8e.payload.length > 2) {
+              const txt = p8e.payload
+                .slice(2)
+                .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+                .join("")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (txt.length >= 4 && !/^0+$/.test(txt)) partNumber = txt;
+            }
+          } catch {
+            /* ignore */
+          }
+          if (sessionOpened) {
+            try {
+              await this.udsExchange(target.tx, target.rx, "1001", 700);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+
+        out.push({
+          txHex,
+          rxHex,
+          title: target.title,
+          safetyCritical: target.safetyCritical,
+          canSafeClear: target.canSafeClear,
+          responded,
+          systemName,
+          partNumber,
+          dtcs,
+          rawStatus,
+        });
+        onProgress?.(`Проверен ${target.title}`, [...out]);
+      }
+    } finally {
+      try {
+        await this.elm!.sendCommand("ATSTFF");
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Safely clears DTCs on non-safety-critical modules only (ECM, TCM, Meter, BIU, Climate, Sonar).
+   * Explicitly refuses SRS Airbag (780), ABS/VDC/EPB (7B0), EPS (746), and EyeSight (787).
+   */
+  async clearModuleDtcsSafe(
+    protocol: CanProtocol,
+    txHex: string,
+    rxHex: string,
+  ): Promise<string> {
+    const cleanTx = txHex.trim().toUpperCase();
+    const cleanRx = rxHex.trim().toUpperCase();
+    const FORBIDDEN_CLEAR_TX = new Set(["780", "7B0", "746", "787", "784", "7E2", "7E5"]);
+    if (FORBIDDEN_CLEAR_TX.has(cleanTx)) {
+      throw new Error(
+        `Сброс ошибок в блоке безопасности (${cleanTx}) заблокирован для защиты калибровок SRS / ABS / EPS / EyeSight. Доступно только чтение.`,
+      );
+    }
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед сбросом ошибок");
+    await this.ensureUdsProfile(protocol);
+
+    const txNum = Number.parseInt(cleanTx, 16);
+    const rxNum = cleanRx ? Number.parseInt(cleanRx, 16) : undefined;
+
+    if (cleanTx === "7E0" || cleanTx === "7E1") {
+      const raw04 = await this.udsExchange(txNum, rxNum, "04", 3_000);
+      const p04 = parseUdsResponse(raw04, 0x04);
+      if (p04.kind === "positive") {
+        return `Коды ошибок блока ${cleanTx} сброшены (Mode 04 OK)`;
+      }
+    }
+
+    try {
+      await this.udsExchange(txNum, rxNum, "1003", 1_000);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const raw14 = await this.udsExchange(txNum, rxNum, "14FFFFFF", 3_000);
+      const p14 = parseUdsResponse(raw14, 0x14);
+      if (p14.kind === "positive") {
+        return `Коды ошибок блока ${cleanTx} сброшены (UDS 14 FF FF FF OK)`;
+      }
+      if (p14.kind === "negative") {
+        throw new Error(`Отказ блока ${cleanTx} при сбросе (7F 14): ${p14.nrcText ?? ""}`);
+      }
+      throw new Error(`Блок ${cleanTx} не подтвердил сброс ошибок.`);
+    } finally {
+      try {
+        await this.udsExchange(txNum, rxNum, "1001", 800);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   async connectAdapter(): Promise<{ name: string; elm: ElmIdentity }> {

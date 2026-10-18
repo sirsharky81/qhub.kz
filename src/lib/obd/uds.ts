@@ -44,15 +44,78 @@ export const DID_LABELS: Record<string, string> = {
   F199: "Дата программирования",
   "1019": "Напряжение / датчик питания (1019)",
   "101B": "Напряжение бортсети / генератора (101B)",
-  "101E": "Слепок блока (бортсеть + таймер зажигания)",
-  "1041": "Датчик уровня топлива 1 / параметр A (1041)",
-  "1042": "Датчик уровня топлива 2 / параметр B (1042)",
-  "2021": "Датчик силовой установки 1 (2021)",
-  "2022": "Датчик силовой установки 2 (2022)",
-  "2023": "Датчик силовой установки 3 (2023)",
-  "2024": "Датчик силовой установки 4 (2024)",
-  "2027": "Датчик силовой установки 5 (2027)",
+  "101E": "Счётчик запусков и таймер зажигания (101E)",
 };
+
+export const MODULE_DID_LABELS: Record<string, Record<string, string>> = {
+  "7A2": {
+    "1001": "Температура агрегата 1 (1001)",
+    "1005": "Температура агрегата 2 (1005)",
+    "103D": "Температура рабочей жидкости КПП/узла (103D)",
+    "10CB": "Температура воздуха / контура A (10CB)",
+    "10CC": "Температура контура B (10CC)",
+    "1297": "Температура ДВС / масла (1297)",
+    "1298": "Температура впуска / подкапотная (1298)",
+    "2021": "Датчик силовой установки 1 (2021)",
+    "2022": "Датчик силовой установки 2 (2022)",
+    "2023": "Датчик силовой установки 3 (2023)",
+    "2024": "Датчик силовой установки 4 (2024)",
+    "2027": "Нагрузка / привод силовой установки (2027)",
+  },
+  "752": {
+    "1021": "Давление шины 1 (1021)",
+    "1022": "Давление шины 2 (1022)",
+    "1023": "Давление шины 3 (1023)",
+    "1024": "Давление шины 4 (1024)",
+  },
+  "783": {
+    "1007": "Температура наружная / приборки (1007)",
+    "1041": "Датчик уровня топлива 1 — левый полубак (1041)",
+    "1042": "Датчик уровня топлива 2 — правый полубак (1042)",
+    "1062": "Датчик освещённости / подсветки приборки (1062)",
+  },
+  "746": {
+    "1006": "Крутящий момент на рулевом валу (1006)",
+    "1007": "Нагрузка электроусилителя руля (1007)",
+    "1041": "Угол поворота рулевого колеса (1041)",
+  },
+  "7B0": {
+    "1001": "Давление в тормозной магистрали (1001)",
+    "1006": "Продольное/поперечное ускорение G (1006)",
+    "1041": "Состояние впускных клапанов ABS/VDC (1041)",
+    "1042": "Клапаны / статус тормозного контура VDC (1042)",
+    "200A": "Счётчик / ресурс электроручника EPB (200A)",
+    "200D": "Усилие затяжки электроручника EPB (200D)",
+    "2012": "Статус актуатора электроручника EPB (2012)",
+  },
+  "780": {
+    "1007": "Внутренняя температура блока SRS (1007)",
+    "1022": "Код модели блока SRS (1022)",
+    "1023": "Цепь пиропатрона 1 (1023)",
+    "1024": "Цепь пиропатрона 2 (1024)",
+    "1026": "Цепь пиропатрона 3 (1026)",
+    "1027": "Цепь пиропатрона 4 (1027)",
+    "1028": "Цепь пиропатрона 5 (1028)",
+    "1029": "Цепь пиропатрона 6 (1029)",
+    "102C": "Цепь пиропатрона 7 (102C)",
+    "102E": "Цепь преднатяжителя 1 (102E)",
+    "102F": "Цепь преднатяжителя 2 (102F)",
+    "1044": "Датчик ремня водителя (1044)",
+    "1045": "Датчик ремня переднего пассажира (1045)",
+    "1047": "Статус присутствия пассажира (1047)",
+    "105F": "Серийный номер блока SRS (105F)",
+  },
+};
+
+export function resolveDidLabel(didHex: string, txHex?: string): string | undefined {
+  const cleanDid = didHex.toUpperCase();
+  if (txHex) {
+    const cleanTx = txHex.toUpperCase();
+    const scoped = MODULE_DID_LABELS[cleanTx]?.[cleanDid];
+    if (scoped) return scoped;
+  }
+  return DID_LABELS[cleanDid];
+}
 
 export const MODULE_SCAN_ADDRESSES = [0x7e0, 0x7e1, 0x7e2, 0x7e3, 0x7e4, 0x7e5, 0x7e6, 0x7e7, 0x7df] as const;
 
@@ -322,7 +385,36 @@ export function parseTaggedUdsReplies(raw: string, requestSid: number): TaggedCa
   return [];
 }
 
-export function formatUdsPayload(payload: number[], requestSid?: number): string {
+export interface ParsedUdsDtc {
+  code: string;
+  statusByte: number;
+  active: boolean;
+  description: string;
+}
+
+export function parseUdsDtcs1902(payload: number[]): ParsedUdsDtc[] {
+  if (payload.length < 2 || payload[0] !== 0x02) return [];
+  const records = payload.slice(2);
+  const out: ParsedUdsDtc[] = [];
+  for (let i = 0; i + 3 < records.length; i += 4) {
+    const b0 = records[i]!;
+    const b1 = records[i + 1]!;
+    const status = records[i + 3]!;
+    if (b0 === 0 && b1 === 0) continue;
+    const prefix = ["P", "C", "B", "U"][(b0 >> 6) & 0x03]!;
+    const code = `${prefix}${(((b0 & 0x3f) << 8) | b1).toString(16).padStart(4, "0").toUpperCase()}`;
+    const active = (status & 0x01) !== 0 || (status & 0x08) !== 0;
+    out.push({
+      code,
+      statusByte: status,
+      active,
+      description: describeDtcCode(code),
+    });
+  }
+  return out;
+}
+
+export function formatUdsPayload(payload: number[], requestSid?: number, txHex?: string): string {
   const hex = payload.map((byte) => byte.toString(16).padStart(2, "0").toUpperCase()).join(" ");
   if (requestSid === 0x3e) {
     return `${hex} (Блок на связи — TesterPresent OK)`;
@@ -343,23 +435,12 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
     return `${sName} (${hex})`;
   }
   if (requestSid === 0x19 && payload.length >= 2 && payload[0] === 0x02) {
-    // 59 02 <statusAvailabilityMask> [<dtcHigh> <dtcMid> <dtcLow> <status>]*
-    const records = payload.slice(2);
-    const dtcs: string[] = [];
-    for (let i = 0; i + 3 < records.length; i += 4) {
-      const b0 = records[i]!;
-      const b1 = records[i + 1]!;
-      const status = records[i + 3]!;
-      if (b0 === 0 && b1 === 0) continue;
-      const prefix = ["P", "C", "B", "U"][(b0 >> 6) & 0x03]!;
-      const code = `${prefix}${((b0 & 0x3f) << 8 | b1).toString(16).padStart(4, "0").toUpperCase()}`;
-      const active = (status & 0x01) !== 0 ? "активна" : "в памяти";
-      dtcs.push(`${code} (${active}) — ${describeDtcCode(code)}`);
-    }
+    const dtcs = parseUdsDtcs1902(payload);
     if (dtcs.length === 0) {
       return `Ошибок в блоке нет (0 DTC) · [${hex}]`;
     }
-    return `Найдено ошибок (${dtcs.length}): ${dtcs.join("; ")} · [${hex}]`;
+    const list = dtcs.map((d) => `${d.code} (${d.active ? "активна" : "в памяти"}) — ${d.description}`);
+    return `Найдено ошибок (${dtcs.length}): ${list.join("; ")} · [${hex}]`;
   }
   if (requestSid === 0x09 && payload.length >= 2 && payload[0] === 0x04) {
     // Mode 09 PID 04: [04, count, ...16-byte ASCII CalID blocks]
@@ -382,7 +463,8 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
       .join("");
     const dataBytes = payload.slice(2);
     const dataHex = dataBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-    const label = DID_LABELS[didHex];
+    const label = resolveDidLabel(didHex, txHex);
+    const cleanTx = txHex?.toUpperCase();
     if (isUdsBitmapDid(didNum) && dataBytes.length === 4) {
       const supported = decodeUdsDidSupportBitmap(didNum, dataBytes);
       const list =
@@ -395,12 +477,30 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
       const w0 = (dataBytes[0]! << 8) | dataBytes[1]!;
       const ticks = (dataBytes[4]! << 8) | dataBytes[5]!;
       const secs = (ticks / 10).toFixed(1);
-      return `${label ? `${label}: ` : ""}${dataHex}  [код=${w0} · таймер зажигания=${ticks} (${secs} с)]`;
+      return `${label ? `${label}: ` : ""}${dataHex}  [запусков=${w0} · таймер зажигания=${ticks} (${secs} с)]`;
     }
     if ((didHex === "101B" || didHex === "1019") && dataBytes.length === 2) {
       const mv = (dataBytes[0]! << 8) | dataBytes[1]!;
       const voltsStr = (mv / 1000).toFixed(2);
       return `${label ? `${label}: ` : ""}${dataHex}  [${voltsStr} В (${mv} мВ)]`;
+    }
+    if (cleanTx === "746" && didHex === "1041" && dataBytes.length === 2) {
+      const u16 = (dataBytes[0]! << 8) | dataBytes[1]!;
+      const s16 = u16 >= 0x8000 ? u16 - 0x10000 : u16;
+      const deg = (s16 / 10).toFixed(1);
+      const dir = s16 === 0 ? "ровно 0.0°" : s16 < 0 ? `${deg}° (вправо)` : `+${deg}° (влево)`;
+      return `${label ? `${label}: ` : ""}${dir}  [${dataHex} · знак=${s16}]`;
+    }
+    if (cleanTx === "752" && ["1021", "1022", "1023", "1024"].includes(didHex) && dataBytes.length === 1) {
+      const a = dataBytes[0]!;
+      const bar = (a * 0.01379).toFixed(2);
+      const psi = (a * 0.2).toFixed(1);
+      return `${label ? `${label}: ` : ""}${bar} бар (${psi} PSI)  [${dataHex}=${a}]`;
+    }
+    if (cleanTx === "783" && (didHex === "1041" || didHex === "1042") && dataBytes.length === 1) {
+      const a = dataBytes[0]!;
+      const pct = Math.round((a * 100) / 255);
+      return `${label ? `${label}: ` : ""}${pct}%  [${dataHex}=${a}]`;
     }
     const text = dataBytes
       .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
@@ -456,9 +556,7 @@ export function summarizeNumericUdsBytes(payload: number[], hex?: string): strin
     const temp40 = a - 40;
     const temp50 = a - 50;
     const pct = Math.round((a * 100) / 255);
-    const tpmsHint =
-      a >= 100 && a <= 240 ? ` · шина=${(a * 0.01379).toFixed(2)} бар (${(a * 0.2).toFixed(1)} PSI)` : "";
-    return `${hexStr}  [число=${a} · темп=${temp40}°C/${temp50}°C · ${pct}%${tpmsHint}]`;
+    return `${hexStr}  [число=${a} · темп=${temp40}°C/${temp50}°C · ${pct}%]`;
   }
   if (payload.length === 2) {
     const u16 = (payload[0]! << 8) | payload[1]!;
