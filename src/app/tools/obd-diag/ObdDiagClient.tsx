@@ -24,7 +24,7 @@ import {
 } from "@/lib/obd/mitsubishi-etacs-download";
 import { etacsDownloadNames, type EtacsCodingDump } from "@/lib/obd/mitsubishi-etacs";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
-import { useIosSingleScrollPane } from "@/hooks/useIosSingleScrollPane";
+import { useObdScroll } from "./ObdScrollContext";
 import CanUdsPanel from "./CanUdsPanel";
 
 type ToolTab = "obd" | "mitsubishi" | "can";
@@ -87,25 +87,19 @@ export default function ObdDiagClient() {
     pinnedRef.current = onlyPinned && pinnedPids.length > 0 ? new Set(pinnedPids) : new Set();
   }, [onlyPinned, pinnedPids]);
 
-  const { scrollRef, scrollingRef, onScrollEndRef } = useIosSingleScrollPane();
+  const obdScroll = useObdScroll();
   const pendingLive = useRef<{ pids: LiveTile[]; note: string | null } | null>(null);
-  const canUdsFlushRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    const flushLive = () => {
+    if (!obdScroll) return;
+    return obdScroll.registerScrollFlush(() => {
       const pending = pendingLive.current;
       pendingLive.current = null;
-      if (pending) {
-        setPids(pending.pids);
-        setPidNote(pending.note);
-      }
-      canUdsFlushRef.current?.();
-    };
-    onScrollEndRef.current = flushLive;
-    return () => {
-      if (onScrollEndRef.current === flushLive) onScrollEndRef.current = null;
-    };
-  }, [onScrollEndRef]);
+      if (!pending) return;
+      setPids(pending.pids);
+      setPidNote(pending.note);
+    });
+  }, [obdScroll]);
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -158,7 +152,7 @@ export default function ObdDiagClient() {
               ? null
               : explainEmptyPidReadings(readings.map((r) => r.raw)),
           };
-          if (scrollingRef.current) {
+          if (obdScroll?.scrollingRef.current) {
             pendingLive.current = next;
           } else {
             setPids(next.pids);
@@ -174,7 +168,7 @@ export default function ObdDiagClient() {
     return () => {
       cancelled = true;
     };
-  }, [poll, phase, tab]);
+  }, [obdScroll, poll, phase, tab]);
 
   const run = useCallback(
     async (label: string, fn: () => Promise<void>) => {
@@ -369,20 +363,7 @@ export default function ObdDiagClient() {
     });
 
   return (
-    <div
-      ref={scrollRef}
-      className="bg-slate-950 text-slate-100"
-      style={{
-        position: "fixed",
-        inset: 0,
-        overflowX: "clip",
-        overflowY: "auto",
-        overscrollBehavior: "none",
-        WebkitOverflowScrolling: "touch",
-        touchAction: "pan-y",
-      }}
-    >
-      <div className="mx-auto max-w-lg px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+    <>
         <header className="mb-3 flex items-baseline justify-between gap-2">
           <div>
             <p className="text-[11px] uppercase tracking-wider text-emerald-400/90">QHub · Диагностика</p>
@@ -750,21 +731,18 @@ export default function ObdDiagClient() {
             enabled={phase !== "idle"}
             linkLostTick={linkLostTick}
             onLog={pushLog}
-            isScrollingRef={scrollingRef}
-            scrollFlushRef={canUdsFlushRef}
           />
         )}
 
         {log.length > 0 ? (
           <section className="mt-5">
             <h2 className="text-xs font-medium text-slate-400">Журнал обмена</h2>
-            <pre className="mt-1.5 max-h-40 overflow-y-auto overflow-x-clip overscroll-y-contain rounded-md bg-black/40 p-2 text-xs text-slate-400">
+            <pre className="mt-1.5 max-h-48 overflow-x-clip break-all rounded-md bg-black/40 p-2 text-xs text-slate-400">
               {log.join("\n")}
             </pre>
           </section>
         ) : null}
-      </div>
-    </div>
+    </>
   );
 }
 
