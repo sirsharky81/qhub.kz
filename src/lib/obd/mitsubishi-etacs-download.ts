@@ -3,6 +3,7 @@ import {
   ETACS_PROFILES,
   type EtacsCanProfile,
   type EtacsCodingDump,
+  type EtacsWriteBlockResult,
 } from "./mitsubishi-etacs";
 
 export function listMitsubishiEtacsProfiles(): EtacsCanProfile[] {
@@ -15,3 +16,16 @@ export async function downloadMitsubishiEtacsCoding(
 ): Promise<EtacsCodingDump> {
   return session.readEtacsDump(profileId);
 }
+
+export async function uploadMitsubishiEtacsSingleBlock(
+  session: ObdBleSession,
+  options: {
+    profileId?: string;
+    kind: "kon" | "cuf";
+    payload: Uint8Array;
+    overrideLidHex?: string;
+  },
+): Promise<EtacsWriteBlockResult> {
+  return session.writeEtacsBlock(options);
+}
+

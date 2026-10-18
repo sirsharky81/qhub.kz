@@ -21,8 +21,14 @@ import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transpo
 import {
   downloadMitsubishiEtacsCoding,
   listMitsubishiEtacsProfiles,
+  uploadMitsubishiEtacsSingleBlock,
 } from "@/lib/obd/mitsubishi-etacs-download";
-import { etacsDownloadNames, type EtacsCodingDump } from "@/lib/obd/mitsubishi-etacs";
+import {
+  etacsDownloadNames,
+  parseMitsubishiCodingFileBytes,
+  type EtacsCodingDump,
+  type EtacsWriteBlockResult,
+} from "@/lib/obd/mitsubishi-etacs";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { useObdScroll } from "./ObdScrollContext";
 import CanUdsPanel from "./CanUdsPanel";
@@ -68,6 +74,20 @@ export default function ObdDiagClient() {
   const [pidNote, setPidNote] = useState<string | null>(null);
   const [profileId, setProfileId] = useState(listMitsubishiEtacsProfiles()[0]?.id ?? "auto");
   const [etacsDump, setEtacsDump] = useState<EtacsCodingDump | null>(null);
+  const [loadedKon, setLoadedKon] = useState<{
+    fileName: string;
+    payload: Uint8Array;
+    lidHex?: string | null;
+    partNumber?: string | null;
+  } | null>(null);
+  const [loadedCuf, setLoadedCuf] = useState<{
+    fileName: string;
+    payload: Uint8Array;
+    lidHex?: string | null;
+    partNumber?: string | null;
+  } | null>(null);
+  const [konWriteResult, setKonWriteResult] = useState<EtacsWriteBlockResult | null>(null);
+  const [cufWriteResult, setCufWriteResult] = useState<EtacsWriteBlockResult | null>(null);
   const [poll, setPoll] = useState(false);
   const [linkLostTick, setLinkLostTick] = useState(0);
   const [envLines, setEnvLines] = useState<string[] | null>(null);
@@ -336,6 +356,93 @@ export default function ObdDiagClient() {
       names.json,
     );
     pushLog(`Сохранён резервный ${names.json}`);
+  };
+
+  const handleLoadMitsubishiFile = async (kind: "kon" | "cuf", file: File | null) => {
+    if (!file) return;
+    setError(null);
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const parsed = parseMitsubishiCodingFileBytes(buf, kind, file.name);
+      if (kind === "kon") {
+        setLoadedKon({
+          fileName: file.name,
+          payload: parsed.payload,
+          lidHex: parsed.detectedLidHex ?? null,
+          partNumber: parsed.detectedPartNumber ?? null,
+        });
+        setKonWriteResult(null);
+        pushLog(`Загружен файл .kon: ${file.name} (${parsed.payload.length} байт)`);
+      } else {
+        setLoadedCuf({
+          fileName: file.name,
+          payload: parsed.payload,
+          lidHex: parsed.detectedLidHex ?? null,
+          partNumber: parsed.detectedPartNumber ?? null,
+        });
+        setCufWriteResult(null);
+        pushLog(`Загружен файл .cuf: ${file.name} (${parsed.payload.length} байт)`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const writeKonSeparately = () => {
+    if (!loadedKon) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Записать Variant Coding (.kon, ${loadedKon.payload.length} байт) в блок Mitsubishi?\n\nВАЖНО: При записи .kon блок ETACS сбрасывает пользовательские настройки .cuf на базовые! После успешной записи .kon обязательно отдельно запишите ваш файл .cuf (Шаг 2).`,
+      )
+    ) {
+      return;
+    }
+    return run("Запись Variant (.kon) в блок Mitsubishi", async () => {
+      const targetProfileId = etacsDump?.profileId ?? profileId;
+      const overrideLid = loadedKon.lidHex ?? etacsDump?.variantUsedId;
+      const res = await uploadMitsubishiEtacsSingleBlock(sessionRef.current, {
+        profileId: targetProfileId,
+        kind: "kon",
+        payload: loadedKon.payload,
+        overrideLidHex: overrideLid ?? undefined,
+      });
+      setKonWriteResult(res);
+      pushLog(
+        `Записан .kon (${res.writeCommandHex}) в ${res.txHex}→${res.rxHex}: ${res.writtenBytes} Б${
+          res.verified ? " [проверено OK]" : ""
+        }`,
+      );
+    });
+  };
+
+  const writeCufSeparately = () => {
+    if (!loadedCuf) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Записать Custom Coding (.cuf, ${loadedCuf.payload.length} байт) в блок ETACS?\n\nЗапись .cuf выполняется отдельно после .kon и восстанавливает пользовательские настройки блока.`,
+      )
+    ) {
+      return;
+    }
+    return run("Запись Custom (.cuf) в блок ETACS", async () => {
+      const targetProfileId =
+        etacsDump?.moduleKind === "etacs" ? etacsDump.profileId : profileId.startsWith("engine") ? "auto" : profileId;
+      const overrideLid = loadedCuf.lidHex ?? etacsDump?.customUsedId;
+      const res = await uploadMitsubishiEtacsSingleBlock(sessionRef.current, {
+        profileId: targetProfileId,
+        kind: "cuf",
+        payload: loadedCuf.payload,
+        overrideLidHex: overrideLid ?? undefined,
+      });
+      setCufWriteResult(res);
+      pushLog(
+        `Записан .cuf (${res.writeCommandHex}) в ${res.txHex}→${res.rxHex}: ${res.writtenBytes} Б${
+          res.verified ? " [проверено OK]" : ""
+        }`,
+      );
+    });
   };
 
   const togglePin = (pid: string) => {
@@ -724,6 +831,175 @@ export default function ObdDiagClient() {
                 ) : null}
               </div>
             ) : null}
+
+            {/* Sequential, separate writing of .kon (Step 1) and .cuf (Step 2) */}
+            <div className="rounded-xl border border-amber-500/40 bg-slate-900/70 p-3.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-amber-200">
+                  Последовательная запись в блок (`.kon` → затем `.cuf`)
+                </span>
+                <span className="rounded bg-amber-950/60 px-2 py-0.5 font-mono text-[10px] text-amber-300">
+                  KWP 3B / UDS 2E
+                </span>
+              </div>
+              <p className="mt-1.5 text-slate-300">
+                Запись выполняется <strong>строго раздельно в 2 шага</strong>: когда вы заливаете{" "}
+                <span className="font-mono text-amber-200">.kon</span> (Variant Coding), блок ETACS автоматически сбрасывает настройки{" "}
+                <span className="font-mono text-amber-200">.cuf</span> (Custom Coding) на заводские базовые. Поэтому сначала запишите{" "}
+                <span className="font-mono text-amber-200">.kon</span>, дождитесь ответа блока и <strong>отдельно вторым шагом</strong> залейте ваш сохранённый{" "}
+                <span className="font-mono text-amber-200">.cuf</span>.
+              </p>
+
+              {/* Step 1: Write .kon */}
+              <div className="mt-3 rounded-xl border border-slate-700/80 bg-slate-950/70 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-100">
+                    Шаг 1. Запись Variant Coding (`.kon`)
+                  </span>
+                  {etacsDump && etacsDump.variant.length > 0 ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setLoadedKon({
+                          fileName: `Текущий считанный .kon (${etacsDump.partNumber ?? etacsDump.txHex})`,
+                          payload: etacsDump.variant,
+                          lidHex: etacsDump.variantUsedId ?? null,
+                          partNumber: etacsDump.partNumber,
+                        });
+                        setKonWriteResult(null);
+                      }}
+                      className="rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                    >
+                      Взять считанный ({etacsDump.variant.length} Б)
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Выберите модифицированный файл `.kon` (или резервный `.json`) с телефона. Подходит как для ETACS (`8637xxxx`), так и для ЭБУ двигателя (`1860xxxx`).
+                </p>
+
+                <label className="mt-2 block">
+                  <span className="sr-only">Выбрать файл .kon</span>
+                  <input
+                    type="file"
+                    accept=".kon,.json,.bin,.txt,application/octet-stream,application/json"
+                    disabled={busy}
+                    onChange={(e) => void handleLoadMitsubishiFile("kon", e.target.files?.[0] ?? null)}
+                    className="block w-full text-xs text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-100"
+                  />
+                </label>
+
+                {loadedKon ? (
+                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/90 p-2 font-mono text-[11px] text-slate-200">
+                    <div>
+                      Файл: <span className="text-emerald-300">{loadedKon.fileName}</span> ({loadedKon.payload.length} байт)
+                      {loadedKon.partNumber ? ` · Блок ${loadedKon.partNumber}` : ""}
+                    </div>
+                    <div className="mt-0.5 truncate text-slate-400">
+                      HEX: {bytesToHex(loadedKon.payload.slice(0, 16))}
+                      {loadedKon.payload.length > 16 ? "…" : ""}
+                    </div>
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  disabled={busy || phase === "idle" || !loadedKon}
+                  onClick={() => void writeKonSeparately()}
+                  className="mt-2.5 w-full rounded-xl bg-amber-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  {loadedKon
+                    ? `1. Записать ТОЛЬКО .kon в блок (${loadedKon.payload.length} Б)`
+                    : "1. Сначала выберите файл .kon"}
+                </button>
+
+                {konWriteResult ? (
+                  <div className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-2 text-[11px] text-emerald-200">
+                    <div className="font-semibold">
+                      {konWriteResult.txHex} → {konWriteResult.rxHex} ({konWriteResult.writeCommandHex}):{" "}
+                      {konWriteResult.verified ? "Записано и сверено по чтению OK" : "Принято блоком OK"}
+                    </div>
+                    <div className="mt-0.5 text-amber-200">{konWriteResult.note}</div>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Step 2: Write .cuf */}
+              <div className="mt-3 rounded-xl border border-slate-700/80 bg-slate-950/70 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-100">
+                    Шаг 2. Запись Custom Coding (`.cuf`) — после `.kon`
+                  </span>
+                  {etacsDump && etacsDump.custom.length > 0 ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setLoadedCuf({
+                          fileName: `Ранее считанный .cuf (${etacsDump.partNumber ?? etacsDump.txHex})`,
+                          payload: etacsDump.custom,
+                          lidHex: etacsDump.customUsedId ?? null,
+                          partNumber: etacsDump.partNumber,
+                        });
+                        setCufWriteResult(null);
+                      }}
+                      className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200"
+                    >
+                      Взять сохранённый .cuf ({etacsDump.custom.length} Б)
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Загрузите ваш ранее сохранённый `.cuf` (или нажмите «Взять сохранённый .cuf»), чтобы восстановить кастомные настройки ETACS после заливки `.kon`.
+                </p>
+
+                <label className="mt-2 block">
+                  <span className="sr-only">Выбрать файл .cuf</span>
+                  <input
+                    type="file"
+                    accept=".cuf,.json,.bin,.txt,application/octet-stream,application/json"
+                    disabled={busy}
+                    onChange={(e) => void handleLoadMitsubishiFile("cuf", e.target.files?.[0] ?? null)}
+                    className="block w-full text-xs text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-100"
+                  />
+                </label>
+
+                {loadedCuf ? (
+                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/90 p-2 font-mono text-[11px] text-slate-200">
+                    <div>
+                      Файл: <span className="text-emerald-300">{loadedCuf.fileName}</span> ({loadedCuf.payload.length} байт)
+                      {loadedCuf.lidHex ? ` · ${loadedCuf.lidHex}` : ""}
+                    </div>
+                    <div className="mt-0.5 truncate text-slate-400">
+                      HEX: {bytesToHex(loadedCuf.payload.slice(0, 16))}
+                      {loadedCuf.payload.length > 16 ? "…" : ""}
+                    </div>
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  disabled={busy || phase === "idle" || !loadedCuf}
+                  onClick={() => void writeCufSeparately()}
+                  className="mt-2.5 w-full rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  {loadedCuf
+                    ? `2. Записать ТОЛЬКО .cuf в ETACS (${loadedCuf.payload.length} Б)`
+                    : "2. Выберите или подставьте файл .cuf"}
+                </button>
+
+                {cufWriteResult ? (
+                  <div className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-2 text-[11px] text-emerald-200">
+                    <div className="font-semibold">
+                      {cufWriteResult.txHex} → {cufWriteResult.rxHex} ({cufWriteResult.writeCommandHex}):{" "}
+                      {cufWriteResult.verified ? "Записано и сверено по чтению OK" : "Принято блоком OK"}
+                    </div>
+                    <div className="mt-0.5">{cufWriteResult.note}</div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </section>
         ) : (
           <CanUdsPanel

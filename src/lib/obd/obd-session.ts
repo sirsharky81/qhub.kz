@@ -7,7 +7,9 @@ import { Elm327Client, type ElmIdentity } from "./elm327";
 import {
   ETACS_PROFILES,
   readEtacsCoding,
+  writeEtacsSingleBlock,
   type EtacsCodingDump,
+  type EtacsWriteBlockResult,
 } from "./mitsubishi-etacs";
 import {
   DID_SCAN_FROM,
@@ -230,6 +232,25 @@ export class ObdBleSession {
     await this.ensureUdsProfile("6");
     const profile = ETACS_PROFILES.find((item) => item.id === profileId) ?? ETACS_PROFILES[0]!;
     return readEtacsCoding(this.elm!, profile);
+  }
+
+  async writeEtacsBlock(options: {
+    profileId?: string;
+    kind: "kon" | "cuf";
+    payload: Uint8Array;
+    overrideLidHex?: string;
+  }): Promise<EtacsWriteBlockResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    const profile = ETACS_PROFILES.find((item) => item.id === options.profileId) ?? ETACS_PROFILES[0]!;
+    return writeEtacsSingleBlock(this.elm!, {
+      profile,
+      kind: options.kind,
+      payload: options.payload,
+      overrideLidHex: options.overrideLidHex,
+    });
   }
 
   async scanModules(
