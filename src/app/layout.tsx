@@ -58,7 +58,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  interactiveWidget: "resizes-content",
+  interactiveWidget: "resizes-visual",
 };
 
 export default function RootLayout({
@@ -72,12 +72,14 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
       <body className="min-h-full flex flex-col bg-white text-gray-900">
-        <PWAProvider />
-        <PlatformInit />
-        <VersionGate>
-          <AppProviders>{children}</AppProviders>
-        </VersionGate>
-        <InstallBanner />
+        <div className="flex min-h-full min-w-0 w-full max-w-full flex-1 flex-col overflow-x-clip">
+          <PWAProvider />
+          <PlatformInit />
+          <VersionGate>
+            <AppProviders>{children}</AppProviders>
+          </VersionGate>
+          <InstallBanner />
+        </div>
       </body>
     </html>
   );

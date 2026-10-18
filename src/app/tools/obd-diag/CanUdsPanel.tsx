@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type {
   ModuleScanItem,
   ObdBleSession,
@@ -48,11 +48,15 @@ export default function CanUdsPanel({
   enabled,
   linkLostTick,
   onLog,
+  isScrollingRef,
+  scrollFlushRef,
 }: {
   session: ObdBleSession;
   enabled: boolean;
   linkLostTick: number;
   onLog: (line: string) => void;
+  isScrollingRef?: RefObject<boolean>;
+  scrollFlushRef?: RefObject<(() => void) | null>;
 }) {
   const [protocol, setProtocol] = useState<CanProtocol>("6");
   const [view, setView] = useState<"monitor" | "uds">("uds");
@@ -103,6 +107,27 @@ export default function CanUdsPanel({
   const recordingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
   const rowsRef = useRef<FrameRow[]>([]);
+  const tapeRef = useRef<string[]>([]);
+  const pendingUiRef = useRef(false);
+
+  const flushDeferredUi = useCallback(() => {
+    if (!pendingUiRef.current) return;
+    pendingUiRef.current = false;
+    setRows([...rowsRef.current]);
+    setTape([...tapeRef.current]);
+  }, []);
+
+  useEffect(() => {
+    if (!scrollFlushRef) return;
+    scrollFlushRef.current = flushDeferredUi;
+    return () => {
+      if (scrollFlushRef.current === flushDeferredUi) scrollFlushRef.current = null;
+    };
+  }, [flushDeferredUi, scrollFlushRef]);
+
+  useEffect(() => {
+    tapeRef.current = tape;
+  }, [tape]);
 
   useEffect(() => {
     setCustomDids(loadCustomDids());
@@ -154,7 +179,11 @@ export default function CanUdsPanel({
           now - row.flashAt > 500 ? { ...row, changed: row.changed.map(() => false) } : row,
         );
         rowsRef.current = faded;
-        setRows(faded);
+        if (isScrollingRef?.current) {
+          pendingUiRef.current = true;
+        } else {
+          setRows(faded);
+        }
         return;
       }
       let lossAdd = 0;
@@ -200,11 +229,16 @@ export default function CanUdsPanel({
         }
       }
       rowsRef.current = next;
-      setRows(next);
-      if (lossAdd) setLosses((count) => count + lossAdd);
       if (tapeAdd.length) {
-        setTape((prev) => [...prev, ...tapeAdd].slice(-TAPE_LIMIT));
+        tapeRef.current = [...tapeRef.current, ...tapeAdd].slice(-TAPE_LIMIT);
       }
+      if (isScrollingRef?.current) {
+        pendingUiRef.current = true;
+      } else {
+        setRows(next);
+        if (tapeAdd.length) setTape(tapeRef.current);
+      }
+      if (lossAdd) setLosses((count) => count + lossAdd);
       if (recordingRef.current) setRecordCount(recordsRef.current.length);
     }, 100);
     return () => window.clearInterval(id);
@@ -533,6 +567,7 @@ export default function CanUdsPanel({
             const res = await session.sendUds(protocol, tx, rx, `22${did}`, false);
             if (res.parsed.kind === "positive") {
               const text = formatUdsPayload(res.parsed.payload, res.parsed.sid);
+              if (isScrollingRef?.current) continue;
               setLiveUdsRows((prev) => {
                 const existing = prev.find((r) => r.did === did);
                 if (!existing) {
@@ -703,8 +738,8 @@ export default function CanUdsPanel({
               Метка
             </button>
           </div>
-          <div className="overflow-x-auto rounded-lg border border-slate-800">
-            <table className="w-full text-left text-xs">
+          <div className="max-w-full overflow-x-clip rounded-lg border border-slate-800">
+            <table className="w-full table-fixed text-left text-xs">
               <thead className="text-slate-500">
                 <tr>
                   <th className="px-2 py-2">ID</th>
@@ -717,7 +752,7 @@ export default function CanUdsPanel({
                 {rows.map((row) => (
                   <tr key={row.id} className="border-t border-slate-800">
                     <td className="px-2 py-2 font-mono">{row.id}</td>
-                    <td className="px-2 py-2 font-mono">
+                    <td className="break-all px-2 py-2 font-mono text-[10px] leading-snug">
                       {row.data.map((byte, index) => (
                         <span key={`${row.id}-${index}`} className={row.changed[index] ? "text-amber-300" : ""}>
                           {byte.toString(16).padStart(2, "0").toUpperCase()}{" "}
@@ -731,7 +766,7 @@ export default function CanUdsPanel({
               </tbody>
             </table>
           </div>
-          <pre className="max-h-40 overflow-auto rounded-md bg-black/40 p-2 text-xs text-slate-400">
+          <pre className="max-h-40 overflow-y-auto overflow-x-clip overscroll-y-contain break-all rounded-md bg-black/40 p-2 text-xs text-slate-400">
             {tape.join("\n")}
           </pre>
         </>
