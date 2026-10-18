@@ -18,9 +18,11 @@ import {
   KNOWN_MODULE_TARGETS,
   UDS_TEMPLATES,
   type CustomDid,
+  type SubaruDidDiffEntry,
   type UdsLogEntry,
   appendUdsLog,
   assessUdsRequest,
+  diffSubaruDumps,
   exportUdsLog,
   formatUdsPayload,
   loadCustomDids,
@@ -98,6 +100,9 @@ export default function CanUdsPanel({
   const [subaruDump, setSubaruDump] = useState<SubaruRegionConfigDump | null>(null);
   const [subaruProgress, setSubaruProgress] = useState("");
   const [subaruPartial, setSubaruPartial] = useState<SubaruRegionModuleReport[]>([]);
+  const [diffDumpA, setDiffDumpA] = useState<{ name: string; dump: SubaruRegionConfigDump } | null>(null);
+  const [diffDumpB, setDiffDumpB] = useState<{ name: string; dump: SubaruRegionConfigDump } | null>(null);
+  const [diffRows, setDiffRows] = useState<SubaruDidDiffEntry[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -382,7 +387,7 @@ export default function CanUdsPanel({
           const res09 = await session.sendUds("6", "7E1", "7E9", "09 04", false);
           if (res09.parsed.kind === "positive") {
             udsRows.push({
-              name: "Калибровка КПП (09 04)",
+              name: "Калибровка КПП (7E1 · 09 04)",
               value: formatUdsPayload(res09.parsed.payload, 0x09).replace(/^Калибровка \(CalID\):\s*/, ""),
               unit: "",
             });
@@ -397,7 +402,7 @@ export default function CanUdsPanel({
           if (res03.parsed.kind === "positive") {
             const dtcCount = res03.parsed.payload[0] ?? 0;
             udsRows.push({
-              name: "Ошибки КПП (Mode 03)",
+              name: "Ошибки КПП (7E1 · Mode 03)",
               value: dtcCount === 0 ? "0 ошибок" : `${dtcCount} шт.`,
               unit: "",
             });
@@ -407,57 +412,122 @@ export default function CanUdsPanel({
           /* ignore */
         }
 
-        let sessionOpened = false;
+        // Probe SGP 2.4 TURBO Powertrain UDS module (7A2 -> 7AA)
+        setTx("7A2");
+        setRx("7AA");
+        let opened7A2 = false;
         try {
-          const res10 = await session.sendUds("6", "7E1", "7E9", "10 03", false);
-          if (res10.parsed.kind === "positive") sessionOpened = true;
+          const r10 = await session.sendUds("6", "7A2", "7AA", "10 03", false);
+          if (r10.parsed.kind === "positive") opened7A2 = true;
         } catch {
           /* ignore */
         }
 
-        const queue: number[] = [
-          0xf18e, 0xf197, 0xf189, 0xf182, 0x1000, 0x1100, 0x2000, 0x2100, 0x3000, 0xd000,
+        const sgp7A2Dids: { did: string; label: string }[] = [
+          { did: "F197", label: "Блок силовой установки (7A2)" },
+          { did: "1001", label: "7A2 · Датчик 1001" },
+          { did: "1002", label: "7A2 · Датчик 1002" },
+          { did: "1005", label: "7A2 · Датчик 1005" },
+          { did: "103C", label: "7A2 · Датчик 103C" },
+          { did: "103D", label: "7A2 · Датчик 103D" },
+          { did: "10CB", label: "7A2 · Датчик 10CB" },
+          { did: "10CC", label: "7A2 · Датчик 10CC" },
+          { did: "1121", label: "7A2 · Датчик 1121" },
+          { did: "2021", label: "7A2 · Канал 2021" },
+          { did: "2022", label: "7A2 · Канал 2022" },
+          { did: "2023", label: "7A2 · Канал 2023" },
+          { did: "2024", label: "7A2 · Канал 2024" },
+          { did: "2027", label: "7A2 · Канал 2027" },
+          { did: "101E", label: "7A2 · Таймер зажигания (101E)" },
         ];
-        const visited = new Set<number>();
-        while (queue.length > 0 && visited.size < 48) {
-          const didNum = queue.shift()!;
-          if (visited.has(didNum)) continue;
-          visited.add(didNum);
-          const didHex = didNum.toString(16).padStart(4, "0").toUpperCase();
+        for (const item of sgp7A2Dids) {
           try {
-            const res22 = await session.sendUds("6", "7E1", "7E9", `22 ${didHex}`, false);
-            if (res22.parsed.kind === "positive") {
-              const body =
-                res22.parsed.payload.length >= 2 &&
-                res22.parsed.payload[0] === ((didNum >> 8) & 0xff) &&
-                res22.parsed.payload[1] === (didNum & 0xff)
-                  ? res22.parsed.payload.slice(2)
-                  : res22.parsed.payload;
+            const res = await session.sendUds("6", "7A2", "7AA", `22 ${item.did}`, false);
+            if (res.parsed.kind === "positive") {
               udsRows.push({
-                name: `UDS 22 ${didHex}`,
-                value: formatUdsPayload(res22.parsed.payload, 0x22),
+                name: item.label,
+                value: formatUdsPayload(res.parsed.payload, 0x22),
                 unit: "",
               });
               setCatalog([...udsRows]);
-              if (didNum >= 0x1000 && didNum < 0xf180 && (didNum & 0x1f) === 0 && body.length === 4) {
-                for (let i = 0; i < 32; i++) {
-                  const byteIdx = i >> 3;
-                  const bitMask = 1 << (7 - (i & 7));
-                  if ((body[byteIdx]! & bitMask) !== 0) {
-                    const child = didNum + i + 1;
-                    if (!visited.has(child)) queue.push(child);
-                  }
-                }
-              }
             }
           } catch {
             /* ignore */
           }
         }
-
-        if (sessionOpened) {
+        if (opened7A2) {
           try {
-            await session.sendUds("6", "7E1", "7E9", "10 01", false);
+            await session.sendUds("6", "7A2", "7AA", "10 01", false);
+          } catch {
+            /* ignore */
+          }
+        }
+
+        // Probe SGP BIU / TPMS Tire Pressures (752 -> 75A)
+        let opened752 = false;
+        try {
+          const r10 = await session.sendUds("6", "752", "75A", "10 03", false);
+          if (r10.parsed.kind === "positive") opened752 = true;
+        } catch {
+          /* ignore */
+        }
+        for (const [idx, didHex] of (["1021", "1022", "1023", "1024"] as const).entries()) {
+          try {
+            const res = await session.sendUds("6", "752", "75A", `22 ${didHex}`, false);
+            if (res.parsed.kind === "positive" && res.parsed.payload.length >= 3) {
+              const rawVal = res.parsed.payload[2]!;
+              const bar = (rawVal * 0.01379).toFixed(2);
+              const psi = (rawVal * 0.2).toFixed(1);
+              udsRows.push({
+                name: `Давление шины ${idx + 1} (752 · 22 ${didHex})`,
+                value: `${bar} бар (${psi} PSI) [0x${rawVal.toString(16).toUpperCase()}=${rawVal}]`,
+                unit: "",
+              });
+              setCatalog([...udsRows]);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (opened752) {
+          try {
+            await session.sendUds("6", "752", "75A", "10 01", false);
+          } catch {
+            /* ignore */
+          }
+        }
+
+        // Probe SGP Combination Meter (783 -> 78B): battery voltage (101B), temperature (1007), fuel tank sensors (1041/1042)
+        let opened783 = false;
+        try {
+          const r10 = await session.sendUds("6", "783", "78B", "10 03", false);
+          if (r10.parsed.kind === "positive") opened783 = true;
+        } catch {
+          /* ignore */
+        }
+        for (const item of [
+          { did: "101B", label: "Приборка (783) · Бортсеть (101B)" },
+          { did: "1007", label: "Приборка (783) · Температура (1007)" },
+          { did: "1041", label: "Приборка (783) · Бак левый (1041)" },
+          { did: "1042", label: "Приборка (783) · Бак правый (1042)" },
+        ]) {
+          try {
+            const res = await session.sendUds("6", "783", "78B", `22 ${item.did}`, false);
+            if (res.parsed.kind === "positive") {
+              udsRows.push({
+                name: item.label,
+                value: formatUdsPayload(res.parsed.payload, 0x22),
+                unit: "",
+              });
+              setCatalog([...udsRows]);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (opened783) {
+          try {
+            await session.sendUds("6", "783", "78B", "10 01", false);
           } catch {
             /* ignore */
           }
@@ -468,8 +538,8 @@ export default function CanUdsPanel({
             ? udsRows
             : [
                 {
-                  name: "Subaru КПП (7E1)",
-                  value: "Нет ответа от 7E1 — проверьте зажигание ON",
+                  name: "Subaru SGP (7E1 / 7A2 / 752 / 783)",
+                  value: "Нет ответа — проверьте зажигание ON",
                   unit: "",
                 },
               ],
@@ -548,6 +618,27 @@ export default function CanUdsPanel({
       `subaru-meter-eyesight${vinPart}-${stamp}.json`,
     );
     onLog("Сохранён JSON-дамп конфигурации Subaru (Приборка / EyeSight / BIU)");
+  };
+
+  const loadSubaruDumpFile = async (slot: "A" | "B", file: File | null) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as SubaruRegionConfigDump;
+      if (!parsed || !Array.isArray(parsed.modules)) {
+        setLocalError("Файл не похож на JSON-дамп Subaru SGP (нет поля modules).");
+        return;
+      }
+      const nextA = slot === "A" ? { name: file.name, dump: parsed } : diffDumpA;
+      const nextB = slot === "B" ? { name: file.name, dump: parsed } : diffDumpB;
+      if (slot === "A") setDiffDumpA(nextA);
+      else setDiffDumpB(nextB);
+      if (nextA && nextB) {
+        setDiffRows(diffSubaruDumps(nextA.dump, nextB.dump));
+      }
+    } catch {
+      setLocalError("Не удалось прочитать JSON-файл дампа.");
+    }
   };
 
   const scan = async (
@@ -876,7 +967,7 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
             <div className="text-xs font-medium text-slate-300">Заводские таблицы (1 нажатие)</div>
             <p className="mt-1 text-xs text-slate-500">
-              Subaru ДВС (`7E0` SSM `A8`), Subaru КПП SGP (`7E1` UDS `22` / `09 04`), Pajero Sport (`7E0` `21 01–04`).
+              Subaru ДВС (`7E0` SSM `A8`), Subaru SGP (`7E1` КПП + `7A2` 2.4 TURBO + `752` Шины TPMS + `783` Приборка), Pajero Sport (`7E0` `21 01–04`).
             </p>
             <div className="mt-2 grid grid-cols-3 gap-2">
               <button
@@ -893,7 +984,7 @@ export default function CanUdsPanel({
                 onClick={() => void runCatalog("subaru-tcm")}
                 className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
               >
-                Subaru КПП (7E1)
+                Subaru SGP + Шины
               </button>
               <button
                 type="button"
@@ -1005,6 +1096,96 @@ export default function CanUdsPanel({
                 ))}
               </div>
             ) : null}
+
+            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/80 p-2.5 text-xs">
+              <div className="font-semibold text-emerald-200">
+                Сравнение двух дампов (.json Diff: Было → Стало)
+              </div>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                Загрузите два сохранённых `.json` файла (например, на `P` и на `D`, или с холодным/прогретым КПП), чтобы увидеть только изменившиеся DID по всем блокам.
+              </p>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-[11px] text-slate-300">
+                  <span>Дамп 1 (Было): {diffDumpA ? <strong>{diffDumpA.name}</strong> : "не выбран"}</span>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(e) => void loadSubaruDumpFile("A", e.target.files?.[0] ?? null)}
+                    className="text-[11px] text-slate-400"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-[11px] text-slate-300">
+                  <span>Дамп 2 (Стало): {diffDumpB ? <strong>{diffDumpB.name}</strong> : "не выбран"}</span>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(e) => void loadSubaruDumpFile("B", e.target.files?.[0] ?? null)}
+                    className="text-[11px] text-slate-400"
+                  />
+                </label>
+              </div>
+              {subaruDump ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextA = { name: `Текущий (${subaruDump.capturedAt.slice(11, 19)})`, dump: subaruDump };
+                      setDiffDumpA(nextA);
+                      if (diffDumpB) setDiffRows(diffSubaruDumps(nextA.dump, diffDumpB.dump));
+                    }}
+                    className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300"
+                  >
+                    Взять текущий скан как «Было»
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextB = { name: `Текущий (${subaruDump.capturedAt.slice(11, 19)})`, dump: subaruDump };
+                      setDiffDumpB(nextB);
+                      if (diffDumpA) setDiffRows(diffSubaruDumps(diffDumpA.dump, nextB.dump));
+                    }}
+                    className="rounded-lg border border-emerald-500/50 px-2.5 py-1 text-[11px] text-emerald-200"
+                  >
+                    Взять текущий скан как «Стало»
+                  </button>
+                </div>
+              ) : null}
+              {diffRows != null ? (
+                <div className="mt-2 border-t border-slate-800 pt-2">
+                  <div className="text-[11px] text-slate-300">
+                    Найдено изменившихся параметров: <strong>{diffRows.length}</strong>
+                  </div>
+                  {diffRows.length > 0 ? (
+                    <ul className="mt-1.5 max-h-56 space-y-1.5 overflow-y-auto font-mono text-[11px]">
+                      {diffRows.map((d) => (
+                        <li
+                          key={`${d.txHex}-${d.did}`}
+                          className="rounded border border-amber-500/40 bg-amber-950/20 p-2 text-slate-200"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-amber-300">
+                              [{d.txHex}] 22 {d.did} · {d.moduleTitle}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTx(d.txHex);
+                                toggleWatchedDid(d.did);
+                              }}
+                              className="rounded border border-emerald-500/60 bg-emerald-900/40 px-2 py-0.5 font-sans text-[10px] text-emerald-200"
+                            >
+                              + В Live ({d.txHex})
+                            </button>
+                          </div>
+                          <div className="mt-0.5 text-slate-400">Было: {d.beforeDecoded}</div>
+                          <div className="text-emerald-300">Стало: {d.afterDecoded}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">

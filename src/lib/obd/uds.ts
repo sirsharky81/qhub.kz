@@ -42,6 +42,16 @@ export const DID_LABELS: Record<string, string> = {
   F197: "Название системы / блока",
   F198: "Код сканера / сервиса (Repair Shop)",
   F199: "Дата программирования",
+  "1019": "Напряжение / датчик питания (1019)",
+  "101B": "Напряжение бортсети / генератора (101B)",
+  "101E": "Слепок блока (бортсеть + таймер зажигания)",
+  "1041": "Датчик уровня топлива 1 / параметр A (1041)",
+  "1042": "Датчик уровня топлива 2 / параметр B (1042)",
+  "2021": "Датчик силовой установки 1 (2021)",
+  "2022": "Датчик силовой установки 2 (2022)",
+  "2023": "Датчик силовой установки 3 (2023)",
+  "2024": "Датчик силовой установки 4 (2024)",
+  "2027": "Датчик силовой установки 5 (2027)",
 };
 
 export const MODULE_SCAN_ADDRESSES = [0x7e0, 0x7e1, 0x7e2, 0x7e3, 0x7e4, 0x7e5, 0x7e6, 0x7e7, 0x7df] as const;
@@ -56,25 +66,25 @@ export interface KnownModuleTarget {
 export const KNOWN_MODULE_TARGETS: readonly KnownModuleTarget[] = [
   { tx: 0x7e0, rx: 0x7e8, name: "Двигатель (ECM)", brand: "common" },
   { tx: 0x7e1, rx: 0x7e9, name: "Коробка передач (TCM / CVT)", brand: "common" },
-  { tx: 0x7e2, rx: 0x7ea, name: "ABS / VDC / Тормоза", brand: "common" },
-  { tx: 0x7e3, rx: 0x7eb, name: "Полный привод / 4WD", brand: "common" },
-  { tx: 0x7e4, rx: 0x7ec, name: "Кузов / Гибрид / Доп. блок", brand: "common" },
-  { tx: 0x7e5, rx: 0x7ed, name: "Шасси / Электроусилитель", brand: "common" },
-  { tx: 0x7e6, rx: 0x7ee, name: "Климат / Доп. модуль", brand: "common" },
-  { tx: 0x7e7, rx: 0x7ef, name: "Модуль 7E7", brand: "common" },
+  { tx: 0x7a2, rx: 0x7aa, name: "Силовая установка 2.4 TURBO / КПП SGP (7A2)", brand: "subaru" },
   { tx: 0x7b0, rx: 0x7b8, name: "ABS / VDC / Ручник (EPB)", brand: "subaru" },
   { tx: 0x780, rx: 0x788, name: "Подушки SRS (Airbag)", brand: "subaru" },
   { tx: 0x783, rx: 0x78b, name: "Приборка SGP (METER 783)", brand: "subaru" },
   { tx: 0x787, rx: 0x78f, name: "Камера EyeSight SGP (787)", brand: "subaru" },
   { tx: 0x786, rx: 0x78e, name: "Сонары / Парктроник RAB (786)", brand: "subaru" },
-  { tx: 0x7a2, rx: 0x7aa, name: "КПП / Селектор SGP (7A2)", brand: "subaru" },
-  { tx: 0x7c0, rx: 0x7c8, name: "Приборная панель (Meter 7C0)", brand: "subaru" },
   { tx: 0x7c4, rx: 0x7cc, name: "Климат-контроль (A/C)", brand: "subaru" },
-  { tx: 0x740, rx: 0x748, name: "Боди-модуль BIU / Кузов", brand: "subaru" },
   { tx: 0x746, rx: 0x74e, name: "Электроусилитель руля (EPS)", brand: "subaru" },
+  { tx: 0x752, rx: 0x75a, name: "Боди-модуль BIU / TPMS (Integ. Unit 752)", brand: "subaru" },
+  { tx: 0x7c0, rx: 0x7c8, name: "Приборная панель (Meter 7C0)", brand: "subaru" },
+  { tx: 0x740, rx: 0x748, name: "Боди-модуль BIU старый (740)", brand: "subaru" },
   { tx: 0x750, rx: 0x758, name: "Шлюз / бесключевой доступ (Keyless)", brand: "subaru" },
-  { tx: 0x752, rx: 0x75a, name: "Датчики давления шин (TPMS)", brand: "subaru" },
   { tx: 0x784, rx: 0x78c, name: "Камера EyeSight / Ассистенты (784)", brand: "subaru" },
+  { tx: 0x7e2, rx: 0x7ea, name: "ABS / VDC / Тормоза (7E2)", brand: "common" },
+  { tx: 0x7e3, rx: 0x7eb, name: "Полный привод / 4WD (7E3)", brand: "common" },
+  { tx: 0x7e4, rx: 0x7ec, name: "Кузов / Гибрид / Доп. блок (7E4)", brand: "common" },
+  { tx: 0x7e5, rx: 0x7ed, name: "Шасси / Электроусилитель (7E5)", brand: "common" },
+  { tx: 0x7e6, rx: 0x7ee, name: "Климат / Доп. модуль (7E6)", brand: "common" },
+  { tx: 0x7e7, rx: 0x7ef, name: "Модуль 7E7", brand: "common" },
   { tx: 0x7a1, rx: 0x7a0, name: "Mitsubishi ETACS (7A1 → 7A0)", brand: "mitsubishi" },
   { tx: 0x710, rx: 0x718, name: "Mitsubishi ETACS / Кузов (710 → 718)", brand: "mitsubishi" },
   { tx: 0x7df, name: "Общий широковещательный (7DF)", brand: "common" },
@@ -94,13 +104,13 @@ const RX_MODULE_NAMES: Record<number, { name: string; tx: number }> = {
   0x78b: { name: "Приборка SGP (METER 783)", tx: 0x783 },
   0x78f: { name: "Камера EyeSight SGP (787)", tx: 0x787 },
   0x78e: { name: "Сонары / Парктроник RAB (786)", tx: 0x786 },
-  0x7aa: { name: "КПП / Селектор SGP (7A2)", tx: 0x7a2 },
+  0x7aa: { name: "Силовая установка 2.4 TURBO / КПП SGP (7A2)", tx: 0x7a2 },
   0x7c8: { name: "Приборная панель (Meter 7C0)", tx: 0x7c0 },
   0x7cc: { name: "Климат-контроль (A/C)", tx: 0x7c4 },
-  0x748: { name: "Боди-модуль BIU / Кузов", tx: 0x740 },
+  0x748: { name: "Боди-модуль BIU старый (740)", tx: 0x740 },
   0x74e: { name: "Электроусилитель руля (EPS)", tx: 0x746 },
   0x758: { name: "Шлюз / бесключевой доступ", tx: 0x750 },
-  0x75a: { name: "Датчики давления шин (TPMS)", tx: 0x752 },
+  0x75a: { name: "Боди-модуль BIU / TPMS (Integ. Unit 752)", tx: 0x752 },
   0x78c: { name: "Камера EyeSight / Ассистенты (784)", tx: 0x784 },
   0x7a0: { name: "Mitsubishi ETACS", tx: 0x7a1 },
   0x718: { name: "Mitsubishi ETACS / Кузов", tx: 0x710 },
@@ -381,6 +391,17 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
           : "нет (только указатель дальше)";
       return `Карта поддерживаемых DID (${didHex}): ${dataHex} → открыты [${list}]`;
     }
+    if (didHex === "101E" && dataBytes.length === 6) {
+      const w0 = (dataBytes[0]! << 8) | dataBytes[1]!;
+      const ticks = (dataBytes[4]! << 8) | dataBytes[5]!;
+      const secs = (ticks / 10).toFixed(1);
+      return `${label ? `${label}: ` : ""}${dataHex}  [код=${w0} · таймер зажигания=${ticks} (${secs} с)]`;
+    }
+    if ((didHex === "101B" || didHex === "1019") && dataBytes.length === 2) {
+      const mv = (dataBytes[0]! << 8) | dataBytes[1]!;
+      const voltsStr = (mv / 1000).toFixed(2);
+      return `${label ? `${label}: ` : ""}${dataHex}  [${voltsStr} В (${mv} мВ)]`;
+    }
     const text = dataBytes
       .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
       .join("")
@@ -435,7 +456,9 @@ export function summarizeNumericUdsBytes(payload: number[], hex?: string): strin
     const temp40 = a - 40;
     const temp50 = a - 50;
     const pct = Math.round((a * 100) / 255);
-    return `${hexStr}  [число=${a} · темп=${temp40}°C/${temp50}°C · ${pct}%]`;
+    const tpmsHint =
+      a >= 100 && a <= 240 ? ` · шина=${(a * 0.01379).toFixed(2)} бар (${(a * 0.2).toFixed(1)} PSI)` : "";
+    return `${hexStr}  [число=${a} · темп=${temp40}°C/${temp50}°C · ${pct}%${tpmsHint}]`;
   }
   if (payload.length === 2) {
     const u16 = (payload[0]! << 8) | payload[1]!;
@@ -451,6 +474,67 @@ export function summarizeNumericUdsBytes(payload: number[], hex?: string): strin
     return `${hexStr}  [B0=${b0} (${b0 - 40}°C), B1=${b1} (${b1 - 40}°C), W0=${u16}]`;
   }
   return hexStr;
+}
+
+export interface SubaruDidDiffEntry {
+  txHex: string;
+  moduleTitle: string;
+  did: string;
+  label: string;
+  beforeHex: string;
+  afterHex: string;
+  beforeDecoded: string;
+  afterDecoded: string;
+}
+
+export function diffSubaruDumps(
+  before: {
+    modules: {
+      txHex: string;
+      title: string;
+      dids: { did: string; label: string; hex: string; decoded: string }[];
+    }[];
+  },
+  after: {
+    modules: {
+      txHex: string;
+      title: string;
+      dids: { did: string; label: string; hex: string; decoded: string }[];
+    }[];
+  },
+): SubaruDidDiffEntry[] {
+  const diffs: SubaruDidDiffEntry[] = [];
+  const beforeMap = new Map<string, (typeof before.modules)[number]>();
+  for (const mod of before.modules) {
+    beforeMap.set(mod.txHex.toUpperCase(), mod);
+  }
+  for (const afterMod of after.modules) {
+    const tx = afterMod.txHex.toUpperCase();
+    const beforeMod = beforeMap.get(tx);
+    if (!beforeMod) continue;
+    const beforeDids = new Map<string, (typeof beforeMod.dids)[number]>();
+    for (const d of beforeMod.dids) {
+      beforeDids.set(d.did.toUpperCase(), d);
+    }
+    for (const afterDid of afterMod.dids) {
+      const didKey = afterDid.did.toUpperCase();
+      const prev = beforeDids.get(didKey);
+      if (!prev) continue;
+      if (prev.hex.trim() !== afterDid.hex.trim()) {
+        diffs.push({
+          txHex: tx,
+          moduleTitle: afterMod.title || beforeMod.title,
+          did: didKey,
+          label: afterDid.label || prev.label,
+          beforeHex: prev.hex,
+          afterHex: afterDid.hex,
+          beforeDecoded: prev.decoded,
+          afterDecoded: afterDid.decoded,
+        });
+      }
+    }
+  }
+  return diffs;
 }
 
 export interface CustomDid {

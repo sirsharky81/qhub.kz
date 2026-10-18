@@ -310,6 +310,8 @@ export class ObdBleSession {
             // Launch-style passport enrichment for physical modules: fetch OEM Part# (22 F18E / F187) and System Name (22 F197)
             if (!wide && address !== 0x7df) {
               try {
+                // Temporarily disable ATH1 so multi-frame ISO-TP strings (22 F197 / 22 F18E) never mix CAN ID nibbles into ASCII
+                await this.elm!.sendCommand("ATH0");
                 const pRaw = await this.udsExchange(address, target.rx, "22F18E", 1_100);
                 const pParsed = parseUdsResponse(pRaw, 0x22);
                 if (pParsed.kind === "positive" && pParsed.payload.length > 2) {
@@ -318,7 +320,7 @@ export class ObdBleSession {
                     .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
                     .join("")
                     .trim();
-                  if (ascii.length >= 4) partNumber = ascii;
+                  if (ascii.length >= 4 && !/^0+$/.test(ascii)) partNumber = ascii;
                 }
                 const sRaw = await this.udsExchange(address, target.rx, "22F197", 1_100);
                 const sParsed = parseUdsResponse(sRaw, 0x22);
@@ -345,6 +347,12 @@ export class ObdBleSession {
                 }
               } catch {
                 /* optional enrichment */
+              } finally {
+                try {
+                  await this.elm!.sendCommand("ATH1");
+                } catch {
+                  /* ignore */
+                }
               }
               // Return module to default session (10 01) so ABS/VDC/EyeSight warning lights turn off immediately
               try {
@@ -522,15 +530,16 @@ export class ObdBleSession {
     await this.ensureUdsProfile(protocol);
 
     const targets: { tx: number; rx: number; title: string }[] = [
-      { tx: 0x7e1, rx: 0x7e9, title: "Коробка передач / Вариатор CVT (TCM 7E1 → 7E9)" },
+      { tx: 0x7a2, rx: 0x7aa, title: "Силовая установка 2.4 TURBO / КПП SGP (7A2 → 7AA)" },
+      { tx: 0x7e1, rx: 0x7e9, title: "Коробка передач / Вариатор CVT OBD (7E1 → 7E9)" },
       { tx: 0x783, rx: 0x78b, title: "Приборка SGP (METER 783 → 78B)" },
+      { tx: 0x752, rx: 0x75a, title: "Боди-модуль BIU / TPMS (Integ. Unit 752 → 75A)" },
       { tx: 0x787, rx: 0x78f, title: "Камера EyeSight SGP (787 → 78F)" },
       { tx: 0x7c4, rx: 0x7cc, title: "Климат-контроль A/C (7C4 → 7CC)" },
       { tx: 0x786, rx: 0x78e, title: "Сонары / Парктроник RAB (786 → 78E)" },
-      { tx: 0x7a2, rx: 0x7aa, title: "Селектор КПП / Доп. блок SGP (7A2 → 7AA)" },
-      { tx: 0x750, rx: 0x758, title: "Шлюз / бесключевой доступ (750 → 758)" },
-      { tx: 0x752, rx: 0x75a, title: "Боди / TPMS (752 → 75A)" },
-      { tx: 0x740, rx: 0x748, title: "Боди-модуль BIU (740 → 748)" },
+      { tx: 0x7b0, rx: 0x7b8, title: "ABS / VDC / Ручник EPB (7B0 → 7B8)" },
+      { tx: 0x746, rx: 0x74e, title: "Электроусилитель руля EPS (746 → 74E)" },
+      { tx: 0x780, rx: 0x788, title: "Подушки безопасности SRS Airbag (780 → 788)" },
     ];
 
     const passportDids = [
@@ -538,7 +547,7 @@ export class ObdBleSession {
       0xf192, 0xf193, 0xf194, 0xf195, 0xf197, 0xf198, 0xf199, 0xf19e,
     ];
 
-    const rootBitmaps = [0x1000, 0x1100, 0x2000, 0x2100, 0x3000, 0xd000];
+    const rootBitmaps = [0x1000, 0x1100, 0x1200, 0x2000, 0x2100, 0x3000, 0x3200, 0xd000];
 
     let vin: string | null = null;
     const reports: SubaruRegionModuleReport[] = [];
@@ -603,6 +612,7 @@ export class ObdBleSession {
         if (responded) {
           let step = 0;
           const visited = new Set<number>();
+          const emptyHops = new Map<number, number>();
           const queue: number[] = [...passportDids, ...rootBitmaps];
 
           while (queue.length > 0) {
@@ -637,19 +647,32 @@ export class ObdBleSession {
                   .join("")
                   .replace(/\s+/g, " ")
                   .trim();
-                const label = DID_LABELS[didHex] ?? `DID ${didHex}`;
-                dids.push({ did: didHex, label, hex, decoded });
+
+                const isBitmap = isUdsBitmapDid(didNum) && body.length === 4;
+                const children = isBitmap ? decodeUdsDidSupportBitmap(didNum, body) : [];
+                const dataChildren = children.filter((c) => !isUdsBitmapDid(c));
+                const isEmptyOrPointerOnlyBitmap = isBitmap && dataChildren.length === 0;
+
+                if (!isEmptyOrPointerOnlyBitmap) {
+                  const label = DID_LABELS[didHex] ?? `DID ${didHex}`;
+                  dids.push({ did: didHex, label, hex, decoded });
+                }
                 if (didHex === "F197" && ascii) systemName = ascii;
-                if ((didHex === "F18E" || didHex === "F187") && ascii) partNumber = ascii;
+                if ((didHex === "F18E" || didHex === "F187") && ascii && !/^0+$/.test(ascii)) partNumber = ascii;
                 if ((didHex === "F189" || didHex === "F195") && ascii) softwareVersion = ascii;
                 if (didHex === "F182") calId = ascii || hex;
                 if (didHex === "F190" && ascii.length >= 11) vin = ascii;
 
                 // If this DID is a 32-bit support bitmap (e.g. 1000, 1020, 1100, 2100), enqueue all supported child DIDs
-                if (isUdsBitmapDid(didNum) && body.length === 4) {
-                  const children = decodeUdsDidSupportBitmap(didNum, body);
+                if (isBitmap) {
+                  const prevEmpty = emptyHops.get(didNum) ?? 0;
+                  const nextEmpty = dataChildren.length === 0 ? prevEmpty + 1 : 0;
                   for (const childDid of children) {
-                    if (!visited.has(childDid) && visited.size + queue.length < 160) {
+                    if (isUdsBitmapDid(childDid) && nextEmpty > 2) continue;
+                    if (isUdsBitmapDid(childDid)) {
+                      emptyHops.set(childDid, nextEmpty);
+                    }
+                    if (!visited.has(childDid) && dids.length + queue.length < 180) {
                       queue.push(childDid);
                     }
                   }

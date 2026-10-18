@@ -40,14 +40,59 @@ export function withoutElmLineNumbers(raw: string): string {
 }
 
 /**
- * Strips ELM multiline frame indexes (`0:`, `1:`) and extracts the declared
- * ISO-TP payload byte count when ELM printed a 3-hex-digit length header line.
+ * Strips ELM multiline frame indexes (`0:`, `1:`) or `ATH1` ISO-TP frame headers
+ * (`74E 10 23 ...`, `74E 21 ...`, `7E8 06 ...`) and extracts the declared
+ * ISO-TP payload byte count when present.
  */
 export function stripElmMultiline(raw: string): { cleaned: string; declaredLength: number | null } {
   const lines = raw
     .split(/\r|\n/)
     .map((line) => line.replace(/>/g, "").trim())
-    .filter((line) => line.length > 0);
+    .filter((line) => line.length > 0 && !/^(NO DATA|STOPPED|OK|SEARCHING|\?)$/i.test(line));
+
+  // Case 1: ATH1 + ATCAF1 ISO-TP lines starting with 3-hex or 8-hex CAN ID
+  // e.g. "74E 10 23 62 F1 97 50 6F 77" / "74E 21 65 72 20 53 74 65 65"
+  // or single frame "74E 05 62 F1 86 03"
+  const ath1Lines: { pciType: number; len?: number; seq?: number; dataHex: string }[] = [];
+  for (const line of lines) {
+    const tokens = line.toUpperCase().match(/\b[0-9A-F]+\b/g);
+    if (!tokens || tokens.length < 3) continue;
+    const idTok = tokens[0]!;
+    if (idTok.length !== 3 && idTok.length !== 8) continue;
+    const rest = tokens.slice(1);
+    if (!rest.every((t) => t.length === 2)) continue;
+    const pci0 = Number.parseInt(rest[0]!, 16);
+    const frameType = (pci0 >> 4) & 0x0f;
+    if (frameType === 0 && pci0 > 0 && pci0 <= 7 && rest.length >= 1 + pci0) {
+      ath1Lines.push({
+        pciType: 0,
+        len: pci0,
+        dataHex: rest.slice(1, 1 + pci0).join(" "),
+      });
+    } else if (frameType === 1 && rest.length >= 3) {
+      const pci1 = Number.parseInt(rest[1]!, 16);
+      const totalLen = ((pci0 & 0x0f) << 8) | pci1;
+      ath1Lines.push({
+        pciType: 1,
+        len: totalLen,
+        dataHex: rest.slice(2).join(" "),
+      });
+    } else if (frameType === 2 && rest.length >= 2) {
+      ath1Lines.push({
+        pciType: 2,
+        seq: pci0 & 0x0f,
+        dataHex: rest.slice(1).join(" "),
+      });
+    }
+  }
+  if (ath1Lines.length > 0 && ath1Lines.length === lines.length) {
+    const firstFrame = ath1Lines.find((l) => l.pciType === 1) ?? ath1Lines.find((l) => l.pciType === 0);
+    const declaredLength = firstFrame?.len ?? null;
+    const cleaned = ath1Lines.map((l) => l.dataHex).join(" ");
+    return { cleaned, declaredLength };
+  }
+
+  // Case 2: Standard ELM multiline "014 / 0: 49 02 ... / 1: ..."
   const indexed = lines.filter((line) => /^[0-9A-Fa-f]+\s*:/.test(line));
   const hasLengthHeader = lines.some((line) => /^[0-9A-Fa-f]{3}$/.test(line));
   if (indexed.length < 2 && !(indexed.length >= 1 && hasLengthHeader)) {
