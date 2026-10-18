@@ -317,8 +317,19 @@ export default function ObdDiagClient() {
       tx: etacsDump.txHex,
       rx: etacsDump.rxHex,
       partNumber: etacsDump.partNumber,
+      swVersion: etacsDump.swVersion ?? null,
+      vin: etacsDump.vin ?? null,
+      variantUsedId: etacsDump.variantUsedId ?? null,
+      customUsedId: etacsDump.customUsedId ?? null,
       variantHex: bytesToHex(etacsDump.variant, ""),
       customHex: bytesToHex(etacsDump.custom, ""),
+      extraLids: (etacsDump.extraLids ?? []).map((item) => ({
+        lidHex: item.lidHex,
+        label: item.label,
+        length: item.payload.length,
+        hex: bytesToHex(item.payload, " "),
+        ascii: item.ascii,
+      })),
     };
     await saveBlobToDevice(
       new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }),
@@ -592,6 +603,14 @@ export default function ObdDiagClient() {
                 {etacsDump.partNumber ? (
                   <p className="mt-1 text-xs text-slate-300">
                     Номер блока / SW: <span className="font-mono text-emerald-300">{etacsDump.partNumber}</span>
+                    {etacsDump.swVersion ? (
+                      <span className="ml-2 font-mono text-slate-400">({etacsDump.swVersion})</span>
+                    ) : null}
+                  </p>
+                ) : null}
+                {etacsDump.vin ? (
+                  <p className="mt-0.5 text-xs text-slate-300">
+                    VIN в ETACS: <span className="font-mono text-cyan-300">{etacsDump.vin}</span>
                   </p>
                 ) : null}
                 {etacsDump.customStatusNote ? (
@@ -651,6 +670,52 @@ export default function ObdDiagClient() {
                     Сохранить резервную копию (.json с дампом)
                   </button>
                 </div>
+
+                {etacsDump.extraLids && etacsDump.extraLids.length > 0 ? (
+                  <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5 text-xs">
+                    <div className="font-medium text-slate-300">
+                      Дополнительные регистры блока ({etacsDump.extraLids.length} LID) — нажмите, чтобы использовать как `.cuf`:
+                    </div>
+                    <div className="mt-1.5 flex flex-col gap-1.5">
+                      {etacsDump.extraLids.map((extra) => (
+                        <div
+                          key={extra.lidHex}
+                          className="flex items-center justify-between gap-2 rounded bg-slate-900/80 px-2 py-1.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-slate-200">
+                              <span className="font-mono text-emerald-300">{extra.lidHex}</span> · {extra.label} (
+                              {extra.payload.length} Б)
+                            </div>
+                            <div className="truncate font-mono text-[10px] text-slate-400">
+                              {extra.ascii ? `${extra.ascii} · ` : ""}
+                              {bytesToHex(extra.payload.slice(0, 16))}
+                              {extra.payload.length > 16 ? "…" : ""}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEtacsDump((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      custom: extra.payload,
+                                      customUsedId: extra.lidHex,
+                                      customStatusNote: null,
+                                    }
+                                  : prev,
+                              )
+                            }
+                            className="shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200"
+                          >
+                            В .cuf
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </section>

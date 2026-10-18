@@ -20,7 +20,7 @@ export interface EtacsCanProfile {
 export const ETACS_PROFILES: EtacsCanProfile[] = [
   {
     id: "auto",
-    label: "Автопоиск ETACS (620 / 7A1 / 710, KWP 21 и UDS 22)",
+    label: "Автопоиск ETACS (620→504 / 7A1→7A0 / 710→718, 8637C671 Pajero Sport III)",
     txId: 0x620,
     rxId: 0x504,
     service: 0x21,
@@ -30,7 +30,7 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   },
   {
     id: "620-504",
-    label: "ETACS 620 → 504 · KWP 21 (Pajero Sport / L200 / Triton / Outlander)",
+    label: "ETACS 620 → 504 · KWP 21 (8637C671 Pajero Sport III / L200 V / Outlander III)",
     txId: 0x620,
     rxId: 0x504,
     service: 0x21,
@@ -70,12 +70,21 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   },
 ];
 
+export interface EtacsExtraLidItem {
+  lidHex: string;
+  label: string;
+  payload: Uint8Array;
+  ascii: string | null;
+}
+
 export interface EtacsCodingDump {
   profileId: string;
   profileLabel: string;
   txHex: string;
   rxHex: string;
   partNumber: string | null;
+  swVersion?: string | null;
+  vin?: string | null;
   variant: Uint8Array;
   custom: Uint8Array;
   rawVariantResponse: string;
@@ -83,6 +92,7 @@ export interface EtacsCodingDump {
   variantUsedId?: string;
   customUsedId?: string;
   customStatusNote?: string | null;
+  extraLids?: EtacsExtraLidItem[];
 }
 
 /**
@@ -209,6 +219,15 @@ async function readCodingBlockWithFallbacks(
   );
 }
 
+function extractCleanAscii(payload: Uint8Array): string | null {
+  const ascii = Array.from(payload)
+    .filter((b) => b >= 0x20 && b <= 0x7e)
+    .map((b) => String.fromCharCode(b))
+    .join("")
+    .trim();
+  return ascii.length >= 4 ? ascii : null;
+}
+
 async function tryReadPartNumber(elm: Elm327Client, profile: EtacsCanProfile): Promise<string | null> {
   const partCandidates =
     profile.service === 0x21
@@ -222,17 +241,74 @@ async function tryReadPartNumber(elm: Elm327Client, profile: EtacsCanProfile): P
       const raw = await elm.sendPayload(`${svcHex}${idHex}`, 3_500);
       const payload = positiveEtacsPayload(raw, profile.service, partId);
       if (!payload || payload.length < 4) continue;
-      const ascii = Array.from(payload)
-        .filter((b) => b >= 0x20 && b <= 0x7e)
-        .map((b) => String.fromCharCode(b))
-        .join("")
-        .trim();
-      if (ascii.length >= 4) return ascii;
+      // Prefer Mitsubishi OEM part number pattern (e.g. 8637C671, 8637A645) when embedded in a larger ECU ID block
+      const ascii = extractCleanAscii(payload);
+      if (ascii) {
+        const mitsuMatch = ascii.match(/\b8637[A-Z0-9]{4}\b/i);
+        if (mitsuMatch?.[0]) return mitsuMatch[0].toUpperCase();
+        return ascii;
+      }
     } catch {
       /* try next part LID */
     }
   }
   return null;
+}
+
+async function probeExtraEtacsLids(
+  elm: Elm327Client,
+  profile: EtacsCanProfile,
+  skipIdHex: Set<string>,
+): Promise<{ extraLids: EtacsExtraLidItem[]; swVersion: string | null; vin: string | null }> {
+  const extraLids: EtacsExtraLidItem[] = [];
+  let swVersion: string | null = null;
+  let vin: string | null = null;
+
+  if (profile.service !== 0x21) {
+    return { extraLids, swVersion, vin };
+  }
+
+  const probes: { lid: number; label: string }[] = [
+    { lid: 0x31, label: "Custom Coding 1 (21 31)" },
+    { lid: 0x32, label: "Custom Coding 2 / Sub-block (21 32)" },
+    { lid: 0x33, label: "Custom Coding 3 (21 33)" },
+    { lid: 0x40, label: "Кодировка опций 40 (21 40)" },
+    { lid: 0x41, label: "Кодировка опций 41 (21 41)" },
+    { lid: 0x42, label: "Variant / Option Block 42 (21 42)" },
+    { lid: 0x43, label: "Custom / Option Block 43 (21 43)" },
+    { lid: 0x50, label: "Конфигурация 50 (21 50)" },
+    { lid: 0x51, label: "Пользовательские настройки 51 (21 51)" },
+    { lid: 0x52, label: "Пользовательские настройки 52 (21 52)" },
+    { lid: 0x80, label: "Идентификатор ЭБУ / Part Number (21 80)" },
+    { lid: 0x81, label: "Версия ПО / HW (21 81)" },
+    { lid: 0x87, label: "Каталожный номер OEM (21 87)" },
+    { lid: 0x90, label: "VIN в блоке ETACS (21 90)" },
+    { lid: 0x99, label: "Серийный / калибровочный номер (21 99)" },
+  ];
+
+  for (const probe of probes) {
+    const hexCode = `21 ${probe.lid.toString(16).padStart(2, "0").toUpperCase()}`;
+    if (skipIdHex.has(hexCode)) continue;
+    try {
+      const cmd = `21${probe.lid.toString(16).padStart(2, "0").toUpperCase()}`;
+      const raw = await elm.sendPayload(cmd, 2_500);
+      const payload = positiveEtacsPayload(raw, 0x21, [probe.lid]);
+      if (!payload || payload.length === 0) continue;
+      const ascii = extractCleanAscii(payload);
+      if (probe.lid === 0x81 && ascii && !swVersion) swVersion = ascii;
+      if (probe.lid === 0x90 && ascii && !vin) vin = ascii;
+      extraLids.push({
+        lidHex: hexCode,
+        label: probe.label,
+        payload,
+        ascii,
+      });
+    } catch {
+      /* ignore unsupported LID */
+    }
+  }
+
+  return { extraLids, swVersion, vin };
 }
 
 async function readSingleEtacsProfile(
@@ -275,6 +351,10 @@ async function readSingleEtacsProfile(
   }
 
   const partNumber = await tryReadPartNumber(elm, profile);
+  const skipSet = new Set<string>();
+  if (variant.usedIdHex) skipSet.add(variant.usedIdHex);
+  if (customUsedId) skipSet.add(customUsedId);
+  const { extraLids, swVersion, vin } = await probeExtraEtacsLids(elm, profile, skipSet);
 
   // Reset Flow Control mode to automatic (ATFCSM0) so subsequent standard UDS requests work normally
   try {
@@ -289,6 +369,8 @@ async function readSingleEtacsProfile(
     txHex: profile.txId.toString(16).toUpperCase(),
     rxHex: profile.rxId.toString(16).toUpperCase(),
     partNumber,
+    swVersion,
+    vin,
     variant: variant.payload,
     custom: customPayload,
     rawVariantResponse: variant.raw,
@@ -296,6 +378,7 @@ async function readSingleEtacsProfile(
     variantUsedId: variant.usedIdHex,
     customUsedId,
     customStatusNote,
+    extraLids,
   };
 }
 
