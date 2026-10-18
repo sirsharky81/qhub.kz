@@ -1,26 +1,30 @@
 import { bytesToHex, extractHexTokens, stripElmMultiline } from "./hex";
 import type { Elm327Client } from "./elm327";
 
+export type MitsubishiCodingModuleKind = "etacs" | "engine";
+
 export interface EtacsCanProfile {
   id: string;
   label: string;
+  moduleKind?: MitsubishiCodingModuleKind;
   txId: number;
   rxId: number;
   /** Primary service: 0x21 (KWP ReadDataByLocalIdentifier) or 0x22 (UDS ReadDataByIdentifier). */
   service: 0x21 | 0x22;
   /** Identifier for variant coding (MMCodingWriter / MUT .kon). */
   variantId: number[];
-  /** Identifier for custom coding (.cuf). */
+  /** Identifier for custom coding (.cuf), optional for Engine ECU. */
   customId: number[];
   /** Optional identifier for ECU part/SW number. */
   partId?: number[];
 }
 
-/** Common Mitsubishi ETACS addressing (11-bit 500k CAN). */
+/** Common Mitsubishi ETACS & Engine ECU addressing (11-bit 500k CAN). */
 export const ETACS_PROFILES: EtacsCanProfile[] = [
   {
     id: "auto",
-    label: "Автопоиск ETACS (620→504 / 7A1→7A0 / 710→718, 8637C671 Pajero Sport III)",
+    label: "Автопоиск ETACS (620→504 / 7A1→7A0 / 710→718, 8637C671 / 8637B838)",
+    moduleKind: "etacs",
     txId: 0x620,
     rxId: 0x504,
     service: 0x21,
@@ -31,6 +35,7 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   {
     id: "620-504",
     label: "ETACS 620 → 504 · KWP 21 (8637C671 Pajero Sport III / L200 V / Outlander III)",
+    moduleKind: "etacs",
     txId: 0x620,
     rxId: 0x504,
     service: 0x21,
@@ -40,7 +45,8 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   },
   {
     id: "7a1-7a0",
-    label: "ETACS 7A1 → 7A0 · KWP 21 (Outlander XL/III, ASX, Lancer X)",
+    label: "ETACS 7A1 → 7A0 · KWP 21 (8637B838 Outlander XL/III, ASX, Lancer X)",
+    moduleKind: "etacs",
     txId: 0x7a1,
     rxId: 0x7a0,
     service: 0x21,
@@ -51,6 +57,7 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   {
     id: "710-718",
     label: "ETACS 710 → 718 · KWP 21 (альтернативный адрес)",
+    moduleKind: "etacs",
     txId: 0x710,
     rxId: 0x718,
     service: 0x21,
@@ -61,8 +68,42 @@ export const ETACS_PROFILES: EtacsCanProfile[] = [
   {
     id: "7a1-7a0-uds",
     label: "ETACS 7A1 → 7A0 · UDS 22 (новые кузова 22 B0/B1)",
+    moduleKind: "etacs",
     txId: 0x7a1,
     rxId: 0x7a0,
+    service: 0x22,
+    variantId: [0x01, 0x30],
+    customId: [0x01, 0x31],
+    partId: [0xf1, 0x87],
+  },
+  {
+    id: "engine-auto",
+    label: "Двигатель (ECM 7E0 → 7E8) · Автопоиск .kon (1860D362 / KWP 21 и UDS 22)",
+    moduleKind: "engine",
+    txId: 0x7e0,
+    rxId: 0x7e8,
+    service: 0x21,
+    variantId: [0x30],
+    customId: [0x31],
+    partId: [0x80],
+  },
+  {
+    id: "engine-7e0-kwp",
+    label: "Двигатель (ECM 7E0 → 7E8) · KWP 21 (1860D362 Pajero Sport III 4N15 / L200 / Outlander)",
+    moduleKind: "engine",
+    txId: 0x7e0,
+    rxId: 0x7e8,
+    service: 0x21,
+    variantId: [0x30],
+    customId: [0x31],
+    partId: [0x80],
+  },
+  {
+    id: "engine-7e0-uds",
+    label: "Двигатель (ECM 7E0 → 7E8) · UDS 22 (новые ЭБУ ДВС Mitsubishi)",
+    moduleKind: "engine",
+    txId: 0x7e0,
+    rxId: 0x7e8,
     service: 0x22,
     variantId: [0x01, 0x30],
     customId: [0x01, 0x31],
@@ -80,6 +121,7 @@ export interface EtacsExtraLidItem {
 export interface EtacsCodingDump {
   profileId: string;
   profileLabel: string;
+  moduleKind?: MitsubishiCodingModuleKind;
   txHex: string;
   rxHex: string;
   partNumber: string | null;
@@ -241,10 +283,10 @@ async function tryReadPartNumber(elm: Elm327Client, profile: EtacsCanProfile): P
       const raw = await elm.sendPayload(`${svcHex}${idHex}`, 3_500);
       const payload = positiveEtacsPayload(raw, profile.service, partId);
       if (!payload || payload.length < 4) continue;
-      // Prefer Mitsubishi OEM part number pattern (e.g. 8637C671, 8637A645) when embedded in a larger ECU ID block
+      // Prefer Mitsubishi OEM part number pattern (ETACS 8637xxxx or Engine ECU 1860xxxx) when embedded in a larger ECU ID block
       const ascii = extractCleanAscii(payload);
       if (ascii) {
-        const mitsuMatch = ascii.match(/\b8637[A-Z0-9]{4}\b/i);
+        const mitsuMatch = ascii.match(/\b(?:8637|1860)[A-Z0-9]{4}\b/i);
         if (mitsuMatch?.[0]) return mitsuMatch[0].toUpperCase();
         return ascii;
       }
@@ -316,11 +358,14 @@ async function readSingleEtacsProfile(
   profile: EtacsCanProfile,
 ): Promise<EtacsCodingDump> {
   await configureEtacsChannel(elm, profile);
+  const isEngine = profile.moduleKind === "engine" || profile.txId === 0x7e0;
 
   const variantCandidates =
     profile.service === 0x21
-      ? [profile.variantId, [0x42], [0x50], [0xb0]]
-      : [profile.variantId, [0x01, 0x42], [0xb0, 0x01]];
+      ? isEngine
+        ? [profile.variantId, [0x32], [0x50], [0x51], [0x52], [0x42], [0x40], [0x31], [0xb0]]
+        : [profile.variantId, [0x42], [0x50], [0xb0]]
+      : [profile.variantId, [0x01, 0x32], [0x01, 0x42], [0x01, 0x50], [0xb0, 0x01]];
 
   const customCandidates =
     profile.service === 0x21
@@ -329,25 +374,28 @@ async function readSingleEtacsProfile(
 
   const variant = await readCodingBlockWithFallbacks(elm, profile, variantCandidates);
 
-  // Some Mitsubishi ETACS units (especially on 620 -> 504) support Variant Coding (21 30 -> .kon)
-  // and return 7F 21 12 (subFunctionNotSupported) for Custom Coding (21 31 -> .cuf) when custom
-  // parameters are either stored in a different LID or not separate from Variant Coding.
-  // Never discard a valid .kon dump just because .cuf returned 7F 21 12!
+  // Engine ECUs (1860xxxx on 7E0->7E8) typically only have a single Variant Coding block (.kon)
+  // without a separate Custom Coding (.cuf). Some ETACS units (especially 620->504) also return
+  // 7F 21 12 for 21 31. Never discard a valid .kon dump when .cuf is absent!
   let customPayload: Uint8Array = new Uint8Array(0);
   let customRaw = "";
   let customUsedId: string | undefined;
   let customStatusNote: string | null = null;
 
   try {
-    const custom = await readCodingBlockWithFallbacks(elm, profile, customCandidates);
+    const filteredCustom = customCandidates.filter(
+      (cand) => `21 ${cand.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}` !== variant.usedIdHex,
+    );
+    const custom = await readCodingBlockWithFallbacks(elm, profile, filteredCustom);
     customPayload = custom.payload;
     customRaw = custom.raw;
     customUsedId = custom.usedIdHex;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     customRaw = msg;
-    customStatusNote =
-      "Блок ETACS отдал основную кодировку Variant (.kon), но не поддерживает отдельный блок Custom (.cuf — ответ 7F 21 12). Вы можете сразу скачать .kon и .json.";
+    customStatusNote = isEngine
+      ? "Кодировка ЭБУ двигателя (.kon) успешно считана. Для блока двигателя используется один файл Variant (.kon) и резервная копия (.json)."
+      : "Блок ETACS отдал основную кодировку Variant (.kon), но не поддерживает отдельный блок Custom (.cuf — ответ 7F 21 12). Вы можете сразу скачать .kon и .json.";
   }
 
   const partNumber = await tryReadPartNumber(elm, profile);
@@ -366,6 +414,7 @@ async function readSingleEtacsProfile(
   return {
     profileId: profile.id,
     profileLabel: profile.label,
+    moduleKind: isEngine ? "engine" : "etacs",
     txHex: profile.txId.toString(16).toUpperCase(),
     rxHex: profile.rxId.toString(16).toUpperCase(),
     partNumber,
@@ -388,8 +437,10 @@ export async function readEtacsCoding(
 ): Promise<EtacsCodingDump> {
   const candidates =
     profile.id === "auto"
-      ? ETACS_PROFILES.filter((item) => item.id !== "auto")
-      : [profile];
+      ? ETACS_PROFILES.filter((item) => item.id !== "auto" && item.moduleKind !== "engine")
+      : profile.id === "engine-auto"
+        ? ETACS_PROFILES.filter((item) => item.id !== "engine-auto" && item.moduleKind === "engine")
+        : [profile];
 
   const errors: string[] = [];
   for (const candidate of candidates) {
@@ -401,7 +452,7 @@ export async function readEtacsCoding(
   }
 
   throw new Error(
-    `Не удалось выгрузить кодировку ETACS. Включите зажигание (ON) и проверьте, что это Mitsubishi. Ответы: ${errors.join(" | ")}`,
+    `Не удалось выгрузить кодировку Mitsubishi. Включите зажигание (ON) и проверьте подключение. Ответы: ${errors.join(" | ")}`,
   );
 }
 

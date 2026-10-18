@@ -213,6 +213,43 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(link.written).toContain("ATFCSH620");
     expect(link.written).toContain("ATFCSM1");
   });
+
+  it("reads Mitsubishi Engine ECU (7E0 -> 7E8) .kon coding and 1860xxxx part number", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    link.writeLine = async (line: string) => {
+      if (line === "2130" || line === "21 30") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "7F 21 12\r>";
+        return;
+      }
+      if (line === "2132" || line === "21 32") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "006\r0: 61 32 10 20 30 40 00\r>";
+        return;
+      }
+      if (line === "2180" || line === "21 80") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "61 80 31 38 36 30 43 39 39 31\r>";
+        return;
+      }
+      if (/^21(31|43|51|40|52|B1)$/.test(line)) {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "7F 21 12\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+    const elm = new Elm327Client(link);
+    const engineProfile = ETACS_PROFILES.find((p) => p.id === "engine-auto")!;
+    const dump = await readEtacsCoding(elm, engineProfile);
+    expect(dump.moduleKind).toBe("engine");
+    expect(dump.txHex).toBe("7E0");
+    expect(dump.rxHex).toBe("7E8");
+    expect(dump.variantUsedId).toBe("21 32");
+    expect(Array.from(dump.variant)).toEqual([0x10, 0x20, 0x30, 0x40]);
+    expect(dump.partNumber).toBe("1860C991");
+  });
 });
 
 describe("exportUdsLog", () => {
