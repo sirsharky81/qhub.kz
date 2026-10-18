@@ -376,10 +376,12 @@ export default function CanUdsPanel({
       setRx("7E8");
     }
     try {
+      let ssmSuccessCount = 0;
       for (const command of EXTENDED_COMMANDS.filter((item) => item.group === group)) {
         try {
           const result = await session.sendUds("6", command.tx, command.rx, command.hex, false);
           if (result.parsed.kind === "positive") {
+            ssmSuccessCount += 1;
             rows.push(...decodeExtendedSignals(command, result.parsed.payload));
           } else {
             const raw = result.raw.replace(/>/g, "").replace(/\s+/g, " ").trim();
@@ -398,6 +400,111 @@ export default function CanUdsPanel({
         }
         setCatalog([...rows]);
       }
+
+      // On 6th-gen Subaru SGP (Outback BT / Legacy BW 2020+), legacy SSM A8 is disabled on TCM (7E1).
+      // Automatically switch to UDS (10 03 + 09 04 + 22 bitmaps 1000/1020/1100/2100/F18E/F197) and read all supported CVT DIDs!
+      if (group === "subaru-tcm" && ssmSuccessCount === 0) {
+        const udsRows: DecodedSignal[] = [];
+        try {
+          const res09 = await session.sendUds("6", "7E1", "7E9", "09 04", false);
+          if (res09.parsed.kind === "positive") {
+            udsRows.push({
+              name: "Калибровка КПП (09 04)",
+              value: formatUdsPayload(res09.parsed.payload, 0x09).replace(/^Калибровка \(CalID\):\s*/, ""),
+              unit: "",
+            });
+            setCatalog([...udsRows]);
+          }
+        } catch {
+          /* ignore */
+        }
+
+        try {
+          const res03 = await session.sendUds("6", "7E1", "7E9", "03", false);
+          if (res03.parsed.kind === "positive") {
+            const dtcCount = res03.parsed.payload[0] ?? 0;
+            udsRows.push({
+              name: "Ошибки КПП (Mode 03)",
+              value: dtcCount === 0 ? "0 ошибок" : `${dtcCount} шт.`,
+              unit: "",
+            });
+            setCatalog([...udsRows]);
+          }
+        } catch {
+          /* ignore */
+        }
+
+        let sessionOpened = false;
+        try {
+          const res10 = await session.sendUds("6", "7E1", "7E9", "10 03", false);
+          if (res10.parsed.kind === "positive") sessionOpened = true;
+        } catch {
+          /* ignore */
+        }
+
+        const queue: number[] = [
+          0xf18e, 0xf197, 0xf189, 0xf182, 0x1000, 0x1100, 0x2000, 0x2100, 0x3000, 0xd000,
+        ];
+        const visited = new Set<number>();
+        while (queue.length > 0 && visited.size < 48) {
+          const didNum = queue.shift()!;
+          if (visited.has(didNum)) continue;
+          visited.add(didNum);
+          const didHex = didNum.toString(16).padStart(4, "0").toUpperCase();
+          try {
+            const res22 = await session.sendUds("6", "7E1", "7E9", `22 ${didHex}`, false);
+            if (res22.parsed.kind === "positive") {
+              const body =
+                res22.parsed.payload.length >= 2 &&
+                res22.parsed.payload[0] === ((didNum >> 8) & 0xff) &&
+                res22.parsed.payload[1] === (didNum & 0xff)
+                  ? res22.parsed.payload.slice(2)
+                  : res22.parsed.payload;
+              udsRows.push({
+                name: `UDS 22 ${didHex}`,
+                value: formatUdsPayload(res22.parsed.payload, 0x22),
+                unit: "",
+              });
+              setCatalog([...udsRows]);
+              if (didNum >= 0x1000 && didNum < 0xf180 && (didNum & 0x1f) === 0 && body.length === 4) {
+                for (let i = 0; i < 32; i++) {
+                  const byteIdx = i >> 3;
+                  const bitMask = 1 << (7 - (i & 7));
+                  if ((body[byteIdx]! & bitMask) !== 0) {
+                    const child = didNum + i + 1;
+                    if (!visited.has(child)) queue.push(child);
+                  }
+                }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (sessionOpened) {
+          try {
+            await session.sendUds("6", "7E1", "7E9", "10 01", false);
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (udsRows.length > 0) {
+          setCatalog(udsRows);
+        } else {
+          setCatalog([
+            ...rows,
+            {
+              name: "Подсказка для Subaru SGP (2020+)",
+              value:
+                "На SGP старый протокол SSM (A8) в TCM 7E1 отключён. Нажмите «Полное чтение по битовым картам» ниже или «Поиск датчиков 1000–107F» для 7E1.",
+              unit: "",
+            },
+          ]);
+        }
+      }
+
       onLog(
         group === "subaru"
           ? "Subaru ДВС (7E0)"
@@ -775,7 +882,7 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
             <div className="text-xs font-medium text-slate-300">Заводские таблицы (1 нажатие)</div>
             <p className="mt-1 text-xs text-slate-500">
-              Subaru ДВС (`7E0`) и Коробка TCM/CVT (`7E1`) — протокол SSM (`A8`). Pajero Sport — таблицы `21 01–04` (`7E0`).
+              Subaru ДВС (`7E0` SSM `A8`), Subaru КПП (`7E1` SSM `A8` + автопереход на UDS `22` / `09 04` для 6-го поколения SGP). Pajero Sport — таблицы `21 01–04` (`7E0`).
             </p>
             <div className="mt-2 grid grid-cols-3 gap-2">
               <button
@@ -823,7 +930,7 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-emerald-200">
-                Subaru SGP: Безопасное чтение паспорта Приборки (783) + EyeSight (787) + BIU (740)
+                Subaru SGP: Полное чтение КПП (7E1) + Приборки (783) + EyeSight (787) + Климата (7C4)
               </span>
               {busy && subaruProgress ? (
                 <button
@@ -838,7 +945,7 @@ export default function CanUdsPanel({
               ) : null}
             </div>
             <p className="mt-1 text-[11px] text-slate-300">
-              Строго <strong>только чтение (`Service 22 ReadDataByIdentifier`)</strong> — автоматически читает битовые маски (`1000`, `1020`, `1100`, `2100`, `3000`) и выгружает все открытые DID Приборки (`783`), EyeSight (`787`), Климата (`7C4`), Сонаров (`786`) и Шлюза (`750`). Без единой команды записи (`2E`) или сброса (`11`).
+              Строго <strong>только чтение (`Service 22 ReadDataByIdentifier`)</strong> — автоматически читает битовые маски (`1000`, `1020`, `1100`, `2100`, `3000`) и выгружает все открытые DID Коробки CVT (`7E1`), Приборки (`783`), EyeSight (`787`), Климата (`7C4`), Сонаров (`786`) и Шлюза (`750`). Без единой команды записи (`2E`) или сброса (`11`).
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               <button
@@ -847,7 +954,7 @@ export default function CanUdsPanel({
                 onClick={() => void runSubaruRegionDump()}
                 className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                Полное чтение по битовым картам (783 / 787 / 7C4 / 786 / 750)
+                Полное чтение по битовым картам (7E1 / 783 / 787 / 7C4 / 786)
               </button>
               {subaruDump ? (
                 <button

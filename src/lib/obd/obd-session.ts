@@ -522,10 +522,12 @@ export class ObdBleSession {
     await this.ensureUdsProfile(protocol);
 
     const targets: { tx: number; rx: number; title: string }[] = [
+      { tx: 0x7e1, rx: 0x7e9, title: "Коробка передач / Вариатор CVT (TCM 7E1 → 7E9)" },
       { tx: 0x783, rx: 0x78b, title: "Приборка SGP (METER 783 → 78B)" },
       { tx: 0x787, rx: 0x78f, title: "Камера EyeSight SGP (787 → 78F)" },
       { tx: 0x7c4, rx: 0x7cc, title: "Климат-контроль A/C (7C4 → 7CC)" },
       { tx: 0x786, rx: 0x78e, title: "Сонары / Парктроник RAB (786 → 78E)" },
+      { tx: 0x7a2, rx: 0x7aa, title: "Селектор КПП / Доп. блок SGP (7A2 → 7AA)" },
       { tx: 0x750, rx: 0x758, title: "Шлюз / бесключевой доступ (750 → 758)" },
       { tx: 0x752, rx: 0x75a, title: "Боди / TPMS (752 → 75A)" },
       { tx: 0x740, rx: 0x748, title: "Боди-модуль BIU (740 → 748)" },
@@ -577,11 +579,26 @@ export class ObdBleSession {
           /* ignore */
         }
 
+        // Powertrain modules (7E0/7E1) sometimes ignore 3E 00 / 10 03 in default mode but answer 09 04 (CalID) or 22 F190
+        let mode09CalId: string | null = null;
+        if (!responded && (target.tx === 0x7e1 || target.tx === 0x7e0)) {
+          try {
+            const raw09 = await this.udsExchange(target.tx, target.rx, "0904", 1_200);
+            const p09 = parseUdsResponse(raw09, 0x09);
+            if (p09.kind === "positive") {
+              responded = true;
+              mode09CalId = formatUdsPayload(p09.payload, 0x09);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
         const dids: { did: string; label: string; hex: string; decoded: string }[] = [];
         let systemName: string | null = null;
         let partNumber: string | null = null;
         let softwareVersion: string | null = null;
-        let calId: string | null = null;
+        let calId: string | null = mode09CalId;
 
         if (responded) {
           let step = 0;
