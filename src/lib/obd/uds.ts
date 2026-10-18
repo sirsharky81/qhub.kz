@@ -363,6 +363,7 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
     }
   }
   if (requestSid === 0x22 && payload.length >= 3) {
+    const didNum = (payload[0]! << 8) | payload[1]!;
     const didHex = payload
       .slice(0, 2)
       .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
@@ -370,6 +371,14 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
     const dataBytes = payload.slice(2);
     const dataHex = dataBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
     const label = DID_LABELS[didHex];
+    if (isUdsBitmapDid(didNum) && dataBytes.length === 4) {
+      const supported = decodeUdsDidSupportBitmap(didNum, dataBytes);
+      const list =
+        supported.length > 0
+          ? supported.map((d) => d.toString(16).padStart(4, "0").toUpperCase()).join(", ")
+          : "нет (только указатель дальше)";
+      return `Карта поддерживаемых DID (${didHex}): ${dataHex} → открыты [${list}]`;
+    }
     const text = dataBytes
       .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
       .join("")
@@ -386,6 +395,30 @@ export function formatUdsPayload(payload: number[], requestSid?: number): string
   const printable = text.replace(/\s+/g, " ").trim();
   if (printable.length >= 4 && /[A-Za-z0-9]{3}/.test(printable)) return `${printable} (${hex})`;
   return summarizeNumericUdsBytes(payload, hex);
+}
+
+/**
+ * True when a DID is a 32-bit support bitmap header (multiple of 0x20, e.g. 1000, 1020, 1040, 1100, 2100).
+ */
+export function isUdsBitmapDid(did: number): boolean {
+  return did >= 0x1000 && did < 0xf180 && (did & 0x1f) === 0;
+}
+
+/**
+ * Decodes a 4-byte ISO/SAE-style UDS DID support bitmap (e.g. `22 1000` -> `06 00 00 F5`)
+ * into the list of supported DID numbers (`baseDid + 1` .. `baseDid + 32`).
+ */
+export function decodeUdsDidSupportBitmap(baseDid: number, dataBytes: number[]): number[] {
+  if (dataBytes.length < 4) return [];
+  const out: number[] = [];
+  for (let i = 0; i < 32; i++) {
+    const byteIdx = i >> 3;
+    const bitMask = 1 << (7 - (i & 7));
+    if ((dataBytes[byteIdx]! & bitMask) !== 0) {
+      out.push(baseDid + i + 1);
+    }
+  }
+  return out;
 }
 
 /**

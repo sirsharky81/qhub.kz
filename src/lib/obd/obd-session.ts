@@ -17,8 +17,10 @@ import {
   KNOWN_MODULE_TARGETS,
   MODULE_SCAN_ADDRESSES,
   assessUdsRequest,
+  decodeUdsDidSupportBitmap,
   describeCanModule,
   formatUdsPayload,
+  isUdsBitmapDid,
   parseTaggedUdsReplies,
   parseUdsResponse,
   type UdsParsed,
@@ -428,8 +430,11 @@ export class ObdBleSession {
     const txNum = Number.parseInt(txId, 16);
     const rxNum = rxId ? Number.parseInt(rxId, 16) : undefined;
     try {
+      const visited = new Set<number>();
       for (let did = fromDid; did <= toDid; did++) {
         if (shouldStop()) return;
+        if (visited.has(did)) continue;
+        visited.add(did);
         // Send TesterPresent (3E 00) every 12 DIDs so extended session 10 03 never times out during a scan
         if (done > 0 && done % 12 === 0) {
           try {
@@ -454,8 +459,23 @@ export class ObdBleSession {
                 : parsed.payload;
             const didHex = request.slice(2);
             const label = DID_LABELS[didHex];
-            const formatted = formatUdsPayload(body, 0x22);
+            const formatted = formatUdsPayload(parsed.payload, 0x22);
             hit = { did: label ? `${didHex} · ${label}` : didHex, text: formatted };
+            done += 1;
+            onProgress(done, total, hit);
+
+            // If this DID is a 32-bit support bitmap (e.g. 1000, 1020, 1100, 2100), probe only the supported DIDs in its 32-DID block
+            if (isUdsBitmapDid(did) && body.length === 4) {
+              const supported = new Set(decodeUdsDidSupportBitmap(did, body));
+              for (let offset = 1; offset <= 32 && did + offset <= toDid; offset++) {
+                const subDid = did + offset;
+                if (!supported.has(subDid)) {
+                  visited.add(subDid);
+                  done += 1;
+                }
+              }
+            }
+            continue;
           } else if (parsed.kind === "negative") {
             silence = 0;
           } else if (stopOnSilence && ++silence >= DID_SCAN_SILENCE) {
@@ -504,21 +524,19 @@ export class ObdBleSession {
     const targets: { tx: number; rx: number; title: string }[] = [
       { tx: 0x783, rx: 0x78b, title: "Приборка SGP (METER 783 → 78B)" },
       { tx: 0x787, rx: 0x78f, title: "Камера EyeSight SGP (787 → 78F)" },
-      { tx: 0x740, rx: 0x748, title: "Боди-модуль BIU (740 → 748)" },
       { tx: 0x7c4, rx: 0x7cc, title: "Климат-контроль A/C (7C4 → 7CC)" },
-      { tx: 0x7c0, rx: 0x7c8, title: "Приборка / MFD (7C0 → 7C8)" },
       { tx: 0x786, rx: 0x78e, title: "Сонары / Парктроник RAB (786 → 78E)" },
+      { tx: 0x750, rx: 0x758, title: "Шлюз / бесключевой доступ (750 → 758)" },
+      { tx: 0x752, rx: 0x75a, title: "Боди / TPMS (752 → 75A)" },
+      { tx: 0x740, rx: 0x748, title: "Боди-модуль BIU (740 → 748)" },
     ];
 
-    const configDids = [
+    const passportDids = [
       0xf182, 0xf186, 0xf187, 0xf188, 0xf189, 0xf18a, 0xf18b, 0xf18c, 0xf18e, 0xf190, 0xf191,
       0xf192, 0xf193, 0xf194, 0xf195, 0xf197, 0xf198, 0xf199, 0xf19e,
-      0x1000, 0x1001, 0x1002, 0x1003, 0x1004, 0x1005, 0x1006, 0x1007, 0x1008, 0x1009, 0x100a,
-      0x1010, 0x1011, 0x1012, 0x1020, 0x1021,
-      0x1100, 0x1101, 0x1102, 0x1103, 0x1104, 0x1105,
-      0x2100, 0x2101, 0x2102, 0x2103, 0x2104,
-      0xd001, 0xd002, 0xd003, 0xd004,
     ];
+
+    const rootBitmaps = [0x1000, 0x1100, 0x2000, 0x2100, 0x3000, 0xd000];
 
     let vin: string | null = null;
     const reports: SubaruRegionModuleReport[] = [];
@@ -567,8 +585,15 @@ export class ObdBleSession {
 
         if (responded) {
           let step = 0;
-          for (const didNum of configDids) {
+          const visited = new Set<number>();
+          const queue: number[] = [...passportDids, ...rootBitmaps];
+
+          while (queue.length > 0) {
             if (shouldStop?.()) break;
+            const didNum = queue.shift()!;
+            if (visited.has(didNum)) continue;
+            visited.add(didNum);
+
             step += 1;
             if (step % 8 === 0) {
               try {
@@ -602,6 +627,16 @@ export class ObdBleSession {
                 if ((didHex === "F189" || didHex === "F195") && ascii) softwareVersion = ascii;
                 if (didHex === "F182") calId = ascii || hex;
                 if (didHex === "F190" && ascii.length >= 11) vin = ascii;
+
+                // If this DID is a 32-bit support bitmap (e.g. 1000, 1020, 1100, 2100), enqueue all supported child DIDs
+                if (isUdsBitmapDid(didNum) && body.length === 4) {
+                  const children = decodeUdsDidSupportBitmap(didNum, body);
+                  for (const childDid of children) {
+                    if (!visited.has(childDid) && visited.size + queue.length < 160) {
+                      queue.push(childDid);
+                    }
+                  }
+                }
               }
             } catch {
               /* ignore */

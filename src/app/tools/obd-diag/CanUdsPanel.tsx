@@ -838,7 +838,7 @@ export default function CanUdsPanel({
               ) : null}
             </div>
             <p className="mt-1 text-[11px] text-slate-300">
-              Строго <strong>только чтение (`Service 22 ReadDataByIdentifier`)</strong> — без единой команды записи (`2E`), сброса (`11`) или входа в защиту (`27`). Настройки приборки, пробег и калибровка EyeSight гарантированно не затрагиваются. После чтения каждого блока сразу отправляется `10 01`.
+              Строго <strong>только чтение (`Service 22 ReadDataByIdentifier`)</strong> — автоматически читает битовые маски (`1000`, `1020`, `1100`, `2100`, `3000`) и выгружает все открытые DID Приборки (`783`), EyeSight (`787`), Климата (`7C4`), Сонаров (`786`) и Шлюза (`750`). Без единой команды записи (`2E`) или сброса (`11`).
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               <button
@@ -847,7 +847,7 @@ export default function CanUdsPanel({
                 onClick={() => void runSubaruRegionDump()}
                 className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                Считать паспорт и конфигурацию (783 / 787 / 740 / 7C4)
+                Полное чтение по битовым картам (783 / 787 / 7C4 / 786 / 750)
               </button>
               {subaruDump ? (
                 <button

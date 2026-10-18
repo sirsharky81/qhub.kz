@@ -7,6 +7,7 @@ import { EXTENDED_COMMANDS, decodeExtendedSignals } from "../extended-signals";
 import { ETACS_PROFILES, positiveEtacsPayload, readEtacsCoding } from "../mitsubishi-etacs";
 import {
   assessUdsRequest,
+  decodeUdsDidSupportBitmap,
   describeCanModule,
   exportUdsLog,
   formatUdsPayload,
@@ -257,5 +258,12 @@ describe("sendUds gate", () => {
     const formatted = formatUdsPayload([0x10, 0x01, 0x82], 0x22);
     expect(formatted).toContain("число=130");
     expect(formatted).toContain("темп=90°C");
+
+    // Subaru SGP Meter 783 bitmap 22 1000 -> 06 00 00 F5
+    const meterSupported = decodeUdsDidSupportBitmap(0x1000, [0x06, 0x00, 0x00, 0xf5]);
+    expect(meterSupported).toEqual([0x1006, 0x1007, 0x1019, 0x101a, 0x101b, 0x101c, 0x101e, 0x1020]);
+    const bitmapText = formatUdsPayload([0x10, 0x00, 0x06, 0x00, 0x00, 0xf5], 0x22);
+    expect(bitmapText).toContain("1019");
+    expect(bitmapText).toContain("1020");
   });
 });
