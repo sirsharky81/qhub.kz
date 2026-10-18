@@ -4,7 +4,13 @@ import { framesToCsv, parseMonitorLine } from "../can-frame";
 import { Elm327Client } from "../elm327";
 import { ObdBleSession } from "../obd-session";
 import { EXTENDED_COMMANDS, decodeExtendedSignals } from "../extended-signals";
-import { ETACS_PROFILES, positiveEtacsPayload, readEtacsCoding } from "../mitsubishi-etacs";
+import {
+  ETACS_PROFILES,
+  parseMitsubishiCodingFileBytes,
+  positiveEtacsPayload,
+  readEtacsCoding,
+  writeEtacsSingleBlock,
+} from "../mitsubishi-etacs";
 import {
   assessUdsRequest,
   decodeUdsDidSupportBitmap,
@@ -249,6 +255,71 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(dump.variantUsedId).toBe("21 32");
     expect(Array.from(dump.variant)).toEqual([0x10, 0x20, 0x30, 0x40]);
     expect(dump.partNumber).toBe("1860C991");
+  });
+
+  it("writes .kon (3B 30) and .cuf (3B 31) separately and verifies each block", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    let currentVariant = "A1 B2 C3 D4";
+    let currentCustom = "00 00 00";
+
+    link.writeLine = async (line: string) => {
+      if (line.startsWith("3B30")) {
+        link.written.push(line);
+        // Simulate ECU writing .kon and resetting .cuf to factory defaults (FF FF FF)
+        currentVariant = "11 22 33 44";
+        currentCustom = "FF FF FF";
+        (link as unknown as { pending: string }).pending += "7B 30\r>";
+        return;
+      }
+      if (line === "2130") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += `61 30 ${currentVariant}\r>`;
+        return;
+      }
+      if (line.startsWith("3B31")) {
+        link.written.push(line);
+        currentCustom = "05 06 07";
+        (link as unknown as { pending: string }).pending += "7B 31\r>";
+        return;
+      }
+      if (line === "2131") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += `61 31 ${currentCustom}\r>`;
+        return;
+      }
+      await origWrite(line);
+    };
+
+    const elm = new Elm327Client(link);
+    const p620 = ETACS_PROFILES.find((p) => p.id === "620-504")!;
+
+    // Step 1: Write only .kon
+    const konParsed = parseMitsubishiCodingFileBytes(
+      new Uint8Array([0x11, 0x22, 0x33, 0x44]),
+      "kon",
+      "test.kon",
+    );
+    const konRes = await writeEtacsSingleBlock(elm, {
+      profile: p620,
+      kind: "kon",
+      payload: konParsed.payload,
+    });
+    expect(konRes.writeCommandHex).toBe("3B 30");
+    expect(konRes.verified).toBe(true);
+    expect(konRes.note).toMatch(/сбрасывает настройки \.cuf/);
+    // Ensure 3B31 was NOT sent during Step 1
+    expect(link.written.some((cmd) => cmd.startsWith("3B31"))).toBe(false);
+
+    // Step 2: Write only .cuf separately to restore custom settings
+    const cufRes = await writeEtacsSingleBlock(elm, {
+      profile: p620,
+      kind: "cuf",
+      payload: new Uint8Array([0x05, 0x06, 0x07]),
+    });
+    expect(cufRes.writeCommandHex).toBe("3B 31");
+    expect(cufRes.verified).toBe(true);
+    expect(link.written).toContain("3B31050607");
   });
 });
 

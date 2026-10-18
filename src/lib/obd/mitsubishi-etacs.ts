@@ -465,3 +465,226 @@ export function etacsDownloadNames(prefix: string): { kon: string; cuf: string; 
     json: `${safe}_etacs_backup.json`,
   };
 }
+
+export interface EtacsWriteBlockResult {
+  kind: "kon" | "cuf";
+  profileId: string;
+  txHex: string;
+  rxHex: string;
+  writeCommandHex: string;
+  writtenBytes: number;
+  verified: boolean;
+  rawWriteResponse: string;
+  note: string;
+}
+
+/**
+ * Parse a user-supplied `.kon` / `.cuf` / `.json` file into raw coding bytes.
+ * Supports:
+ * - Raw binary `.kon` / `.cuf` files (exact byte array from MMCodingWriter / MUT Coding / QHub)
+ * - `.json` backup files exported by QHub (`variantHex` / `customHex`)
+ * - Plain text / ASCII hex files (e.g. `A1 B2 C3...` or `61 30 A1 B2...`)
+ */
+export function parseMitsubishiCodingFileBytes(
+  fileBuffer: Uint8Array,
+  kind: "kon" | "cuf",
+  fileName = "",
+): { payload: Uint8Array; detectedPartNumber?: string | null; detectedLidHex?: string | null } {
+  if (fileBuffer.length === 0) {
+    throw new Error("Выбранный файл пуст (0 байт).");
+  }
+
+  const lowerName = fileName.toLowerCase();
+  const isPrintableText = Array.from(fileBuffer).every(
+    (b) => b === 0x09 || b === 0x0a || b === 0x0d || (b >= 0x20 && b <= 0x7e),
+  );
+
+  if (lowerName.endsWith(".json") || (isPrintableText && fileBuffer[0] === 0x7b)) {
+    const text = new TextDecoder().decode(fileBuffer);
+    const parsed = JSON.parse(text) as {
+      partNumber?: string | null;
+      variantHex?: string;
+      customHex?: string;
+      variantUsedId?: string | null;
+      customUsedId?: string | null;
+    };
+    const hexStr = kind === "kon" ? parsed.variantHex : parsed.customHex;
+    if (!hexStr || typeof hexStr !== "string" || hexStr.trim().length < 2) {
+      throw new Error(
+        kind === "kon"
+          ? "В JSON-файле не найден массив variantHex (.kon)."
+          : "В JSON-файле не найден массив customHex (.cuf).",
+      );
+    }
+    const clean = hexStr.replace(/[^0-9A-Fa-f]/g, "");
+    const out = new Uint8Array(Math.floor(clean.length / 2));
+    for (let i = 0; i < out.length; i++) {
+      out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+    }
+    return {
+      payload: out,
+      detectedPartNumber: parsed.partNumber ?? null,
+      detectedLidHex: (kind === "kon" ? parsed.variantUsedId : parsed.customUsedId) ?? null,
+    };
+  }
+
+  // Check if the file is an ASCII hex dump or MMCodingWriter text container with header + hex
+  if (isPrintableText && fileBuffer.length >= 8) {
+    const text = new TextDecoder().decode(fileBuffer).trim();
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const hexOnlyLines = lines.filter((l) => /^[0-9A-Fa-f\s:;-]+$/.test(l) && /[0-9A-Fa-f]{4}/.test(l));
+    if (hexOnlyLines.length > 0 && hexOnlyLines.length === lines.length) {
+      const tokens = extractHexTokens(text);
+      if (tokens.length >= 4) {
+        // Strip leading positive response header if someone pasted "61 30 ..." or "61 31 ..."
+        const stripped =
+          tokens[0] === 0x61 && (tokens[1] === 0x30 || tokens[1] === 0x31 || tokens[1] === 0x32)
+            ? tokens.slice(2)
+            : tokens;
+        return { payload: Uint8Array.from(stripped) };
+      }
+    }
+  }
+
+  return { payload: new Uint8Array(fileBuffer) };
+}
+
+function parseLidBytesFromReadId(
+  usedIdHex: string | undefined,
+  fallbackId: number[],
+): number[] {
+  if (!usedIdHex) return fallbackId;
+  const parts = usedIdHex
+    .trim()
+    .split(/\s+/)
+    .map((p) => Number.parseInt(p, 16))
+    .filter((n) => Number.isFinite(n));
+  if (parts.length >= 2 && (parts[0] === 0x21 || parts[0] === 0x22 || parts[0] === 0x3b || parts[0] === 0x2e)) {
+    return parts.slice(1);
+  }
+  if (parts.length >= 1 && parts.every((n) => n >= 0 && n <= 0xff)) {
+    return parts;
+  }
+  return fallbackId;
+}
+
+/**
+ * Write a single coding block (either `.kon` Variant OR `.cuf` Custom) to Mitsubishi ETACS or Engine ECU.
+ *
+ * Why `.kon` and `.cuf` MUST be written separately and sequentially:
+ * - Writing `.kon` (Variant Coding, `3B 30` / `2E 0130`) causes the ETACS ECU to re-initialize
+ *   its feature matrix and reset Custom Coding (`.cuf`, `LID 31`) back to factory defaults.
+ * - Therefore, the user must first write `.kon` (Step 1), let the ECU commit Variant Coding,
+ *   and then separately write the saved `.cuf` file (Step 2) to restore all custom settings.
+ */
+export async function writeEtacsSingleBlock(
+  elm: Elm327Client,
+  options: {
+    profile: EtacsCanProfile;
+    kind: "kon" | "cuf";
+    payload: Uint8Array;
+    overrideLidHex?: string;
+  },
+): Promise<EtacsWriteBlockResult> {
+  const { profile, kind, payload, overrideLidHex } = options;
+  if (!payload || payload.length < 2) {
+    throw new Error("Массив кодировки слишком короткий (минимум 2 байта).");
+  }
+  if (payload.length > 250) {
+    throw new Error(`Слишком большой размер блока кодировки (${payload.length} байт, максимум 250 байт).`);
+  }
+
+  // If "auto" or "engine-auto" was selected, resolve the concrete profile by probing read first
+  let activeProfile = profile;
+  let detectedReadId: string | undefined;
+  if (profile.id === "auto" || profile.id === "engine-auto") {
+    const currentDump = await readEtacsCoding(elm, profile);
+    const resolved = ETACS_PROFILES.find((p) => p.id === currentDump.profileId);
+    if (resolved) activeProfile = resolved;
+    detectedReadId = kind === "kon" ? currentDump.variantUsedId : currentDump.customUsedId;
+  }
+
+  await configureEtacsChannel(elm, activeProfile);
+
+  const defaultId = kind === "kon" ? activeProfile.variantId : activeProfile.customId;
+  const targetId = parseLidBytesFromReadId(overrideLidHex ?? detectedReadId, defaultId);
+  const idHex = targetId.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
+  const writeSvc = activeProfile.service === 0x21 ? 0x3b : 0x2e;
+  const expectPosSid = (writeSvc + 0x40) & 0xff; // 0x7B for KWP 3B, 0x6E for UDS 2E
+  const writeSvcHex = writeSvc.toString(16).padStart(2, "0").toUpperCase();
+  const dataHex = bytesToHex(payload, "");
+
+  // Ensure coding write session is unlocked (KWP 10 92 / 10 85 or UDS 10 03)
+  const rawWriteResponse = await elm.sendPayload(`${writeSvcHex}${idHex}${dataHex}`, 15_000);
+  const tokens = extractHexTokens(rawWriteResponse);
+
+  const isPositive = tokens.some((b, idx) => {
+    if (b !== expectPosSid) return false;
+    if (idx + targetId.length >= tokens.length) return true;
+    return targetId.every((idByte, k) => tokens[idx + 1 + k] === idByte);
+  });
+
+  if (!isPositive) {
+    // Check for negative response 7F <svc> <nrc>
+    let nrcDetail = rawWriteResponse.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "NO DATA";
+    for (let i = 0; i + 2 < tokens.length; i++) {
+      if (tokens[i] === 0x7f && tokens[i + 1] === writeSvc) {
+        const nrc = tokens[i + 2]!.toString(16).padStart(2, "0").toUpperCase();
+        nrcDetail = `7F ${writeSvcHex} ${nrc}`;
+        break;
+      }
+    }
+    try {
+      await elm.sendCommand("ATFCSM0");
+    } catch {
+      /* ignore */
+    }
+    throw new Error(
+      `Блок ${activeProfile.txId.toString(16).toUpperCase()}/${activeProfile.rxId.toString(16).toUpperCase()} отклонил запись ${writeSvcHex} ${idHex} (${nrcDetail}). Проверьте, что зажигание в положении ON (двигатель заглушен), а размер файла (${payload.length} Б) точно соответствует этому блоку.`,
+    );
+  }
+
+  // Read back the same LID/DID to verify bytes were committed to EEPROM
+  let verified = false;
+  try {
+    const readSvcHex = activeProfile.service.toString(16).padStart(2, "0").toUpperCase();
+    const verifyRaw = await elm.sendPayload(`${readSvcHex}${idHex}`, 10_000);
+    const verifyPayload = positiveEtacsPayload(verifyRaw, activeProfile.service, targetId);
+    if (verifyPayload && verifyPayload.length === payload.length) {
+      verified = verifyPayload.every((b, idx) => b === payload[idx]);
+    }
+  } catch {
+    /* verification read is best-effort */
+  }
+
+  try {
+    await elm.sendCommand("ATFCSM0");
+  } catch {
+    /* ignore */
+  }
+
+  const note =
+    kind === "kon"
+      ? verified
+        ? `Variant (.kon, ${payload.length} Б) успешно записан и проверен по чтению! Внимание: при записи .kon блок ETACS сбрасывает настройки .cuf на базовые — теперь обязательно запишите ваш файл .cuf вторым шагом.`
+        : `Variant (.kon, ${payload.length} Б) принят блоком (ответ ${expectPosSid.toString(16).toUpperCase()} ${idHex}). Внимание: после записи .kon настройки .cuf сбрасываются на базовые — запишите ваш файл .cuf отдельно вторым шагом.`
+      : verified
+        ? `Custom (.cuf, ${payload.length} Б) успешно записан и проверен по чтению! Пользовательские настройки восстановлены.`
+        : `Custom (.cuf, ${payload.length} Б) принят блоком (ответ ${expectPosSid.toString(16).toUpperCase()} ${idHex}). Выключите зажигание на 5–10 секунд для фиксации в памяти.`;
+
+  return {
+    kind,
+    profileId: activeProfile.id,
+    txHex: activeProfile.txId.toString(16).toUpperCase(),
+    rxHex: activeProfile.rxId.toString(16).toUpperCase(),
+    writeCommandHex: `${writeSvcHex} ${idHex}`,
+    writtenBytes: payload.length,
+    verified,
+    rawWriteResponse,
+    note,
+  };
+}
+
