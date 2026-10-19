@@ -1,6 +1,5 @@
 import { bytesToHex, extractHexTokens, stripElmMultiline } from "./hex";
 import type { Elm327Client } from "./elm327";
-import { parseMode09Ascii } from "./obd2";
 
 export type MitsubishiCodingModuleKind = "etacs" | "engine";
 
@@ -346,28 +345,6 @@ function extractVinFromAscii(ascii: string | null): string | null {
   return match?.[0] ?? null;
 }
 
-async function tryReadMode09Vin(elm: Elm327Client): Promise<string | null> {
-  try {
-    await elm.clearRxFilter();
-    await elm.setCanHeader(0x7e0);
-    try {
-      await elm.sendCommand("ATFCSM0");
-    } catch {
-      /* ignore */
-    }
-    const raw = await elm.sendPayload("0902", 4_000);
-    const parsed = parseMode09Ascii(raw, 0x02);
-    if (parsed) {
-      const vinHit = extractVinFromAscii(parsed);
-      if (vinHit) return vinHit;
-    }
-    const ascii = extractCleanAscii(Uint8Array.from(extractHexTokens(raw)));
-    return extractVinFromAscii(ascii);
-  } catch {
-    return null;
-  }
-}
-
 async function tryReadPartNumber(
   elm: Elm327Client,
   profile: EtacsCanProfile,
@@ -636,19 +613,13 @@ async function readSingleEtacsProfile(
   if (variant?.usedIdHex) skipSet.add(variant.usedIdHex);
   if (customUsedId) skipSet.add(customUsedId);
   const { extraLids, swVersion, vin: extraVin } = await probeExtraEtacsLids(elm, profile, skipSet, isEngine);
-  let vin = extraVin ?? detectedVin;
+  const vin = extraVin ?? detectedVin;
 
-  // Reset Flow Control mode to automatic (ATFCSM0) so subsequent standard UDS / Mode 09 requests work normally
+  // Reset Flow Control mode to automatic (ATFCSM0) so subsequent standard UDS requests work normally
   try {
     await elm.sendCommand("ATFCSM0");
   } catch {
     /* ignore */
-  }
-
-  // If KWP 21 90 / 21 80 did not return a 17-char VIN (or on ETACS 620->504), fallback to standard OBD Mode 09 PID 02 on 7E0
-  if (!vin || vin.replace(/[^A-Za-z0-9]/g, "").length < 17) {
-    const mode09Vin = await tryReadMode09Vin(elm);
-    if (mode09Vin) vin = mode09Vin;
   }
 
   // If Engine ECU (7E0->7E8, e.g. Pajero Sport V6 6B31 1860D362) returned 7F 21 12 on all standard
