@@ -321,6 +321,72 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(cufRes.verified).toBe(true);
     expect(link.written).toContain("3B31050607");
   });
+
+  it("skips 1-byte 21 30 status (02) on ETACS 8637C671 in favor of multi-byte 21 52 / 21 42", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    link.writeLine = async (line: string) => {
+      if (line === "2130") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "61 30 02\r>";
+        return;
+      }
+      if (line === "2152") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "008\r0: 61 52 11 22 33 44\r1: 55 66 00 00\r>";
+        return;
+      }
+      if (line === "2132") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "009\r0: 61 32 5B 0D 04 FF\r1: FF FF FF 00\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+    const elm = new Elm327Client(link);
+    const p620 = ETACS_PROFILES.find((p) => p.id === "620-504")!;
+    const dump = await readEtacsCoding(elm, p620);
+    expect(dump.variantUsedId).toBe("21 52");
+    expect(Array.from(dump.variant)).toEqual([0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+    expect(dump.customUsedId).toBe("21 32");
+    expect(Array.from(dump.custom)).toEqual([0x5b, 0x0d, 0x04, 0xff, 0xff, 0xff, 0xff]);
+  });
+
+  it("never sends 1085 (ECUProgrammingSession) to Engine ECU 1860D362 and succeeds via passport registers when coding LIDs return 7F 21 12", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    link.writeLine = async (line: string) => {
+      if (line === "1089") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "50 89\r>";
+        return;
+      }
+      if (line === "2180") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "61 80 31 38 36 30 44 33 36 32\r>";
+        return;
+      }
+      if (line === "2199") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "61 99 4A 4D 31 38 36 30 44 33 36 32\r>";
+        return;
+      }
+      if (/^21[0-9A-F]{2}$/.test(line)) {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "7F 21 12\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+    const elm = new Elm327Client(link);
+    const engineProfile = ETACS_PROFILES.find((p) => p.id === "engine-auto")!;
+    const dump = await readEtacsCoding(elm, engineProfile);
+    expect(link.written).not.toContain("1085");
+    expect(link.written).toContain("1089");
+    expect(dump.partNumber).toBe("1860D362");
+    expect(dump.variantUsedId).toBe("21 99");
+    expect(dump.extraLids?.some((e) => e.lidHex === "21 80")).toBe(true);
+  });
 });
 
 describe("exportUdsLog", () => {

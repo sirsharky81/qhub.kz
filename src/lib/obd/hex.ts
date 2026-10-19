@@ -93,25 +93,80 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
   }
 
   // Case 2: Standard ELM multiline "014 / 0: 49 02 ... / 1: ..."
-  const indexed = lines.filter((line) => /^[0-9A-Fa-f]+\s*:/.test(line));
+  // Also handles compact ATS0 multiline lines ("0:6130..." or "04A")
+  const indexed = lines.filter((line) => /^[0-9A-Fa-f]{1,2}\s*:/.test(line));
   const hasLengthHeader = lines.some((line) => /^[0-9A-Fa-f]{3}$/.test(line));
-  if (indexed.length < 2 && !(indexed.length >= 1 && hasLengthHeader)) {
-    return { cleaned: raw, declaredLength: null };
-  }
-
-  let declaredLength: number | null = null;
-  for (const line of lines) {
-    if (/^[0-9A-Fa-f]+\s*:/.test(line)) break;
-    if (/^[0-9A-Fa-f]{3}$/.test(line)) {
-      const parsed = Number.parseInt(line, 16);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        declaredLength = parsed;
+  if (indexed.length >= 2 || (indexed.length >= 1 && hasLengthHeader)) {
+    let declaredLength: number | null = null;
+    for (const line of lines) {
+      if (/^[0-9A-Fa-f]{1,2}\s*:/.test(line)) break;
+      if (/^[0-9A-Fa-f]{3}$/.test(line)) {
+        const parsed = Number.parseInt(line, 16);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          declaredLength = parsed;
+        }
       }
     }
+
+    const cleaned = indexed.map((line) => line.replace(/^[0-9A-Fa-f]{1,2}\s*:\s*/, "")).join(" ");
+    return { cleaned, declaredLength };
   }
 
-  const cleaned = indexed.map((line) => line.replace(/^[0-9A-Fa-f]+\s*:\s*/, "")).join(" ");
-  return { cleaned, declaredLength };
+  // Case 3: Raw ISO-TP frames without colons (ATH0 + ATS0/ATS1 on non-standard pairs like 620->504)
+  // e.g. First Frame "10 4A 61 30 ..." or "104A6130...", Consecutive Frames "21 ...", "22 ...",
+  // or Single Frame "07 61 31 5B 0D ..." / "046180..."
+  const rawIsoLines: { pciType: number; len?: number; seq?: number; dataHex: string }[] = [];
+  for (const line of lines) {
+    const compact = line.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+    if (compact.length < 4 || compact.length % 2 !== 0) continue;
+    const frameBytes = bytesFromHex(compact, 0);
+    const pci0 = frameBytes[0]!;
+    const frameType = (pci0 >> 4) & 0x0f;
+    if (frameType === 0 && pci0 >= 2 && pci0 <= 7 && frameBytes.length >= 1 + pci0) {
+      const nextSid = frameBytes[1]!;
+      if (nextSid === 0x50 || nextSid === 0x61 || nextSid === 0x62 || nextSid === 0x7b || nextSid === 0x6e || nextSid === 0x7f) {
+        rawIsoLines.push({
+          pciType: 0,
+          len: pci0,
+          dataHex: frameBytes
+            .slice(1, 1 + pci0)
+            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+            .join(" "),
+        });
+      }
+    } else if (frameType === 1 && frameBytes.length >= 4) {
+      const pci1 = frameBytes[1]!;
+      const totalLen = ((pci0 & 0x0f) << 8) | pci1;
+      const nextSid = frameBytes[2]!;
+      if (totalLen >= 6 && (nextSid === 0x61 || nextSid === 0x62 || nextSid === 0x49)) {
+        rawIsoLines.push({
+          pciType: 1,
+          len: totalLen,
+          dataHex: frameBytes
+            .slice(2)
+            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+            .join(" "),
+        });
+      }
+    } else if (frameType === 2 && rawIsoLines.length > 0 && frameBytes.length >= 2) {
+      rawIsoLines.push({
+        pciType: 2,
+        seq: pci0 & 0x0f,
+        dataHex: frameBytes
+          .slice(1)
+          .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+          .join(" "),
+      });
+    }
+  }
+  if (rawIsoLines.length > 0 && rawIsoLines.length === lines.length) {
+    const firstFrame = rawIsoLines.find((l) => l.pciType === 1) ?? rawIsoLines.find((l) => l.pciType === 0);
+    const declaredLength = firstFrame?.len ?? null;
+    const cleaned = rawIsoLines.map((l) => l.dataHex).join(" ");
+    return { cleaned, declaredLength };
+  }
+
+  return { cleaned: raw, declaredLength: null };
 }
 
 /**
