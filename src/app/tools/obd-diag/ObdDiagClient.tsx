@@ -743,7 +743,7 @@ export default function ObdDiagClient() {
                 ) : null}
                 {etacsDump.vin ? (
                   <p className="mt-0.5 text-xs text-slate-300">
-                    VIN в ETACS: <span className="font-mono text-cyan-300">{etacsDump.vin}</span>
+                    VIN в блоке: <span className="font-mono text-cyan-300">{etacsDump.vin}</span>
                   </p>
                 ) : null}
                 {etacsDump.customStatusNote ? (
@@ -768,12 +768,18 @@ export default function ObdDiagClient() {
                       Custom (`.cuf`){etacsDump.customUsedId ? ` · ${etacsDump.customUsedId}` : ""}
                     </div>
                     <div className="font-mono text-sm font-medium text-slate-100">
-                      {etacsDump.custom.length > 0 ? `${etacsDump.custom.length} байт` : "не отдан (7F 21 12)"}
+                      {etacsDump.custom.length > 0
+                        ? `${etacsDump.custom.length} байт`
+                        : etacsDump.moduleKind === "engine"
+                          ? "не используется (только .kon)"
+                          : "не отдан (7F 21 12)"}
                     </div>
                     <div className="mt-1 truncate font-mono text-[11px] text-slate-500">
                       {etacsDump.custom.length > 0
                         ? `${bytesToHex(etacsDump.custom.slice(0, 12))}…`
-                        : etacsDump.rawCustomResponse.slice(0, 48)}
+                        : etacsDump.moduleKind === "engine"
+                          ? "Для ЭБУ ДВС предусмотрен только Variant (.kon)"
+                          : etacsDump.rawCustomResponse.slice(0, 48)}
                     </div>
                   </div>
                 </div>

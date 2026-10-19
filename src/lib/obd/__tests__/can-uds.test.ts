@@ -438,6 +438,71 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(parsedBack.payload.length).toBe(90);
     expect(parsedBack.detectedPartNumber).toBe("8637C671");
   });
+
+  it("reads VIN (1A 90), Part Number (1A 87), and SW Version (1A 9C) via KWP Service 1A and skips .cuf on Engine ECU", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    link.writeLine = async (line: string) => {
+      if (line === "1092" || line === "1089") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "50 89\r>";
+        return;
+      }
+      if (line === "1A87") {
+        link.written.push(line);
+        // 5A 87 + binary header + "1860D362  "
+        (link as unknown as { pending: string }).pending +=
+          "5A 87 04 82 00 17 FF 20 00 3D 00 00 31 38 36 30 44 33 36 32 20 20\r>";
+        return;
+      }
+      if (line === "1A9C") {
+        link.written.push(line);
+        // 5A 9C + binary header + "1860D362-A"
+        (link as unknown as { pending: string }).pending +=
+          "5A 9C 01 04 82 00 17 FF 3D 00 00 31 38 36 30 44 33 36 32 2D 41\r>";
+        return;
+      }
+      if (line === "1A90") {
+        link.written.push(line);
+        // 5A 90 + ASCII "MMEMCY1XXNH003447"
+        (link as unknown as { pending: string }).pending +=
+          "5A 90 4D 4D 45 4D 43 59 31 58 58 4E 48 30 30 33 34 34 37\r>";
+        return;
+      }
+      if (line === "21C0") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending +=
+          "61 C0 81 07 05 00 40 04 03 00 09 47 C9 81 05 00 02 01 A0 05 A0 01\r>";
+        return;
+      }
+      if (line === "21C1") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "61 C1 05 A0 05 A0 01\r>";
+        return;
+      }
+      if (/^(1A|21)[0-9A-F]{2}$/.test(line)) {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "7F 21 12\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+    const elm = new Elm327Client(link);
+    const engineProfile = ETACS_PROFILES.find((p) => p.id === "engine-7e0-kwp")!;
+    const dump = await readEtacsCoding(elm, engineProfile);
+    expect(dump.partNumber).toBe("1860D362");
+    expect(dump.swVersion).toBe("1860D362-A");
+    expect(dump.vin).toBe("MMEMCY1XXNH003447");
+    expect(dump.variantUsedId).toBe("21 C0");
+    expect(dump.variant.length).toBe(16);
+    // Engine ECU must NOT populate a .cuf custom coding block
+    expect(dump.custom.length).toBe(0);
+    expect(dump.customUsedId).toBeUndefined();
+    // And 21 C1 (with A0 05 A0 01 stripped -> 1 byte "05") is preserved in extraLids
+    const extraC1 = dump.extraLids?.find((e) => e.lidHex === "21 C1");
+    expect(extraC1).toBeTruthy();
+    expect(Array.from(extraC1!.payload)).toEqual([0x05]);
+  });
 });
 
 describe("exportUdsLog", () => {
