@@ -180,9 +180,23 @@ async function configureEtacsChannel(elm: Elm327Client, profile: EtacsCanProfile
   const rxHex = profile.rxId.toString(16).padStart(3, "0").toUpperCase();
   const standardPair = profile.rxId === ((profile.txId + 8) & 0x7ff);
 
+  // Enable spaces (ATS1) so ELM multiline frames ("04A\r0: 61 30 ..." or "10 4A 61 30...")
+  // are cleanly separated and never merge the 3-nibble ISO-TP byte length with the first payload bytes!
+  try {
+    await elm.sendCommand("ATS1");
+    await elm.sendCommand("ATAL");
+  } catch {
+    /* ignore */
+  }
+
   if (standardPair) {
     await elm.clearRxFilter();
     await elm.setCanHeader(profile.txId);
+    try {
+      await elm.sendCommand("ATFCSM0");
+    } catch {
+      /* ignore */
+    }
   } else {
     // Non-standard CAN pair (e.g. 620 -> 504 or 7A1 -> 7A0):
     // Program explicit ISO-TP Flow Control header (ATFCSH) + data (ATFCSD 300000) + mode (ATFCSM1)
@@ -198,11 +212,19 @@ async function configureEtacsChannel(elm: Elm327Client, profile: EtacsCanProfile
   }
 
   // Open KWP / UDS diagnostic session.
-  // IMPORTANT: On KWP2000 ETACS (620->504, 7A1->7A0), sending UDS "10 03" AFTER "10 92"
-  // either resets the session or returns 7F 10 12, locking Custom Coding (21 31 -> 7F 21 12).
+  // IMPORTANT:
+  // 1. On KWP2000 ETACS (620->504, 7A1->7A0) and Engine ECU (7E0->7E8),
+  //    sending UDS "10 03" AFTER KWP "10 92" / "10 89" resets the session.
+  // 2. NEVER send KWP "10 85" (ECUProgrammingSession / ROM flash mode) when reading coding:
+  //    on Mitsubishi Engine ECUs (7E0->7E8), "10 92" returns 7F 10 12 and "10 85" succeeds (50 85),
+  //    trapping the Engine ECU in Programming Session where all 21 xx coding LIDs fail with 7F 21 12!
+  const isEngine = profile.moduleKind === "engine" || profile.txId === 0x7e0;
   if (profile.service === 0x21) {
+    const kwpSessions = isEngine
+      ? ["1089", "1081", "1092", "10C0", "1090"]
+      : ["1092", "1089", "1081", "10C0", "1090"];
     let opened = false;
-    for (const sessionCmd of ["1092", "1085", "1089", "1081"]) {
+    for (const sessionCmd of kwpSessions) {
       try {
         const resp = await elm.sendPayload(sessionCmd, 2_500);
         const tokens = extractHexTokens(resp);
@@ -240,24 +262,60 @@ async function readCodingBlockWithFallbacks(
   elm: Elm327Client,
   profile: EtacsCanProfile,
   candidates: number[][],
-): Promise<{ payload: Uint8Array; raw: string; usedIdHex: string }> {
+  options?: { minBytes?: number; fallbackSessions?: string[] },
+): Promise<{ payload: Uint8Array; raw: string; usedIdHex: string; shortFallback?: { payload: Uint8Array; raw: string; usedIdHex: string } | null }> {
   const svcHex = profile.service.toString(16).padStart(2, "0").toUpperCase();
+  const minBytes = options?.minBytes ?? 1;
   let lastCompact = "NO DATA";
-  let firstIdHex = "";
+  const triedIds: string[] = [];
+  let bestShortFallback: { payload: Uint8Array; raw: string; usedIdHex: string } | null = null;
 
-  for (const identifier of candidates) {
-    const idHex = identifier.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
-    if (!firstIdHex) firstIdHex = idHex;
-    const raw = await elm.sendPayload(`${svcHex}${idHex}`, 12_000);
-    const payload = positiveEtacsPayload(raw, profile.service, identifier);
-    if (payload && payload.length > 0) {
-      return { payload, raw, usedIdHex: `${svcHex} ${idHex}` };
+  const probeCandidateList = async (list: number[][]): Promise<{ payload: Uint8Array; raw: string; usedIdHex: string } | null> => {
+    for (const identifier of list) {
+      const idHex = identifier.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
+      if (!triedIds.includes(idHex)) triedIds.push(idHex);
+      const raw = await elm.sendPayload(`${svcHex}${idHex}`, 12_000);
+      const payload = positiveEtacsPayload(raw, profile.service, identifier);
+      if (payload && payload.length >= minBytes) {
+        return { payload, raw, usedIdHex: `${svcHex} ${idHex}` };
+      }
+      if (payload && payload.length > 0 && (!bestShortFallback || payload.length > bestShortFallback.payload.length)) {
+        bestShortFallback = { payload, raw, usedIdHex: `${svcHex} ${idHex}` };
+      }
+      lastCompact = raw.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "NO DATA";
     }
-    lastCompact = raw.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "NO DATA";
+    return null;
+  };
+
+  const directHit = await probeCandidateList(candidates);
+  if (directHit) {
+    return { ...directHit, shortFallback: bestShortFallback };
   }
 
+  // If primary session returned 7F 21 12 or only a 1-byte status, try fallback KWP sessions (e.g. 10 81 / 10 92 / 10 89)
+  if (profile.service === 0x21 && options?.fallbackSessions && options.fallbackSessions.length > 0) {
+    const topCandidates = candidates.slice(0, 8);
+    for (const sessCmd of options.fallbackSessions) {
+      try {
+        const sessResp = await elm.sendPayload(sessCmd, 2_500);
+        if (!extractHexTokens(sessResp).includes(0x50)) continue;
+        const retryHit = await probeCandidateList(topCandidates);
+        if (retryHit) {
+          return { ...retryHit, shortFallback: bestShortFallback };
+        }
+      } catch {
+        /* try next fallback session */
+      }
+    }
+  }
+
+  if (bestShortFallback) {
+    return bestShortFallback;
+  }
+
+  const summaryIds = triedIds.slice(0, 6).join("/");
   throw new Error(
-    `ETACS не отдал блок ${svcHex} ${firstIdHex} (${lastCompact}) на адресе ${profile.txId.toString(16).toUpperCase()}/${profile.rxId.toString(16).toUpperCase()}.`,
+    `ETACS не отдал блок ${svcHex} ${summaryIds || "30"} (${lastCompact}) на адресе ${profile.txId.toString(16).toUpperCase()}/${profile.rxId.toString(16).toUpperCase()}.`,
   );
 }
 
@@ -301,6 +359,7 @@ async function probeExtraEtacsLids(
   elm: Elm327Client,
   profile: EtacsCanProfile,
   skipIdHex: Set<string>,
+  isEngine = false,
 ): Promise<{ extraLids: EtacsExtraLidItem[]; swVersion: string | null; vin: string | null }> {
   const extraLids: EtacsExtraLidItem[] = [];
   let swVersion: string | null = null;
@@ -310,23 +369,52 @@ async function probeExtraEtacsLids(
     return { extraLids, swVersion, vin };
   }
 
-  const probes: { lid: number; label: string }[] = [
-    { lid: 0x31, label: "Custom Coding 1 (21 31)" },
-    { lid: 0x32, label: "Custom Coding 2 / Sub-block (21 32)" },
-    { lid: 0x33, label: "Custom Coding 3 (21 33)" },
-    { lid: 0x40, label: "Кодировка опций 40 (21 40)" },
-    { lid: 0x41, label: "Кодировка опций 41 (21 41)" },
-    { lid: 0x42, label: "Variant / Option Block 42 (21 42)" },
-    { lid: 0x43, label: "Custom / Option Block 43 (21 43)" },
-    { lid: 0x50, label: "Конфигурация 50 (21 50)" },
-    { lid: 0x51, label: "Пользовательские настройки 51 (21 51)" },
-    { lid: 0x52, label: "Пользовательские настройки 52 (21 52)" },
-    { lid: 0x80, label: "Идентификатор ЭБУ / Part Number (21 80)" },
-    { lid: 0x81, label: "Версия ПО / HW (21 81)" },
-    { lid: 0x87, label: "Каталожный номер OEM (21 87)" },
-    { lid: 0x90, label: "VIN в блоке ETACS (21 90)" },
-    { lid: 0x99, label: "Серийный / калибровочный номер (21 99)" },
-  ];
+  const probes: { lid: number; label: string }[] = isEngine
+    ? [
+        { lid: 0x52, label: "Variant Coding ДВС (21 52)" },
+        { lid: 0x42, label: "Variant Block 42 (21 42)" },
+        { lid: 0x30, label: "Variant Block 30 (21 30)" },
+        { lid: 0x32, label: "Variant Block 32 (21 32)" },
+        { lid: 0x50, label: "Конфигурация / кодировка ДВС 50 (21 50)" },
+        { lid: 0x51, label: "Конфигурация ДВС 51 (21 51)" },
+        { lid: 0x53, label: "Конфигурация ДВС 53 (21 53)" },
+        { lid: 0x54, label: "Конфигурация ДВС 54 (21 54)" },
+        { lid: 0x60, label: "Кодировка опций ДВС 60 (21 60)" },
+        { lid: 0x61, label: "Кодировка опций ДВС 61 (21 61)" },
+        { lid: 0x62, label: "Кодировка опций ДВС 62 (21 62)" },
+        { lid: 0x40, label: "Кодировка 40 (21 40)" },
+        { lid: 0x41, label: "Кодировка 41 (21 41)" },
+        { lid: 0xa0, label: "Регистр конфигурации A0 (21 A0)" },
+        { lid: 0xb0, label: "Регистр конфигурации B0 (21 B0)" },
+        { lid: 0xc0, label: "Регистр конфигурации C0 (21 C0)" },
+        { lid: 0x80, label: "Идентификатор ЭБУ / Part Number (21 80)" },
+        { lid: 0x81, label: "Версия ПО / HW (21 81)" },
+        { lid: 0x87, label: "Каталожный номер OEM (21 87)" },
+        { lid: 0x90, label: "VIN в ЭБУ ДВС (21 90)" },
+        { lid: 0x99, label: "Калибровка / серийный номер (21 99)" },
+      ]
+    : [
+        { lid: 0x52, label: "Variant Coding ETACS 52 (21 52)" },
+        { lid: 0x51, label: "Custom Coding ETACS 51 (21 51)" },
+        { lid: 0x50, label: "Конфигурация 50 (21 50)" },
+        { lid: 0x42, label: "Variant / Option Block 42 (21 42)" },
+        { lid: 0x43, label: "Custom / Option Block 43 (21 43)" },
+        { lid: 0x30, label: "Статус / Variant 30 (21 30)" },
+        { lid: 0x31, label: "Custom Coding 31 (21 31)" },
+        { lid: 0x32, label: "Custom Coding 32 (21 32)" },
+        { lid: 0x33, label: "Custom Coding 33 (21 33)" },
+        { lid: 0x40, label: "Кодировка опций 40 (21 40)" },
+        { lid: 0x41, label: "Кодировка опций 41 (21 41)" },
+        { lid: 0x60, label: "Кодировка опций 60 (21 60)" },
+        { lid: 0x62, label: "Кодировка опций 62 (21 62)" },
+        { lid: 0xb0, label: "Variant Block B0 (21 B0)" },
+        { lid: 0xb1, label: "Custom Block B1 (21 B1)" },
+        { lid: 0x80, label: "Идентификатор ЭБУ / Part Number (21 80)" },
+        { lid: 0x81, label: "Версия ПО / HW (21 81)" },
+        { lid: 0x87, label: "Каталожный номер OEM (21 87)" },
+        { lid: 0x90, label: "VIN в блоке ETACS (21 90)" },
+        { lid: 0x99, label: "Серийный / калибровочный номер (21 99)" },
+      ];
 
   for (const probe of probes) {
     const hexCode = `21 ${probe.lid.toString(16).padStart(2, "0").toUpperCase()}`;
@@ -363,16 +451,76 @@ async function readSingleEtacsProfile(
   const variantCandidates =
     profile.service === 0x21
       ? isEngine
-        ? [profile.variantId, [0x32], [0x50], [0x51], [0x52], [0x42], [0x40], [0x31], [0xb0]]
-        : [profile.variantId, [0x42], [0x50], [0xb0]]
-      : [profile.variantId, [0x01, 0x32], [0x01, 0x42], [0x01, 0x50], [0xb0, 0x01]];
+        ? [
+            profile.variantId,
+            [0x32],
+            [0x42],
+            [0x52],
+            [0x50],
+            [0x51],
+            [0x53],
+            [0x54],
+            [0x60],
+            [0x61],
+            [0x62],
+            [0x63],
+            [0x64],
+            [0x40],
+            [0x41],
+            [0x43],
+            [0x44],
+            [0x31],
+            [0x33],
+            [0x34],
+            [0xa0],
+            [0xb0],
+            [0xc0],
+            [0xd0],
+            [0xe0],
+            [0xf0],
+          ]
+        : [
+            profile.variantId,
+            [0x52],
+            [0x42],
+            [0x50],
+            [0xb0],
+            [0x40],
+            [0x51],
+            [0x53],
+            [0x54],
+            [0x60],
+            [0x62],
+            [0xa0],
+            [0xc0],
+            [0x33],
+            [0x41],
+          ]
+      : [profile.variantId, [0x01, 0x32], [0x01, 0x42], [0x01, 0x50], [0x01, 0x52], [0xb0, 0x01]];
 
   const customCandidates =
     profile.service === 0x21
       ? [profile.customId, [0x32], [0x43], [0x51], [0x40], [0x52], [0xb1]]
       : [profile.customId, [0x01, 0x32], [0x01, 0x43], [0xb1, 0x01]];
 
-  const variant = await readCodingBlockWithFallbacks(elm, profile, variantCandidates);
+  let variant: { payload: Uint8Array; raw: string; usedIdHex: string } | null = null;
+  let variantError: unknown = null;
+
+  try {
+    variant = await readCodingBlockWithFallbacks(elm, profile, variantCandidates, {
+      // On ETACS 8637C671 (620->504), 21 30 can return a 1-byte status ("02"); require >=4 bytes
+      // on the first pass so we continue to 21 52 / 21 42 / 21 50 / 21 B0 if a multi-byte table exists.
+      minBytes: isEngine ? 2 : 4,
+      fallbackSessions:
+        profile.service === 0x21
+          ? isEngine
+            ? ["1081", "1092"]
+            : ["1089", "1081"]
+          : undefined,
+    });
+  } catch (err) {
+    variantError = err;
+  }
 
   // Engine ECUs (1860xxxx on 7E0->7E8) typically only have a single Variant Coding block (.kon)
   // without a separate Custom Coding (.cuf). Some ETACS units (especially 620->504) also return
@@ -382,27 +530,72 @@ async function readSingleEtacsProfile(
   let customUsedId: string | undefined;
   let customStatusNote: string | null = null;
 
-  try {
-    const filteredCustom = customCandidates.filter(
-      (cand) => `21 ${cand.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}` !== variant.usedIdHex,
-    );
-    const custom = await readCodingBlockWithFallbacks(elm, profile, filteredCustom);
-    customPayload = custom.payload;
-    customRaw = custom.raw;
-    customUsedId = custom.usedIdHex;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    customRaw = msg;
-    customStatusNote = isEngine
-      ? "Кодировка ЭБУ двигателя (.kon) успешно считана. Для блока двигателя используется один файл Variant (.kon) и резервная копия (.json)."
-      : "Блок ETACS отдал основную кодировку Variant (.kon), но не поддерживает отдельный блок Custom (.cuf — ответ 7F 21 12). Вы можете сразу скачать .kon и .json.";
+  if (variant) {
+    try {
+      const filteredCustom = customCandidates.filter(
+        (cand) => `21 ${cand.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}` !== variant!.usedIdHex,
+      );
+      const custom = await readCodingBlockWithFallbacks(elm, profile, filteredCustom);
+      customPayload = custom.payload;
+      customRaw = custom.raw;
+      customUsedId = custom.usedIdHex;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      customRaw = msg;
+      customStatusNote = isEngine
+        ? "Кодировка ЭБУ двигателя (.kon) успешно считана. Для блока двигателя используется один файл Variant (.kon) и резервная копия (.json)."
+        : "Блок ETACS отдал основную кодировку Variant (.kon), но не поддерживает отдельный блок Custom (.cuf — ответ 7F 21 12). Вы можете сразу скачать .kon и .json.";
+    }
   }
 
   const partNumber = await tryReadPartNumber(elm, profile);
   const skipSet = new Set<string>();
-  if (variant.usedIdHex) skipSet.add(variant.usedIdHex);
+  if (variant?.usedIdHex) skipSet.add(variant.usedIdHex);
   if (customUsedId) skipSet.add(customUsedId);
-  const { extraLids, swVersion, vin } = await probeExtraEtacsLids(elm, profile, skipSet);
+  const { extraLids, swVersion, vin } = await probeExtraEtacsLids(elm, profile, skipSet, isEngine);
+
+  // If Engine ECU (7E0->7E8, e.g. Pajero Sport V6 6B31 1860D362) returned 7F 21 12 on all standard
+  // variant coding LIDs across 10 89 / 10 81 / 10 92, but IS online and returned ECU passport/calibration
+  // registers (21 80, 21 81, 21 87, 21 90, 21 99), construct a valid Engine ECU dump instead of failing!
+  if (!variant) {
+    if (isEngine && extraLids.length > 0) {
+      const preferredExtra =
+        extraLids.find((item) => item.lidHex === "21 99") ??
+        extraLids.find((item) => item.lidHex === "21 80") ??
+        extraLids.find((item) => item.lidHex === "21 81") ??
+        extraLids[0]!;
+      variant = {
+        payload: preferredExtra.payload,
+        raw: bytesToHex(preferredExtra.payload),
+        usedIdHex: preferredExtra.lidHex,
+      };
+      const errMsg = variantError instanceof Error ? variantError.message : String(variantError ?? "");
+      customRaw = errMsg;
+      customStatusNote = `ЭБУ двигателя (7E0→7E8) на связи и отдал регистры (${extraLids.map((e) => e.lidHex).join(", ")}), но на запросы отдельной таблицы Variant Coding (21 30/32/42/50/52/60/62 в сессиях 10 89 / 10 81 / 10 92) ответил 7F 21 12 (subFunctionNotSupported). На бензиновом 3.0 V6 6B31 (1860D362) опции автомобиля хранятся в ETACS (620→504); в .kon подставлен паспортный регистр ${preferredExtra.lidHex} (ниже можно выбрать любой регистр кнопкой «В .kon»).`;
+    } else {
+      try {
+        await elm.sendCommand("ATFCSM0");
+      } catch {
+        /* ignore */
+      }
+      throw variantError instanceof Error ? variantError : new Error(String(variantError));
+    }
+  } else if (!isEngine && variant.payload.length < 4 && customPayload.length >= 4) {
+    // On ETACS 8637C671 (620->504), if 21 30 returned only a 1-byte status ("02") while 21 32 returned
+    // the 7-byte coding block ("5B 0D 04 FF FF FF FF"), preserve 21 30 in extraLids and warn the user
+    // that 21 30 is 1 byte so they can also assign any multi-byte block to .kon if needed.
+    if (!extraLids.some((e) => e.lidHex === variant!.usedIdHex)) {
+      extraLids.unshift({
+        lidHex: variant.usedIdHex,
+        label: `Статус / короткий регистр (${variant.usedIdHex})`,
+        payload: variant.payload,
+        ascii: extractCleanAscii(variant.payload),
+      });
+    }
+    customStatusNote =
+      customStatusNote ??
+      `Внимание: регистр ${variant.usedIdHex} на блоке ${profile.txId.toString(16).toUpperCase()}/${profile.rxId.toString(16).toUpperCase()} вернул короткий ответ (${variant.payload.length} Б: ${bytesToHex(variant.payload)}), а основная таблица (${customPayload.length} Б) считана из ${customUsedId ?? "21 32"}. При необходимости нажмите «В .kon» у нужного регистра ниже.`;
+  }
 
   // Reset Flow Control mode to automatic (ATFCSM0) so subsequent standard UDS requests work normally
   try {

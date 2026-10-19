@@ -787,7 +787,7 @@ export default function ObdDiagClient() {
                 {etacsDump.extraLids && etacsDump.extraLids.length > 0 ? (
                   <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5 text-xs">
                     <div className="font-medium text-slate-300">
-                      Дополнительные регистры блока ({etacsDump.extraLids.length} LID) — нажмите, чтобы использовать как `.cuf`:
+                      Дополнительные регистры блока ({etacsDump.extraLids.length} LID) — нажмите «В .kon» или «В .cuf» для выбора:
                     </div>
                     <div className="mt-1.5 flex flex-col gap-1.5">
                       {etacsDump.extraLids.map((extra) => (
@@ -806,24 +806,44 @@ export default function ObdDiagClient() {
                               {extra.payload.length > 16 ? "…" : ""}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setEtacsDump((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      custom: extra.payload,
-                                      customUsedId: extra.lidHex,
-                                      customStatusNote: null,
-                                    }
-                                  : prev,
-                              )
-                            }
-                            className="shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200"
-                          >
-                            В .cuf
-                          </button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEtacsDump((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        variant: extra.payload,
+                                        variantUsedId: extra.lidHex,
+                                        rawVariantResponse: bytesToHex(extra.payload),
+                                      }
+                                    : prev,
+                                )
+                              }
+                              className="rounded-lg border border-sky-500/40 bg-sky-950/40 px-2 py-1 text-[11px] font-medium text-sky-200"
+                            >
+                              В .kon
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEtacsDump((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        custom: extra.payload,
+                                        customUsedId: extra.lidHex,
+                                        customStatusNote: null,
+                                      }
+                                    : prev,
+                                )
+                              }
+                              className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200"
+                            >
+                              В .cuf
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
