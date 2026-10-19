@@ -6,6 +6,8 @@ import { ObdBleSession } from "../obd-session";
 import { EXTENDED_COMMANDS, decodeExtendedSignals } from "../extended-signals";
 import {
   ETACS_PROFILES,
+  crc16X25Ascii,
+  formatMutCodingContainer,
   parseMitsubishiCodingFileBytes,
   positiveEtacsPayload,
   readEtacsCoding,
@@ -386,6 +388,55 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(dump.partNumber).toBe("1860D362");
     expect(dump.variantUsedId).toBe("21 99");
     expect(dump.extraLids?.some((e) => e.lidHex === "21 80")).toBe(true);
+  });
+
+  it("generates byte-for-byte identical 1233-byte MMCodingWriter .kon and .cuf containers with CRC-16/X25 and parses them back", () => {
+    const etacsKonHex =
+      "28820042F008205500A40A041004831A58228C50CA431500481601104023094780242617C48A009220020A06140CC3881851E2D9C311A50545A0570B2A538A0000008C030100001E1202B0050000200152370000002900010000";
+    // Include trailing KWP A0 05 A0 01 footer to verify it is stripped automatically
+    const rawWithFooterHex = `${etacsKonHex}A005A001`;
+    const rawBytes = new Uint8Array(
+      rawWithFooterHex.match(/.{1,2}/g)!.map((b) => Number.parseInt(b, 16)),
+    );
+
+    const container = formatMutCodingContainer({
+      payload: rawBytes,
+      partNumber: "8637C671",
+      vin: "MMEMCY1XXNH003447",
+      timestamp: "202504061736",
+    });
+
+    expect(container.length).toBe(1233);
+    // Check UTF-8 BOM
+    expect(Array.from(container.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+    const ascii = new TextDecoder().decode(container.slice(3));
+    expect(ascii.slice(2, 19)).toBe("MMEMCY1XXNH003447");
+    expect(ascii.slice(80, 92)).toBe("202504061736");
+    expect(ascii.slice(162, 170)).toBe("8637C671");
+    expect(ascii.slice(200, 380)).toBe(etacsKonHex);
+    expect(ascii.slice(712, 892)).toBe(etacsKonHex);
+    expect(ascii.slice(1224, 1228)).toBe("CB1C");
+
+    // Verify Engine 1860D362 CRC-16/X25 matches reference 3FD2
+    const engineHex = "81070500400403000947C98105000201";
+    const engineContainer = formatMutCodingContainer({
+      payload: new Uint8Array(engineHex.match(/.{1,2}/g)!.map((b) => Number.parseInt(b, 16))),
+      partNumber: "1860D362",
+      vin: "MMEMCY1XXNH003447",
+      timestamp: "202504061738",
+    });
+    const engineAscii = new TextDecoder().decode(engineContainer.slice(3));
+    expect(engineAscii.slice(1224, 1228)).toBe("3FD2");
+
+    // Verify ETACS .cuf CRC-16/X25 matches reference 94D1
+    const cufHex =
+      "4040408080204020804080804080402080402040808080801020404080404040408040408040802040000000000000000000000000000000000000000000000000";
+    expect(crc16X25Ascii(cufHex.padEnd(512, " "))).toBe("94D1");
+
+    // Verify round-trip parsing back into raw 90-byte coding payload
+    const parsedBack = parseMitsubishiCodingFileBytes(container, "kon", "8637C671_MMEMCY1XXNH003447_20250406_1.kon");
+    expect(parsedBack.payload.length).toBe(90);
+    expect(parsedBack.detectedPartNumber).toBe("8637C671");
   });
 });
 

@@ -25,6 +25,7 @@ import {
 } from "@/lib/obd/mitsubishi-etacs-download";
 import {
   etacsDownloadNames,
+  formatMutCodingContainer,
   parseMitsubishiCodingFileBytes,
   type EtacsCodingDump,
   type EtacsWriteBlockResult,
@@ -309,26 +310,45 @@ export default function ObdDiagClient() {
 
   const saveEtacsFile = async (kind: "kon" | "cuf" | "json") => {
     if (!etacsDump) return;
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const now = new Date();
+    const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
     const moduleTag = etacsDump.moduleKind === "engine" ? "engine" : "etacs";
+    const fallbackPart = etacsDump.partNumber ?? (etacsDump.moduleKind === "engine" ? "1860D362" : "8637C671");
+    const fallbackVin = etacsDump.vin ?? identity?.vin ?? null;
     const prefix = etacsDump.partNumber
       ? `${moduleTag}_${etacsDump.partNumber}_${stamp}`
       : `${moduleTag}_${stamp}`;
-    const names = etacsDownloadNames(prefix);
+    const names = etacsDownloadNames(prefix, {
+      partNumber: fallbackPart,
+      vin: fallbackVin,
+      date: now,
+    });
     if (kind === "kon") {
+      const containerBytes = formatMutCodingContainer({
+        payload: etacsDump.variant,
+        partNumber: fallbackPart,
+        vin: fallbackVin,
+        timestamp: now,
+      });
       await saveBlobToDevice(
-        new Blob([Uint8Array.from(etacsDump.variant)], { type: "application/octet-stream" }),
+        new Blob([Uint8Array.from(containerBytes)], { type: "application/octet-stream" }),
         names.kon,
       );
-      pushLog(`Сохранён ${names.kon} (${etacsDump.variant.length} байт)`);
+      pushLog(`Сохранён ${names.kon} (формат MMCodingWriter 1233 Б, данные ${etacsDump.variant.length} Б)`);
       return;
     }
     if (kind === "cuf") {
+      const containerBytes = formatMutCodingContainer({
+        payload: etacsDump.custom,
+        partNumber: fallbackPart,
+        vin: fallbackVin,
+        timestamp: now,
+      });
       await saveBlobToDevice(
-        new Blob([Uint8Array.from(etacsDump.custom)], { type: "application/octet-stream" }),
+        new Blob([Uint8Array.from(containerBytes)], { type: "application/octet-stream" }),
         names.cuf,
       );
-      pushLog(`Сохранён ${names.cuf} (${etacsDump.custom.length} байт)`);
+      pushLog(`Сохранён ${names.cuf} (формат MMCodingWriter 1233 Б, данные ${etacsDump.custom.length} Б)`);
       return;
     }
     const backup = {

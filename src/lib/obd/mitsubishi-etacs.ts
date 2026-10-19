@@ -170,6 +170,17 @@ export function positiveEtacsPayload(
         data = data.slice(0, expectedPayloadLen);
       }
     }
+    // Strip Mitsubishi KWP 4-byte coding block footer ("A0 05 A0 01") when present at the end of a multi-byte table
+    if (
+      service === 0x21 &&
+      data.length > 8 &&
+      data[data.length - 4] === 0xa0 &&
+      data[data.length - 3] === 0x05 &&
+      data[data.length - 2] === 0xa0 &&
+      data[data.length - 1] === 0x01
+    ) {
+      data = data.slice(0, data.length - 4);
+    }
     if (data.length > 0) return Uint8Array.from(data);
   }
   return null;
@@ -500,7 +511,7 @@ async function readSingleEtacsProfile(
 
   const customCandidates =
     profile.service === 0x21
-      ? [profile.customId, [0x32], [0x43], [0x51], [0x40], [0x52], [0xb1]]
+      ? [profile.customId, [0x51], [0x43], [0x33], [0x52], [0x40], [0x32], [0xb1]]
       : [profile.customId, [0x01, 0x32], [0x01, 0x43], [0xb1, 0x01]];
 
   let variant: { payload: Uint8Array; raw: string; usedIdHex: string } | null = null;
@@ -535,7 +546,15 @@ async function readSingleEtacsProfile(
       const filteredCustom = customCandidates.filter(
         (cand) => `21 ${cand.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}` !== variant!.usedIdHex,
       );
-      const custom = await readCodingBlockWithFallbacks(elm, profile, filteredCustom);
+      const custom = await readCodingBlockWithFallbacks(elm, profile, filteredCustom, {
+        // Require >= 16 bytes on the first pass so a 7-byte status register on 21 32 ("5B 0D 04 FF FF FF FF")
+        // is skipped in favor of the full 65-byte Custom Coding table (21 51 / 21 31 / 21 43) across 10 92 / 10 89.
+        minBytes: isEngine ? 2 : 16,
+        fallbackSessions:
+          profile.service === 0x21 && !isEngine
+            ? ["1089", "1092", "1081"]
+            : undefined,
+      });
       customPayload = custom.payload;
       customRaw = custom.raw;
       customUsedId = custom.usedIdHex;
@@ -649,14 +668,135 @@ export async function readEtacsCoding(
   );
 }
 
-/** MMCodingWriter / MUT Coding filenames (binary payload from ECU). */
-export function etacsDownloadNames(prefix: string): { kon: string; cuf: string; json: string } {
+/** MMCodingWriter / MUT Coding filenames (`8637C671_MMEMCY1XXNH003447_20261019_1.kon`). */
+export function etacsDownloadNames(
+  prefix: string,
+  meta?: { partNumber?: string | null; vin?: string | null; date?: Date },
+): { kon: string; cuf: string; json: string } {
+  const partClean = (meta?.partNumber ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const vinClean = (meta?.vin ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (partClean.length >= 6) {
+    const d = meta?.date ?? new Date();
+    const ymd = [
+      d.getFullYear().toString().padStart(4, "0"),
+      (d.getMonth() + 1).toString().padStart(2, "0"),
+      d.getDate().toString().padStart(2, "0"),
+    ].join("");
+    const stem = vinClean.length >= 11 ? `${partClean}_${vinClean}_${ymd}_1` : `${partClean}_${ymd}_1`;
+    return {
+      kon: `${stem}.kon`,
+      cuf: `${stem}.cuf`,
+      json: `${stem}_backup.json`,
+    };
+  }
   const safe = prefix.replace(/[^\w\-]+/g, "_").slice(0, 40);
   return {
     kon: `${safe}_variant.kon`,
     cuf: `${safe}_custom.cuf`,
     json: `${safe}_etacs_backup.json`,
   };
+}
+
+/**
+ * CRC-16/X25 (poly 0x1021, init 0xFFFF, refin=true, refout=true, xorout=0xFFFF)
+ * used by Mitsubishi MUT-III / MMCodingWriter over the 512-byte coding field (offset 200..712).
+ */
+export function crc16X25Ascii(asciiField512: string): string {
+  let crc = 0xffff;
+  for (let i = 0; i < asciiField512.length; i++) {
+    let b = asciiField512.charCodeAt(i) & 0xff;
+    let reflectedByte = 0;
+    for (let k = 0; k < 8; k++) {
+      reflectedByte = (reflectedByte << 1) | ((b >> k) & 1);
+    }
+    crc ^= reflectedByte << 8;
+    for (let k = 0; k < 8; k++) {
+      if (crc & 0x8000) {
+        crc = ((crc << 1) ^ 0x1021) & 0xffff;
+      } else {
+        crc = (crc << 1) & 0xffff;
+      }
+    }
+  }
+  let reflectedCrc = 0;
+  for (let k = 0; k < 16; k++) {
+    reflectedCrc = (reflectedCrc << 1) | ((crc >> k) & 1);
+  }
+  const finalCrc = (reflectedCrc ^ 0xffff) & 0xffff;
+  return finalCrc.toString(16).padStart(4, "0").toUpperCase();
+}
+
+/**
+ * Build an authentic 1233-byte Mitsubishi MUT-III / MMCodingWriter `.kon` or `.cuf` container file:
+ * - Bytes `0..2`: UTF-8 BOM (`EF BB BF`)
+ * - Bytes `3..1232`: 1230 ASCII characters padded with spaces (`0x20`):
+ *   - Offset `2`: 17-char VIN (e.g. `MMEMCY1XXNH003447`)
+ *   - Offset `80`: 12-char timestamp `YYYYMMDDHHmm` (e.g. `202610191736`)
+ *   - Offset `162`: 8-char ECU Part Number (`8637C671` or `1860D362`)
+ *   - Offset `200..711`: 512-char block 1 (uppercase hex coding string, space-padded to 512 chars)
+ *   - Offset `712..1223`: 512-char block 2 (duplicate uppercase hex coding string, space-padded to 512 chars)
+ *   - Offset `1224..1227`: 4-char CRC-16/X25 checksum of `offset 200..712`
+ */
+export function formatMutCodingContainer(options: {
+  payload: Uint8Array;
+  partNumber?: string | null;
+  vin?: string | null;
+  timestamp?: Date | string;
+}): Uint8Array {
+  const buf = new Array<string>(1230).fill(" ");
+  const writeAt = (offset: number, text: string, maxLen: number) => {
+    const clean = text.slice(0, maxLen);
+    for (let i = 0; i < clean.length && offset + i < 1230; i++) {
+      buf[offset + i] = clean[i]!;
+    }
+  };
+
+  const vinStr = (options.vin ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "00000000000000000";
+  const partStr = (options.partNumber ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "86370000";
+
+  let dateStr: string;
+  if (typeof options.timestamp === "string" && /^\d{12}$/.test(options.timestamp)) {
+    dateStr = options.timestamp;
+  } else {
+    const d = options.timestamp instanceof Date ? options.timestamp : new Date();
+    dateStr = [
+      d.getFullYear().toString().padStart(4, "0"),
+      (d.getMonth() + 1).toString().padStart(2, "0"),
+      d.getDate().toString().padStart(2, "0"),
+      d.getHours().toString().padStart(2, "0"),
+      d.getMinutes().toString().padStart(2, "0"),
+    ].join("");
+  }
+
+  let cleanPayload = options.payload;
+  if (
+    cleanPayload.length > 8 &&
+    cleanPayload[cleanPayload.length - 4] === 0xa0 &&
+    cleanPayload[cleanPayload.length - 3] === 0x05 &&
+    cleanPayload[cleanPayload.length - 2] === 0xa0 &&
+    cleanPayload[cleanPayload.length - 1] === 0x01
+  ) {
+    cleanPayload = cleanPayload.slice(0, cleanPayload.length - 4);
+  }
+
+  const codingHex = bytesToHex(cleanPayload, "");
+  writeAt(2, vinStr, 17);
+  writeAt(80, dateStr, 12);
+  writeAt(162, partStr, 16);
+  writeAt(200, codingHex, 512);
+  writeAt(712, codingHex, 512);
+
+  const field512 = buf.slice(200, 712).join("");
+  const crcHex = crc16X25Ascii(field512);
+  writeAt(1224, crcHex, 4);
+
+  const asciiBytes = new TextEncoder().encode(buf.join(""));
+  const out = new Uint8Array(3 + asciiBytes.length);
+  out[0] = 0xef;
+  out[1] = 0xbb;
+  out[2] = 0xbf;
+  out.set(asciiBytes, 3);
+  return out;
 }
 
 export interface EtacsWriteBlockResult {
@@ -688,9 +828,39 @@ export function parseMitsubishiCodingFileBytes(
   }
 
   const lowerName = fileName.toLowerCase();
-  const isPrintableText = Array.from(fileBuffer).every(
+  const hasUtf8Bom =
+    fileBuffer.length >= 3 &&
+    fileBuffer[0] === 0xef &&
+    fileBuffer[1] === 0xbb &&
+    fileBuffer[2] === 0xbf;
+  const contentBuffer = hasUtf8Bom ? fileBuffer.subarray(3) : fileBuffer;
+
+  const isPrintableText = Array.from(contentBuffer).every(
     (b) => b === 0x09 || b === 0x0a || b === 0x0d || (b >= 0x20 && b <= 0x7e),
   );
+
+  // Check for standard 1230/1233-byte Mitsubishi MUT-III / MMCodingWriter container format:
+  // [VIN at 2..19] [Timestamp at 80..92] [PartNumber at 162..178] [CodingHex1 at 200..712] [CodingHex2 at 712..1224] [CRC16 at 1224..1228]
+  if (isPrintableText && contentBuffer.length >= 400) {
+    const asciiText = new TextDecoder().decode(contentBuffer);
+    const partSlice = asciiText.slice(160, 195).trim();
+    const block1Slice = asciiText.slice(200, 712).trim();
+    if (
+      /^[0-9A-Fa-f]{8,512}$/.test(block1Slice) &&
+      block1Slice.length % 2 === 0 &&
+      /^(?:8637|1860|[A-Z0-9]{6,12})/i.test(partSlice)
+    ) {
+      const out = new Uint8Array(block1Slice.length / 2);
+      for (let i = 0; i < out.length; i++) {
+        out[i] = Number.parseInt(block1Slice.slice(i * 2, i * 2 + 2), 16);
+      }
+      return {
+        payload: out,
+        detectedPartNumber: partSlice || null,
+        detectedLidHex: null,
+      };
+    }
+  }
 
   if (lowerName.endsWith(".json") || (isPrintableText && fileBuffer[0] === 0x7b)) {
     const text = new TextDecoder().decode(fileBuffer);
