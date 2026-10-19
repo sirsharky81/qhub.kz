@@ -303,9 +303,9 @@ async function readCodingBlockWithFallbacks(
     return { ...directHit, shortFallback: bestShortFallback };
   }
 
-  // If primary session returned 7F 21 12 or only a 1-byte status, try fallback KWP sessions (e.g. 10 81 / 10 92 / 10 89)
+  // If primary session returned 7F 21 12 or only a short status, try fallback KWP sessions (e.g. 10 81 / 10 92 / 10 89)
   if (profile.service === 0x21 && options?.fallbackSessions && options.fallbackSessions.length > 0) {
-    const topCandidates = candidates.slice(0, 8);
+    const topCandidates = candidates.slice(0, 14);
     for (const sessCmd of options.fallbackSessions) {
       try {
         const sessResp = await elm.sendPayload(sessCmd, 2_500);
@@ -339,11 +339,23 @@ function extractCleanAscii(payload: Uint8Array): string | null {
   return ascii.length >= 4 ? ascii : null;
 }
 
-async function tryReadPartNumber(elm: Elm327Client, profile: EtacsCanProfile): Promise<string | null> {
+function extractVinFromAscii(ascii: string | null): string | null {
+  if (!ascii) return null;
+  const match = ascii.toUpperCase().match(/[A-HJ-NPR-Z0-9]{17}/);
+  return match?.[0] ?? null;
+}
+
+async function tryReadPartNumber(
+  elm: Elm327Client,
+  profile: EtacsCanProfile,
+): Promise<{ partNumber: string | null; detectedVin: string | null }> {
   const partCandidates =
     profile.service === 0x21
       ? [profile.partId ?? [0x80], [0x87], [0x90], [0x99], [0x81]]
       : [profile.partId ?? [0xf1, 0x87], [0xf1, 0x91], [0xf1, 0x90]];
+
+  let partNumber: string | null = null;
+  let detectedVin: string | null = null;
 
   for (const partId of partCandidates) {
     try {
@@ -355,15 +367,23 @@ async function tryReadPartNumber(elm: Elm327Client, profile: EtacsCanProfile): P
       // Prefer Mitsubishi OEM part number pattern (ETACS 8637xxxx or Engine ECU 1860xxxx) when embedded in a larger ECU ID block
       const ascii = extractCleanAscii(payload);
       if (ascii) {
-        const mitsuMatch = ascii.match(/\b(?:8637|1860)[A-Z0-9]{4}\b/i);
-        if (mitsuMatch?.[0]) return mitsuMatch[0].toUpperCase();
-        return ascii;
+        const vinHit = extractVinFromAscii(ascii);
+        if (vinHit && !detectedVin) detectedVin = vinHit;
+        if (!partNumber) {
+          const mitsuMatch = ascii.match(/\b(?:8637|1860)[A-Z0-9]{4}\b/i);
+          if (mitsuMatch?.[0]) {
+            partNumber = mitsuMatch[0].toUpperCase();
+          } else if (!vinHit) {
+            partNumber = ascii;
+          }
+        }
+        if (partNumber && detectedVin) break;
       }
     } catch {
       /* try next part LID */
     }
   }
-  return null;
+  return { partNumber, detectedVin };
 }
 
 async function probeExtraEtacsLids(
@@ -437,7 +457,10 @@ async function probeExtraEtacsLids(
       if (!payload || payload.length === 0) continue;
       const ascii = extractCleanAscii(payload);
       if (probe.lid === 0x81 && ascii && !swVersion) swVersion = ascii;
-      if (probe.lid === 0x90 && ascii && !vin) vin = ascii;
+      const vinHit = extractVinFromAscii(ascii);
+      if ((probe.lid === 0x90 || vinHit) && (vinHit ?? ascii) && !vin) {
+        vin = vinHit ?? ascii;
+      }
       extraLids.push({
         lidHex: hexCode,
         label: probe.label,
@@ -511,7 +534,25 @@ async function readSingleEtacsProfile(
 
   const customCandidates =
     profile.service === 0x21
-      ? [profile.customId, [0x51], [0x43], [0x33], [0x52], [0x40], [0x32], [0xb1]]
+      ? [
+          profile.customId,
+          [0x51],
+          [0x43],
+          [0x33],
+          [0x34],
+          [0x52],
+          [0x53],
+          [0x54],
+          [0x40],
+          [0x41],
+          [0x60],
+          [0x61],
+          [0x62],
+          [0xa1],
+          [0xb1],
+          [0xc1],
+          [0x32],
+        ]
       : [profile.customId, [0x01, 0x32], [0x01, 0x43], [0xb1, 0x01]];
 
   let variant: { payload: Uint8Array; raw: string; usedIdHex: string } | null = null;
@@ -567,11 +608,19 @@ async function readSingleEtacsProfile(
     }
   }
 
-  const partNumber = await tryReadPartNumber(elm, profile);
+  const { partNumber, detectedVin } = await tryReadPartNumber(elm, profile);
   const skipSet = new Set<string>();
   if (variant?.usedIdHex) skipSet.add(variant.usedIdHex);
   if (customUsedId) skipSet.add(customUsedId);
-  const { extraLids, swVersion, vin } = await probeExtraEtacsLids(elm, profile, skipSet, isEngine);
+  const { extraLids, swVersion, vin: extraVin } = await probeExtraEtacsLids(elm, profile, skipSet, isEngine);
+  const vin = extraVin ?? detectedVin;
+
+  // Reset Flow Control mode to automatic (ATFCSM0) so subsequent standard UDS requests work normally
+  try {
+    await elm.sendCommand("ATFCSM0");
+  } catch {
+    /* ignore */
+  }
 
   // If Engine ECU (7E0->7E8, e.g. Pajero Sport V6 6B31 1860D362) returned 7F 21 12 on all standard
   // variant coding LIDs across 10 89 / 10 81 / 10 92, but IS online and returned ECU passport/calibration

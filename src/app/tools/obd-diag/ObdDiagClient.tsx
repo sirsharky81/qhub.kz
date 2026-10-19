@@ -314,7 +314,7 @@ export default function ObdDiagClient() {
     const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
     const moduleTag = etacsDump.moduleKind === "engine" ? "engine" : "etacs";
     const fallbackPart = etacsDump.partNumber ?? (etacsDump.moduleKind === "engine" ? "1860D362" : "8637C671");
-    const fallbackVin = etacsDump.vin ?? identity?.vin ?? null;
+    const fallbackVin = etacsDump.vin ?? null;
     const prefix = etacsDump.partNumber
       ? `${moduleTag}_${etacsDump.partNumber}_${stamp}`
       : `${moduleTag}_${stamp}`;
