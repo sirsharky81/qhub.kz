@@ -170,14 +170,12 @@ export function positiveEtacsPayload(
         data = data.slice(0, expectedPayloadLen);
       }
     }
-    // Strip Mitsubishi KWP 4-byte coding block footer ("A0 05 A0 01") when present at the end of a multi-byte table
+    // Strip Mitsubishi KWP 4-byte coding block footer ("A0 xx A0 yy", e.g. "A0 05 A0 01" or "A0 01 A0 16")
     if (
       service === 0x21 &&
-      data.length > 8 &&
+      data.length >= 5 &&
       data[data.length - 4] === 0xa0 &&
-      data[data.length - 3] === 0x05 &&
-      data[data.length - 2] === 0xa0 &&
-      data[data.length - 1] === 0x01
+      data[data.length - 2] === 0xa0
     ) {
       data = data.slice(0, data.length - 4);
     }
@@ -331,6 +329,27 @@ async function readCodingBlockWithFallbacks(
 }
 
 function extractCleanAscii(payload: Uint8Array): string | null {
+  // Split on non-printable bytes so binary headers in KWP 1A 87 / 1A 9C ("04 82 00 17 FF 20 00 3D 00 00 38 36...")
+  // do not glue stray single printable bytes (like 0x3D "=") onto the ASCII Part Number or VIN.
+  const runs: string[] = [];
+  let current = "";
+  for (const b of payload) {
+    if (b >= 0x20 && b <= 0x7e) {
+      current += String.fromCharCode(b);
+    } else if (current.length > 0) {
+      const trimmed = current.trim();
+      if (trimmed.length >= 4) runs.push(trimmed);
+      current = "";
+    }
+  }
+  if (current.length > 0) {
+    const trimmed = current.trim();
+    if (trimmed.length >= 4) runs.push(trimmed);
+  }
+  if (runs.length > 0) {
+    return runs.join(" ");
+  }
+
   const ascii = Array.from(payload)
     .filter((b) => b >= 0x20 && b <= 0x7e)
     .map((b) => String.fromCharCode(b))
@@ -345,45 +364,121 @@ function extractVinFromAscii(ascii: string | null): string | null {
   return match?.[0] ?? null;
 }
 
+function extractPartNumberFromAscii(ascii: string | null): string | null {
+  if (!ascii) return null;
+  const mitsuMatch = ascii.match(/(?:8637|1860|8100|8631)[A-Z0-9]{4,6}(?:-[A-Z0-9])?/i);
+  if (mitsuMatch?.[0]) return mitsuMatch[0].toUpperCase();
+  return null;
+}
+
+function extractPartNumberFromBytes(payload: Uint8Array): string | null {
+  const fullAscii = Array.from(payload)
+    .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+    .join("");
+  return extractPartNumberFromAscii(fullAscii);
+}
+
+function extractVinFromBytes(payload: Uint8Array): string | null {
+  const fullAscii = Array.from(payload)
+    .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+    .join("");
+  return extractVinFromAscii(fullAscii);
+}
+
 async function tryReadPartNumber(
   elm: Elm327Client,
   profile: EtacsCanProfile,
-): Promise<{ partNumber: string | null; detectedVin: string | null }> {
-  const partCandidates =
-    profile.service === 0x21
-      ? [profile.partId ?? [0x80], [0x87], [0x90], [0x99], [0x81]]
-      : [profile.partId ?? [0xf1, 0x87], [0xf1, 0x91], [0xf1, 0x90]];
-
+): Promise<{
+  partNumber: string | null;
+  swVersion: string | null;
+  detectedVin: string | null;
+  idLids: EtacsExtraLidItem[];
+}> {
   let partNumber: string | null = null;
+  let swVersion: string | null = null;
   let detectedVin: string | null = null;
+  const idLids: EtacsExtraLidItem[] = [];
 
-  for (const partId of partCandidates) {
-    try {
-      const idHex = partId.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
-      const svcHex = profile.service.toString(16).padStart(2, "0").toUpperCase();
-      const raw = await elm.sendPayload(`${svcHex}${idHex}`, 3_500);
-      const payload = positiveEtacsPayload(raw, profile.service, partId);
-      if (!payload || payload.length < 4) continue;
-      // Prefer Mitsubishi OEM part number pattern (ETACS 8637xxxx or Engine ECU 1860xxxx) when embedded in a larger ECU ID block
-      const ascii = extractCleanAscii(payload);
-      if (ascii) {
-        const vinHit = extractVinFromAscii(ascii);
-        if (vinHit && !detectedVin) detectedVin = vinHit;
-        if (!partNumber) {
-          const mitsuMatch = ascii.match(/\b(?:8637|1860)[A-Z0-9]{4}\b/i);
-          if (mitsuMatch?.[0]) {
-            partNumber = mitsuMatch[0].toUpperCase();
-          } else if (!vinHit) {
-            partNumber = ascii;
+  // On Mitsubishi KWP2000 CAN ECUs (ETACS 620->504, Engine 7E0->7E8, Meter 6A0->514),
+  // MMCodingWriter / MUT-III reads ECU Identification via Service 0x1A (ReadEcuIdentification, positive 0x5A):
+  // - 1A 87 -> 5A 87 ... (Hardware Part Number, e.g. 8637C671 / 1860D362)
+  // - 1A 9C -> 5A 9C ... (Software Part Number, e.g. 8637C671-A)
+  // - 1A 90 -> 5A 90 ... (Current VIN in ECU, 17 ASCII chars)
+  // - 1A 88 -> 5A 88 ... (Original VIN in ECU, 17 ASCII chars)
+  if (profile.service === 0x21) {
+    const kwp1aProbes: { id: number; label: string; role: "pn" | "sw" | "vin" | "orig_vin" }[] = [
+      { id: 0x87, label: "Паспорт ЭБУ / Part Number (1A 87)", role: "pn" },
+      { id: 0x9c, label: "Версия ПО ЭБУ / SW PN (1A 9C)", role: "sw" },
+      { id: 0x90, label: "Текущий VIN в блоке (1A 90)", role: "vin" },
+      { id: 0x88, label: "Оригинальный VIN в блоке (1A 88)", role: "orig_vin" },
+    ];
+
+    for (const probe of kwp1aProbes) {
+      try {
+        const idHex = probe.id.toString(16).padStart(2, "0").toUpperCase();
+        const raw = await elm.sendPayload(`1A${idHex}`, 3_000);
+        const payload = positiveEtacsPayload(raw, 0x1a, [probe.id]);
+        if (!payload || payload.length < 4) continue;
+        const ascii = extractCleanAscii(payload);
+        const pnHit = extractPartNumberFromBytes(payload) ?? extractPartNumberFromAscii(ascii);
+        const vinHit = extractVinFromBytes(payload) ?? extractVinFromAscii(ascii);
+        idLids.push({
+          lidHex: `1A ${idHex}`,
+          label: probe.label,
+          payload,
+          ascii: pnHit ?? vinHit ?? ascii,
+        });
+        if (probe.role === "pn" && !partNumber && (pnHit ?? ascii)) {
+          partNumber = (pnHit ?? ascii!).replace(/-[A-Z0-9]$/i, "");
+        } else if (probe.role === "sw" && !swVersion && (pnHit ?? ascii)) {
+          swVersion = pnHit ?? ascii;
+          if (!partNumber && pnHit) {
+            partNumber = pnHit.replace(/-[A-Z0-9]$/i, "");
           }
+        } else if ((probe.role === "vin" || probe.role === "orig_vin") && vinHit && !detectedVin) {
+          detectedVin = vinHit;
         }
-        if (partNumber && detectedVin) break;
+      } catch {
+        /* try next 1A identification item */
       }
-    } catch {
-      /* try next part LID */
     }
   }
-  return { partNumber, detectedVin };
+
+  // Fallback to Service 0x21 (21 80 / 21 87 / 21 90 / 21 99 / 21 81) or UDS 0x22 (22 F1 87 / F1 90)
+  if (!partNumber || !detectedVin) {
+    const partCandidates =
+      profile.service === 0x21
+        ? [profile.partId ?? [0x80], [0x87], [0x90], [0x99], [0x81]]
+        : [profile.partId ?? [0xf1, 0x87], [0xf1, 0x91], [0xf1, 0x90]];
+
+    for (const partId of partCandidates) {
+      try {
+        const idHex = partId.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
+        const svcHex = profile.service.toString(16).padStart(2, "0").toUpperCase();
+        const raw = await elm.sendPayload(`${svcHex}${idHex}`, 3_000);
+        const payload = positiveEtacsPayload(raw, profile.service, partId);
+        if (!payload || payload.length < 4) continue;
+        const ascii = extractCleanAscii(payload);
+        if (ascii) {
+          const vinHit = extractVinFromAscii(ascii);
+          if (vinHit && !detectedVin) detectedVin = vinHit;
+          if (!partNumber) {
+            const mitsuPn = extractPartNumberFromAscii(ascii);
+            if (mitsuPn) {
+              partNumber = mitsuPn.replace(/-[A-Z0-9]$/i, "");
+            } else if (!vinHit) {
+              partNumber = ascii;
+            }
+          }
+          if (partNumber && detectedVin) break;
+        }
+      } catch {
+        /* try next part LID */
+      }
+    }
+  }
+
+  return { partNumber, swVersion, detectedVin, idLids };
 }
 
 async function probeExtraEtacsLids(
@@ -402,6 +497,8 @@ async function probeExtraEtacsLids(
 
   const probes: { lid: number; label: string }[] = isEngine
     ? [
+        { lid: 0xc0, label: "Variant Coding ДВС C0 (21 C0)" },
+        { lid: 0xc1, label: "Статусный регистр ДВС C1 (21 C1)" },
         { lid: 0x52, label: "Variant Coding ДВС (21 52)" },
         { lid: 0x42, label: "Variant Block 42 (21 42)" },
         { lid: 0x30, label: "Variant Block 30 (21 30)" },
@@ -417,7 +514,6 @@ async function probeExtraEtacsLids(
         { lid: 0x41, label: "Кодировка 41 (21 41)" },
         { lid: 0xa0, label: "Регистр конфигурации A0 (21 A0)" },
         { lid: 0xb0, label: "Регистр конфигурации B0 (21 B0)" },
-        { lid: 0xc0, label: "Регистр конфигурации C0 (21 C0)" },
         { lid: 0x80, label: "Идентификатор ЭБУ / Part Number (21 80)" },
         { lid: 0x81, label: "Версия ПО / HW (21 81)" },
         { lid: 0x87, label: "Каталожный номер OEM (21 87)" },
@@ -425,12 +521,13 @@ async function probeExtraEtacsLids(
         { lid: 0x99, label: "Калибровка / серийный номер (21 99)" },
       ]
     : [
+        { lid: 0xb0, label: "Variant Coding ETACS B0 (21 B0)" },
+        { lid: 0xb2, label: "Custom Coding ETACS B2 (21 B2)" },
+        { lid: 0xb1, label: "Custom Block B1 (21 B1)" },
+        { lid: 0xe1, label: "Серийный номер ETACS E1 (21 E1)" },
         { lid: 0x52, label: "Variant Coding ETACS 52 (21 52)" },
         { lid: 0x51, label: "Custom Coding ETACS 51 (21 51)" },
         { lid: 0x50, label: "Конфигурация 50 (21 50)" },
-        { lid: 0xb2, label: "Custom Coding B2 (21 B2)" },
-        { lid: 0xb1, label: "Custom Block B1 (21 B1)" },
-        { lid: 0xb0, label: "Variant Block B0 (21 B0)" },
         { lid: 0x42, label: "Variant / Option Block 42 (21 42)" },
         { lid: 0x43, label: "Custom / Option Block 43 (21 43)" },
         { lid: 0x30, label: "Статус / Variant 30 (21 30)" },
@@ -489,6 +586,7 @@ async function readSingleEtacsProfile(
       ? isEngine
         ? [
             profile.variantId,
+            [0xc0],
             [0x32],
             [0x42],
             [0x52],
@@ -510,17 +608,16 @@ async function readSingleEtacsProfile(
             [0x34],
             [0xa0],
             [0xb0],
-            [0xc0],
             [0xd0],
             [0xe0],
             [0xf0],
           ]
         : [
             profile.variantId,
+            [0xb0],
             [0x52],
             [0x42],
             [0x50],
-            [0xb0],
             [0x40],
             [0x51],
             [0x53],
@@ -583,46 +680,58 @@ async function readSingleEtacsProfile(
     variantError = err;
   }
 
-  // Engine ECUs (1860xxxx on 7E0->7E8) typically only have a single Variant Coding block (.kon)
-  // without a separate Custom Coding (.cuf). Some ETACS units (especially 620->504) also return
-  // 7F 21 12 for 21 31. Never discard a valid .kon dump when .cuf is absent!
+  // Engine ECUs (1860xxxx on 7E0->7E8) ONLY have Variant Coding (.kon, e.g. 21 C0) and NEVER have a
+  // Customer Coding (.cuf) file in MMCodingWriter / MUT-III (any 21 C1 on 7E0->7E8 is just a 1-byte
+  // status register `05` followed by the 4-byte KWP trailer `A0 05 A0 01`).
+  // Only ETACS modules (620->504 / 7A1->7A0 / 710->718) have a `.cuf` Custom Coding block.
   let customPayload: Uint8Array = new Uint8Array(0);
   let customRaw = "";
   let customUsedId: string | undefined;
   let customStatusNote: string | null = null;
 
   if (variant) {
-    try {
-      const filteredCustom = customCandidates.filter(
-        (cand) => `21 ${cand.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}` !== variant!.usedIdHex,
-      );
-      const custom = await readCodingBlockWithFallbacks(elm, profile, filteredCustom, {
-        // Require >= 16 bytes on the first pass so a 7-byte status register on 21 32 ("5B 0D 04 FF FF FF FF")
-        // is skipped in favor of the full 65-byte Custom Coding table (21 51 / 21 31 / 21 43) across 10 92 / 10 89.
-        minBytes: isEngine ? 2 : 16,
-        fallbackSessions:
-          profile.service === 0x21 && !isEngine
-            ? ["1089", "1092", "1081"]
-            : undefined,
-      });
-      customPayload = custom.payload;
-      customRaw = custom.raw;
-      customUsedId = custom.usedIdHex;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      customRaw = msg;
-      customStatusNote = isEngine
-        ? "Кодировка ЭБУ двигателя (.kon) успешно считана. Для блока двигателя используется один файл Variant (.kon) и резервная копия (.json)."
-        : "Блок ETACS отдал основную кодировку Variant (.kon), но не поддерживает отдельный блок Custom (.cuf — ответ 7F 21 12). Вы можете сразу скачать .kon и .json.";
+    if (isEngine) {
+      customStatusNote =
+        "Кодировка ЭБУ двигателя (.kon) успешно считана. Для блока двигателя используется один файл Variant (.kon) и резервная копия (.json) — отдельного файла .cuf у ЭБУ ДВС нет.";
+    } else {
+      try {
+        const filteredCustom = customCandidates.filter(
+          (cand) => `21 ${cand.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}` !== variant!.usedIdHex,
+        );
+        const custom = await readCodingBlockWithFallbacks(elm, profile, filteredCustom, {
+          // Require >= 16 bytes on the first pass so a 7-byte status register on 21 32 / 21 B1 ("5B 0D 04 FF FF FF FF")
+          // is skipped in favor of the full 65-byte Custom Coding table (21 B2 / 21 51 / 21 31 / 21 43) across 10 92 / 10 89.
+          minBytes: 16,
+          fallbackSessions:
+            profile.service === 0x21
+              ? ["1089", "1092", "1081"]
+              : undefined,
+        });
+        customPayload = custom.payload;
+        customRaw = custom.raw;
+        customUsedId = custom.usedIdHex;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        customRaw = msg;
+        customStatusNote =
+          "Блок ETACS отдал основную кодировку Variant (.kon), но не поддерживает отдельный блок Custom (.cuf — ответ 7F 21 12). Вы можете сразу скачать .kon и .json.";
+      }
     }
   }
 
-  const { partNumber, detectedVin } = await tryReadPartNumber(elm, profile);
+  const { partNumber, swVersion: idSwVersion, detectedVin, idLids } = await tryReadPartNumber(elm, profile);
   const skipSet = new Set<string>();
   if (variant?.usedIdHex) skipSet.add(variant.usedIdHex);
   if (customUsedId) skipSet.add(customUsedId);
-  const { extraLids, swVersion, vin: extraVin } = await probeExtraEtacsLids(elm, profile, skipSet, isEngine);
-  const vin = extraVin ?? detectedVin;
+  const { extraLids: probedLids, swVersion: extraSwVersion, vin: extraVin } = await probeExtraEtacsLids(
+    elm,
+    profile,
+    skipSet,
+    isEngine,
+  );
+  const extraLids = [...idLids, ...probedLids];
+  const swVersion = idSwVersion ?? extraSwVersion;
+  const vin = detectedVin ?? extraVin;
 
   // Reset Flow Control mode to automatic (ATFCSM0) so subsequent standard UDS requests work normally
   try {

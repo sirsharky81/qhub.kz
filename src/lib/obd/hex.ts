@@ -22,9 +22,26 @@ function bytesFromHex(hex: string, offset: number): number[] {
 
 /** Positive OBD/UDS/KWP service ids worth aligning a CAN header against. */
 function responseScore(bytes: number[]): number {
-  for (let i = 0; i + 1 < bytes.length; i++) {
+  const maxCheck = Math.min(bytes.length - 1, 4);
+  for (let i = 0; i < maxCheck; i++) {
     const b = bytes[i];
-    if (b === 0x41 || b === 0x43 || b === 0x47 || b === 0x49 || b === 0x61 || b === 0x62 || b === 0x7f) return 2;
+    if (
+      b === 0x41 ||
+      b === 0x43 ||
+      b === 0x47 ||
+      b === 0x49 ||
+      b === 0x50 ||
+      b === 0x54 ||
+      b === 0x58 ||
+      b === 0x5a ||
+      b === 0x61 ||
+      b === 0x62 ||
+      b === 0x6e ||
+      b === 0x7b ||
+      b === 0x7f
+    ) {
+      return 2;
+    }
   }
   return bytes.length > 0 ? 1 : 0;
 }
@@ -124,7 +141,15 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
     const frameType = (pci0 >> 4) & 0x0f;
     if (frameType === 0 && pci0 >= 2 && pci0 <= 7 && frameBytes.length >= 1 + pci0) {
       const nextSid = frameBytes[1]!;
-      if (nextSid === 0x50 || nextSid === 0x61 || nextSid === 0x62 || nextSid === 0x7b || nextSid === 0x6e || nextSid === 0x7f) {
+      if (
+        nextSid === 0x50 ||
+        nextSid === 0x5a ||
+        nextSid === 0x61 ||
+        nextSid === 0x62 ||
+        nextSid === 0x7b ||
+        nextSid === 0x6e ||
+        nextSid === 0x7f
+      ) {
         rawIsoLines.push({
           pciType: 0,
           len: pci0,
@@ -138,7 +163,7 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
       const pci1 = frameBytes[1]!;
       const totalLen = ((pci0 & 0x0f) << 8) | pci1;
       const nextSid = frameBytes[2]!;
-      if (totalLen >= 6 && (nextSid === 0x61 || nextSid === 0x62 || nextSid === 0x49)) {
+      if (totalLen >= 6 && (nextSid === 0x5a || nextSid === 0x61 || nextSid === 0x62 || nextSid === 0x49)) {
         rawIsoLines.push({
           pciType: 1,
           len: totalLen,
