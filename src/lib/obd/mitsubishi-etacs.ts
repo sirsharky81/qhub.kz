@@ -305,7 +305,7 @@ async function readCodingBlockWithFallbacks(
 
   // If primary session returned 7F 21 12 or only a short status, try fallback KWP sessions (e.g. 10 81 / 10 92 / 10 89)
   if (profile.service === 0x21 && options?.fallbackSessions && options.fallbackSessions.length > 0) {
-    const topCandidates = candidates.slice(0, 14);
+    const topCandidates = candidates.slice(0, 24);
     for (const sessCmd of options.fallbackSessions) {
       try {
         const sessResp = await elm.sendPayload(sessCmd, 2_500);
@@ -428,18 +428,20 @@ async function probeExtraEtacsLids(
         { lid: 0x52, label: "Variant Coding ETACS 52 (21 52)" },
         { lid: 0x51, label: "Custom Coding ETACS 51 (21 51)" },
         { lid: 0x50, label: "Конфигурация 50 (21 50)" },
+        { lid: 0xb2, label: "Custom Coding B2 (21 B2)" },
+        { lid: 0xb1, label: "Custom Block B1 (21 B1)" },
+        { lid: 0xb0, label: "Variant Block B0 (21 B0)" },
         { lid: 0x42, label: "Variant / Option Block 42 (21 42)" },
         { lid: 0x43, label: "Custom / Option Block 43 (21 43)" },
         { lid: 0x30, label: "Статус / Variant 30 (21 30)" },
         { lid: 0x31, label: "Custom Coding 31 (21 31)" },
         { lid: 0x32, label: "Custom Coding 32 (21 32)" },
         { lid: 0x33, label: "Custom Coding 33 (21 33)" },
+        { lid: 0x34, label: "Custom Coding 34 (21 34)" },
         { lid: 0x40, label: "Кодировка опций 40 (21 40)" },
         { lid: 0x41, label: "Кодировка опций 41 (21 41)" },
         { lid: 0x60, label: "Кодировка опций 60 (21 60)" },
         { lid: 0x62, label: "Кодировка опций 62 (21 62)" },
-        { lid: 0xb0, label: "Variant Block B0 (21 B0)" },
-        { lid: 0xb1, label: "Custom Block B1 (21 B1)" },
         { lid: 0x80, label: "Идентификатор ЭБУ / Part Number (21 80)" },
         { lid: 0x81, label: "Версия ПО / HW (21 81)" },
         { lid: 0x87, label: "Каталожный номер OEM (21 87)" },
@@ -536,24 +538,31 @@ async function readSingleEtacsProfile(
     profile.service === 0x21
       ? [
           profile.customId,
+          [0xb2],
+          [0xb1],
+          [0xb0],
           [0x51],
           [0x43],
           [0x33],
           [0x34],
+          [0x35],
+          [0x36],
           [0x52],
           [0x53],
           [0x54],
           [0x40],
           [0x41],
+          [0x44],
           [0x60],
           [0x61],
           [0x62],
           [0xa1],
-          [0xb1],
+          [0xa2],
           [0xc1],
+          [0xc2],
           [0x32],
         ]
-      : [profile.customId, [0x01, 0x32], [0x01, 0x43], [0xb1, 0x01]];
+      : [profile.customId, [0x01, 0x32], [0x01, 0x43], [0xb1, 0x01], [0xb2, 0x01]];
 
   let variant: { payload: Uint8Array; raw: string; usedIdHex: string } | null = null;
   let variantError: unknown = null;
