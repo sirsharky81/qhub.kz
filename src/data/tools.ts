@@ -22,6 +22,16 @@ export const tools: Tool[] = [
     isNew: true,
   },
   {
+    id: "etacs-coding",
+    name: "ETACS Coding",
+    description:
+      "Редактор и сравнение .kon / .cuf Mitsubishi ETACS по серверному справочнику MUT (после выгрузки с блока или из MMCodingWriter).",
+    icon: "Settings2",
+    category: "utilities",
+    href: "/tools/etacs-coding",
+    isNew: true,
+  },
+  {
     id: "random-picker",
     name: "Генератор случайных чисел",
     description:

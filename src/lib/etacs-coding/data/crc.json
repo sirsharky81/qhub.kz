@@ -1,0 +1,28 @@
+{
+  "verified": true,
+  "algorithm": {
+    "kind": "mut-coding-ascii",
+    "poly": 2065,
+    "init": 2282,
+    "weight": 34322,
+    "charXor": 32
+  },
+  "samples": [
+    {
+      "name": "june",
+      "crc": "7CB2",
+      "date": "202306082145"
+    },
+    {
+      "name": "bsw",
+      "crc": "F463",
+      "date": "202306082145"
+    },
+    {
+      "name": "sep",
+      "crc": "E964",
+      "date": "202306171302"
+    }
+  ],
+  "note": "Точная формула CRC MUT Coding Mitsubishi ver. 0.1 (LFSR в GF(2^16) по полиному 0x0811 над ASCII-hex строкой с маской 0x20, init 0x08EA, стартовый вес 0x8612). Проверена на всех .kon и .cuf блоках (16, 45, 65, 70, 90 байт)."
+}

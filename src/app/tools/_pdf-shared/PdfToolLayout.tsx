@@ -13,6 +13,8 @@ interface PdfToolLayoutProps {
   badge?: ReactNode | false;
   /** Корневой контейнер страницы */
   shellClassName?: string;
+  /** Без тёмных вариантов Tailwind в шапке (как у Random Picker на светлом фоне) */
+  lightHeader?: boolean;
 }
 
 const backLink = (
@@ -32,11 +34,12 @@ export function PdfToolLayout({
   children,
   badge,
   shellClassName = "min-h-screen bg-white",
+  lightHeader = false,
 }: PdfToolLayoutProps) {
   return (
     <div className={`flex flex-col ${shellClassName}`}>
       <ServicePageHeader
-        className="print:hidden"
+        className={`print:hidden ${lightHeader ? "bg-white border-gray-200 dark:bg-white dark:border-gray-200" : ""}`.trim()}
         trailing={
           <>
             {badge === false
@@ -64,7 +67,11 @@ export function PdfToolLayout({
                 {icon}
               </span>
             ))}
-          <span className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+          <span
+            className={`text-xs sm:text-sm font-medium truncate ${
+              lightHeader ? "text-gray-800" : "text-gray-800 dark:text-gray-200"
+            }`}
+          >
             {title}
           </span>
         </div>

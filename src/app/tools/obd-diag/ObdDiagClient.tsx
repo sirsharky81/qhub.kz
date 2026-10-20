@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatBleFailure } from "@/lib/obd/ble-error";
@@ -811,6 +812,12 @@ export default function ObdDiagClient() {
                   >
                     Сохранить резервную копию (.json с дампом)
                   </button>
+                  <Link
+                    href="/tools/etacs-coding"
+                    className="col-span-2 rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2.5 text-center text-xs font-medium text-amber-100"
+                  >
+                    Открыть в редакторе ETACS Coding (.kon / .cuf)
+                  </Link>
                 </div>
 
                 {etacsDump.extraLids && etacsDump.extraLids.length > 0 ? (
