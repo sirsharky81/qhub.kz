@@ -33,6 +33,18 @@ import {
 } from "@/lib/obd/uds";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { EXTENDED_COMMANDS, decodeExtendedSignals, type DecodedSignal } from "@/lib/obd/extended-signals";
+import {
+  decodeCanBroadcastFrame,
+  diffCanBusSnapshots,
+  type CanFrameDiffEntry,
+  type DecodedBroadcastSignal,
+  type MitsubishiMeterReport,
+  type MitsubishiTcmTelemetry,
+  type SasCalibrationResult,
+  type TpmsModuleReport,
+} from "@/lib/obd/mitsubishi-modules";
+
+type TpmsWheelPosition = "FL" | "FR" | "RR" | "RL" | "SPARE";
 
 const RECORD_LIMIT = 50_000;
 const TAPE_LIMIT = 40;
@@ -61,7 +73,13 @@ export default function CanUdsPanel({
   onLog: (line: string) => void;
 }) {
   const obdScroll = useObdScroll();
-  const deferUi = obdScroll?.deferUiUpdate ?? ((apply: () => void) => apply());
+  const deferUiRef = useRef<(apply: () => void) => void>((apply) => apply());
+  useEffect(() => {
+    deferUiRef.current = obdScroll?.deferUiUpdate ?? ((apply: () => void) => apply());
+  }, [obdScroll]);
+  const deferUi = useCallback((apply: () => void) => {
+    deferUiRef.current(apply);
+  }, []);
   const [protocol, setProtocol] = useState<CanProtocol>("6");
   const [view, setView] = useState<CanSubView>("dashboard");
   const [monitoring, setMonitoring] = useState(false);
@@ -79,11 +97,11 @@ export default function CanUdsPanel({
   const [rx, setRx] = useState("7E8");
   const [request, setRequest] = useState("22 F190");
   const [developer, setDeveloper] = useState(false);
-  const [customDids, setCustomDids] = useState<CustomDid[]>([]);
+  const [customDids, setCustomDids] = useState<CustomDid[]>(() => loadCustomDids());
   const [didLabel, setDidLabel] = useState("");
   const [udsText, setUdsText] = useState<string | null>(null);
   const [udsRaw, setUdsRaw] = useState<string | null>(null);
-  const [udsLog, setUdsLog] = useState<UdsLogEntry[]>([]);
+  const [udsLog, setUdsLog] = useState<UdsLogEntry[]>(() => loadUdsLog());
   const [scanRows, setScanRows] = useState<ModuleScanItem[]>([]);
   const [didHits, setDidHits] = useState<{ did: string; text: string }[]>([]);
   const [didProgress, setDidProgress] = useState("");
@@ -106,16 +124,60 @@ export default function CanUdsPanel({
   const [diffDumpB, setDiffDumpB] = useState<{ name: string; dump: SubaruRegionConfigDump } | null>(null);
   const [diffRows, setDiffRows] = useState<SubaruDidDiffEntry[] | null>(null);
 
-  // Steering alignment (746 EPS) state
+  // Steering alignment (746 EPS / 622 SAS / 784 ABS) state
   const [steeringRunning, setSteeringRunning] = useState(false);
+  const [steeringSource, setSteeringSource] = useState<"subaru-746" | "mitsu-622" | "mitsu-784">("subaru-746");
   const [steeringData, setSteeringData] = useState<{
     angleDeg: number;
     rawHex: string;
     torqueRaw: number | null;
     loadRaw: number | null;
     supplyVolts: number | null;
+    angularSpeedDegPerSec?: number | null;
+    calibrated?: boolean | null;
+    sourceLabel?: string;
     ticks: number;
   } | null>(null);
+  const [sasCalResult, setSasCalResult] = useState<SasCalibrationResult | null>(null);
+
+  // Mitsubishi AT/CVT (7E1 -> 7E9) live & single-shot state
+  const [mitsuTcmData, setMitsuTcmData] = useState<MitsubishiTcmTelemetry | null>(null);
+  const [mitsuTcmLive, setMitsuTcmLive] = useState(false);
+  const stopMitsuTcmRef = useRef(false);
+
+  // TPMS (773 / 600 / 752) state + wheel order persistence
+  const [tpmsTarget, setTpmsTarget] = useState<"mitsubishi-773" | "mitsubishi-600" | "subaru-752">("mitsubishi-773");
+  const [tpmsReport, setTpmsReport] = useState<TpmsModuleReport | null>(null);
+  const [tpmsUnit, setTpmsUnit] = useState<"bar" | "kpa" | "psi">("bar");
+  const [tpmsWheelMap, setTpmsWheelMap] = useState<Record<TpmsWheelPosition, number>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const savedMap = localStorage.getItem("qhub.obd.tpms-wheel-map");
+        if (savedMap) {
+          const parsed = JSON.parse(savedMap) as Record<TpmsWheelPosition, number>;
+          if (parsed && typeof parsed.FL === "number") {
+            return parsed;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return {
+      FL: 0,
+      FR: 1,
+      RR: 2,
+      RL: 3,
+      SPARE: 4,
+    };
+  });
+
+  // Mitsubishi Combination Meter (6A0 -> 514) state
+  const [mitsuMeter, setMitsuMeter] = useState<MitsubishiMeterReport | null>(null);
+
+  // CAN Diff-Sniffer state
+  const [canBaseline, setCanBaseline] = useState<{ id: string; dlc: number; data: number[] }[] | null>(null);
+  const [canDiffResult, setCanDiffResult] = useState<CanFrameDiffEntry[] | null>(null);
 
   // Safety modules (7B0 ABS/VDC/EPB & 780 SRS Airbag) read-only state
   const [safetyRows, setSafetyRows] = useState<
@@ -144,11 +206,6 @@ export default function CanUdsPanel({
   }, [tape]);
 
   useEffect(() => {
-    setCustomDids(loadCustomDids());
-    setUdsLog(loadUdsLog());
-  }, []);
-
-  useEffect(() => {
     if (!enabled) return;
     let cancel = false;
     void session
@@ -164,16 +221,22 @@ export default function CanUdsPanel({
 
   useEffect(() => {
     if (linkLostTick === 0) return;
-    setMonitoring(false);
-    if (recordingRef.current) setIncomplete(true);
-    recordingRef.current = false;
-    setRecording(false);
-    setLocalError("Связь с адаптером прервалась. Запись помечена как незавершённая. Подключите vLinker снова.");
+    const timer = window.setTimeout(() => {
+      setMonitoring(false);
+      if (recordingRef.current) setIncomplete(true);
+      recordingRef.current = false;
+      setRecording(false);
+      setLocalError("Связь с адаптером прервалась. Запись помечена как незавершённая. Подключите vLinker снова.");
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [linkLostTick]);
 
   useEffect(() => {
     if (enabled) return;
-    setMonitoring(false);
+    const timer = window.setTimeout(() => {
+      setMonitoring(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [enabled]);
 
   useEffect(() => {
@@ -193,7 +256,7 @@ export default function CanUdsPanel({
           now - row.flashAt > 500 ? { ...row, changed: row.changed.map(() => false) } : row,
         );
         rowsRef.current = faded;
-        deferUi(() => setRows(faded));
+        deferUiRef.current(() => setRows(faded));
         return;
       }
       let lossAdd = 0;
@@ -242,7 +305,7 @@ export default function CanUdsPanel({
       if (tapeAdd.length) {
         tapeRef.current = [...tapeRef.current, ...tapeAdd].slice(-TAPE_LIMIT);
       }
-      deferUi(() => {
+      deferUiRef.current(() => {
         setRows(next);
         if (tapeAdd.length) setTape(tapeRef.current);
         if (lossAdd) setLosses((count) => count + lossAdd);
@@ -250,7 +313,7 @@ export default function CanUdsPanel({
       });
     }, 100);
     return () => window.clearInterval(id);
-  }, [deferUi, onLog, protocol]);
+  }, [onLog, protocol]);
 
   const remember = (entry: UdsLogEntry) => {
     setUdsLog(appendUdsLog(entry));
@@ -815,7 +878,45 @@ export default function CanUdsPanel({
     setSteeringRunning(true);
     setBusy(true);
     setLocalError(null);
-    onLog("Старт мониторинга угла поворота руля (746 → 74E · DID 1041)");
+    if (steeringSource !== "subaru-746") {
+      const src = steeringSource === "mitsu-622" ? "sas-622" : "abs-784";
+      onLog(
+        `Старт мониторинга угла руля Mitsubishi (${
+          src === "sas-622" ? "SAS 622 → 484" : "ABS/ASC 784 → 785"
+        })`,
+      );
+      try {
+        let ticks = 0;
+        while (!stopSteeringRef.current) {
+          ticks += 1;
+          try {
+            const mitsu = await session.readMitsubishiSteeringAngle(src);
+            deferUi(() => {
+              setSteeringData({
+                angleDeg: mitsu.angleDeg,
+                rawHex: mitsu.rawHex,
+                torqueRaw: null,
+                loadRaw: null,
+                supplyVolts: null,
+                angularSpeedDegPerSec: mitsu.angularSpeedDegPerSec,
+                calibrated: mitsu.calibrated,
+                sourceLabel: `${mitsu.txHex} → ${mitsu.rxHex}`,
+                ticks,
+              });
+            });
+          } catch {
+            /* continue polling */
+          }
+        }
+      } finally {
+        setSteeringRunning(false);
+        setBusy(false);
+        onLog("Мониторинг угла руля Mitsubishi остановлен (сессия 10 81 закрыта)");
+      }
+      return;
+    }
+
+    onLog("Старт мониторинга угла поворота руля Subaru (746 → 74E · DID 1041)");
     try {
       try {
         await session.sendUds(protocol, "746", "74E", "10 03", false);
@@ -874,6 +975,7 @@ export default function CanUdsPanel({
                 torqueRaw,
                 loadRaw,
                 supplyVolts,
+                sourceLabel: "Subaru EPS (746 → 74E)",
                 ticks,
               });
             });
@@ -896,6 +998,131 @@ export default function CanUdsPanel({
 
   const stopSteeringMonitor = () => {
     stopSteeringRef.current = true;
+  };
+
+  const runSasZeroCalibration = async () => {
+    const confirmed = window.confirm(
+      "Калибровка нулевого положения датчика угла руля Mitsubishi (SAS 622 → 484 / ABS 784 → 785).\n\n" +
+        "Условия перед запуском:\n" +
+        "1. Автомобиль стоит на ровной горизонтальной площадке.\n" +
+        "2. Передние колёса и рулевое колесо выставлены строго прямо (0.0°).\n" +
+        "3. Селектор КПП в положении P или N, зажигание ON.\n\n" +
+        "Выполнить запись нулевой точки (31 02 → 31 01)?",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setLocalError(null);
+    setSasCalResult(null);
+    try {
+      const res = await session.calibrateMitsubishiSasZero();
+      setSasCalResult(res);
+      onLog(res.success ? "Калибровка нуля руля SAS (622) завершена успешно" : "Ошибка калибровки SAS");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Ошибка калибровки нуля руля SAS");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const readMitsuTcmOnce = async () => {
+    setBusy(true);
+    setLocalError(null);
+    try {
+      const data = await session.readMitsubishiTransmission();
+      setMitsuTcmData(data);
+      onLog(
+        `Mitsubishi АКПП/CVT (7E1): темп=${data.atfTempC ?? "—"}°C, передача=${data.currentGearText}, ${data.disengagedStateText}`,
+      );
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Ошибка чтения АКПП/CVT Mitsubishi");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startMitsuTcmLive = async () => {
+    stopMitsuTcmRef.current = false;
+    setMitsuTcmLive(true);
+    setBusy(true);
+    setLocalError(null);
+    onLog("Старт живого опроса АКПП/CVT Mitsubishi (7E1 → 7E9 · KWP 21 02 / 21 04)");
+    try {
+      while (!stopMitsuTcmRef.current) {
+        try {
+          const data = await session.readMitsubishiTransmission();
+          deferUi(() => setMitsuTcmData(data));
+        } catch {
+          /* continue polling */
+        }
+      }
+    } finally {
+      setMitsuTcmLive(false);
+      setBusy(false);
+      onLog("Живой опрос АКПП/CVT Mitsubishi остановлен");
+    }
+  };
+
+  const stopMitsuTcmLive = () => {
+    stopMitsuTcmRef.current = true;
+  };
+
+  const readTpmsOnce = async (
+    targetOverride?: "mitsubishi-773" | "mitsubishi-600" | "subaru-752",
+  ) => {
+    const activeTarget = targetOverride ?? tpmsTarget;
+    if (targetOverride) setTpmsTarget(targetOverride);
+    setBusy(true);
+    setLocalError(null);
+    try {
+      const report = await session.readTpmsSensors(activeTarget);
+      setTpmsReport(report);
+      onLog(`TPMS (${report.moduleName}): прочитано датчиков колёс: ${report.wheels.length}`);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Ошибка чтения датчиков шин TPMS");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateTpmsWheelMapping = (pos: TpmsWheelPosition, sensorIndex: number) => {
+    const next = { ...tpmsWheelMap, [pos]: sensorIndex };
+    setTpmsWheelMap(next);
+    try {
+      localStorage.setItem("qhub.obd.tpms-wheel-map", JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const readMitsuMeterOnce = async () => {
+    setBusy(true);
+    setLocalError(null);
+    try {
+      const meter = await session.readMitsubishiMeter();
+      setMitsuMeter(meter);
+      onLog(
+        `Приборка Mitsubishi (6A0 → 514): топливо=${meter.fuelLiters ?? "—"} л, пробег=${meter.odometerKm ?? "—"} км`,
+      );
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Ошибка чтения приборки 6A0");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const captureCanBaseline = () => {
+    const snap = rowsRef.current.map((r) => ({ id: r.id, dlc: r.dlc, data: [...r.data] }));
+    setCanBaseline(snap);
+    setCanDiffResult(null);
+    onLog(`CAN Diff: запомнен фоновый снимок (${snap.length} CAN ID)`);
+  };
+
+  const compareCanAction = () => {
+    if (!canBaseline) return;
+    const actionSnap = rowsRef.current.map((r) => ({ id: r.id, dlc: r.dlc, data: [...r.data] }));
+    const diffs = diffCanBusSnapshots(canBaseline, actionSnap);
+    setCanDiffResult(diffs);
+    onLog(`CAN Diff: найдено изменившихся фреймов: ${diffs.length}`);
   };
 
   const readSafetyModulesOnce = async (targetGroup: "all" | "abs" | "srs" = "all") => {
@@ -1067,23 +1294,7 @@ export default function CanUdsPanel({
     }
   };
 
-  if (!enabled) {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm text-slate-400">Сначала подключите адаптер сверху.</p>
-        {localError ? <p className="text-sm text-red-200">{localError}</p> : null}
-        {recordCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => void exportCapture()}
-            className="rounded-xl border border-slate-600 px-4 py-3 text-sm"
-          >
-            CSV ({recordCount})
-          </button>
-        ) : null}
-      </div>
-    );
-  }
+  const hwBusy = !enabled || busy;
 
   const switchCanSubView = (nextView: CanSubView) => {
     void (async () => {
@@ -1092,6 +1303,9 @@ export default function CanUdsPanel({
       }
       if (steeringRunning && nextView !== "steering") {
         stopSteeringRef.current = true;
+      }
+      if (mitsuTcmLive && nextView !== "dashboard") {
+        stopMitsuTcmRef.current = true;
       }
       if (liveUdsRunning && nextView !== "expert") {
         stopLiveUdsRef.current = true;
@@ -1102,6 +1316,23 @@ export default function CanUdsPanel({
 
   return (
     <section className="flex min-w-0 flex-col gap-3">
+      {!enabled ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+          <span>
+            Сначала подключите адаптер сверху, чтобы отправлять запросы в CAN. Навигация, настройка колёс TPMS и сравнение дампов доступны офлайн.
+          </span>
+          {recordCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => void exportCapture()}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200"
+            >
+              CSV ({recordCount})
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-1.5">
         <ProtocolButton active={view === "dashboard"} onClick={() => switchCanSubView("dashboard")}>
           Показатели UDS
@@ -1144,6 +1375,342 @@ export default function CanUdsPanel({
 
       {view === "dashboard" ? (
         <div className="flex flex-col gap-3">
+          {/* Card 1: Mitsubishi AT / CVT Telemetry (7E1 -> 7E9) */}
+          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-semibold text-emerald-300">
+                  Mitsubishi АКПП (8AT V8AWG / 5AT) и Вариатор CVT (`7E1 → 7E9` · KWP `21 02` / `21 04` / `21 03`)
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  Температура масла АКПП (`°C`), текущая включенная передача (`1..8`), явный статус <strong>«Передача выключена (P/N / Автонейтраль)»</strong>, обороты входного/выходного валов и скольжение блокировки гидротрансформатора.
+                </p>
+              </div>
+              <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+                7E1 → 7E9
+              </span>
+            </div>
+
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={hwBusy || monitoring}
+                onClick={() => void readMitsuTcmOnce()}
+                className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Прочитать АКПП / CVT (21 02 + 21 04)
+              </button>
+              {!mitsuTcmLive ? (
+                <button
+                  type="button"
+                  disabled={hwBusy || monitoring}
+                  onClick={() => void startMitsuTcmLive()}
+                  className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-3 py-2.5 text-xs font-semibold text-emerald-200 disabled:opacity-40"
+                >
+                  Живой поток АКПП
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopMitsuTcmLive}
+                  className="rounded-xl bg-amber-600 px-3 py-2.5 text-xs font-semibold text-white"
+                >
+                  Остановить поток АКПП
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={hwBusy || monitoring}
+                onClick={() => void readMitsuMeterOnce()}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs font-medium text-slate-200 disabled:opacity-40"
+              >
+                Приборка 6A0 (Топливо в л / Пробег)
+              </button>
+            </div>
+
+            {mitsuTcmData ? (
+              <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  {/* ATF / CVT Temperature */}
+                  <div className="rounded-lg border border-slate-800/90 bg-slate-900/80 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                      Температура ATF / CVT
+                    </div>
+                    <div
+                      className={`mt-1 font-mono text-2xl font-bold ${
+                        mitsuTcmData.atfTempC != null && mitsuTcmData.atfTempC >= 100
+                          ? "text-rose-400"
+                          : mitsuTcmData.atfTempC != null && mitsuTcmData.atfTempC >= 55
+                            ? "text-emerald-400"
+                            : "text-sky-300"
+                      }`}
+                    >
+                      {mitsuTcmData.atfTempC != null ? `${mitsuTcmData.atfTempC} °C` : "—"}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-slate-400">
+                      {mitsuTcmData.atfTempC == null
+                        ? "Формула F - 40"
+                        : mitsuTcmData.atfTempC > 110
+                          ? "ПЕРЕГРЕВ АКПП (> 110 °C)!"
+                          : mitsuTcmData.atfTempC >= 96
+                            ? "Высокая нагрузка (96–110 °C)"
+                            : mitsuTcmData.atfTempC >= 55
+                              ? "Рабочая норма (55–95 °C)"
+                              : "Холодная (прогрев < 55 °C)"}
+                    </div>
+                  </div>
+
+                  {/* Engaged Gear */}
+                  <div className="rounded-lg border border-slate-800/90 bg-slate-900/80 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                      Включенная передача
+                    </div>
+                    <div className="mt-1 font-mono text-xl font-bold text-slate-100">
+                      {mitsuTcmData.currentGearText}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-slate-400">
+                      Селектор: <strong>{mitsuTcmData.selectorPosition}</strong>
+                    </div>
+                  </div>
+
+                  {/* Disengaged / Neutral / Lock-up status */}
+                  <div
+                    className={`col-span-2 rounded-lg border p-2.5 sm:col-span-1 ${
+                      mitsuTcmData.isGearDisengaged
+                        ? "border-amber-500/50 bg-amber-950/25"
+                        : "border-emerald-500/40 bg-emerald-950/20"
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                      Состояние передачи в КПП
+                    </div>
+                    <div
+                      className={`mt-1 text-xs font-bold ${
+                        mitsuTcmData.isGearDisengaged ? "text-amber-300" : "text-emerald-300"
+                      }`}
+                    >
+                      {mitsuTcmData.isGearDisengaged
+                        ? "ПЕРЕДАЧА ВЫКЛЮЧЕНА (РАЗОМКНУТА)"
+                        : "ПЕРЕДАЧА ВКЛЮЧЕНА (В ЗАЦЕПЛЕНИИ)"}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-slate-300">
+                      {mitsuTcmData.disengagedStateText}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2.5 grid grid-cols-2 gap-2 border-t border-slate-800/80 pt-2.5 font-mono text-xs sm:grid-cols-4">
+                  <div>
+                    <div className="font-sans text-[10px] text-slate-500">Первичный вал (Input)</div>
+                    <div className="text-slate-200">
+                      {mitsuTcmData.inputShaftRpm != null ? `${mitsuTcmData.inputShaftRpm} об/мин` : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-sans text-[10px] text-slate-500">Вторичный вал (Output)</div>
+                    <div className="text-slate-200">
+                      {mitsuTcmData.outputShaftRpm != null ? `${mitsuTcmData.outputShaftRpm} об/мин` : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-sans text-[10px] text-slate-500">Скольжение ГДТ (Slip)</div>
+                    <div className="text-slate-200">
+                      {mitsuTcmData.torqueConverterSlipRpm != null ? `${mitsuTcmData.torqueConverterSlipRpm} об/мин` : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-sans text-[10px] text-slate-500">Питание TCM / Скорость</div>
+                    <div className="text-slate-200">
+                      {mitsuTcmData.controlVoltageV != null ? `${mitsuTcmData.controlVoltageV} В` : "—"} ·{" "}
+                      {mitsuTcmData.vehicleSpeedKmh != null ? `${mitsuTcmData.vehicleSpeedKmh} км/ч` : "—"}
+                    </div>
+                  </div>
+                </div>
+                {mitsuTcmData.cvtDegradationCount != null ? (
+                  <div className="mt-2 border-t border-slate-800/80 pt-1.5 text-xs text-slate-300">
+                    Счётчик деградации жидкости CVT (`21 10`):{" "}
+                    <strong className="font-mono text-emerald-300">{mitsuTcmData.cvtDegradationCount}</strong> ед.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {mitsuMeter ? (
+              <div className="mt-2.5 rounded-xl border border-slate-800 bg-slate-950/90 p-2.5 text-xs">
+                <div className="font-semibold text-emerald-300">
+                  Приборная панель Mitsubishi (`6A0 → 514` · KWP `21 A3` / `21 AD`)
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-2 font-mono">
+                  <div className="rounded bg-slate-900 p-2">
+                    <div className="font-sans text-[10px] text-slate-400">Остаток топлива в баке (`21 A3`)</div>
+                    <div className="text-base font-bold text-emerald-300">
+                      {mitsuMeter.fuelLiters != null ? `${mitsuMeter.fuelLiters} л` : "нет ответа"}
+                    </div>
+                  </div>
+                  <div className="rounded bg-slate-900 p-2">
+                    <div className="font-sans text-[10px] text-slate-400">Одометр в приборке (`21 AD`)</div>
+                    <div className="text-base font-bold text-slate-100">
+                      {mitsuMeter.odometerKm != null ? `${mitsuMeter.odometerKm.toLocaleString("ru-RU")} км` : "нет ответа"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Card 2: TPMS 4+1 Wheel Map (Mitsubishi 773/600 & Subaru 752) */}
+          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-semibold text-emerald-300">
+                  Давление и температура в шинах (TPMS Карта 4+1 с запаской)
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  Mitsubishi Pajero Sport III (`773 → 774` OSS/TPMS), Outlander III / ASX (`600 → 500` KOS/TPMS) и Subaru SGP (`752 → 75A`). Поддерживается перестановка позиций колёс после шиномонтажа.
+                </p>
+              </div>
+              <div className="flex gap-1">
+                {(["bar", "kpa", "psi"] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setTpmsUnit(u)}
+                    className={`rounded px-2 py-0.5 font-mono text-[10px] font-semibold uppercase ${
+                      tpmsUnit === u
+                        ? "bg-emerald-600 text-white"
+                        : "border border-slate-700 bg-slate-950 text-slate-400"
+                    }`}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-2.5 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                disabled={hwBusy || monitoring}
+                onClick={() => void readTpmsOnce("mitsubishi-773")}
+                className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
+                  tpmsTarget === "mitsubishi-773"
+                    ? "bg-emerald-600 text-white"
+                    : "border border-slate-700 bg-slate-950 text-slate-200"
+                }`}
+              >
+                Pajero Sport III (773)
+              </button>
+              <button
+                type="button"
+                disabled={hwBusy || monitoring}
+                onClick={() => void readTpmsOnce("mitsubishi-600")}
+                className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
+                  tpmsTarget === "mitsubishi-600"
+                    ? "bg-emerald-600 text-white"
+                    : "border border-slate-700 bg-slate-950 text-slate-200"
+                }`}
+              >
+                Outlander / ASX (600)
+              </button>
+              <button
+                type="button"
+                disabled={hwBusy || monitoring}
+                onClick={() => void readTpmsOnce("subaru-752")}
+                className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
+                  tpmsTarget === "subaru-752"
+                    ? "bg-emerald-600 text-white"
+                    : "border border-slate-700 bg-slate-950 text-slate-200"
+                }`}
+              >
+                Subaru SGP (752)
+              </button>
+            </div>
+
+            {tpmsReport ? (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Блок: <strong>{tpmsReport.moduleName}</strong></span>
+                  {tpmsReport.activeSet ? (
+                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-300">
+                      Комплект шин #{tpmsReport.activeSet}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["FL", "FR", "RL", "RR", "SPARE"] as const).map((pos) => {
+                    const mappedIndex = tpmsWheelMap[pos] ?? 0;
+                    const wheel = tpmsReport.wheels[mappedIndex] ?? tpmsReport.wheels[0];
+                    if (!wheel) return null;
+                    const posNames: Record<TpmsWheelPosition, string> = {
+                      FL: "Переднее левое (FL)",
+                      FR: "Переднее правое (FR)",
+                      RL: "Заднее левое (RL)",
+                      RR: "Заднее правое (RR)",
+                      SPARE: "Запасное колесо (5-й датчик)",
+                    };
+                    const pVal =
+                      tpmsUnit === "bar"
+                        ? wheel.pressureBar != null
+                          ? `${wheel.pressureBar.toFixed(2)} бар`
+                          : "—"
+                        : tpmsUnit === "kpa"
+                          ? wheel.pressureKpa != null
+                            ? `${wheel.pressureKpa} кПа`
+                            : "—"
+                          : wheel.pressurePsi != null
+                            ? `${wheel.pressurePsi.toFixed(1)} PSI`
+                            : "—";
+                    const lowPressure = wheel.pressureBar != null && wheel.pressureBar > 0.3 && wheel.pressureBar < 1.85;
+                    return (
+                      <div
+                        key={pos}
+                        className={`rounded-lg border p-2.5 ${
+                          pos === "SPARE" ? "col-span-2" : ""
+                        } ${
+                          lowPressure
+                            ? "border-amber-500/60 bg-amber-950/25"
+                            : "border-slate-800 bg-slate-950/90"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[11px] font-semibold text-slate-200">{posNames[pos]}</span>
+                          <select
+                            value={mappedIndex}
+                            onChange={(e) => updateTpmsWheelMapping(pos, Number(e.target.value))}
+                            className="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] text-slate-300"
+                            title="Сопоставление канала датчика ЭБУ с колесом после ротации шин"
+                          >
+                            {[0, 1, 2, 3, 4].map((idx) => (
+                              <option key={idx} value={idx}>
+                                Канал #{idx + 1}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="mt-1 flex items-baseline justify-between">
+                          <span
+                            className={`font-mono text-lg font-bold ${
+                              lowPressure ? "text-amber-300" : "text-emerald-400"
+                            }`}
+                          >
+                            {pVal}
+                          </span>
+                          <span className="font-mono text-xs text-slate-300">
+                            {wheel.temperatureC != null ? `${wheel.temperatureC} °C` : "темп. —"}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-slate-400">
+                          <span>ID: {wheel.sensorIdHex ?? "—"}</span>
+                          <span className="text-slate-300">{wheel.statusText}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
           <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs font-semibold text-emerald-200">
@@ -1159,7 +1726,7 @@ export default function CanUdsPanel({
             <div className="mt-2.5 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru-tcm")}
                 className="rounded-xl bg-emerald-600 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -1167,7 +1734,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru")}
                 className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
               >
@@ -1175,11 +1742,11 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("pajero")}
                 className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
               >
-                Pajero 21 (7E0)
+                Pajero 21 (7E0+7E1)
               </button>
             </div>
             {catalog.length > 0 ? (
@@ -1198,7 +1765,7 @@ export default function CanUdsPanel({
               </ul>
             ) : (
               <p className="mt-2.5 text-xs text-slate-400">
-                Нажмите <strong>«Subaru SGP + Шины»</strong> для мгновенного чтения давления шин, температур агрегатов, уровня обоих полубаков и калибровок КПП.
+                Нажмите <strong>«Subaru SGP + Шины»</strong> или <strong>«Pajero 21 (7E0+7E1)»</strong> для мгновенного чтения параметров.
               </p>
             )}
           </div>
@@ -1209,10 +1776,10 @@ export default function CanUdsPanel({
             <div className="flex items-center justify-between gap-2">
               <div>
                 <div className="text-xs font-semibold text-emerald-300">
-                  Датчик угла поворота руля (SAS / EPS `746 → 74E` · DID `1041`)
+                  Датчик угла поворота руля (SAS / EPS) и калибровка «нуля» (0.0°)
                 </div>
                 <p className="mt-0.5 text-[11px] text-slate-400">
-                  Для точного выставления руля строго в <strong>0.0°</strong> на стенде развал-схождения (точность 0.1°). Только чтение (`22 1041`).
+                  Точное выставление рулевого колеса в <strong>0.0°</strong> для Subaru (`746 → 74E` EPS) и Mitsubishi (`622 → 484` SAS / `784 → 785` ABS/ASC).
                 </p>
               </div>
               <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
@@ -1220,11 +1787,50 @@ export default function CanUdsPanel({
               </span>
             </div>
 
+            <div className="mt-2.5 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                disabled={steeringRunning || busy}
+                onClick={() => setSteeringSource("subaru-746")}
+                className={`rounded-lg px-2 py-2 text-xs font-medium disabled:opacity-40 ${
+                  steeringSource === "subaru-746"
+                    ? "bg-emerald-600 text-white"
+                    : "border border-slate-700 bg-slate-950 text-slate-300"
+                }`}
+              >
+                Subaru EPS (746)
+              </button>
+              <button
+                type="button"
+                disabled={steeringRunning || busy}
+                onClick={() => setSteeringSource("mitsu-622")}
+                className={`rounded-lg px-2 py-2 text-xs font-medium disabled:opacity-40 ${
+                  steeringSource === "mitsu-622"
+                    ? "bg-emerald-600 text-white"
+                    : "border border-slate-700 bg-slate-950 text-slate-300"
+                }`}
+              >
+                Mitsubishi SAS (622)
+              </button>
+              <button
+                type="button"
+                disabled={steeringRunning || busy}
+                onClick={() => setSteeringSource("mitsu-784")}
+                className={`rounded-lg px-2 py-2 text-xs font-medium disabled:opacity-40 ${
+                  steeringSource === "mitsu-784"
+                    ? "bg-emerald-600 text-white"
+                    : "border border-slate-700 bg-slate-950 text-slate-300"
+                }`}
+              >
+                Mitsubishi ABS (784)
+              </button>
+            </div>
+
             <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950 p-4 text-center">
               {steeringData ? (
                 <>
                   <div className="text-[11px] uppercase tracking-wider text-slate-400">
-                    Текущее положение рулевого колеса
+                    Текущее положение рулевого колеса {steeringData.sourceLabel ? `(${steeringData.sourceLabel})` : ""}
                   </div>
                   <div
                     className={`mt-1 font-mono text-4xl font-bold tabular-nums ${
@@ -1273,26 +1879,44 @@ export default function CanUdsPanel({
 
                   <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-800/80 pt-2.5 text-left font-mono text-[11px]">
                     <div>
-                      <div className="font-sans text-[10px] text-slate-500">Сырой код (1041)</div>
+                      <div className="font-sans text-[10px] text-slate-500">Сырой код</div>
                       <div className="text-slate-200">{steeringData.rawHex}</div>
                     </div>
                     <div>
-                      <div className="font-sans text-[10px] text-slate-500">Момент на валу (1006)</div>
+                      <div className="font-sans text-[10px] text-slate-500">
+                        {steeringSource === "subaru-746" ? "Момент на валу (1006)" : "Скорость руля"}
+                      </div>
                       <div className="text-slate-200">
-                        {steeringData.torqueRaw != null ? steeringData.torqueRaw : "—"}
+                        {steeringSource === "subaru-746"
+                          ? steeringData.torqueRaw != null
+                            ? steeringData.torqueRaw
+                            : "—"
+                          : steeringData.angularSpeedDegPerSec != null
+                            ? `${steeringData.angularSpeedDegPerSec} °/с`
+                            : "—"}
                       </div>
                     </div>
                     <div>
-                      <div className="font-sans text-[10px] text-slate-500">Питание EPS (101B)</div>
+                      <div className="font-sans text-[10px] text-slate-500">
+                        {steeringSource === "subaru-746" ? "Питание EPS (101B)" : "Калибровка SAS"}
+                      </div>
                       <div className="text-slate-200">
-                        {steeringData.supplyVolts != null ? `${steeringData.supplyVolts.toFixed(2)} В` : "—"}
+                        {steeringSource === "subaru-746"
+                          ? steeringData.supplyVolts != null
+                            ? `${steeringData.supplyVolts.toFixed(2)} В`
+                            : "—"
+                          : steeringData.calibrated === true
+                            ? "Калиброван (OK)"
+                            : steeringData.calibrated === false
+                              ? "Требуется 0°"
+                              : "—"}
                       </div>
                     </div>
                   </div>
                 </>
               ) : (
                 <div className="py-4 text-xs text-slate-400">
-                  Нажмите кнопку ниже, чтобы запустить живой поток датчика угла руля (`746 · 22 1041`).
+                  Выберите профиль выше (`Subaru 746`, `Mitsubishi SAS 622` или `ABS 784`) и нажмите кнопку запуска живого потока.
                 </div>
               )}
             </div>
@@ -1301,7 +1925,7 @@ export default function CanUdsPanel({
               {!steeringRunning ? (
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void startSteeringMonitor()}
                   className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
                 >
@@ -1313,9 +1937,52 @@ export default function CanUdsPanel({
                   onClick={stopSteeringMonitor}
                   className="flex-1 rounded-xl bg-amber-600 px-4 py-3 text-xs font-semibold text-white"
                 >
-                  Остановить опрос руля (и закрыть сессию 10 01)
+                  Остановить опрос руля
                 </button>
               )}
+            </div>
+
+            {/* Mitsubishi SAS Zero-Point Calibration card */}
+            <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-950/15 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-amber-200">
+                  Калибровка нулевого положения руля Mitsubishi (SAS `622 → 484` + ABS `784 → 785`)
+                </span>
+                <span className="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-300">
+                  KWP 31 02 / 31 01
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-300">
+                Выполняется после регулировки сход-развала или снятия руля/улитки на Pajero Sport III / Outlander / ASX: переводит датчик `622` в сессию `10 92`, стирает старую поправку (`31 02`), фиксирует новую нулевую точку (`31 01`) и перезапускает блок курсовой устойчивости `784` (`11 01`).
+              </p>
+              <button
+                type="button"
+                disabled={hwBusy || monitoring || steeringRunning}
+                onClick={() => void runSasZeroCalibration()}
+                className="mt-2.5 w-full rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Выполнить калибровку нуля руля Mitsubishi (0.0°)
+              </button>
+              {sasCalResult ? (
+                <div
+                  className={`mt-2.5 rounded-lg border p-2.5 text-xs ${
+                    sasCalResult.success
+                      ? "border-emerald-500/50 bg-emerald-950/30 text-emerald-200"
+                      : "border-rose-500/50 bg-rose-950/30 text-rose-200"
+                  }`}
+                >
+                  <div className="font-semibold">
+                    {sasCalResult.success
+                      ? "Калибровка нуля датчика угла руля выполнена (0.0°)"
+                      : "Ошибка калибровки нуля руля"}
+                  </div>
+                  <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-slate-300">
+                    {sasCalResult.steps.map((s, idx) => (
+                      <li key={idx}>• {s}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1336,7 +2003,7 @@ export default function CanUdsPanel({
             <div className="mt-2.5 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("all")}
                 className="rounded-xl bg-amber-600 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -1344,7 +2011,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("abs")}
                 className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
               >
@@ -1352,7 +2019,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("srs")}
                 className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
               >
@@ -1410,16 +2077,16 @@ export default function CanUdsPanel({
               ) : null}
             </div>
             <p className="mt-1 text-xs text-slate-400">
-              Опрашивает все 11 блоков (`UDS 19 02 FF` и `OBD Mode 03`). Для <strong>обычных блоков</strong> (ДВС `7E0`, КПП `7E1`, Силовая `7A2`, Приборка `783`, Кузов/Шины `752`, Климат `7C4`, Сонары `786`) доступен безопасный сброс ошибок. Для <strong>блоков безопасности</strong> (Подушки `780`, Тормоза `7B0`, Руль `746`, Камера EyeSight `787`) разрешено <strong>только чтение</strong> без риска сбить калибровки.
+              Опрашивает все блоки Subaru и Mitsubishi (`UDS 19 02 FF`, `KWP2000 18 00 FF 00` и `OBD Mode 03`). Для <strong>обычных блоков</strong> (ДВС `7E0`, АКПП/CVT `7E1`, Силовая `7A2`, ETACS `620`/`7A1`, Приборка `783`/`6A0`, TPMS/KOS `752`/`773`/`600`, Климат `7C4`/`688`, 4WD `7B6`, Сонары `786`/`763`) доступен безопасный сброс ошибок (`14 FF FF FF` / `14 FF 00`). Для <strong>блоков безопасности</strong> (Подушки SRS `780`/`7B2`, Тормоза ABS/ASC `7B0`/`784`, Руль EPS/SAS `746`/`622`, EyeSight `787`) разрешено <strong>только чтение</strong> без риска сбить калибровки.
             </p>
 
             <button
               type="button"
-              disabled={busy || monitoring}
+              disabled={hwBusy || monitoring}
               onClick={() => void runAllModuleDtcScan()}
               className="mt-2.5 w-full rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
             >
-              Проверить ошибки во всех блоках (11 ЭБУ)
+              Проверить ошибки во всех блоках ({KNOWN_MODULE_TARGETS.filter((t) => t.rx != null).length} ЭБУ)
             </button>
 
             {dtcProgress ? <p className="mt-2 text-xs text-emerald-300">{dtcProgress}</p> : null}
@@ -1514,7 +2181,7 @@ export default function CanUdsPanel({
       ) : view === "monitor" ? (
         <>
           <p className="text-xs text-slate-400">
-            Пассивная прослушка шины (`ATMA`). На машинах с межсетевым шлюзом (Gateway) в разъёме OBD-II тишина, пока не идёт опрос. Для чтения параметров и блоков используйте вкладку «Запросы к блокам».
+            Пассивная прослушка шины (`ATMA` / `ATCRA`). Включает автоматический декодер широковещательных CAN-фреймов Mitsubishi & Subaru (`0x236` угол руля, `0x318` передача АКПП, `0x32F` ручник EPB, `0x214`/`0x215` скорости 4 колёс, `0x208` тормоз, `0x210` педаль газа, `0x154` топливо/пробег, `0x608` темп. ОЖ/улицы) и интерактивный Diff-охотник за кнопками.
           </p>
           <p className="text-xs text-slate-500">
             Потери адаптера: {losses}. Фильтр и протокол меняются только когда монитор остановлен.
@@ -1523,9 +2190,33 @@ export default function CanUdsPanel({
             <Field label="ID" value={filterId} disabled={monitoring || busy} onChange={setFilterId} />
             <Field label="Маска" value={filterMask} disabled={monitoring || busy} onChange={setFilterMask} />
           </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { id: "236", label: "0x236 Руль SAS" },
+              { id: "318", label: "0x318 АКПП / Передача" },
+              { id: "32F", label: "0x32F Электроручник EPB" },
+              { id: "214", label: "0x214 Колёса ABS" },
+              { id: "208", label: "0x208 Тормоз" },
+              { id: "154", label: "0x154 Бак / Одометр" },
+              { id: "", label: "Все ID" },
+            ].map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                disabled={monitoring || busy}
+                onClick={() => {
+                  setFilterId(preset.id);
+                  setFilterMask(preset.id ? "7FF" : "");
+                }}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-[11px] text-slate-300 disabled:opacity-40"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
-            disabled={monitoring || busy}
+            disabled={monitoring || hwBusy}
             onClick={() => void applyFilter()}
             className="rounded-xl border border-slate-600 px-4 py-3 text-sm disabled:opacity-40"
           >
@@ -1533,12 +2224,101 @@ export default function CanUdsPanel({
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={hwBusy}
             onClick={() => void (monitoring ? stopMonitor() : startMonitor())}
             className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
           >
             {monitoring ? "Остановить монитор" : "Слушать шину"}
           </button>
+
+          {/* Interactive CAN Diff-Sniffer (Button & Event Hunter) */}
+          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-emerald-300">
+                Интерактивный CAN Diff-Sniffer («Охотник за кнопками и событиями»)
+              </span>
+              {canBaseline ? (
+                <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-300">
+                  Фон: {canBaseline.length} ID
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              1. Нажмите <strong>«Запомнить фон»</strong> в покое. 2. Нажмите кнопку в салоне или переключите рычаг. 3. Нажмите <strong>«Найти изменения»</strong> — отобразятся только изменившиеся байты и биты.
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={rows.length === 0}
+                onClick={captureCanBaseline}
+                className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-3 py-2 text-xs font-semibold text-emerald-200 disabled:opacity-40"
+              >
+                1. Запомнить фон ({rows.length} ID)
+              </button>
+              <button
+                type="button"
+                disabled={!canBaseline}
+                onClick={compareCanAction}
+                className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                2. Найти изменения (Diff)
+              </button>
+            </div>
+            {canDiffResult ? (
+              <div className="mt-2.5 border-t border-slate-800 pt-2 text-xs">
+                <div className="text-[11px] text-slate-300">
+                  Изменилось CAN ID: <strong>{canDiffResult.length}</strong>
+                </div>
+                {canDiffResult.length > 0 ? (
+                  <ul className="mt-1.5 max-h-52 space-y-1.5 overflow-y-auto font-mono text-[11px]">
+                    {canDiffResult.map((diff) => (
+                      <li
+                        key={diff.idHex}
+                        className="rounded border border-amber-500/40 bg-amber-950/20 p-2 text-slate-200"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-amber-300">0x{diff.idHex}</span>
+                          <span className="text-[10px] text-slate-400">
+                            байты [{diff.changedByteIndices.join(", ")}]
+                            {diff.decodedHint ? ` · ${diff.decodedHint}` : ""}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-slate-400">Было: {diff.beforeHex}</div>
+                        <div className="text-emerald-300">Стало: {diff.afterHex}</div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-400">Изменений относительно фона не обнаружено.</p>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Live Decoded Broadcast Signals */}
+          {rows.some((r) => decodeCanBroadcastFrame(r.id, r.data)) ? (
+            <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/15 p-3">
+              <div className="text-xs font-semibold text-emerald-300">
+                Живая расшифровка широковещательных CAN-фреймов (DBC Live Decoder)
+              </div>
+              <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {rows
+                  .map((r) => decodeCanBroadcastFrame(r.id, r.data))
+                  .filter((sig): sig is DecodedBroadcastSignal => sig !== null)
+                  .map((sig) => (
+                    <div
+                      key={sig.idHex}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/90 px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="font-mono text-[11px] text-slate-400">
+                        <strong className="text-emerald-400">0x{sig.idHex}</strong> · {sig.title}
+                      </span>
+                      <span className="font-mono font-semibold text-slate-100">{sig.summary}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : null}
           <div className="flex gap-2">
             <button
               type="button"
@@ -1626,7 +2406,7 @@ export default function CanUdsPanel({
             <div className="mt-2 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru")}
                 className="rounded-xl bg-emerald-600/90 px-2.5 py-2.5 text-xs font-medium text-white disabled:opacity-40"
               >
@@ -1634,7 +2414,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru-tcm")}
                 className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
               >
@@ -1642,7 +2422,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("pajero")}
                 className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
               >
@@ -1689,7 +2469,7 @@ export default function CanUdsPanel({
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runSubaruRegionDump()}
                 className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -1863,7 +2643,7 @@ export default function CanUdsPanel({
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "extended")}
                 className="col-span-2 rounded-xl bg-emerald-600 px-3 py-3 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -1871,7 +2651,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "standard")}
                 className="rounded-xl border border-slate-600 px-3 py-2 text-xs font-medium disabled:opacity-40"
               >
@@ -1879,7 +2659,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "wide")}
                 className="rounded-xl border border-amber-500/50 bg-amber-950/20 px-3 py-2 text-xs font-medium text-amber-200 disabled:opacity-40"
               >
@@ -1958,7 +2738,7 @@ export default function CanUdsPanel({
             </div>
             <button
               type="button"
-              disabled={busy}
+              disabled={hwBusy}
               onClick={() => void sendRequest(request)}
               className="mt-2 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
             >
@@ -1980,7 +2760,7 @@ export default function CanUdsPanel({
                 <button
                   key={item.id}
                   type="button"
-                  disabled={busy}
+                  disabled={hwBusy}
                   onClick={() => {
                     setRequest(item.hex);
                     void sendRequest(item.hex);
@@ -1994,7 +2774,7 @@ export default function CanUdsPanel({
                 <button
                   key={item.id}
                   type="button"
-                  disabled={busy}
+                  disabled={hwBusy}
                   onClick={() => {
                     setRequest(item.hex);
                     void sendRequest(item.hex);
@@ -2045,7 +2825,7 @@ export default function CanUdsPanel({
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0xf180, to: 0xf1ff, label: "F180–F1FF", stopOnSilence: true })}
                   className="rounded-lg border border-slate-600 px-2.5 py-2 text-xs font-medium disabled:opacity-40"
                 >
@@ -2053,7 +2833,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x1000, to: 0x107f, label: "1000–107F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2061,7 +2841,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x1100, to: 0x117f, label: "1100–117F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2069,7 +2849,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x2000, to: 0x207f, label: "2000–207F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2077,7 +2857,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x2100, to: 0x217f, label: "2100–217F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2085,7 +2865,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0xd000, to: 0xd07f, label: "D000–D07F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2135,7 +2915,7 @@ export default function CanUdsPanel({
                 </span>
                 <button
                   type="button"
-                  disabled={busy && !liveUdsRunning}
+                  disabled={hwBusy && !liveUdsRunning}
                   onClick={() => void sendRequest("10 01")}
                   className="rounded-lg border border-slate-600 bg-slate-900 px-2.5 py-1 text-[11px] text-slate-200 disabled:opacity-40"
                 >
@@ -2170,7 +2950,7 @@ export default function CanUdsPanel({
                 {!liveUdsRunning ? (
                   <button
                     type="button"
-                    disabled={busy || monitoring || watchedDids.length === 0}
+                    disabled={hwBusy || monitoring || watchedDids.length === 0}
                     onClick={() => void startLiveUds()}
                     className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
                   >

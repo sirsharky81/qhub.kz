@@ -186,7 +186,6 @@ export function positiveEtacsPayload(
 
 async function configureEtacsChannel(elm: Elm327Client, profile: EtacsCanProfile): Promise<void> {
   const txHex = profile.txId.toString(16).padStart(3, "0").toUpperCase();
-  const rxHex = profile.rxId.toString(16).padStart(3, "0").toUpperCase();
   const standardPair = profile.rxId === ((profile.txId + 8) & 0x7ff);
 
   // Enable spaces (ATS1) so ELM multiline frames ("04A\r0: 61 30 ..." or "10 4A 61 30...")
@@ -871,7 +870,7 @@ export function etacsDownloadNames(
 export function crc16X25Ascii(asciiField512: string): string {
   let crc = 0xffff;
   for (let i = 0; i < asciiField512.length; i++) {
-    let b = asciiField512.charCodeAt(i) & 0xff;
+    const b = asciiField512.charCodeAt(i) & 0xff;
     let reflectedByte = 0;
     for (let k = 0; k < 8; k++) {
       reflectedByte = (reflectedByte << 1) | ((b >> k) & 1);

@@ -12,6 +12,18 @@ import {
   type EtacsWriteBlockResult,
 } from "./mitsubishi-etacs";
 import {
+  calibrateMitsubishiSasZero,
+  readMitsubishiMeter,
+  readMitsubishiSteeringAngle,
+  readMitsubishiTransmission,
+  readTpmsSensors,
+  type MitsubishiMeterReport,
+  type MitsubishiSteeringReport,
+  type MitsubishiTcmTelemetry,
+  type SasCalibrationResult,
+  type TpmsModuleReport,
+} from "./mitsubishi-modules";
+import {
   DID_SCAN_FROM,
   DID_SCAN_SILENCE,
   DID_SCAN_TO,
@@ -22,6 +34,7 @@ import {
   describeCanModule,
   formatUdsPayload,
   isUdsBitmapDid,
+  parseKwpDtcs18,
   parseTaggedUdsReplies,
   parseUdsDtcs1902,
   parseUdsResponse,
@@ -253,6 +266,68 @@ export class ObdBleSession {
     });
   }
 
+  /**
+   * Reads Mitsubishi AT (8AT V8AWG / 5AT V5A5A) & CVT (7E1 → 7E9) live telemetry via KWP2000 `21 02` / `21 04` / `21 03`:
+   * ATF/CVT temperature (°C), engaged gear (1..8), explicit disengaged gear (P/N) state, shaft RPMs, and damper slip.
+   */
+  async readMitsubishiTransmission(): Promise<MitsubishiTcmTelemetry> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return readMitsubishiTransmission(this.elm!);
+  }
+
+  /**
+   * Reads TPMS wheel pressures, temperatures, and 32-bit sensor IDs (4+1 spare wheel)
+   * on Mitsubishi Pajero Sport III (`773 → 774`), Outlander/ASX (`600 → 500`), or Subaru SGP (`752 → 75A`).
+   */
+  async readTpmsSensors(
+    target: "mitsubishi-auto" | "mitsubishi-773" | "mitsubishi-600" | "subaru-752" = "mitsubishi-auto",
+  ): Promise<TpmsModuleReport> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return readTpmsSensors(this.elm!, target);
+  }
+
+  /**
+   * Reads Mitsubishi Steering Wheel Angle Sensor (`622 → 484` SAS or `784 → 785` ABS/ASC).
+   */
+  async readMitsubishiSteeringAngle(
+    source: "sas-622" | "abs-784" = "sas-622",
+  ): Promise<MitsubishiSteeringReport> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return readMitsubishiSteeringAngle(this.elm!, source);
+  }
+
+  /**
+   * Executes Mitsubishi SAS Zero-Point Calibration (`622 → 484`: `10 92` → `31 02` → `31 01` → `10 81`,
+   * followed by `784 → 785` ABS/ASC reset `11 01`).
+   */
+  async calibrateMitsubishiSasZero(): Promise<SasCalibrationResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return calibrateMitsubishiSasZero(this.elm!);
+  }
+
+  /**
+   * Reads Mitsubishi Combination Meter (`6A0 → 514`) fuel level in liters (`21 A3`) and odometer (`21 AD`).
+   */
+  async readMitsubishiMeter(): Promise<MitsubishiMeterReport> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return readMitsubishiMeter(this.elm!);
+  }
+
   async scanModules(
     protocol: CanProtocol,
     request: "10 01" | "3E 00",
@@ -309,10 +384,14 @@ export class ObdBleSession {
         try {
           let raw = await this.udsExchange(address, target.rx, request, wide ? 1_000 : 2_200);
           let tagged = parseTaggedUdsReplies(raw, gate.sid);
-          // Many Subaru / Mitsubishi ECUs (especially TCM 7E1) stay silent on 3E 00 until 10 03 or 22 F18E / 09 04 is sent.
+          // Many Subaru / Mitsubishi ECUs (especially TCM 7E1 or KWP 620/6A0/773/600/622/784) stay silent on 3E 00 until 10 03 / 10 92 is sent.
           if (tagged.length === 0 && !wide && address !== 0x7df) {
             raw = await this.udsExchange(address, target.rx, "1003", 1_500);
             tagged = parseTaggedUdsReplies(raw, 0x10);
+            if (tagged.length === 0) {
+              raw = await this.udsExchange(address, target.rx, "1092", 1_500);
+              tagged = parseTaggedUdsReplies(raw, 0x10);
+            }
             if (tagged.length === 0 && (address === 0x7e0 || address === 0x7e1)) {
               raw = await this.udsExchange(address, target.rx, "0904", 1_800);
               tagged = parseTaggedUdsReplies(raw, 0x09);
@@ -864,6 +943,55 @@ export class ObdBleSession {
         safetyCritical: true,
         canSafeClear: false,
       },
+      {
+        tx: 0x620,
+        rx: 0x504,
+        title: "Mitsubishi ETACS Боди-модуль (620 → 504)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x6a0,
+        rx: 0x514,
+        title: "Mitsubishi Приборная панель Meter (6A0 → 514)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x773,
+        rx: 0x774,
+        title: "Mitsubishi Давление в шинах TPMS / OSS (773 → 774)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x600,
+        rx: 0x500,
+        title: "Mitsubishi Бесключевой доступ KOS / TPMS (600 → 500)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x622,
+        rx: 0x484,
+        title: "Mitsubishi Датчик угла руля SAS (622 → 484)",
+        safetyCritical: true,
+        canSafeClear: false,
+      },
+      {
+        tx: 0x784,
+        rx: 0x785,
+        title: "Mitsubishi Тормоза ABS / ASC (784 → 785)",
+        safetyCritical: true,
+        canSafeClear: false,
+      },
+      {
+        tx: 0x688,
+        rx: 0x511,
+        title: "Mitsubishi Климат-контроль A/C (688 → 511)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
     ];
 
     const out: ModuleDtcReport[] = [];
@@ -898,6 +1026,20 @@ export class ObdBleSession {
           /* ignore */
         }
 
+        let kwpSessionOpened = false;
+        if (!responded) {
+          try {
+            const rawKwp10 = await this.udsExchange(target.tx, target.rx, "1092", 900);
+            const pKwp10 = parseUdsResponse(rawKwp10, 0x10);
+            if (pKwp10.kind !== "empty") {
+              responded = true;
+              if (pKwp10.kind === "positive") kwpSessionOpened = true;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
         // Try reading UDS 19 02 FF (ReadDTCInformation: reportDTCByStatusMask)
         try {
           const raw19 = await this.udsExchange(target.tx, target.rx, "1902FF", 1_400);
@@ -925,6 +1067,34 @@ export class ObdBleSession {
           }
         } catch {
           /* ignore */
+        }
+
+        // Fallback to KWP2000 18 00 FF 00 (ReadDTCByStatus) for Mitsubishi modules
+        if (!responded || rawStatus.startsWith("UDS 19 02:") || kwpSessionOpened) {
+          try {
+            const raw18 = await this.udsExchange(target.tx, target.rx, "1800FF00", 1_400);
+            const p18 = parseUdsResponse(raw18, 0x18);
+            if (p18.kind === "positive") {
+              responded = true;
+              const kwpDtcs = parseKwpDtcs18(p18.payload);
+              for (const d of kwpDtcs) {
+                if (!dtcs.some((existing) => existing.code === d.code)) {
+                  dtcs.push({
+                    code: d.code,
+                    active: d.active,
+                    description: d.description,
+                    statusByte: d.statusByte,
+                  });
+                }
+              }
+              rawStatus =
+                dtcs.length === 0
+                  ? "0 ошибок (KWP 18 00)"
+                  : `Найдено ошибок: ${dtcs.length} (KWP 18 00)`;
+            }
+          } catch {
+            /* ignore */
+          }
         }
 
         // Fallback or supplement with OBD Mode 03 on ECM/TCM (7E0/7E1) or when 19 02 was unsupported
@@ -986,9 +1156,33 @@ export class ObdBleSession {
           } catch {
             /* ignore */
           }
+          if (!partNumber) {
+            try {
+              const raw87 = await this.udsExchange(target.tx, target.rx, "1A87", 800);
+              const p87 = parseUdsResponse(raw87, 0x1a);
+              if (p87.kind === "positive" && p87.payload.length > 2) {
+                const txt = p87.payload
+                  .slice(1)
+                  .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+                  .join("")
+                  .replace(/\s+/g, " ")
+                  .trim();
+                if (txt.length >= 4) partNumber = txt;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
           if (sessionOpened) {
             try {
               await this.udsExchange(target.tx, target.rx, "1001", 700);
+            } catch {
+              /* ignore */
+            }
+          }
+          if (kwpSessionOpened) {
+            try {
+              await this.udsExchange(target.tx, target.rx, "1081", 700);
             } catch {
               /* ignore */
             }
@@ -1031,10 +1225,10 @@ export class ObdBleSession {
   ): Promise<string> {
     const cleanTx = txHex.trim().toUpperCase();
     const cleanRx = rxHex.trim().toUpperCase();
-    const FORBIDDEN_CLEAR_TX = new Set(["780", "7B0", "746", "787", "784", "7E2", "7E5"]);
+    const FORBIDDEN_CLEAR_TX = new Set(["780", "7B0", "746", "787", "784", "622", "6E0", "796", "7E2", "7E5"]);
     if (FORBIDDEN_CLEAR_TX.has(cleanTx)) {
       throw new Error(
-        `Сброс ошибок в блоке безопасности (${cleanTx}) заблокирован для защиты калибровок SRS / ABS / EPS / EyeSight. Доступно только чтение.`,
+        `Сброс ошибок в блоке безопасности (${cleanTx}) заблокирован для защиты калибровок SRS / ABS / SAS / EPS / EyeSight. Доступно только чтение.`,
       );
     }
     this.requireAdapter();
@@ -1064,6 +1258,13 @@ export class ObdBleSession {
       if (p14.kind === "positive") {
         return `Коды ошибок блока ${cleanTx} сброшены (UDS 14 FF FF FF OK)`;
       }
+      // Fallback to KWP2000 10 92 + 14 FF 00 for Mitsubishi modules
+      await this.udsExchange(txNum, rxNum, "1092", 1_000);
+      const rawKwp14 = await this.udsExchange(txNum, rxNum, "14FF00", 3_000);
+      const pKwp14 = parseUdsResponse(rawKwp14, 0x14);
+      if (pKwp14.kind === "positive") {
+        return `Коды ошибок блока ${cleanTx} сброшены (KWP 14 FF 00 OK)`;
+      }
       if (p14.kind === "negative") {
         throw new Error(`Отказ блока ${cleanTx} при сбросе (7F 14): ${p14.nrcText ?? ""}`);
       }
@@ -1071,6 +1272,11 @@ export class ObdBleSession {
     } finally {
       try {
         await this.udsExchange(txNum, rxNum, "1001", 800);
+      } catch {
+        /* ignore */
+      }
+      try {
+        await this.udsExchange(txNum, rxNum, "1081", 800);
       } catch {
         /* ignore */
       }
