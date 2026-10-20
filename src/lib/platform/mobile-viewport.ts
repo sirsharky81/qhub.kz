@@ -2,42 +2,55 @@ function isMessengerKeyboardShellActive(): boolean {
   return document.documentElement.style.getPropertyValue("--messenger-vvh").length > 0;
 }
 
-/** Reset layout drift after iOS keyboard / input zoom (Safari PWA, Capacitor WebView). */
+function isDocumentVerticallyPinned(): boolean {
+  return document.body.style.getPropertyValue("position") === "fixed";
+}
+
+function isEditableElement(el: EventTarget | null): boolean {
+  if (!el || !(el instanceof HTMLElement)) return false;
+  if (el instanceof HTMLInputElement) {
+    const t = el.type;
+    return t !== "checkbox" && t !== "radio" && t !== "range" && t !== "button" && t !== "submit";
+  }
+  return (
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement ||
+    el.isContentEditable
+  );
+}
+
+/** Reset horizontal layout drift after iOS keyboard / input zoom (Safari PWA, Capacitor WebView). */
 export function resetMobileViewport(): void {
   if (typeof window === "undefined") return;
-  if (isMessengerKeyboardShellActive()) return;
+  if (isMessengerKeyboardShellActive() || isDocumentVerticallyPinned()) return;
 
   const apply = () => {
-    document.documentElement.scrollLeft = 0;
-    document.body.scrollLeft = 0;
+    if (isMessengerKeyboardShellActive() || isDocumentVerticallyPinned()) return;
 
-    const vv = window.visualViewport;
-    const top =
-      vv && vv.offsetTop > 0
-        ? Math.max(0, window.scrollY + vv.offsetTop)
-        : window.scrollY;
-
-    if (window.scrollX !== 0 || (vv && vv.offsetTop > 0)) {
-      window.scrollTo(0, top);
+    if (document.documentElement.scrollLeft !== 0) {
+      document.documentElement.scrollLeft = 0;
+    }
+    if (document.body.scrollLeft !== 0) {
+      document.body.scrollLeft = 0;
+    }
+    if (window.scrollX !== 0) {
+      window.scrollTo(0, window.scrollY);
     }
   };
 
   requestAnimationFrame(apply);
-  window.setTimeout(apply, 80);
-  window.setTimeout(apply, 320);
+  window.setTimeout(apply, 100);
 }
 
 let guardInstalled = false;
 
-/** Call once on app boot — keeps viewport pinned after keyboard / focus changes. */
+/** Call once on app boot — resets horizontal viewport drift after closing keyboard. */
 export function installMobileViewportGuard(): void {
   if (guardInstalled || typeof window === "undefined") return;
   guardInstalled = true;
 
-  const vv = window.visualViewport;
-  vv?.addEventListener("resize", resetMobileViewport);
-  vv?.addEventListener("scroll", resetMobileViewport);
-  document.addEventListener("focusout", () => {
+  document.addEventListener("focusout", (event) => {
+    if (!isEditableElement(event.target)) return;
     window.setTimeout(resetMobileViewport, 100);
   });
 }

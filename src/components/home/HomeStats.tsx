@@ -3,24 +3,18 @@
 import { useCatalog } from "@/contexts/CatalogContext";
 
 export function HomeStats() {
-  const { visibleApps, catalogReady } = useCatalog();
+  const { visibleApps } = useCatalog();
   const liveCount = visibleApps.filter((a) => !a.comingSoon).length;
   const comingSoonCount = visibleApps.filter((a) => a.comingSoon).length;
 
-  const stats = catalogReady
-    ? [
-        {
-          value: String(liveCount),
-          label: liveCount === 1 ? "Запущенное приложение" : "Запущенных приложения",
-        },
-        { value: `${comingSoonCount}+`, label: "Скоро на платформе" },
-        { value: "100%", label: "Бесплатно" },
-      ]
-    : [
-        { value: "…", label: "Запущенных приложения" },
-        { value: "…", label: "Скоро на платформе" },
-        { value: "100%", label: "Бесплатно" },
-      ];
+  const stats = [
+    {
+      value: String(liveCount),
+      label: liveCount === 1 ? "Запущенное приложение" : "Запущенных приложения",
+    },
+    { value: `${comingSoonCount}+`, label: "Скоро на платформе" },
+    { value: "100%", label: "Бесплатно" },
+  ];
 
   return (
     <div className="relative mt-12 sm:mt-16 w-full max-w-xl mx-auto px-2 min-h-[4.5rem] sm:min-h-[5.5rem]">

@@ -4,12 +4,10 @@ import { HomePageExtras } from "@/components/home/HomePageExtras";
 import { DevelopersSubmitSection } from "@/components/home/DevelopersSubmitSection";
 import { AppsGrid } from "@/components/home/AppsGrid";
 import { HomeStats } from "@/components/home/HomeStats";
-import { HomeIosScrollGuard } from "@/components/home/HomeIosScrollGuard";
 
 export default function Home() {
   return (
-    <div className="flex min-h-dvh flex-col bg-white text-gray-900 pb-16">
-      <HomeIosScrollGuard />
+    <div className="flex min-h-svh flex-col overflow-x-clip bg-white text-gray-900 pb-16">
       <Navbar />
           {/* ── HERO ─────────────────────────────────────────────── */}
           <section className="relative overflow-x-clip pt-24 pb-16 sm:pt-32 sm:pb-24 px-4 sm:px-6 flex flex-col items-center text-center bg-white bg-dot-grid">
