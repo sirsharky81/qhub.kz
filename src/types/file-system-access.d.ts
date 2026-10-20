@@ -30,7 +30,16 @@ interface LaunchQueue {
   setConsumer(consumer: (params: LaunchParams) => void | Promise<void>): void;
 }
 
+interface OpenFilePickerOptions {
+  types?: Array<{
+    description?: string;
+    accept: Record<string, string[]>;
+  }>;
+  multiple?: boolean;
+}
+
 interface Window {
   showDirectoryPicker?(options?: { mode?: "read" | "readwrite" }): Promise<FileSystemDirectoryHandle>;
+  showOpenFilePicker?(options?: OpenFilePickerOptions): Promise<FileSystemFileHandle[]>;
   readonly launchQueue?: LaunchQueue;
 }

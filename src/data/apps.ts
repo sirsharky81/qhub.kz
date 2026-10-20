@@ -268,6 +268,21 @@ export const apps: App[] = [
     sortOrder: 3,
   },
   {
+    id: "etacs-coding",
+    title: "ETACS Coding",
+    description:
+      "Редактор кодировок Mitsubishi (.kon / .cuf): сравнение двух файлов, правки по справочнику MUT, сохранение для MMCodingWriter.",
+    longDescription:
+      "Откройте .kon или .cuf с MMCodingWriter или после выгрузки в OBD Scanner. Справочник параметров обрабатывается на сервере QHub — битовые маски и структура блоков не отдаются клиенту. Режим сравнения A/B для переноса отдельных опций.",
+    href: "/tools/etacs-coding",
+    tags: ["tools"],
+    icon: "/tools/obd-diag/icon-192.png",
+    color: "from-amber-600/10 to-slate-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 3,
+  },
+  {
     id: "code-scanner",
     title: "Сканер кодов",
     description:
