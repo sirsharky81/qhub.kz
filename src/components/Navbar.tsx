@@ -11,7 +11,7 @@ export default function Navbar() {
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur-sm [transform:translateZ(0)] supports-[padding:max(0px)]:pt-[env(safe-area-inset-top)]">
+      <header className="fixed top-0 left-0 right-0 z-50 border-b border-gray-200 bg-white [transform:translateZ(0)] supports-[padding:max(0px)]:pt-[env(safe-area-inset-top)] md:bg-white/95 md:backdrop-blur-sm">
         <nav className="mx-auto max-w-6xl px-4 sm:px-6 flex items-center justify-between h-14">
 
           <QHubBrandLink />

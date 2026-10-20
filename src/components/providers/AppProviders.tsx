@@ -16,12 +16,13 @@ interface AppProvidersProps {
 export function AppProviders({ children }: AppProvidersProps) {
   return (
     <CatalogBootstrap>
-      {({ visibleApps, isAdmin, hiddenIds, host }) => (
+      {({ visibleApps, isAdmin, hiddenIds, host, loaded }) => (
         <CatalogProvider
           visibleApps={visibleApps}
           isAdmin={isAdmin}
           hiddenIds={hiddenIds}
           host={host}
+          catalogReady={loaded}
         >
           <FavoritesProvider>
             <MusicPlayerProvider>

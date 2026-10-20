@@ -2,7 +2,10 @@
 
 ## Главная страница (`/`)
 
-1. **Не вешать `{...listeners}` dnd-kit на всю карточку избранного** — только на ручку ⋮⋮; иначе iOS путает вертикальный скролл с drag (`autoScroll={false}` в `DndContext`).
+1. **На iPhone не монтировать dnd-kit вообще** — только кнопки ↑↓ (`useCoarsePointer`); на desktop — drag за ⋮⋮, `autoScroll={false}`.
+2. **Не вешать `{...listeners}` dnd-kit на всю карточку** — iOS путает скролл с drag при смене направления свайпа.
+3. **Не использовать `touch-action: pan-y` на `body`** вместе с overscroll — может усилить дрожь при «вниз‑вверх‑вниз».
+4. **`.app-card:hover` transform только для `(hover: hover)`** — на touch ложный hover при инерции двигает карточки.
 2. **Не использовать `overflow-hidden` на больших секциях hero** — достаточно `overflow-x-clip`; `hidden` создаёт лишний scrollport.
 3. **Не дублировать `overflow-x-clip` на обёртке в `layout.tsx` и `body`** — горизонталь режет только `html` в `globals.css`.
 4. **Избегать резкого появления блока «Избранное»** после hydrate без резерва места — иначе скачок layout у стыка hero / favorites.

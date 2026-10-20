@@ -3,21 +3,29 @@
 import { useCatalog } from "@/contexts/CatalogContext";
 
 export function HomeStats() {
-  const { visibleApps } = useCatalog();
+  const { visibleApps, catalogReady } = useCatalog();
   const liveCount = visibleApps.filter((a) => !a.comingSoon).length;
   const comingSoonCount = visibleApps.filter((a) => a.comingSoon).length;
 
+  const stats = catalogReady
+    ? [
+        {
+          value: String(liveCount),
+          label: liveCount === 1 ? "Запущенное приложение" : "Запущенных приложения",
+        },
+        { value: `${comingSoonCount}+`, label: "Скоро на платформе" },
+        { value: "100%", label: "Бесплатно" },
+      ]
+    : [
+        { value: "…", label: "Запущенных приложения" },
+        { value: "…", label: "Скоро на платформе" },
+        { value: "100%", label: "Бесплатно" },
+      ];
+
   return (
-    <div className="relative mt-12 sm:mt-16 w-full max-w-xl mx-auto px-2">
+    <div className="relative mt-12 sm:mt-16 w-full max-w-xl mx-auto px-2 min-h-[4.5rem] sm:min-h-[5.5rem]">
       <div className="grid grid-cols-3 gap-3 sm:gap-10">
-        {[
-          {
-            value: String(liveCount),
-            label: liveCount === 1 ? "Запущенное приложение" : "Запущенных приложения",
-          },
-          { value: `${comingSoonCount}+`, label: "Скоро на платформе" },
-          { value: "100%", label: "Бесплатно" },
-        ].map((s) => (
+        {stats.map((s) => (
           <div key={s.label} className="flex flex-col items-center gap-1 min-w-0">
             <span className="text-xl sm:text-3xl font-bold tracking-tight text-gray-900 whitespace-nowrap tabular-nums">
               {s.value}

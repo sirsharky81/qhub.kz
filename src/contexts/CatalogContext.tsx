@@ -9,6 +9,7 @@ interface CatalogContextValue {
   isAdmin: boolean;
   hiddenIds: Set<string>;
   host: string | null;
+  catalogReady: boolean;
   isAppVisible: (app: App) => boolean;
 }
 
@@ -17,6 +18,7 @@ const CatalogContext = createContext<CatalogContextValue>({
   isAdmin: false,
   hiddenIds: new Set(),
   host: null,
+  catalogReady: false,
   isAppVisible: () => true,
 });
 
@@ -26,12 +28,14 @@ export function CatalogProvider({
   isAdmin,
   hiddenIds,
   host,
+  catalogReady,
 }: {
   children: ReactNode;
   visibleApps: App[];
   isAdmin: boolean;
   hiddenIds: string[];
   host: string | null;
+  catalogReady: boolean;
 }) {
   const hiddenSet = new Set(hiddenIds);
   const value: CatalogContextValue = {
@@ -39,6 +43,7 @@ export function CatalogProvider({
     isAdmin,
     hiddenIds: hiddenSet,
     host,
+    catalogReady,
     isAppVisible: (app) => isAppVisibleToViewer(app, hiddenSet, isAdmin, host),
   };
   return <CatalogContext.Provider value={value}>{children}</CatalogContext.Provider>;
