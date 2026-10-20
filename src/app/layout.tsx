@@ -72,7 +72,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
       <body className="min-h-full flex flex-col bg-white text-gray-900">
-        <div className="flex min-h-full min-w-0 w-full max-w-full flex-1 flex-col overflow-x-clip">
+        <div className="flex min-h-full min-w-0 w-full max-w-full flex-1 flex-col">
           <PWAProvider />
           <PlatformInit />
           <VersionGate>
