@@ -517,29 +517,31 @@ export default function ObdDiagClient() {
           onDisconnect={disconnect}
         />
 
-        {!transportReady ? (
-          <p className="mb-3 text-xs text-slate-500">Проверка Bluetooth…</p>
-        ) : null}
+        <div className="mb-3 space-y-2">
+          {!transportReady ? (
+            <p className="min-h-[2.5rem] text-xs leading-relaxed text-slate-500">Проверка Bluetooth…</p>
+          ) : null}
 
-        {transportReady && transport === "none" ? (
-          <div className="mb-3 space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
-            <p>{obdTransportHint("none")}</p>
-            <button
-              type="button"
-              className="text-xs underline text-amber-200/90"
-              onClick={() => setEnvLines(formatObdEnvironmentLines(probeObdEnvironment()))}
-            >
-              Показать диагностику Bluetooth
-            </button>
-            {envLines ? (
-              <pre className="whitespace-pre-wrap text-xs text-amber-100/90">{envLines.join("\n")}</pre>
-            ) : null}
-          </div>
-        ) : null}
+          {transportReady && transport === "none" ? (
+            <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+              <p>{obdTransportHint("none")}</p>
+              <button
+                type="button"
+                className="text-xs underline text-amber-200/90"
+                onClick={() => setEnvLines(formatObdEnvironmentLines(probeObdEnvironment()))}
+              >
+                Показать диагностику Bluetooth
+              </button>
+              {envLines ? (
+                <pre className="whitespace-pre-wrap text-xs text-amber-100/90">{envLines.join("\n")}</pre>
+              ) : null}
+            </div>
+          ) : null}
 
-        {transportReady && transport !== "none" && phase === "idle" && obdTransportHint(transport) ? (
-          <p className="mb-3 text-xs text-slate-500">{obdTransportHint(transport)}</p>
-        ) : null}
+          {transportReady && transport !== "none" && phase === "idle" && obdTransportHint(transport) ? (
+            <p className="text-xs text-slate-500">{obdTransportHint(transport)}</p>
+          ) : null}
+        </div>
 
         {error ? (
           <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">{error}</p>

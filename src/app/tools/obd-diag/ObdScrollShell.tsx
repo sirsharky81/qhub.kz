@@ -1,18 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useIosSingleScrollPane } from "@/hooks/useIosSingleScrollPane";
 import ObdScrollContext from "./ObdScrollContext";
 
+const MAX_DEFERRED_UPDATES = 16;
+
 export function ObdScrollShell({ children }: { children: ReactNode }) {
-  const { scrollRef, scrollingRef, onScrollEndRef } = useIosSingleScrollPane();
+  const { scrollRef, scrollingRef, onScrollEndRef } = useIosSingleScrollPane({ scrollEndMs: 240 });
   const deferredRef = useRef<(() => void)[]>([]);
   const flushCallbacksRef = useRef(new Set<() => void>());
 
   const deferUiUpdate = useCallback(
     (apply: () => void) => {
-      if (scrollingRef.current) deferredRef.current.push(apply);
-      else apply();
+      if (!scrollingRef.current) {
+        apply();
+        return;
+      }
+      deferredRef.current.push(apply);
+      if (deferredRef.current.length > MAX_DEFERRED_UPDATES) {
+        deferredRef.current = deferredRef.current.slice(-MAX_DEFERRED_UPDATES);
+      }
     },
     [scrollingRef],
   );
@@ -26,9 +34,12 @@ export function ObdScrollShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const runFlushes = () => {
-      const deferred = deferredRef.current.splice(0);
-      for (const fn of deferred) fn();
       for (const fn of flushCallbacksRef.current) fn();
+      const deferred = deferredRef.current.splice(0);
+      if (deferred.length === 0) return;
+      requestAnimationFrame(() => {
+        for (const fn of deferred) fn();
+      });
     };
     onScrollEndRef.current = runFlushes;
     return () => {
@@ -36,8 +47,13 @@ export function ObdScrollShell({ children }: { children: ReactNode }) {
     };
   }, [onScrollEndRef]);
 
+  const scrollContextValue = useMemo(
+    () => ({ scrollingRef, deferUiUpdate, registerScrollFlush }),
+    [deferUiUpdate, registerScrollFlush],
+  );
+
   return (
-    <ObdScrollContext.Provider value={{ scrollingRef, deferUiUpdate, registerScrollFlush }}>
+    <ObdScrollContext.Provider value={scrollContextValue}>
       <div
         ref={scrollRef}
         className="bg-slate-950 text-slate-100"
@@ -49,9 +65,13 @@ export function ObdScrollShell({ children }: { children: ReactNode }) {
           overscrollBehavior: "none",
           WebkitOverflowScrolling: "touch",
           touchAction: "pan-y",
+          transform: "translateZ(0)",
         }}
       >
-        <div className="mx-auto max-w-lg min-w-0 px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div
+          className="mx-auto max-w-lg min-w-0 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+          style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
+        >
           {children}
         </div>
       </div>

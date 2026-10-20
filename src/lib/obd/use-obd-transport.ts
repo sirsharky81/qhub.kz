@@ -18,7 +18,8 @@ export function useObdTransportKind(): { transport: ObdTransportKind; ready: boo
   useEffect(() => {
     const detect = () => {
       resetNativePlatformCache();
-      setTransport(getObdTransportKind());
+      const next = getObdTransportKind();
+      setTransport((prev) => (prev === next ? prev : next));
       setReady(true);
     };
     detect();

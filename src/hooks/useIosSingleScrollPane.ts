@@ -37,9 +37,10 @@ export function useIosSingleScrollPane(options?: { pinDocument?: boolean; scroll
       lock(el, "position", "fixed");
       lock(el, "inset", "0");
       lock(el, "width", "100%");
-      lock(el, "height", "100%");
+      lock(el, "height", "100dvh");
       lock(el, "overflow", "hidden");
       lock(el, "overscroll-behavior", "none");
+      lock(el, "touch-action", "pan-y");
     }
 
     return () => {
