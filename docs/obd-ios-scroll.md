@@ -9,8 +9,9 @@
 5. **Не использовать `overflow-hidden` на больших секциях hero** — достаточно `overflow-x-clip`; `hidden` создаёт лишний scrollport.
 6. **Не дублировать `overflow-x-clip` на обёртке в `layout.tsx` и `body`** — горизонталь режет только `html` в `globals.css`.
 7. **Стабильная высота счётчиков hero** (`HomeStats`) до загрузки каталога — иначе скачок при первом скролле.
-8. **Главная прокручивается только через `HomeScrollPane`** (`page.tsx`) — как OBD через `ObdScrollShell`; не возвращать `html/body { height:100% }` + flex-обёртку в `layout.tsx`.
+8. **Главная — нативный scroll документа**, не `position:fixed` inner pane (на iOS после rubber-band сверху inner pane дёргается). Используйте `HomeIosScrollGuard` — блок только pull-down на `scrollTop=0`.
 9. **На touch отключать `.bg-dot-grid`** (см. `globals.css`) — иначе дрожь при скролле вниз по hero.
+10. **Не возвращать `html/body { height:100% }` + flex-обёртку** в `layout.tsx`.
 
 ---
 
