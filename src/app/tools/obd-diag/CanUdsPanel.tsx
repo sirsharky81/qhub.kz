@@ -73,7 +73,13 @@ export default function CanUdsPanel({
   onLog: (line: string) => void;
 }) {
   const obdScroll = useObdScroll();
-  const deferUi = obdScroll?.deferUiUpdate ?? ((apply: () => void) => apply());
+  const deferUiRef = useRef<(apply: () => void) => void>((apply) => apply());
+  useEffect(() => {
+    deferUiRef.current = obdScroll?.deferUiUpdate ?? ((apply: () => void) => apply());
+  }, [obdScroll]);
+  const deferUi = useCallback((apply: () => void) => {
+    deferUiRef.current(apply);
+  }, []);
   const [protocol, setProtocol] = useState<CanProtocol>("6");
   const [view, setView] = useState<CanSubView>("dashboard");
   const [monitoring, setMonitoring] = useState(false);
@@ -91,11 +97,11 @@ export default function CanUdsPanel({
   const [rx, setRx] = useState("7E8");
   const [request, setRequest] = useState("22 F190");
   const [developer, setDeveloper] = useState(false);
-  const [customDids, setCustomDids] = useState<CustomDid[]>([]);
+  const [customDids, setCustomDids] = useState<CustomDid[]>(() => loadCustomDids());
   const [didLabel, setDidLabel] = useState("");
   const [udsText, setUdsText] = useState<string | null>(null);
   const [udsRaw, setUdsRaw] = useState<string | null>(null);
-  const [udsLog, setUdsLog] = useState<UdsLogEntry[]>([]);
+  const [udsLog, setUdsLog] = useState<UdsLogEntry[]>(() => loadUdsLog());
   const [scanRows, setScanRows] = useState<ModuleScanItem[]>([]);
   const [didHits, setDidHits] = useState<{ did: string; text: string }[]>([]);
   const [didProgress, setDidProgress] = useState("");
@@ -143,12 +149,27 @@ export default function CanUdsPanel({
   const [tpmsTarget, setTpmsTarget] = useState<"mitsubishi-773" | "mitsubishi-600" | "subaru-752">("mitsubishi-773");
   const [tpmsReport, setTpmsReport] = useState<TpmsModuleReport | null>(null);
   const [tpmsUnit, setTpmsUnit] = useState<"bar" | "kpa" | "psi">("bar");
-  const [tpmsWheelMap, setTpmsWheelMap] = useState<Record<TpmsWheelPosition, number>>({
-    FL: 0,
-    FR: 1,
-    RR: 2,
-    RL: 3,
-    SPARE: 4,
+  const [tpmsWheelMap, setTpmsWheelMap] = useState<Record<TpmsWheelPosition, number>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const savedMap = localStorage.getItem("qhub.obd.tpms-wheel-map");
+        if (savedMap) {
+          const parsed = JSON.parse(savedMap) as Record<TpmsWheelPosition, number>;
+          if (parsed && typeof parsed.FL === "number") {
+            return parsed;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return {
+      FL: 0,
+      FR: 1,
+      RR: 2,
+      RL: 3,
+      SPARE: 4,
+    };
   });
 
   // Mitsubishi Combination Meter (6A0 -> 514) state
@@ -185,22 +206,6 @@ export default function CanUdsPanel({
   }, [tape]);
 
   useEffect(() => {
-    setCustomDids(loadCustomDids());
-    setUdsLog(loadUdsLog());
-    try {
-      const savedMap = localStorage.getItem("qhub.obd.tpms-wheel-map");
-      if (savedMap) {
-        const parsed = JSON.parse(savedMap) as Record<TpmsWheelPosition, number>;
-        if (parsed && typeof parsed.FL === "number") {
-          setTpmsWheelMap(parsed);
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
     if (!enabled) return;
     let cancel = false;
     void session
@@ -216,16 +221,22 @@ export default function CanUdsPanel({
 
   useEffect(() => {
     if (linkLostTick === 0) return;
-    setMonitoring(false);
-    if (recordingRef.current) setIncomplete(true);
-    recordingRef.current = false;
-    setRecording(false);
-    setLocalError("Связь с адаптером прервалась. Запись помечена как незавершённая. Подключите vLinker снова.");
+    const timer = window.setTimeout(() => {
+      setMonitoring(false);
+      if (recordingRef.current) setIncomplete(true);
+      recordingRef.current = false;
+      setRecording(false);
+      setLocalError("Связь с адаптером прервалась. Запись помечена как незавершённая. Подключите vLinker снова.");
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [linkLostTick]);
 
   useEffect(() => {
     if (enabled) return;
-    setMonitoring(false);
+    const timer = window.setTimeout(() => {
+      setMonitoring(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [enabled]);
 
   useEffect(() => {
@@ -245,7 +256,7 @@ export default function CanUdsPanel({
           now - row.flashAt > 500 ? { ...row, changed: row.changed.map(() => false) } : row,
         );
         rowsRef.current = faded;
-        deferUi(() => setRows(faded));
+        deferUiRef.current(() => setRows(faded));
         return;
       }
       let lossAdd = 0;
@@ -294,7 +305,7 @@ export default function CanUdsPanel({
       if (tapeAdd.length) {
         tapeRef.current = [...tapeRef.current, ...tapeAdd].slice(-TAPE_LIMIT);
       }
-      deferUi(() => {
+      deferUiRef.current(() => {
         setRows(next);
         if (tapeAdd.length) setTape(tapeRef.current);
         if (lossAdd) setLosses((count) => count + lossAdd);
@@ -302,7 +313,7 @@ export default function CanUdsPanel({
       });
     }, 100);
     return () => window.clearInterval(id);
-  }, [deferUi, onLog, protocol]);
+  }, [onLog, protocol]);
 
   const remember = (entry: UdsLogEntry) => {
     setUdsLog(appendUdsLog(entry));

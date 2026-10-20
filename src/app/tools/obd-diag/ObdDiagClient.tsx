@@ -53,8 +53,12 @@ const phaseLabels: Record<ObdConnectionPhase, string> = {
 };
 
 export default function ObdDiagClient() {
-  const sessionRef = useRef(new ObdBleSession());
-  const [tab, setTab] = useState<ToolTab>("obd");
+  const searchParams = useSearchParams();
+  const [session] = useState(() => new ObdBleSession());
+  const sessionRef = useRef(session);
+  const [tab, setTab] = useState<ToolTab>(() =>
+    searchParams.get("tab") === "mitsubishi" ? "mitsubishi" : "obd",
+  );
   const [obdSubTab, setObdSubTab] = useState<ObdSubTab>("live");
   const [phase, setPhase] = useState<ObdConnectionPhase>("idle");
   const [adapterLabel, setAdapterLabel] = useState<string | null>(null);
@@ -98,11 +102,6 @@ export default function ObdDiagClient() {
 
   const { transport, ready: transportReady } = useObdTransportKind();
   const profiles = listMitsubishiEtacsProfiles();
-  const searchParams = useSearchParams();
-
-  useEffect(() => {
-    if (searchParams.get("tab") === "mitsubishi") setTab("mitsubishi");
-  }, [searchParams]);
 
   useEffect(() => {
     pinnedRef.current = onlyPinned && pinnedPids.length > 0 ? new Set(pinnedPids) : new Set();
@@ -1049,7 +1048,7 @@ export default function ObdDiagClient() {
           </section>
         ) : (
           <CanUdsPanel
-            session={sessionRef.current}
+            session={session}
             enabled={phase !== "idle"}
             linkLostTick={linkLostTick}
             onLog={pushLog}

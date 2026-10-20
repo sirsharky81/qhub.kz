@@ -765,5 +765,89 @@ describe("sendUds gate", () => {
     expect(canDiffs[0]?.idHex).toBe("318");
     expect(canDiffs[0]?.changedByteIndices).toEqual([0, 1]);
   });
+
+  it("executes transport-level Mitsubishi TCM, TPMS, SAS calibration, and Meter sequences over Elm327Client", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    let currentHeader = "";
+    link.writeLine = async (line: string) => {
+      if (line.startsWith("ATSH")) {
+        currentHeader = line.slice(4).trim().toUpperCase();
+      }
+      link.written.push(line);
+      if (line === "2102") {
+        (link as unknown as { pending: string }).pending +=
+          "61 02 00 0A 00 08 00 7A 6C 19 33 20 00\r>";
+        return;
+      }
+      if (line === "2104") {
+        (link as unknown as { pending: string }).pending += "61 04 00 00 08\r>";
+        return;
+      }
+      if (line === "2128") {
+        (link as unknown as { pending: string }).pending +=
+          "016\r0: 61 28 11 22 33 01\r1: 11 22 33 02 11 22 33\r2: 03 11 22 33 04 11 22\r3: 33 05 00 00\r>";
+        return;
+      }
+      if (line === "2101") {
+        if (currentHeader === "622") {
+          (link as unknown as { pending: string }).pending += "61 01 10 00 00\r>";
+          return;
+        }
+        (link as unknown as { pending: string }).pending +=
+          "00C\r0: 61 01 A0 4B A0 4C\r1: A2 4A A2 4B 9E 48 00\r>";
+        return;
+      }
+      if (line === "1092") {
+        (link as unknown as { pending: string }).pending += "50 92\r>";
+        return;
+      }
+      if (line === "3102") {
+        (link as unknown as { pending: string }).pending += "71 02 00\r>";
+        return;
+      }
+      if (line === "3101") {
+        (link as unknown as { pending: string }).pending += "71 01 00\r>";
+        return;
+      }
+      if (line === "1101") {
+        (link as unknown as { pending: string }).pending += "51 01\r>";
+        return;
+      }
+      if (line === "21A3") {
+        // C byte = 80 -> (80 - 16) * 0.7 = 44.8 L
+        (link as unknown as { pending: string }).pending += "61 A3 00 00 50\r>";
+        return;
+      }
+      if (line === "21AD") {
+        (link as unknown as { pending: string }).pending += "61 AD 01 E2 40\r>";
+        return;
+      }
+      link.written.pop();
+      await origWrite(line);
+    };
+
+    const elm = new Elm327Client(link);
+
+    const tcm = await readMitsubishiTransmission(elm);
+    expect(tcm.atfTempC).toBe(82);
+    expect(tcm.gearNumber).toBe(4);
+    expect(tcm.isGearDisengaged).toBe(false);
+
+    const tpms = await readTpmsSensors(elm, "mitsubishi-773");
+    expect(tpms.wheels).toHaveLength(5);
+    expect(tpms.wheels[0]?.sensorIdHex).toBe("11223301");
+
+    const sas = await readMitsubishiSteeringAngle(elm, "sas-622");
+    expect(sas.angleDeg).toBe(0);
+
+    const cal = await calibrateMitsubishiSasZero(elm);
+    expect(cal.success).toBe(true);
+    expect(cal.finalAngleDeg).toBe(0);
+
+    const meter = await readMitsubishiMeter(elm);
+    expect(meter.fuelLiters).toBeCloseTo(44.8, 1);
+    expect(meter.odometerKm).toBe(123456);
+  });
 });
 
