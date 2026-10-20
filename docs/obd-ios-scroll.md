@@ -9,11 +9,11 @@
 5. **Не использовать `overflow-hidden` на больших секциях hero** — достаточно `overflow-x-clip`; `hidden` создаёт лишний scrollport.
 6. **Не дублировать `overflow-x-clip` на обёртке в `layout.tsx` и `body`** — горизонталь режет только `html` в `globals.css`.
 7. **Стабильная высота счётчиков hero** (`HomeStats`) до загрузки каталога — иначе скачок при первом скролле.
-8. **Главная на touch — `HomeScrollPane`**: один inner scrollport + pin `html/body` (`useIosSingleScrollPane`), как OBD. **Не** вешать document-level `touchmove` + `preventDefault` — ломает Safari/PWA. Navbar — **`sticky`** внутри pane.
+8. **Главная — чистый нативный scroll документа**, без `HomeScrollPane` (`position:fixed` inner pane), без `HomeIosScrollGuard` (`touchmove` `preventDefault`) и без `overscroll-behavior-y: none` на `html/body`.
 9. **На touch отключать `.bg-dot-grid`** (см. `globals.css`) — иначе дрожь при скролле вниз по hero.
 10. **Не возвращать `html/body { height:100% }` + flex-обёртку** в `layout.tsx`.
-11. **`installMobileViewportGuard`** — не трогать вертикальный scroll при `body { position: fixed }` (home/OBD), не вызывать `scrollTo` при `visualViewport.offsetTop` без фокуса в поле ввода, **не** слушать `visualViewport` `scroll`.
-12. **Не ставить `overscroll-behavior-y: none` на `html/body` глобально** — inner pane уже с `overscrollBehavior: none`.
+11. **`installMobileViewportGuard`** — слушать только `focusout` у полей ввода и сбрасывать только горизонтальный сдвиг (`scrollLeft`/`scrollX`). **Не** вешать `visualViewport` `scroll`/`resize` и не вызывать вертикальный `scrollTo` (иначе при rubber-band сверху iOS борется со скроллом вниз).
+12. **`useCoarsePointer(): boolean`** — возвращать `boolean` (не `boolean | null`), иначе ломается `npm run typecheck` в CI и деплой на VPS блокируется.
 
 ---
 

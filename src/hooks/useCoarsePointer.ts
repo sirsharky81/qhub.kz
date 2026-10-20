@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
-/** True on typical phones (touch-first). Null until mounted. */
-export function useCoarsePointer(): boolean | null {
-  const [coarse, setCoarse] = useState<boolean | null>(() => {
-    if (typeof window === "undefined") return null;
-    return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-  });
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
-  useEffect(() => {
+/** True on phones/tablets with touch as primary input — not on narrow desktop windows. */
+export function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(false);
+
+  useIsomorphicLayoutEffect(() => {
     const mq = window.matchMedia("(hover: none) and (pointer: coarse)");
     const apply = () => setCoarse(mq.matches);
     apply();

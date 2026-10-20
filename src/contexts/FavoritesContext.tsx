@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -13,9 +14,12 @@ import { apps, type App } from "@/data/apps";
 import { useCatalog } from "@/contexts/CatalogContext";
 import { loadFavorites, saveFavorites } from "@/lib/favorites/storage";
 
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 interface FavoritesContextValue {
   pinnedIds: string[];
   pinnedApps: App[];
+  hydrated: boolean;
   isPinned: (id: string) => boolean;
   togglePin: (id: string) => void;
   reorderPinned: (fromIndex: number, toIndex: number) => void;
@@ -34,7 +38,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     setPinnedIds(loadFavorites().pinnedIds);
     setHydrated(true);
   }, []);
@@ -70,6 +74,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const value: FavoritesContextValue = {
     pinnedIds,
     pinnedApps,
+    hydrated,
     isPinned: (id) => pinnedIds.includes(id),
     togglePin,
     reorderPinned,

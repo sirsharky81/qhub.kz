@@ -30,10 +30,10 @@ export function AppCard({
   adminHiddenBadge = false,
   adminHiddenBadgeLabel = "скрыто",
 }: AppCardProps) {
-  const player = useMusicPlayerOptional();
   const isMusicApp = app.id === "music";
-  const messengerUnread = useMessengerUnreadTotal();
   const isMessengerApp = app.id === "messenger";
+  const messengerUnread = useMessengerUnreadTotal(isMessengerApp);
+  const player = useMusicPlayerOptional();
   const isMusicActive = isMusicApp && !!player?.currentTrack;
   const musicStatus = player?.status;
   const isPlayingMusic = isMusicActive && musicStatus === "playing";

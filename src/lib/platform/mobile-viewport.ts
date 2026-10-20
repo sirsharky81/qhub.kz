@@ -6,64 +6,51 @@ function isDocumentVerticallyPinned(): boolean {
   return document.body.style.getPropertyValue("position") === "fixed";
 }
 
-function isEditableFocused(): boolean {
-  const active = document.activeElement;
-  if (!active || active === document.body) return false;
-  if (active instanceof HTMLInputElement) {
-    const t = active.type;
+function isEditableElement(el: EventTarget | null): boolean {
+  if (!el || !(el instanceof HTMLElement)) return false;
+  if (el instanceof HTMLInputElement) {
+    const t = el.type;
     return t !== "checkbox" && t !== "radio" && t !== "range" && t !== "button" && t !== "submit";
   }
   return (
-    active instanceof HTMLTextAreaElement ||
-    active instanceof HTMLSelectElement ||
-    (active instanceof HTMLElement && active.isContentEditable)
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement ||
+    el.isContentEditable
   );
 }
 
-/** Reset layout drift after iOS keyboard / input zoom (Safari PWA, Capacitor WebView). */
+/** Reset horizontal layout drift after iOS keyboard / input zoom (Safari PWA, Capacitor WebView). */
 export function resetMobileViewport(): void {
   if (typeof window === "undefined") return;
-  if (isMessengerKeyboardShellActive()) return;
+  if (isMessengerKeyboardShellActive() || isDocumentVerticallyPinned()) return;
 
   const apply = () => {
-    document.documentElement.scrollLeft = 0;
-    document.body.scrollLeft = 0;
+    if (isMessengerKeyboardShellActive() || isDocumentVerticallyPinned()) return;
 
-    if (isDocumentVerticallyPinned()) return;
-
-    const vv = window.visualViewport;
-    const keyboardLikely = isEditableFocused();
-
-    if (window.scrollX !== 0) {
-      const top =
-        vv && vv.offsetTop > 0 && keyboardLikely
-          ? Math.max(0, window.scrollY + vv.offsetTop)
-          : window.scrollY;
-      window.scrollTo(0, top);
-      return;
+    if (document.documentElement.scrollLeft !== 0) {
+      document.documentElement.scrollLeft = 0;
     }
-
-    // visualViewport offsetTop also moves during top rubber-band — do not fight page scroll.
-    if (vv && vv.offsetTop > 0 && keyboardLikely) {
-      window.scrollTo(0, Math.max(0, window.scrollY + vv.offsetTop));
+    if (document.body.scrollLeft !== 0) {
+      document.body.scrollLeft = 0;
+    }
+    if (window.scrollX !== 0) {
+      window.scrollTo(0, window.scrollY);
     }
   };
 
   requestAnimationFrame(apply);
-  window.setTimeout(apply, 80);
-  window.setTimeout(apply, 320);
+  window.setTimeout(apply, 100);
 }
 
 let guardInstalled = false;
 
-/** Call once on app boot — keeps viewport pinned after keyboard / focus changes. */
+/** Call once on app boot — resets horizontal viewport drift after closing keyboard. */
 export function installMobileViewportGuard(): void {
   if (guardInstalled || typeof window === "undefined") return;
   guardInstalled = true;
 
-  const vv = window.visualViewport;
-  vv?.addEventListener("resize", resetMobileViewport);
-  document.addEventListener("focusout", () => {
+  document.addEventListener("focusout", (event) => {
+    if (!isEditableElement(event.target)) return;
     window.setTimeout(resetMobileViewport, 100);
   });
 }

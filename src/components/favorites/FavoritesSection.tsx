@@ -179,16 +179,10 @@ function DesktopDndFavorites({
 }
 
 export function FavoritesSection() {
-  const { pinnedApps, pinnedIds, reorderPinned } = useFavorites();
+  const { pinnedApps, pinnedIds, hydrated, reorderPinned } = useFavorites();
   const coarsePointer = useCoarsePointer();
 
-  if (coarsePointer === null) {
-    return (
-      <section id="favorites" className="py-12 px-4 sm:px-6 max-w-6xl mx-auto w-full min-h-[8rem]" aria-hidden />
-    );
-  }
-
-  if (pinnedApps.length === 0) return null;
+  if (!hydrated || pinnedApps.length === 0) return null;
 
   return (
     <section id="favorites" className="py-12 px-4 sm:px-6 max-w-6xl mx-auto w-full">
