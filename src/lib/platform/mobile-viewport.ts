@@ -2,6 +2,20 @@ function isMessengerKeyboardShellActive(): boolean {
   return document.documentElement.style.getPropertyValue("--messenger-vvh").length > 0;
 }
 
+function isEditableFocused(): boolean {
+  const active = document.activeElement;
+  if (!active || active === document.body) return false;
+  if (active instanceof HTMLInputElement) {
+    const t = active.type;
+    return t !== "checkbox" && t !== "radio" && t !== "range" && t !== "button" && t !== "submit";
+  }
+  return (
+    active instanceof HTMLTextAreaElement ||
+    active instanceof HTMLSelectElement ||
+    (active instanceof HTMLElement && active.isContentEditable)
+  );
+}
+
 /** Reset layout drift after iOS keyboard / input zoom (Safari PWA, Capacitor WebView). */
 export function resetMobileViewport(): void {
   if (typeof window === "undefined") return;
@@ -12,13 +26,20 @@ export function resetMobileViewport(): void {
     document.body.scrollLeft = 0;
 
     const vv = window.visualViewport;
-    const top =
-      vv && vv.offsetTop > 0
-        ? Math.max(0, window.scrollY + vv.offsetTop)
-        : window.scrollY;
+    const keyboardLikely = isEditableFocused();
 
-    if (window.scrollX !== 0 || (vv && vv.offsetTop > 0)) {
+    if (window.scrollX !== 0) {
+      const top =
+        vv && vv.offsetTop > 0 && keyboardLikely
+          ? Math.max(0, window.scrollY + vv.offsetTop)
+          : window.scrollY;
       window.scrollTo(0, top);
+      return;
+    }
+
+    // visualViewport offsetTop also moves during top rubber-band — do not fight page scroll.
+    if (vv && vv.offsetTop > 0 && keyboardLikely) {
+      window.scrollTo(0, Math.max(0, window.scrollY + vv.offsetTop));
     }
   };
 
@@ -36,7 +57,6 @@ export function installMobileViewportGuard(): void {
 
   const vv = window.visualViewport;
   vv?.addEventListener("resize", resetMobileViewport);
-  vv?.addEventListener("scroll", resetMobileViewport);
   document.addEventListener("focusout", () => {
     window.setTimeout(resetMobileViewport, 100);
   });

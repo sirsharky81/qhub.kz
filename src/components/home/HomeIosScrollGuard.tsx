@@ -23,17 +23,28 @@ export function HomeIosScrollGuard() {
 
     const onTouchMove = (event: TouchEvent) => {
       if (event.touches.length !== 1) return;
-      if (scroller.scrollTop > 0) return;
+      if (scroller.scrollTop > 2) return;
+
       const currentY = event.touches[0].clientY;
       if (currentY > startY) event.preventDefault();
     };
 
-    document.addEventListener("touchstart", onTouchStart, { passive: true });
-    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    const onTouchEnd = () => {
+      if (scroller.scrollTop <= 0) {
+        scroller.scrollTop = 0;
+      }
+    };
+
+    document.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true, capture: true });
+    document.addEventListener("touchcancel", onTouchEnd, { passive: true, capture: true });
 
     return () => {
-      document.removeEventListener("touchstart", onTouchStart);
-      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchstart", onTouchStart, true);
+      document.removeEventListener("touchmove", onTouchMove, true);
+      document.removeEventListener("touchend", onTouchEnd, true);
+      document.removeEventListener("touchcancel", onTouchEnd, true);
     };
   }, [coarsePointer]);
 
