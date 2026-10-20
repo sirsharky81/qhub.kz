@@ -42,6 +42,13 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* One document scrollport on iOS PWA — avoid nested pan on the main hub page. */
+@media (hover: none) and (pointer: coarse) {
+  body {
+    touch-action: pan-y;
+  }
+}
+
 /* iOS Safari / PWA: inputs <16px trigger page zoom — keep layout within viewport */
 @media (hover: none) and (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
