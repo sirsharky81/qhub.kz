@@ -8,11 +8,11 @@ import { HomeStats } from "@/components/home/HomeStats";
 export default function Home() {
 
   return (
-    <div className="flex min-h-screen flex-col bg-white text-gray-900 pb-16 touch-pan-y">
+    <div className="flex min-h-dvh flex-col bg-white text-gray-900 pb-16">
       <Navbar />
 
       {/* ── HERO ─────────────────────────────────────────────── */}
-      <section className="relative overflow-x-clip pt-24 pb-16 sm:pt-32 sm:pb-24 px-4 sm:px-6 flex flex-col items-center text-center bg-white bg-dot-grid">
+      <section className="relative isolate overflow-x-clip pt-24 pb-16 sm:pt-32 sm:pb-24 px-4 sm:px-6 flex flex-col items-center text-center bg-white bg-dot-grid [transform:translateZ(0)]">
         {/* Subtle top gradient fade */}
         <div
           aria-hidden

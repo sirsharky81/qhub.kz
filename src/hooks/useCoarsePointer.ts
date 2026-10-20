@@ -2,16 +2,16 @@
 
 import { useEffect, useState } from "react";
 
-/** True on phones/tablets with touch as primary input — not on narrow desktop windows. */
-export function useCoarsePointer(): boolean {
-  const [coarse, setCoarse] = useState(false);
+/** True on typical phones (touch-first). Null until mounted. */
+export function useCoarsePointer(): boolean | null {
+  const [coarse, setCoarse] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const mq = window.matchMedia("(pointer: coarse)");
-    const update = () => setCoarse(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    const mq = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const apply = () => setCoarse(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
   }, []);
 
   return coarse;
