@@ -67,19 +67,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="ru"
-      className={`${geistSans.variable} ${geistMono.variable} h-full`}
-    >
-      <body className="min-h-full flex flex-col bg-white text-gray-900">
-        <div className="flex min-h-full min-w-0 w-full max-w-full flex-1 flex-col">
-          <PWAProvider />
-          <PlatformInit />
-          <VersionGate>
-            <AppProviders>{children}</AppProviders>
-          </VersionGate>
-          <InstallBanner />
-        </div>
+    <html lang="ru" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className="bg-white text-gray-900">
+        <PWAProvider />
+        <PlatformInit />
+        <VersionGate>
+          <AppProviders>{children}</AppProviders>
+        </VersionGate>
+        <InstallBanner />
       </body>
     </html>
   );
