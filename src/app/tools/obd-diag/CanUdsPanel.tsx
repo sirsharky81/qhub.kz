@@ -200,10 +200,28 @@ export default function CanUdsPanel({
   const queueRef = useRef<string[]>([]);
   const rowsRef = useRef<FrameRow[]>([]);
   const tapeRef = useRef<string[]>([]);
+  const pendingMonitorUiRef = useRef(false);
+  const mitsuTcmLatestRef = useRef<MitsubishiTcmTelemetry | null>(null);
+  const pendingMitsuTcmUiRef = useRef(false);
 
   useEffect(() => {
     tapeRef.current = tape;
   }, [tape]);
+
+  useEffect(() => {
+    if (!obdScroll) return;
+    return obdScroll.registerScrollFlush(() => {
+      if (pendingMonitorUiRef.current) {
+        pendingMonitorUiRef.current = false;
+        setRows([...rowsRef.current]);
+        setTape([...tapeRef.current]);
+      }
+      if (pendingMitsuTcmUiRef.current && mitsuTcmLatestRef.current) {
+        pendingMitsuTcmUiRef.current = false;
+        setMitsuTcmData(mitsuTcmLatestRef.current);
+      }
+    });
+  }, [obdScroll]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -256,7 +274,8 @@ export default function CanUdsPanel({
           now - row.flashAt > 500 ? { ...row, changed: row.changed.map(() => false) } : row,
         );
         rowsRef.current = faded;
-        deferUiRef.current(() => setRows(faded));
+        if (obdScroll?.scrollingRef.current) pendingMonitorUiRef.current = true;
+        else setRows(faded);
         return;
       }
       let lossAdd = 0;
@@ -305,15 +324,17 @@ export default function CanUdsPanel({
       if (tapeAdd.length) {
         tapeRef.current = [...tapeRef.current, ...tapeAdd].slice(-TAPE_LIMIT);
       }
-      deferUiRef.current(() => {
+      if (obdScroll?.scrollingRef.current) {
+        pendingMonitorUiRef.current = true;
+      } else {
         setRows(next);
         if (tapeAdd.length) setTape(tapeRef.current);
         if (lossAdd) setLosses((count) => count + lossAdd);
         if (recordingRef.current) setRecordCount(recordsRef.current.length);
-      });
+      }
     }, 100);
     return () => window.clearInterval(id);
-  }, [onLog, protocol]);
+  }, [obdScroll, onLog, protocol]);
 
   const remember = (entry: UdsLogEntry) => {
     setUdsLog(appendUdsLog(entry));
@@ -1050,7 +1071,9 @@ export default function CanUdsPanel({
       while (!stopMitsuTcmRef.current) {
         try {
           const data = await session.readMitsubishiTransmission();
-          deferUi(() => setMitsuTcmData(data));
+          mitsuTcmLatestRef.current = data;
+          if (obdScroll?.scrollingRef.current) pendingMitsuTcmUiRef.current = true;
+          else setMitsuTcmData(data);
         } catch {
           /* continue polling */
         }
@@ -2270,7 +2293,7 @@ export default function CanUdsPanel({
                   Изменилось CAN ID: <strong>{canDiffResult.length}</strong>
                 </div>
                 {canDiffResult.length > 0 ? (
-                  <ul className="mt-1.5 max-h-52 space-y-1.5 overflow-y-auto font-mono text-[11px]">
+                  <ul className="mt-1.5 space-y-1.5 font-mono text-[11px]">
                     {canDiffResult.map((diff) => (
                       <li
                         key={diff.idHex}
