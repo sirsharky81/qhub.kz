@@ -56,9 +56,12 @@ export default function ObdDiagClient() {
   const searchParams = useSearchParams();
   const [session] = useState(() => new ObdBleSession());
   const sessionRef = useRef(session);
-  const [tab, setTab] = useState<ToolTab>(() =>
-    searchParams.get("tab") === "mitsubishi" ? "mitsubishi" : "obd",
-  );
+  const [tab, setTab] = useState<ToolTab>(() => {
+    const param = searchParams.get("tab");
+    if (param === "mitsubishi") return "mitsubishi";
+    if (param === "can") return "can";
+    return "obd";
+  });
   const [obdSubTab, setObdSubTab] = useState<ObdSubTab>("live");
   const [phase, setPhase] = useState<ObdConnectionPhase>("idle");
   const [adapterLabel, setAdapterLabel] = useState<string | null>(null);
@@ -548,7 +551,6 @@ export default function ObdDiagClient() {
           </TabButton>
           <TabButton
             active={tab === "can"}
-            disabled={phase === "idle"}
             onClick={() => {
               setPoll(false);
               setTab("can");

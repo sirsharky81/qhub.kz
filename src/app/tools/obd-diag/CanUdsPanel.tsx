@@ -1294,23 +1294,7 @@ export default function CanUdsPanel({
     }
   };
 
-  if (!enabled) {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm text-slate-400">Сначала подключите адаптер сверху.</p>
-        {localError ? <p className="text-sm text-red-200">{localError}</p> : null}
-        {recordCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => void exportCapture()}
-            className="rounded-xl border border-slate-600 px-4 py-3 text-sm"
-          >
-            CSV ({recordCount})
-          </button>
-        ) : null}
-      </div>
-    );
-  }
+  const hwBusy = !enabled || busy;
 
   const switchCanSubView = (nextView: CanSubView) => {
     void (async () => {
@@ -1332,6 +1316,23 @@ export default function CanUdsPanel({
 
   return (
     <section className="flex min-w-0 flex-col gap-3">
+      {!enabled ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+          <span>
+            Сначала подключите адаптер сверху, чтобы отправлять запросы в CAN. Навигация, настройка колёс TPMS и сравнение дампов доступны офлайн.
+          </span>
+          {recordCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => void exportCapture()}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200"
+            >
+              CSV ({recordCount})
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-1.5">
         <ProtocolButton active={view === "dashboard"} onClick={() => switchCanSubView("dashboard")}>
           Показатели UDS
@@ -1393,7 +1394,7 @@ export default function CanUdsPanel({
             <div className="mt-2.5 flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readMitsuTcmOnce()}
                 className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -1402,7 +1403,7 @@ export default function CanUdsPanel({
               {!mitsuTcmLive ? (
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void startMitsuTcmLive()}
                   className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-3 py-2.5 text-xs font-semibold text-emerald-200 disabled:opacity-40"
                 >
@@ -1419,7 +1420,7 @@ export default function CanUdsPanel({
               )}
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readMitsuMeterOnce()}
                 className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs font-medium text-slate-200 disabled:opacity-40"
               >
@@ -1589,7 +1590,7 @@ export default function CanUdsPanel({
             <div className="mt-2.5 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readTpmsOnce("mitsubishi-773")}
                 className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
                   tpmsTarget === "mitsubishi-773"
@@ -1601,7 +1602,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readTpmsOnce("mitsubishi-600")}
                 className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
                   tpmsTarget === "mitsubishi-600"
@@ -1613,7 +1614,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readTpmsOnce("subaru-752")}
                 className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
                   tpmsTarget === "subaru-752"
@@ -1725,7 +1726,7 @@ export default function CanUdsPanel({
             <div className="mt-2.5 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru-tcm")}
                 className="rounded-xl bg-emerald-600 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -1733,7 +1734,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru")}
                 className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
               >
@@ -1741,7 +1742,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("pajero")}
                 className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
               >
@@ -1924,7 +1925,7 @@ export default function CanUdsPanel({
               {!steeringRunning ? (
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void startSteeringMonitor()}
                   className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
                 >
@@ -1956,7 +1957,7 @@ export default function CanUdsPanel({
               </p>
               <button
                 type="button"
-                disabled={busy || monitoring || steeringRunning}
+                disabled={hwBusy || monitoring || steeringRunning}
                 onClick={() => void runSasZeroCalibration()}
                 className="mt-2.5 w-full rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -2002,7 +2003,7 @@ export default function CanUdsPanel({
             <div className="mt-2.5 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("all")}
                 className="rounded-xl bg-amber-600 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -2010,7 +2011,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("abs")}
                 className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
               >
@@ -2018,7 +2019,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("srs")}
                 className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
               >
@@ -2076,16 +2077,16 @@ export default function CanUdsPanel({
               ) : null}
             </div>
             <p className="mt-1 text-xs text-slate-400">
-              Опрашивает все 11 блоков (`UDS 19 02 FF` и `OBD Mode 03`). Для <strong>обычных блоков</strong> (ДВС `7E0`, КПП `7E1`, Силовая `7A2`, Приборка `783`, Кузов/Шины `752`, Климат `7C4`, Сонары `786`) доступен безопасный сброс ошибок. Для <strong>блоков безопасности</strong> (Подушки `780`, Тормоза `7B0`, Руль `746`, Камера EyeSight `787`) разрешено <strong>только чтение</strong> без риска сбить калибровки.
+              Опрашивает все блоки Subaru и Mitsubishi (`UDS 19 02 FF`, `KWP2000 18 00 FF 00` и `OBD Mode 03`). Для <strong>обычных блоков</strong> (ДВС `7E0`, АКПП/CVT `7E1`, Силовая `7A2`, ETACS `620`/`7A1`, Приборка `783`/`6A0`, TPMS/KOS `752`/`773`/`600`, Климат `7C4`/`688`, 4WD `7B6`, Сонары `786`/`763`) доступен безопасный сброс ошибок (`14 FF FF FF` / `14 FF 00`). Для <strong>блоков безопасности</strong> (Подушки SRS `780`/`7B2`, Тормоза ABS/ASC `7B0`/`784`, Руль EPS/SAS `746`/`622`, EyeSight `787`) разрешено <strong>только чтение</strong> без риска сбить калибровки.
             </p>
 
             <button
               type="button"
-              disabled={busy || monitoring}
+              disabled={hwBusy || monitoring}
               onClick={() => void runAllModuleDtcScan()}
               className="mt-2.5 w-full rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
             >
-              Проверить ошибки во всех блоках (11 ЭБУ)
+              Проверить ошибки во всех блоках ({KNOWN_MODULE_TARGETS.filter((t) => t.rx != null).length} ЭБУ)
             </button>
 
             {dtcProgress ? <p className="mt-2 text-xs text-emerald-300">{dtcProgress}</p> : null}
@@ -2215,7 +2216,7 @@ export default function CanUdsPanel({
           </div>
           <button
             type="button"
-            disabled={monitoring || busy}
+            disabled={monitoring || hwBusy}
             onClick={() => void applyFilter()}
             className="rounded-xl border border-slate-600 px-4 py-3 text-sm disabled:opacity-40"
           >
@@ -2223,7 +2224,7 @@ export default function CanUdsPanel({
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={hwBusy}
             onClick={() => void (monitoring ? stopMonitor() : startMonitor())}
             className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
           >
@@ -2405,7 +2406,7 @@ export default function CanUdsPanel({
             <div className="mt-2 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru")}
                 className="rounded-xl bg-emerald-600/90 px-2.5 py-2.5 text-xs font-medium text-white disabled:opacity-40"
               >
@@ -2413,7 +2414,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru-tcm")}
                 className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
               >
@@ -2421,7 +2422,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("pajero")}
                 className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
               >
@@ -2468,7 +2469,7 @@ export default function CanUdsPanel({
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void runSubaruRegionDump()}
                 className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -2642,7 +2643,7 @@ export default function CanUdsPanel({
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "extended")}
                 className="col-span-2 rounded-xl bg-emerald-600 px-3 py-3 text-xs font-semibold text-white disabled:opacity-40"
               >
@@ -2650,7 +2651,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "standard")}
                 className="rounded-xl border border-slate-600 px-3 py-2 text-xs font-medium disabled:opacity-40"
               >
@@ -2658,7 +2659,7 @@ export default function CanUdsPanel({
               </button>
               <button
                 type="button"
-                disabled={busy || monitoring}
+                disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "wide")}
                 className="rounded-xl border border-amber-500/50 bg-amber-950/20 px-3 py-2 text-xs font-medium text-amber-200 disabled:opacity-40"
               >
@@ -2737,7 +2738,7 @@ export default function CanUdsPanel({
             </div>
             <button
               type="button"
-              disabled={busy}
+              disabled={hwBusy}
               onClick={() => void sendRequest(request)}
               className="mt-2 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
             >
@@ -2759,7 +2760,7 @@ export default function CanUdsPanel({
                 <button
                   key={item.id}
                   type="button"
-                  disabled={busy}
+                  disabled={hwBusy}
                   onClick={() => {
                     setRequest(item.hex);
                     void sendRequest(item.hex);
@@ -2773,7 +2774,7 @@ export default function CanUdsPanel({
                 <button
                   key={item.id}
                   type="button"
-                  disabled={busy}
+                  disabled={hwBusy}
                   onClick={() => {
                     setRequest(item.hex);
                     void sendRequest(item.hex);
@@ -2824,7 +2825,7 @@ export default function CanUdsPanel({
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0xf180, to: 0xf1ff, label: "F180–F1FF", stopOnSilence: true })}
                   className="rounded-lg border border-slate-600 px-2.5 py-2 text-xs font-medium disabled:opacity-40"
                 >
@@ -2832,7 +2833,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x1000, to: 0x107f, label: "1000–107F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2840,7 +2841,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x1100, to: 0x117f, label: "1100–117F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2848,7 +2849,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x2000, to: 0x207f, label: "2000–207F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2856,7 +2857,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x2100, to: 0x217f, label: "2100–217F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2864,7 +2865,7 @@ export default function CanUdsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || monitoring}
+                  disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0xd000, to: 0xd07f, label: "D000–D07F", stopOnSilence: false })}
                   className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
                 >
@@ -2914,7 +2915,7 @@ export default function CanUdsPanel({
                 </span>
                 <button
                   type="button"
-                  disabled={busy && !liveUdsRunning}
+                  disabled={hwBusy && !liveUdsRunning}
                   onClick={() => void sendRequest("10 01")}
                   className="rounded-lg border border-slate-600 bg-slate-900 px-2.5 py-1 text-[11px] text-slate-200 disabled:opacity-40"
                 >
@@ -2949,7 +2950,7 @@ export default function CanUdsPanel({
                 {!liveUdsRunning ? (
                   <button
                     type="button"
-                    disabled={busy || monitoring || watchedDids.length === 0}
+                    disabled={hwBusy || monitoring || watchedDids.length === 0}
                     onClick={() => void startLiveUds()}
                     className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
                   >
