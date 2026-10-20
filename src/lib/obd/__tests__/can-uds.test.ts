@@ -14,12 +14,25 @@ import {
   writeEtacsSingleBlock,
 } from "../mitsubishi-etacs";
 import {
+  calibrateMitsubishiSasZero,
+  decodeCanBroadcastFrame,
+  decodeMitsubishiAt2102And2104,
+  decodeMitsubishiCvt,
+  decodeMitsubishiTpmsPayload,
+  diffCanBusSnapshots,
+  readMitsubishiMeter,
+  readMitsubishiSteeringAngle,
+  readMitsubishiTransmission,
+  readTpmsSensors,
+} from "../mitsubishi-modules";
+import {
   assessUdsRequest,
   decodeUdsDidSupportBitmap,
   describeCanModule,
   diffSubaruDumps,
   exportUdsLog,
   formatUdsPayload,
+  parseKwpDtcs18,
   parseTaggedUdsReplies,
   parseUdsDtcs1902,
   parseUdsResponse,
@@ -658,11 +671,99 @@ describe("sendUds gate", () => {
     expect(dtcs[0]?.statusByte).toBe(0x2f);
     expect(dtcs[0]?.active).toBe(true);
 
-    // Safety modules (SRS 780, ABS/VDC 7B0, EPS 746, EyeSight 787) must refuse DTC clearing
+    // Safety modules (SRS 780, ABS/VDC 7B0, EPS 746, EyeSight 787, Mitsubishi SAS 622, ABS 784) must refuse DTC clearing
     const session = new ObdBleSession();
-    for (const blockedTx of ["780", "7B0", "746", "787"]) {
+    for (const blockedTx of ["780", "7B0", "746", "787", "622", "784"]) {
       await expect(session.clearModuleDtcsSafe("6", blockedTx, "788")).rejects.toThrow(/заблокирован/i);
     }
+  });
+
+  it("decodes Mitsubishi 8AT/5AT (7E1 -> 7E9) ATF temp, engaged gear 1..8, and disengaged gear P/N state", () => {
+    // 21 02 data bytes [A..K]:
+    // B=10, C=0 -> inputRPM=1280; D=8, E=0 -> outputRPM=1024; F=122 -> ATF=82°C; G=108 -> ~14.0V; H=25 -> ~70km/h; I=51 -> slip=0; J=0x20 (bit 5 -> 4th gear), K=0x00
+    const d02Engaged = [0x00, 10, 0, 8, 0, 122, 108, 25, 51, 0x20, 0x00];
+    const d04Drive = [0x00, 0x00, 0x08]; // C = 0x08 (D)
+    const tcmEngaged = decodeMitsubishiAt2102And2104(d02Engaged, d04Drive);
+    expect(tcmEngaged.atfTempC).toBe(82);
+    expect(tcmEngaged.gearNumber).toBe(4);
+    expect(tcmEngaged.currentGearText).toContain("4-я передача");
+    expect(tcmEngaged.isGearDisengaged).toBe(false);
+    expect(tcmEngaged.torqueConverterSlipRpm).toBe(0);
+
+    // 8th gear on Pajero Sport III 8AT (K bit 1 = 0x02)
+    const d02Gear8 = [0x00, 12, 0, 15, 0, 125, 108, 35, 52, 0x00, 0x02];
+    const tcmGear8 = decodeMitsubishiAt2102And2104(d02Gear8, d04Drive);
+    expect(tcmGear8.gearNumber).toBe(8);
+    expect(tcmGear8.isGearDisengaged).toBe(false);
+
+    // Disengaged gear in Park / Neutral (J bit 0 = 0x01, C = 0x04 N)
+    const d02Neutral = [0x00, 6, 0, 0, 0, 110, 108, 0, 51, 0x01, 0x00];
+    const d04Neutral = [0x00, 0x00, 0x04];
+    const tcmNeutral = decodeMitsubishiAt2102And2104(d02Neutral, d04Neutral);
+    expect(tcmNeutral.atfTempC).toBe(70);
+    expect(tcmNeutral.gearNumber).toBe(0);
+    expect(tcmNeutral.isGearDisengaged).toBe(true);
+    expect(tcmNeutral.disengagedStateText).toContain("ПЕРЕДАЧА ВЫКЛЮЧЕНА");
+
+    // CVT decode (21 03, 21 06, 21 07, 21 10)
+    const cvt = decodeMitsubishiCvt({
+      data2103: [0x04, 0x00, 0x05, 0x00, 0x00, 0x02, 0, 0, 0, 0, 0, 0, 0, 80],
+      data2106: [0x00, 0x00, 0x02], // C=2 -> 3rd virtual gear
+      data2107: [0x80], // bit 7 -> D
+      data2110: [0x00, 0x00, 0x01, 0x20], // degradation = 288
+    });
+    expect(cvt.atfTempC).not.toBeNull();
+    expect(cvt.gearNumber).toBe(3);
+    expect(cvt.cvtDegradationCount).toBe(288);
+    expect(cvt.isGearDisengaged).toBe(false);
+  });
+
+  it("decodes TPMS 4+1 wheels, KWP18 DTCs, CAN broadcast frames, and CAN Diff-Sniffer", () => {
+    // 21 28 IDs (5 wheels * 4 bytes) + 21 01 pressures & temperatures
+    const d28 = [
+      0x11, 0x22, 0x33, 0x01,
+      0x11, 0x22, 0x33, 0x02,
+      0x11, 0x22, 0x33, 0x03,
+      0x11, 0x22, 0x33, 0x04,
+      0x11, 0x22, 0x33, 0x05,
+    ];
+    // 160 * 1.373 = 220 kPa = 2.20 bar; 75 - 50 = 25°C
+    const d01 = [160, 75, 160, 76, 162, 74, 162, 75, 158, 72];
+    const tpmsWheels = decodeMitsubishiTpmsPayload({ lid2101: d01, lid2128: d28 });
+    expect(tpmsWheels).toHaveLength(5);
+    expect(tpmsWheels[0]?.sensorIdHex).toBe("11223301");
+    expect(tpmsWheels[0]?.pressureBar).toBeCloseTo(2.2, 1);
+    expect(tpmsWheels[0]?.temperatureC).toBe(25);
+    expect(tpmsWheels[4]?.wheelIndex).toBe(5);
+    expect(tpmsWheels[4]?.sensorIdHex).toBe("11223305");
+
+    // KWP2000 Service 18 (18 00 FF 00) DTC parser: [count=1, 0xC1, 0x21, 0x20] -> U0121
+    const kwpDtcs = parseKwpDtcs18([0x01, 0xc1, 0x21, 0x20]);
+    expect(kwpDtcs).toHaveLength(1);
+    expect(kwpDtcs[0]?.code).toBe("U0121");
+    expect(kwpDtcs[0]?.active).toBe(true);
+
+    // Passive CAN broadcast decoder (0x236 steering, 0x318 AT gear, 0x154 fuel, 0x608 coolant)
+    const sig236 = decodeCanBroadcastFrame("236", [0x10, 0x00, 0x05]); // 4096 = 0.0°
+    expect(sig236?.summary).toContain("0°");
+    const sig318Disengaged = decodeCanBroadcastFrame("318", [0x4e, 0x00]); // N -> передача выключена
+    expect(sig318Disengaged?.summary).toContain("передача выключена");
+    const sig608 = decodeCanBroadcastFrame("608", [128, 62]); // 88°C, 22°C
+    expect(sig608?.summary).toContain("88 °C");
+
+    // CAN Diff-Sniffer
+    const base = [
+      { id: "236", dlc: 3, data: [0x10, 0x00, 0x00] },
+      { id: "318", dlc: 2, data: [0x50, 0x00] },
+    ];
+    const act = [
+      { id: "236", dlc: 3, data: [0x10, 0x00, 0x00] },
+      { id: "318", dlc: 2, data: [0x44, 0x03] },
+    ];
+    const canDiffs = diffCanBusSnapshots(base, act);
+    expect(canDiffs).toHaveLength(1);
+    expect(canDiffs[0]?.idHex).toBe("318");
+    expect(canDiffs[0]?.changedByteIndices).toEqual([0, 1]);
   });
 });
 

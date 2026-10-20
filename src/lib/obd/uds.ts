@@ -148,6 +148,15 @@ export const KNOWN_MODULE_TARGETS: readonly KnownModuleTarget[] = [
   { tx: 0x7e5, rx: 0x7ed, name: "Шасси / Электроусилитель (7E5)", brand: "common" },
   { tx: 0x7e6, rx: 0x7ee, name: "Климат / Доп. модуль (7E6)", brand: "common" },
   { tx: 0x7e7, rx: 0x7ef, name: "Модуль 7E7", brand: "common" },
+  { tx: 0x620, rx: 0x504, name: "Mitsubishi ETACS Кузов (620 → 504)", brand: "mitsubishi" },
+  { tx: 0x6a0, rx: 0x514, name: "Mitsubishi Приборка Meter (6A0 → 514)", brand: "mitsubishi" },
+  { tx: 0x773, rx: 0x774, name: "Mitsubishi TPMS / OSS Шины (773 → 774)", brand: "mitsubishi" },
+  { tx: 0x600, rx: 0x500, name: "Mitsubishi KOS / TPMS Бесключевой (600 → 500)", brand: "mitsubishi" },
+  { tx: 0x622, rx: 0x484, name: "Mitsubishi Датчик угла руля SAS (622 → 484)", brand: "mitsubishi" },
+  { tx: 0x784, rx: 0x785, name: "Mitsubishi ABS / ASC / Полный привод (784 → 785)", brand: "mitsubishi" },
+  { tx: 0x688, rx: 0x511, name: "Mitsubishi Климат-контроль A/C (688 → 511)", brand: "mitsubishi" },
+  { tx: 0x6e0, rx: 0x51c, name: "Mitsubishi Подушки SRS Airbag (6E0 → 51C)", brand: "mitsubishi" },
+  { tx: 0x796, rx: 0x797, name: "Mitsubishi Электроусилитель EPS (796 → 797)", brand: "mitsubishi" },
   { tx: 0x7a1, rx: 0x7a0, name: "Mitsubishi ETACS (7A1 → 7A0)", brand: "mitsubishi" },
   { tx: 0x710, rx: 0x718, name: "Mitsubishi ETACS / Кузов (710 → 718)", brand: "mitsubishi" },
   { tx: 0x7df, name: "Общий широковещательный (7DF)", brand: "common" },
@@ -175,6 +184,15 @@ const RX_MODULE_NAMES: Record<number, { name: string; tx: number }> = {
   0x758: { name: "Шлюз / бесключевой доступ", tx: 0x750 },
   0x75a: { name: "Боди-модуль BIU / TPMS (Integ. Unit 752)", tx: 0x752 },
   0x78c: { name: "Камера EyeSight / Ассистенты (784)", tx: 0x784 },
+  0x504: { name: "Mitsubishi ETACS (620 → 504)", tx: 0x620 },
+  0x514: { name: "Mitsubishi Приборка Meter (6A0 → 514)", tx: 0x6a0 },
+  0x774: { name: "Mitsubishi TPMS / OSS (773 → 774)", tx: 0x773 },
+  0x500: { name: "Mitsubishi KOS / TPMS (600 → 500)", tx: 0x600 },
+  0x484: { name: "Mitsubishi Датчик руля SAS (622 → 484)", tx: 0x622 },
+  0x785: { name: "Mitsubishi ABS / ASC (784 → 785)", tx: 0x784 },
+  0x511: { name: "Mitsubishi Климат A/C (688 → 511)", tx: 0x688 },
+  0x51c: { name: "Mitsubishi Подушки SRS (6E0 → 51C)", tx: 0x6e0 },
+  0x797: { name: "Mitsubishi EPS (796 → 797)", tx: 0x796 },
   0x7a0: { name: "Mitsubishi ETACS", tx: 0x7a1 },
   0x718: { name: "Mitsubishi ETACS / Кузов", tx: 0x710 },
 };
@@ -218,7 +236,7 @@ export const DID_SCAN_TO = 0xf1ff;
 export const DID_SCAN_SILENCE = 24;
 
 const READ_SERVICES = new Set([
-  0x10, 0x3e, 0x19, 0x21, 0x22, 0x23, 0xa8, 0x09, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0a,
+  0x10, 0x3e, 0x18, 0x19, 0x1a, 0x21, 0x22, 0x23, 0xa8, 0x09, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0a,
 ]);
 
 const BLOCKED_SERVICES = new Set([0x11, 0x14, 0x27, 0x28, 0x2e, 0x2f, 0x31, 0x34, 0x35, 0x36, 0x37, 0x85]);
@@ -414,6 +432,34 @@ export function parseUdsDtcs1902(payload: number[]): ParsedUdsDtc[] {
   return out;
 }
 
+/**
+ * Parses KWP2000 Service `18` (`18 00 FF 00`) response payload (`[count, hi, lo, status, ...]`)
+ * used by Mitsubishi ETACS (`620`), Meter (`6A0`), TPMS (`773`/`600`), SAS (`622`), and ABS (`784`).
+ */
+export function parseKwpDtcs18(payload: number[]): ParsedUdsDtc[] {
+  if (payload.length < 1) return [];
+  const count = payload[0]!;
+  if (count === 0 || payload.length < 4) return [];
+  const records = payload.slice(1);
+  const out: ParsedUdsDtc[] = [];
+  for (let i = 0; i + 2 < records.length && out.length < count; i += 3) {
+    const b0 = records[i]!;
+    const b1 = records[i + 1]!;
+    const status = records[i + 2]!;
+    if (b0 === 0 && b1 === 0) continue;
+    const prefix = ["P", "C", "B", "U"][(b0 >> 6) & 0x03]!;
+    const code = `${prefix}${(((b0 & 0x3f) << 8) | b1).toString(16).padStart(4, "0").toUpperCase()}`;
+    const active = (status & 0x20) !== 0 || (status & 0x01) !== 0 || (status & 0x40) !== 0;
+    out.push({
+      code,
+      statusByte: status,
+      active,
+      description: describeDtcCode(code),
+    });
+  }
+  return out;
+}
+
 export function formatUdsPayload(payload: number[], requestSid?: number, txHex?: string): string {
   const hex = payload.map((byte) => byte.toString(16).padStart(2, "0").toUpperCase()).join(" ");
   if (requestSid === 0x3e) {
@@ -433,6 +479,57 @@ export function formatUdsPayload(payload: number[], requestSid?: number, txHex?:
       return `${sName} · таймаут P2=${p2} мс, P2*=${p2Star} мс (${hex})`;
     }
     return `${sName} (${hex})`;
+  }
+  if (requestSid === 0x18 && payload.length >= 1) {
+    const dtcs = parseKwpDtcs18(payload);
+    if (dtcs.length === 0) {
+      return `Ошибок в блоке нет (KWP 18: 0 DTC) · [${hex}]`;
+    }
+    const list = dtcs.map((d) => `${d.code} (${d.active ? "активна" : "в памяти"}) — ${d.description}`);
+    return `Найдено ошибок KWP (${dtcs.length}): ${list.join("; ")} · [${hex}]`;
+  }
+  if (requestSid === 0x1a && payload.length >= 2) {
+    const lid = payload[0]!.toString(16).padStart(2, "0").toUpperCase();
+    const ascii = payload
+      .slice(1)
+      .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+    return `KWP Идентификация (1A ${lid}): ${ascii || "—"} · [${hex}]`;
+  }
+  if (requestSid === 0x21 && payload.length >= 2) {
+    const lid = payload[0]!;
+    const lidHex = lid.toString(16).padStart(2, "0").toUpperCase();
+    const data = payload.slice(1);
+    const cleanTx = txHex?.toUpperCase();
+    if (cleanTx === "7E1" && lid === 0x02 && data.length >= 10) {
+      const f = data[5]!;
+      const j = data[9]!;
+      const k = data[10] ?? 0;
+      const atfTemp = f - 40;
+      const isNeutralOrPark = (j & 0x01) !== 0;
+      const isReverse = (j & 0x02) !== 0;
+      let gear = 0;
+      for (let g = 1; g <= 6; g++) {
+        if ((j & (1 << (g + 1))) !== 0) gear = g;
+      }
+      if ((k & 0x01) !== 0) gear = 7;
+      if ((k & 0x02) !== 0) gear = 8;
+      const gearStr = isNeutralOrPark
+        ? "P / N (Передача выключена)"
+        : isReverse
+          ? "R (Задний ход)"
+          : gear > 0
+            ? `${gear}-я передача`
+            : "Передача разомкнута";
+      return `АКПП (21 02): Темп. ATF = ${atfTemp} °C · ${gearStr} · [${hex}]`;
+    }
+    if (cleanTx === "6A0" && lid === 0xa3 && data.length >= 3) {
+      const liters = Math.max(0, Number(((data[2]! - 16) * 0.7).toFixed(1)));
+      return `Уровень топлива (21 A3): ${liters} л · [${hex}]`;
+    }
+    return `KWP 21 ${lidHex}: ${summarizeNumericUdsBytes(data, hex)}`;
   }
   if (requestSid === 0x19 && payload.length >= 2 && payload[0] === 0x02) {
     const dtcs = parseUdsDtcs1902(payload);
