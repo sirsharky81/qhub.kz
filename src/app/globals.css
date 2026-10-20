@@ -42,13 +42,6 @@ body {
   margin: 0;
 }
 
-@media (hover: none) and (pointer: coarse) {
-  html,
-  body {
-    overscroll-behavior-y: none;
-  }
-}
-
 /* iOS Safari / PWA: inputs <16px trigger page zoom — keep layout within viewport */
 @media (hover: none) and (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),

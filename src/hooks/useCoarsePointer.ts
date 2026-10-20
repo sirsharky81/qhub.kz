@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 
 /** True on typical phones (touch-first). Null until mounted. */
 export function useCoarsePointer(): boolean | null {
-  const [coarse, setCoarse] = useState<boolean | null>(null);
+  const [coarse, setCoarse] = useState<boolean | null>(() => {
+    if (typeof window === "undefined") return null;
+    return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+  });
 
   useEffect(() => {
     const mq = window.matchMedia("(hover: none) and (pointer: coarse)");

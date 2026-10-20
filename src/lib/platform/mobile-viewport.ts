@@ -2,6 +2,10 @@ function isMessengerKeyboardShellActive(): boolean {
   return document.documentElement.style.getPropertyValue("--messenger-vvh").length > 0;
 }
 
+function isDocumentVerticallyPinned(): boolean {
+  return document.body.style.getPropertyValue("position") === "fixed";
+}
+
 function isEditableFocused(): boolean {
   const active = document.activeElement;
   if (!active || active === document.body) return false;
@@ -24,6 +28,8 @@ export function resetMobileViewport(): void {
   const apply = () => {
     document.documentElement.scrollLeft = 0;
     document.body.scrollLeft = 0;
+
+    if (isDocumentVerticallyPinned()) return;
 
     const vv = window.visualViewport;
     const keyboardLikely = isEditableFocused();
