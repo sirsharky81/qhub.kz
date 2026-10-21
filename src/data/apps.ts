@@ -256,7 +256,7 @@ export const apps: App[] = [
     id: "obd-diag",
     title: "OBD Scanner (BLE)",
     description:
-      "Универсальный OBD-II: коды и live-параметры через vLinker BLE. Отдельная вкладка — Mitsubishi ETACS (.kon / .cuf).",
+      "OBD-II через vLinker BLE и диагностика Mitsubishi: карта блоков, ошибки и живые параметры Outlander III и Pajero Sport III.",
     longDescription:
       "Подключение vLinker по Bluetooth LE, стандарт SAE J1979 для любых OBD2-авто (Subaru, Mitsubishi, Toyota и др.): чтение и сброс DTC, live-PID включая топливные коррекции. Вкладка Mitsubishi ETACS — только выгрузка variant/custom для MMCodingWriter, локально на устройстве.",
     href: "/tools/obd-diag",

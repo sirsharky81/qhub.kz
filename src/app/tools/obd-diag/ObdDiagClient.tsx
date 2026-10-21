@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import MutDiagPanel from "./MutDiagPanel";
 import { formatBleFailure } from "@/lib/obd/ble-error";
 import { bytesToHex } from "@/lib/obd/hex";
 import {
@@ -35,7 +36,7 @@ import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { useObdScroll } from "./ObdScrollContext";
 import CanUdsPanel from "./CanUdsPanel";
 
-type ToolTab = "obd" | "mitsubishi" | "can";
+type ToolTab = "obd" | "mitsubishi" | "can" | "diag";
 type ObdSubTab = "live" | "dtc" | "info";
 
 interface LiveTile {
@@ -61,6 +62,7 @@ export default function ObdDiagClient() {
     const param = searchParams.get("tab");
     if (param === "mitsubishi") return "mitsubishi";
     if (param === "can") return "can";
+    if (param === "diag") return "diag";
     return "obd";
   });
   const [obdSubTab, setObdSubTab] = useState<ObdSubTab>("live");
@@ -548,7 +550,7 @@ export default function ObdDiagClient() {
           <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">{error}</p>
         ) : null}
 
-        <div className="mb-3 flex rounded-xl border border-slate-800 bg-slate-900/50 p-1">
+        <div className="mb-3 flex flex-wrap rounded-xl border border-slate-800 bg-slate-900/50 p-1">
           <TabButton active={tab === "obd"} onClick={() => setTab("obd")}>
             OBD-II
           </TabButton>
@@ -560,6 +562,15 @@ export default function ObdDiagClient() {
             }}
           >
             CAN / UDS
+          </TabButton>
+          <TabButton
+            active={tab === "diag"}
+            onClick={() => {
+              setPoll(false);
+              setTab("diag");
+            }}
+          >
+            Диагностика
           </TabButton>
           <TabButton
             active={tab === "mitsubishi"}
@@ -677,6 +688,8 @@ export default function ObdDiagClient() {
               </div>
             )}
           </section>
+        ) : tab === "diag" ? (
+          <MutDiagPanel session={session} phase={phase} />
         ) : tab === "mitsubishi" ? (
           <section className="flex flex-col gap-3">
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">

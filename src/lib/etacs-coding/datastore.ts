@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resetDiagCatalogCache } from "@/lib/etacs-coding/diag-catalog";
 
 const EXCLUDED_DICT_FILES = new Set([
   "crc.json",
@@ -77,6 +78,7 @@ export function resetEtacsDictionaryCache(): void {
   cachedDedicated = null;
   cachedIndex = null;
   blockCache.clear();
+  resetDiagCatalogCache();
 }
 
 function dictionaryRoot(): string {
