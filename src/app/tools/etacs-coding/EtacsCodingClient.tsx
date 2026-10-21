@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { EtacsDecodedRow, EtacsFileView } from "@/lib/etacs-coding/types";
 import {
   applyEtacsCoding,
@@ -70,7 +71,13 @@ function downloadBytes(bytes: Uint8Array, fileName: string) {
   URL.revokeObjectURL(link.href);
 }
 
+function scenarioFromQuery(value: string | null): ObdTargetScenario {
+  if (value === "engine_kon" || value === "etacs_cuf" || value === "etacs_kon") return value;
+  return "etacs_kon";
+}
+
 export default function EtacsCodingClient() {
+  const searchParams = useSearchParams();
   const [ready, setReady] = useState<boolean | null>(null);
   const [banner, setBanner] = useState("");
   const [slotA, setSlotA] = useState<FileSlot>(() => emptySlot());
@@ -86,7 +93,9 @@ export default function EtacsCodingClient() {
   const [writeModalOpen, setWriteModalOpen] = useState(false);
   const [cufFallbackBytes, setCufFallbackBytes] = useState<Uint8Array | null>(null);
   const [cufFallbackName, setCufFallbackName] = useState<string>("");
-  const [lastObdScenario, setLastObdScenario] = useState<ObdTargetScenario>("etacs_kon");
+  const [lastObdScenario, setLastObdScenario] = useState<ObdTargetScenario>(() =>
+    scenarioFromQuery(searchParams.get("scenario")),
+  );
 
   const inputARef = useRef<HTMLInputElement>(null);
   const inputBRef = useRef<HTMLInputElement>(null);

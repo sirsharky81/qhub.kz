@@ -136,6 +136,15 @@ export interface ModuleDtcReport {
   rawStatus: string;
 }
 
+export interface ModuleDtcTarget {
+  tx: number;
+  rx: number;
+  title: string;
+  safetyCritical: boolean;
+  canSafeClear: boolean;
+  mode03Fallback?: boolean;
+}
+
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
 
 /** Universal OBD-II over ELM327 BLE (any ISO15765/OBD2 vehicle). */
@@ -846,24 +855,29 @@ export class ObdBleSession {
    * Reads DTCs across all major vehicle ECUs (OBD Mode 03 on 7E0/7E1 + UDS Service 19 02 FF on SGP/Mitsubishi modules).
    * Always returns every module to default session `10 01` afterwards so warning lamps extinguish.
    */
+  async scanCatalogModules(
+    protocol: CanProtocol,
+    catalogTargets: ModuleDtcTarget[],
+    onProgress?: (status: string, partial: ModuleDtcReport[]) => void,
+    shouldStop?: () => boolean,
+  ): Promise<ModuleDtcReport[]> {
+    return this.scanAllModuleDtcs(protocol, onProgress, shouldStop, catalogTargets);
+  }
+
   async scanAllModuleDtcs(
     protocol: CanProtocol,
     onProgress?: (status: string, partial: ModuleDtcReport[]) => void,
     shouldStop?: () => boolean,
+    catalogTargets?: ModuleDtcTarget[],
   ): Promise<ModuleDtcReport[]> {
     this.requireAdapter();
     await this.waitLeave();
     if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед чтением ошибок");
     await this.ensureUdsProfile(protocol);
 
-    const targets: {
-      tx: number;
-      rx: number;
-      title: string;
-      safetyCritical: boolean;
-      canSafeClear: boolean;
-      mode03Fallback?: boolean;
-    }[] = [
+    const targets: ModuleDtcTarget[] = catalogTargets?.length
+      ? catalogTargets
+      : [
       {
         tx: 0x7e0,
         rx: 0x7e8,
@@ -1225,7 +1239,7 @@ export class ObdBleSession {
   ): Promise<string> {
     const cleanTx = txHex.trim().toUpperCase();
     const cleanRx = rxHex.trim().toUpperCase();
-    const FORBIDDEN_CLEAR_TX = new Set(["780", "7B0", "746", "787", "784", "622", "6E0", "796", "7E2", "7E5"]);
+    const FORBIDDEN_CLEAR_TX = new Set(["780", "7B0", "746", "787", "784", "622", "6E0", "796", "7E2", "7E5", "610"]);
     if (FORBIDDEN_CLEAR_TX.has(cleanTx)) {
       throw new Error(
         `Сброс ошибок в блоке безопасности (${cleanTx}) заблокирован для защиты калибровок SRS / ABS / SAS / EPS / EyeSight. Доступно только чтение.`,

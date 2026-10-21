@@ -15,7 +15,7 @@ export const tools: Tool[] = [
     id: "obd-diag",
     name: "OBD Scanner (BLE)",
     description:
-      "vLinker BLE: универсальные коды и live-параметры OBD-II; вкладка Mitsubishi — выгрузка ETACS (.kon / .cuf).",
+      "vLinker BLE: OBD-II, диагностика Mitsubishi (ошибки и параметры Outlander III и Pajero Sport III) и выгрузка ETACS.",
     icon: "Gauge",
     category: "utilities",
     href: "/tools/obd-diag",
