@@ -35,8 +35,9 @@ import {
 import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { useObdScroll } from "./ObdScrollContext";
 import CanUdsPanel from "./CanUdsPanel";
+import { SubaruSsmPanel } from "./SubaruSsmPanel";
 
-type ToolTab = "obd" | "mitsubishi" | "can" | "diag";
+type ToolTab = "obd" | "subaru" | "mitsubishi" | "can" | "diag";
 type ObdSubTab = "live" | "dtc" | "info";
 
 interface LiveTile {
@@ -60,6 +61,7 @@ export default function ObdDiagClient() {
   const sessionRef = useRef(session);
   const [tab, setTab] = useState<ToolTab>(() => {
     const param = searchParams.get("tab");
+    if (param === "subaru") return "subaru";
     if (param === "mitsubishi") return "mitsubishi";
     if (param === "can") return "can";
     if (param === "diag") return "diag";
@@ -555,6 +557,15 @@ export default function ObdDiagClient() {
             OBD-II
           </TabButton>
           <TabButton
+            active={tab === "subaru"}
+            onClick={() => {
+              setPoll(false);
+              setTab("subaru");
+            }}
+          >
+            Subaru SSM4
+          </TabButton>
+          <TabButton
             active={tab === "can"}
             onClick={() => {
               setPoll(false);
@@ -583,7 +594,16 @@ export default function ObdDiagClient() {
           </TabButton>
         </div>
 
-        {tab === "obd" ? (
+        {tab === "subaru" ? (
+          <SubaruSsmPanel
+            session={session}
+            ready={phase !== "idle"}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            vinHint={identity?.vin}
+          />
+        ) : tab === "obd" ? (
           <section className="flex flex-col gap-3">
             <div className="flex rounded-xl border border-slate-800 bg-slate-900/40 p-1">
               <TabButton active={obdSubTab === "live"} onClick={() => setObdSubTab("live")}>
