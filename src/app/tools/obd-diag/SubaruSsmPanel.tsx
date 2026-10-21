@@ -1,32 +1,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ObdBleSession, ModuleDtcReport, SubaruRegionConfigDump } from "@/lib/obd/obd-session";
+import type { TpmsWheelReading } from "@/lib/obd/mitsubishi-modules";
 import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  Cpu,
-  Download,
-  FileSearch,
-  Gauge,
-  Layers,
-  Lock,
-  Play,
-  RefreshCw,
-  ShieldCheck,
-  Sliders,
-  Sparkles,
-  Square,
-  Trash2,
-  Wrench,
-} from "lucide-react";
-import type {
-  ModuleDtcReport,
-  ObdSession,
-  SubaruConfigDump,
-  SubaruDumpDiffItem,
-  TpmsSensorReading,
-} from "@/lib/obd/obd-session";
-import { diffSubaruDumps } from "@/lib/obd/obd-session";
-import { formatUdsPayload, parseUdsResponse } from "@/lib/obd/uds";
+  diffSubaruDumps,
+  formatUdsPayload,
+  parseUdsResponse,
+  type SubaruDidDiffEntry,
+} from "@/lib/obd/uds";
+
+function Mark({ className }: { className?: string }) {
+  return <span className={`inline-block ${className ?? ""}`} aria-hidden />;
+}
+const Activity = Mark;
+const AlertTriangle = Mark;
+const CheckCircle2 = Mark;
+const Cpu = Mark;
+const Download = Mark;
+const FileSearch = Mark;
+const Gauge = Mark;
+const Layers = Mark;
+const Lock = Mark;
+const Play = Mark;
+const RefreshCw = Mark;
+const ShieldCheck = Mark;
+const Sliders = Mark;
+const Sparkles = Mark;
+const Square = Mark;
+const Trash2 = Mark;
+const Wrench = Mark;
+
+async function sendUdsRaw(
+  session: ObdBleSession,
+  _protocol: string,
+  tx: string,
+  rx: string,
+  request: string,
+  _timeoutMs?: number,
+): Promise<string> {
+  const result = await session.sendUds("6", tx, rx, request, false);
+  return result.raw;
+}
 import {
   SSM4_CUSTOMIZE_ITEMS,
   SSM4_ECUS,
@@ -46,7 +59,7 @@ import {
 } from "@/lib/obd/subaru-ssm4-catalog";
 
 interface Props {
-  session: ObdSession;
+  session: ObdBleSession;
   ready: boolean;
   busy: boolean;
   setBusy: (busy: boolean) => void;
@@ -148,8 +161,8 @@ export function SubaruSsmPanel({
 
   // Customize & Config Diff state
   const [customizeValues, setCustomizeValues] = useState<Record<string, string>>({});
-  const [configDumpA, setConfigDumpA] = useState<SubaruConfigDump | null>(null);
-  const [configDumpB, setConfigDumpB] = useState<SubaruConfigDump | null>(null);
+  const [configDumpA, setConfigDumpA] = useState<SubaruRegionConfigDump | null>(null);
+  const [configDumpB, setConfigDumpB] = useState<SubaruRegionConfigDump | null>(null);
   const [configProgress, setConfigProgress] = useState<string | null>(null);
   const [appliedModelInput, setAppliedModelInput] = useState<string>("BTACYRB");
   const [optionCodeInput, setOptionCodeInput] = useState<string>("U45D");
@@ -166,7 +179,7 @@ export function SubaruSsmPanel({
   const [utilityLiveDids, setUtilityLiveDids] = useState<
     Record<string, { rawHex: string; decoded: string }>
   >({});
-  const [tpmsSensors, setTpmsSensors] = useState<TpmsSensorReading[]>([]);
+  const [tpmsSensors, setTpmsSensors] = useState<TpmsWheelReading[]>([]);
 
   useEffect(() => {
     if (vinHint) {
@@ -234,7 +247,7 @@ export function SubaruSsmPanel({
     setBusy(true);
     setError(null);
     try {
-      const info = await session.readVehicleIdent("can11-500", 0x7e0, 0x7e8);
+      const info = await session.readVehicleIdentity();
       if (info.vin) {
         setDetectedVin(info.vin);
         const matched = matchSsm4VehicleByVin(info.vin);
@@ -266,7 +279,7 @@ export function SubaruSsmPanel({
     setScanProgress("Запуск опроса всех систем Subaru (Powertrain · Chassis · Body)…");
     try {
       const allReports = await session.scanAllModuleDtcs(
-        "can11-500",
+        "6",
         (msg, partial) => {
           setScanProgress(msg);
           // Filter out Mitsubishi-only 6xx/773 modules so the table shows Subaru systems cleanly
@@ -303,7 +316,7 @@ export function SubaruSsmPanel({
       setError(null);
       setScanStatusMsg(null);
       try {
-        const res = await session.clearModuleDtcsSafe("can11-500", txHex, rxHex);
+        const res = await session.clearModuleDtcsSafe("6", txHex, rxHex);
         setScanStatusMsg(`${title}: ${res}`);
         setDtcReports((prev) =>
           prev.map((r) =>
@@ -326,15 +339,14 @@ export function SubaruSsmPanel({
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
-    const txNum = Number.parseInt(selectedEcu.txHex, 16);
-    const rxNum = Number.parseInt(selectedEcu.rxHex, 16);
     try {
-      const ident = await session.readVehicleIdent("can11-500", txNum, rxNum);
+      const ident = await session.readVehicleIdentity();
       let swVer: string | null = null;
       let sysName: string | null = null;
 
       try {
-        const raw97 = await session.sendUdsRaw(
+        const raw97 = await sendUdsRaw(
+            session,
           "can11-500",
           selectedEcu.txHex,
           selectedEcu.rxHex,
@@ -350,7 +362,8 @@ export function SubaruSsmPanel({
       }
 
       try {
-        const raw89 = await session.sendUdsRaw(
+        const raw89 = await sendUdsRaw(
+            session,
           "can11-500",
           selectedEcu.txHex,
           selectedEcu.rxHex,
@@ -369,9 +382,9 @@ export function SubaruSsmPanel({
         ecuCode: selectedEcu.code,
         txHex: selectedEcu.txHex,
         rxHex: selectedEcu.rxHex,
-        partNumber: ident.ecuPartNumber,
+        partNumber: ident.calid,
         softwareVersion: swVer,
-        calibrationId: ident.calibrationId,
+        calibrationId: ident.calid,
         systemName: sysName ?? selectedEcu.nameEn,
         vin: ident.vin,
       });
@@ -379,7 +392,8 @@ export function SubaruSsmPanel({
       // Read Freeze Frame / IG Counter (DID 101E + Mode 02 on Engine)
       const ffItems: { label: string; value: string }[] = [];
       try {
-        const raw101e = await session.sendUdsRaw(
+        const raw101e = await sendUdsRaw(
+            session,
           "can11-500",
           selectedEcu.txHex,
           selectedEcu.rxHex,
@@ -400,8 +414,11 @@ export function SubaruSsmPanel({
       if (selectedEcu.txHex === "7E0") {
         try {
           const ff = await session.readFreezeFrame();
-          for (const row of ff) {
-            ffItems.push({ label: row.label, value: row.value });
+          for (const row of ff.readings) {
+            ffItems.push({
+              label: row.label,
+              value: row.unit ? `${row.value} ${row.unit}` : row.value,
+            });
           }
         } catch {
           /* ignore */
@@ -423,7 +440,8 @@ export function SubaruSsmPanel({
         const ecu = SSM4_ECUS.find((e) => e.ecuId === sig.ecuId) ?? selectedEcu;
         const { serviceSid, requestHex } = buildSsm4RequestHex(sig);
         try {
-          const raw = await session.sendUdsRaw(
+          const raw = await sendUdsRaw(
+            session,
             "can11-500",
             ecu.txHex,
             ecu.rxHex,
@@ -564,7 +582,8 @@ export function SubaruSsmPanel({
       const next: Record<string, string> = {};
       for (const item of SSM4_CUSTOMIZE_ITEMS) {
         try {
-          const raw = await session.sendUdsRaw(
+          const raw = await sendUdsRaw(
+            session,
             "can11-500",
             item.txHex,
             item.rxHex,
@@ -599,7 +618,7 @@ export function SubaruSsmPanel({
       setConfigProgress("Чтение всех DID Subaru (Meter · BIU · EyeSight · ABS · EPS)…");
       try {
         const dump = await session.readSubaruMeterEyesightConfig(
-          "can11-500",
+          "6",
           (msg) => setConfigProgress(msg),
         );
         if (slot === "A") setConfigDumpA(dump);
@@ -614,7 +633,7 @@ export function SubaruSsmPanel({
     [ready, busy, session, setBusy, setError],
   );
 
-  const handleExportDumpJson = useCallback((dump: SubaruConfigDump, slot: "A" | "B", onlyMeter = false) => {
+  const handleExportDumpJson = useCallback((dump: SubaruRegionConfigDump, slot: "A" | "B", onlyMeter = false) => {
     const payload = onlyMeter
       ? {
           ...dump,
@@ -640,7 +659,7 @@ export function SubaruSsmPanel({
       if (!file) return;
       try {
         const text = await file.text();
-        const parsed = JSON.parse(text) as SubaruConfigDump;
+        const parsed = JSON.parse(text) as SubaruRegionConfigDump;
         if (!parsed || !Array.isArray(parsed.modules)) {
           throw new Error("Некорректный формат JSON-слепка Subaru");
         }
@@ -660,7 +679,8 @@ export function SubaruSsmPanel({
     try {
       const next: Record<string, { rawHex: string; decoded: string }> = {};
       try {
-        await session.sendUdsRaw(
+        await sendUdsRaw(
+            session,
           "can11-500",
           selectedUtility.txHex,
           selectedUtility.rxHex,
@@ -672,7 +692,8 @@ export function SubaruSsmPanel({
       }
       for (const item of selectedUtility.liveDids) {
         try {
-          const raw = await session.sendUdsRaw(
+          const raw = await sendUdsRaw(
+            session,
             "can11-500",
             selectedUtility.txHex,
             selectedUtility.rxHex,
@@ -700,7 +721,8 @@ export function SubaruSsmPanel({
         }
       }
       try {
-        await session.sendUdsRaw(
+        await sendUdsRaw(
+            session,
           "can11-500",
           selectedUtility.txHex,
           selectedUtility.rxHex,
@@ -713,8 +735,8 @@ export function SubaruSsmPanel({
       setUtilityLiveDids(next);
 
       if (selectedUtility.id === "util-tpms-inspection") {
-        const tpms = await session.readTpmsSensors("can11-500", "subaru-752");
-        setTpmsSensors(tpms);
+        const tpms = await session.readTpmsSensors("subaru-752");
+        setTpmsSensors(tpms.wheels);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка инспекции калибровок");
@@ -723,7 +745,7 @@ export function SubaruSsmPanel({
     }
   }, [ready, busy, selectedUtility, session, setBusy, setError]);
 
-  const dumpDiffs = useMemo<SubaruDumpDiffItem[]>(() => {
+  const dumpDiffs = useMemo<SubaruDidDiffEntry[]>(() => {
     if (!configDumpA || !configDumpB) return [];
     return diffSubaruDumps(configDumpA, configDumpB);
   }, [configDumpA, configDumpB]);
@@ -1588,11 +1610,11 @@ export function SubaruSsmPanel({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
                   {tpmsSensors.map((w) => (
                     <div
-                      key={w.wheel}
+                      key={w.wheelIndex}
                       className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/20 p-3"
                     >
                       <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                        {w.label}
+                        {w.defaultLabel}
                       </div>
                       <div className="mt-1 font-mono text-base font-bold text-blue-700 dark:text-blue-300">
                         {w.pressureBar != null
@@ -1600,8 +1622,8 @@ export function SubaruSsmPanel({
                           : "Нет данных"}
                       </div>
                       <div className="font-mono text-[10px] text-zinc-500">
-                        {w.pressurePsi != null ? `${w.pressurePsi} PSI` : ""} · Raw:{" "}
-                        {w.rawHex}
+                        {w.pressurePsi != null ? `${w.pressurePsi} PSI` : ""} · ID:{" "}
+                        {w.sensorIdHex ?? "—"}
                       </div>
                     </div>
                   ))}
@@ -1765,7 +1787,7 @@ export function SubaruSsmPanel({
                 </div>
                 {dumpDiffs.map((d) => (
                   <div
-                    key={`${d.moduleKey}-${d.did}`}
+                    key={`${d.txHex}-${d.did}`}
                     className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs font-mono"
                   >
                     <div className="font-bold text-zinc-800 dark:text-zinc-200">
