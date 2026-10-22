@@ -103,19 +103,17 @@ export default function EtacsCodingClient() {
   const inputARef = useRef<HTMLInputElement>(null);
   const inputBRef = useRef<HTMLInputElement>(null);
 
-  const [canShareFiles, setCanShareFiles] = useState(false);
-
-  useEffect(() => {
+  const [canShareFiles] = useState(() => {
     try {
-      if (typeof navigator === "undefined" || !navigator.canShare) return;
+      if (typeof navigator === "undefined" || !navigator.canShare) return false;
       const probe = new File([new Uint8Array(4)], "probe.kon", {
         type: "application/octet-stream",
       });
-      setCanShareFiles(navigator.canShare({ files: [probe] }));
+      return navigator.canShare({ files: [probe] });
     } catch {
-      setCanShareFiles(false);
+      return false;
     }
-  }, []);
+  });
 
   useEffect(() => {
     void fetchEtacsStatus()

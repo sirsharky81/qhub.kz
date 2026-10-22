@@ -95,36 +95,31 @@ export default function EtacsBlockUploadPanel({
   const profiles = allProfiles.filter((p) =>
     targetScenario === "engine_kon" ? p.moduleKind === "engine" : p.moduleKind !== "engine",
   );
-  const [profileId, setProfileId] = useState(
-    targetScenario === "engine_kon" ? "engine-auto" : "auto",
-  );
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const profileId =
+    selectedProfileId && profiles.some((p) => p.id === selectedProfileId)
+      ? selectedProfileId
+      : targetScenario === "engine_kon"
+        ? "engine-auto"
+        : "auto";
   const companionCufInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setProfileId(targetScenario === "engine_kon" ? "engine-auto" : "auto");
-  }, [targetScenario]);
   const [lastDump, setLastDump] = useState<EtacsCodingDump | null>(null);
   const [konResult, setKonResult] = useState<EtacsWriteBlockResult | null>(null);
   const [cufResult, setCufResult] = useState<EtacsWriteBlockResult | null>(null);
-  const [backupAAt, setBackupAAt] = useState<string | null>(slotA.backupSavedAt);
-  const [backupBAt, setBackupBAt] = useState<string | null>(slotB.backupSavedAt);
+  const [localBackupAAt, setLocalBackupAAt] = useState<string | null>(null);
+  const [localBackupBAt, setLocalBackupBAt] = useState<string | null>(null);
+  const backupAAt = slotA.backupSavedAt ?? localBackupAAt;
+  const backupBAt = slotB.backupSavedAt ?? localBackupBAt;
 
   useEffect(() => {
-    setBackupAAt(slotA.backupSavedAt);
-  }, [slotA.backupSavedAt]);
-
-  useEffect(() => {
-    setBackupBAt(slotB.backupSavedAt);
-  }, [slotB.backupSavedAt]);
-
-  useEffect(() => {
-    sessionRef.current.setLinkLostHandler(() => {
+    const currentSession = sessionRef.current;
+    currentSession.setLinkLostHandler(() => {
       setPhase("idle");
       setAdapterLabel(null);
       setStep("error");
       setError("Связь с адаптером прервалась. Подключите vLinker снова.");
     });
-    return () => sessionRef.current.setLinkLostHandler(null);
+    return () => currentSession.setLinkLostHandler(null);
   }, []);
 
   const pushLog = useCallback((line: string) => {
@@ -175,7 +170,7 @@ export default function EtacsBlockUploadPanel({
       }
       const name = await saveOriginalFileBackup(slotA.originalBytes, slotA.displayName || "file-a.kon");
       const at = new Date().toISOString();
-      setBackupAAt(at);
+      setLocalBackupAAt(at);
       onBackupSavedA(at);
       pushLog(`Сохранён исходник A: ${name}`);
       setStatusLine(`Исходник A сохранён: ${name}`);
@@ -188,7 +183,7 @@ export default function EtacsBlockUploadPanel({
       }
       const name = await saveOriginalFileBackup(slotB.originalBytes, slotB.displayName || "file-b.kon");
       const at = new Date().toISOString();
-      setBackupBAt(at);
+      setLocalBackupBAt(at);
       onBackupSavedB(at);
       pushLog(`Сохранён исходник B: ${name}`);
       setStatusLine(`Исходник B сохранён: ${name}`);
@@ -200,7 +195,7 @@ export default function EtacsBlockUploadPanel({
       setStep("reading");
       const dump = await downloadMitsubishiEtacsCoding(sessionRef.current, profileId);
       setLastDump(dump);
-      setProfileId(dump.profileId);
+      setSelectedProfileId(dump.profileId);
       pushLog(
         `Считано: ${dump.partNumber ?? "?"} · .kon ${dump.variant.length} Б · .cuf ${dump.custom.length} Б`,
       );
@@ -407,7 +402,7 @@ export default function EtacsBlockUploadPanel({
             className="mt-1 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs text-gray-900"
             value={profileId}
             disabled={busy}
-            onChange={(e) => setProfileId(e.target.value)}
+            onChange={(e) => setSelectedProfileId(e.target.value)}
           >
             {profiles.map((p) => (
               <option key={p.id} value={p.id}>

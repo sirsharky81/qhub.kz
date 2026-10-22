@@ -6,7 +6,6 @@ import {
   canUseSaveFilePicker,
   cleanCodingFileStem,
   detectCodingExtension,
-  ensureCodingFileName,
 } from "./etacs-backup";
 
 export type SaveDialogMethod = "picker" | "download" | "share" | "overwrite";
@@ -34,41 +33,46 @@ function makeTimestampTag(): string {
 }
 
 export function EtacsSaveFileModal({ request, onClose }: Props) {
-  const [stem, setStem] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [supportsPicker, setSupportsPicker] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setSupportsPicker(canUseSaveFilePicker());
-  }, []);
-
-  useEffect(() => {
-    if (!request) return;
-    setError(null);
-    const baseStem = cleanCodingFileStem(
-      request.originalDisplayName,
-      [request.ecuId, request.vin].filter(Boolean).join("_") || `file_${request.side}`,
-    );
-    if (request.mode === "original") {
-      setStem(`${baseStem}_orig_${makeTimestampTag()}`);
-    } else {
-      setStem(`${baseStem}_mod_${makeTimestampTag()}`);
-    }
-    window.setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }, 30);
-  }, [request]);
-
   if (!request) return null;
+  return (
+    <EtacsSaveFileModalInner
+      key={`${request.side}-${request.mode}-${request.originalDisplayName}`}
+      request={request}
+      onClose={onClose}
+    />
+  );
+}
 
-  const ext = detectCodingExtension(request.originalDisplayName);
+function EtacsSaveFileModalInner({
+  request,
+  onClose,
+}: {
+  request: EtacsSaveFileDialogRequest;
+  onClose: () => void;
+}) {
   const baseStem = cleanCodingFileStem(
     request.originalDisplayName,
     [request.ecuId, request.vin].filter(Boolean).join("_") || `file_${request.side}`,
   );
+  const [stem, setStem] = useState(() =>
+    request.mode === "original"
+      ? `${baseStem}_orig_${makeTimestampTag()}`
+      : `${baseStem}_mod_${makeTimestampTag()}`,
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [supportsPicker] = useState(() => canUseSaveFilePicker());
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 30);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const ext = detectCodingExtension(request.originalDisplayName);
   const cleanedUserInput = stem
     .replace(/\.(kon|cuf).*$/i, "")
     .replace(/[^\w.\-()+\u0400-\u04FF ]+/g, "_")
@@ -93,7 +97,6 @@ export function EtacsSaveFileModal({ request, onClose }: Props) {
       onClose();
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") {
-        // Пользователь закрыл системный диалог выбора папки — оставляем окно открытым
         setBusy(false);
         return;
       }
@@ -150,7 +153,6 @@ export function EtacsSaveFileModal({ request, onClose }: Props) {
                 value={stem}
                 disabled={busy}
                 onChange={(e) => {
-                  // Если пользователь случайно ввёл .kon / .cuf в середину или конец, убираем дубль
                   const cleaned = e.target.value.replace(/\.(kon|cuf)$/i, "");
                   setStem(cleaned);
                 }}

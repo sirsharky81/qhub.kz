@@ -34,13 +34,11 @@ export function EtacsHexDiffView({
   const selectedSet = new Set(selectedByteIndices);
 
   const [showRawInput, setShowRawInput] = useState(false);
-  const [rawDraft, setRawDraft] = useState(currentHex);
+  const [rawDraftOverride, setRawDraftOverride] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const firstSelectedColRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    setRawDraft(currentHex);
-  }, [currentHex]);
+  const rawDraft = rawDraftOverride ?? currentHex;
 
   // Автопрокрутка к байту выбранного параметра
   useEffect(() => {
@@ -232,8 +230,9 @@ export function EtacsHexDiffView({
             spellCheck={false}
             readOnly={editingLocked}
             value={rawDraft}
+            onBlur={() => setRawDraftOverride(null)}
             onChange={(e) => {
-              setRawDraft(e.target.value);
+              setRawDraftOverride(e.target.value);
               onManualHexChange(e.target.value);
             }}
             className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1 font-mono text-[11px] text-gray-800 focus:border-blue-500 focus:outline-none"
