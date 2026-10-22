@@ -150,7 +150,10 @@ export default function EtacsBlockUploadPanel({
       setAdapterLabel(name);
       const state = await sessionRef.current.linkVehicle();
       setPhase(sessionRef.current.phase);
-      if (state) pushLog(`Связь с ЭБУ: ${state}`);
+      if (state) {
+        const versionInfo = state.elm?.versionLine || "CAN 11-bit 500k";
+        pushLog(`Связь с ЭБУ установлена (${versionInfo})`);
+      }
       setStep("idle");
       setStatusLine("Готово к считыванию или записи");
     });

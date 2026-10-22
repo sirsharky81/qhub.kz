@@ -4,7 +4,7 @@ import {
   VLINKER_NAME_PREFIXES,
 } from "./vlinker-uuids";
 import type { BleAdapterInfo, BleLink } from "./ble-link";
-import { lineToElmBytes } from "./ble-link";
+import { chunkElmWriteBytes, lineToElmBytes } from "./ble-link";
 import { decodeDataView, ElmRxBuffer, readElmUntilQuietPrompt } from "./elm-buffer";
 import {
   formatBleFailure,
@@ -147,27 +147,39 @@ export class WebBleLink implements BleLink {
   async writeLine(line: string): Promise<void> {
     const char = this.writeChar;
     if (!char) throw new Error("Адаптер не подключён");
-    const bytes = lineToElmBytes(line);
-    const attempts: Array<() => Promise<void>> = [];
+    const chunks = chunkElmWriteBytes(lineToElmBytes(line));
     const withoutResponse = char.writeValueWithoutResponse?.bind(char);
     const withResponse = char.writeValue.bind(char);
-    if (this.useWriteWithoutResponse && withoutResponse) {
-      attempts.push(() => withoutResponse(bytes));
-      attempts.push(() => withResponse(bytes));
-    } else {
-      attempts.push(() => withResponse(bytes));
-      if (withoutResponse) attempts.push(() => withoutResponse(bytes));
-    }
-    let last: unknown;
-    for (const attempt of attempts) {
-      try {
-        await attempt();
-        return;
-      } catch (error) {
-        last = error;
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!;
+      const attempts: Array<() => Promise<void>> = [];
+      if (this.useWriteWithoutResponse && withoutResponse) {
+        attempts.push(() => withoutResponse(chunk));
+        attempts.push(() => withResponse(chunk));
+      } else {
+        attempts.push(() => withResponse(chunk));
+        if (withoutResponse) attempts.push(() => withoutResponse(chunk));
+      }
+      let last: unknown;
+      let sent = false;
+      for (const attempt of attempts) {
+        try {
+          await attempt();
+          sent = true;
+          break;
+        } catch (error) {
+          last = error;
+        }
+      }
+      if (!sent) {
+        throw new Error(formatBleFailure(last));
+      }
+      // Small pacing delay between 20-byte BLE UART chunks so vLinker UART FIFO never overflows
+      if (chunks.length > 1 && i + 1 < chunks.length) {
+        await new Promise((resolve) => setTimeout(resolve, 8));
       }
     }
-    throw new Error(formatBleFailure(last));
   }
 
   discardInput(): void {

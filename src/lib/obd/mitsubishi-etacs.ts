@@ -1101,6 +1101,180 @@ function parseLidBytesFromReadId(
 }
 
 /**
+ * Build explicit ISO 15765-2 (ISO-TP) 8-byte CAN frames for a multi-frame PDU
+ * when ELM327 / vLinker rejects a single >7-byte hex string with `?` (because
+ * standard ELM327 command parser only accepts up to 7/8 data bytes per line).
+ *
+ * - Single Frame (`len <= 7`): `[0x00 | len, ...pdu]` (padded to 8 bytes with `0x00`)
+ * - First Frame (`len > 7`): `[0x10 | ((len >> 8) & 0x0F), len & 0xFF, pdu[0..5]]`
+ * - Consecutive Frames: `[0x20 | (seq & 0x0F), ...chunk]` (seq = 1..15, wraps to 0..15, padded to 8 bytes with `0x00`)
+ */
+export function buildIsoTpFrames(pdu: Uint8Array): string[] {
+  const totalLen = pdu.length;
+  if (totalLen <= 7) {
+    const frame = new Uint8Array(8);
+    frame[0] = totalLen & 0x0f;
+    frame.set(pdu, 1);
+    return [bytesToHex(frame, "")];
+  }
+
+  const frames: string[] = [];
+  const ff = new Uint8Array(8);
+  ff[0] = 0x10 | ((totalLen >> 8) & 0x0f);
+  ff[1] = totalLen & 0xff;
+  ff.set(pdu.subarray(0, 6), 2);
+  frames.push(bytesToHex(ff, ""));
+
+  let offset = 6;
+  let seq = 1;
+  while (offset < totalLen) {
+    const cf = new Uint8Array(8);
+    cf[0] = 0x20 | (seq & 0x0f);
+    const slice = pdu.subarray(offset, Math.min(offset + 7, totalLen));
+    cf.set(slice, 1);
+    frames.push(bytesToHex(cf, ""));
+    offset += 7;
+    seq = (seq + 1) & 0x0f;
+  }
+  return frames;
+}
+
+function isElmSyntaxRejection(raw: string): boolean {
+  const clean = raw.replace(/>/g, "").trim();
+  if (!clean) return true;
+  if (clean === "?") return true;
+  const tokens = extractHexTokens(raw);
+  return tokens.length === 0 && clean.includes("?");
+}
+
+function hasPositiveWriteAck(tokens: number[], expectPosSid: number, targetId: number[]): boolean {
+  return tokens.some((b, idx) => {
+    if (b !== expectPosSid) return false;
+    if (idx + targetId.length >= tokens.length) return true;
+    return targetId.every((idByte, k) => tokens[idx + 1 + k] === idByte);
+  });
+}
+
+function hasNegativeResponseForService(tokens: number[], writeSvc: number): number | null {
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    if (tokens[i] === 0x7f && tokens[i + 1] === writeSvc) {
+      return tokens[i + 2]!;
+    }
+  }
+  return null;
+}
+
+/**
+ * Send a multi-byte write PDU (`3B <LID> <DATA...>` or `2E <DID_HI> <DID_LO> <DATA...>`)
+ * with 3-tier fallback so it works on all ELM327 / STN / vLinker MC-IOS / Android adapters:
+ *
+ * 1. Direct hex line (`3BB2...`) — works on adapters with large UART line buffer & auto ISO-TP.
+ * 2. STN / vLinker `STPX` command (`STPX h:620, d:3BB2..., t:10000`) if direct line returns `?`.
+ * 3. Explicit ISO-TP framing (`ATCAF0` + First Frame `10 xx ...` + Flow Control `30 ...` +
+ *    Consecutive Frames `21 ...`, `22 ...`) — works on every ELM327 / vLinker because each command
+ *    is a standard 8-byte (16-hex-char) CAN frame!
+ */
+async function sendCodingWritePdu(
+  elm: Elm327Client,
+  profile: EtacsCanProfile,
+  writeSvc: number,
+  targetId: number[],
+  payload: Uint8Array,
+): Promise<string> {
+  const expectPosSid = (writeSvc + 0x40) & 0xff;
+  const pdu = new Uint8Array(1 + targetId.length + payload.length);
+  pdu[0] = writeSvc & 0xff;
+  for (let i = 0; i < targetId.length; i++) {
+    pdu[1 + i] = targetId[i]! & 0xff;
+  }
+  pdu.set(payload, 1 + targetId.length);
+
+  const fullHex = bytesToHex(pdu, "");
+
+  // Tier 1: Direct hex payload (fast path for adapters that support long lines & test mocks)
+  const directResp = await elm.sendPayload(fullHex, 15_000);
+  if (!isElmSyntaxRejection(directResp)) {
+    return directResp;
+  }
+
+  // Tier 2: STN / vLinker extended transmit `STPX` (supported on STN11xx/21xx & vLinker MC+/BM+/FD+/MC-IOS)
+  const txHex = profile.txId.toString(16).padStart(3, "0").toUpperCase();
+  try {
+    const stpxResp = await elm.sendCommand(`STPXh:${txHex},d:${fullHex},t:10000`, 15_000);
+    if (!isElmSyntaxRejection(stpxResp)) {
+      const stpxTokens = extractHexTokens(stpxResp);
+      if (
+        hasPositiveWriteAck(stpxTokens, expectPosSid, targetId) ||
+        hasNegativeResponseForService(stpxTokens, writeSvc) !== null
+      ) {
+        return stpxResp;
+      }
+    }
+  } catch {
+    /* STPX not supported, proceed to Tier 3 explicit ISO-TP framing */
+  }
+
+  // Tier 3: Manual ISO-TP multi-frame transmission with ATCAF0 (raw 8-byte CAN frames)
+  const frames = buildIsoTpFrames(pdu);
+  try {
+    await elm.sendCommand("ATCAF0");
+    let lastReply = "";
+    if (frames.length === 1) {
+      lastReply = await elm.sendPayload(frames[0]!, 10_000);
+    } else {
+      // Send First Frame (10 LL ...) and expect Flow Control (30 BS STmin ...) from ECU on RX ID
+      const ffResp = await elm.sendPayload(frames[0]!, 5_000);
+      const ffTokens = extractHexTokens(ffResp);
+
+      // Extract STmin from Flow Control frame `30 <BS> <STmin>` if present (default 10ms)
+      let stMinMs = 10;
+      const fcIndex = ffTokens.findIndex((b) => (b & 0xf0) === 0x30);
+      if (fcIndex >= 0 && fcIndex + 2 < ffTokens.length) {
+        const rawStMin = ffTokens[fcIndex + 2]!;
+        if (rawStMin <= 0x7f) {
+          stMinMs = Math.max(5, rawStMin);
+        }
+      }
+
+      // Send Consecutive Frames (21..., 22..., ...). Intermediate CFs have no ECU reply (`NO DATA` with ATST),
+      // so set a short ELM response timeout (`ATST06` ~ 24ms) for intermediate CFs and full timeout on the last CF.
+      if (frames.length > 2) {
+        try {
+          await elm.sendCommand("ATST06");
+        } catch {
+          /* ignore */
+        }
+      }
+
+      for (let i = 1; i < frames.length; i++) {
+        const isLast = i === frames.length - 1;
+        if (isLast && frames.length > 2) {
+          try {
+            await elm.sendCommand("ATSTFF");
+          } catch {
+            /* ignore */
+          }
+        }
+        const cfResp = await elm.sendPayload(frames[i]!, isLast ? 12_000 : 1_500);
+        if (isLast) {
+          lastReply = cfResp;
+        } else if (stMinMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, Math.min(stMinMs, 50)));
+        }
+      }
+    }
+    return lastReply;
+  } finally {
+    try {
+      await elm.sendCommand("ATSTFF");
+      await elm.sendCommand("ATCAF1");
+    } catch {
+      /* restore ISO-TP auto formatting */
+    }
+  }
+}
+
+/**
  * Write a single coding block (either `.kon` Variant OR `.cuf` Custom) to Mitsubishi ETACS or Engine ECU.
  *
  * Why `.kon` and `.cuf` MUST be written separately and sequentially:
@@ -1144,27 +1318,74 @@ export async function writeEtacsSingleBlock(
   const writeSvc = activeProfile.service === 0x21 ? 0x3b : 0x2e;
   const expectPosSid = (writeSvc + 0x40) & 0xff; // 0x7B for KWP 3B, 0x6E for UDS 2E
   const writeSvcHex = writeSvc.toString(16).padStart(2, "0").toUpperCase();
-  const dataHex = bytesToHex(payload, "");
 
-  // Ensure coding write session is unlocked (KWP 10 92 / 10 85 or UDS 10 03)
-  const rawWriteResponse = await elm.sendPayload(`${writeSvcHex}${idHex}${dataHex}`, 15_000);
-  const tokens = extractHexTokens(rawWriteResponse);
+  // Build candidate write attempts:
+  // 1. Primary targetId + exact payload
+  // 2. If ETACS KWP 0x21 .cuf (65 bytes) is rejected with NRC 0x12 / 0x13 / 0x22 / 0x31 on `3B B2`,
+  //    also try with the 4-byte KWP coding trailer `A0 05 A0 01` and fallback ETACS Custom LIDs (`31`, `51`, `43`).
+  const candidateTargets: { lid: number[]; data: Uint8Array }[] = [
+    { lid: targetId, data: payload },
+  ];
 
-  const isPositive = tokens.some((b, idx) => {
-    if (b !== expectPosSid) return false;
-    if (idx + targetId.length >= tokens.length) return true;
-    return targetId.every((idByte, k) => tokens[idx + 1 + k] === idByte);
-  });
+  if (activeProfile.service === 0x21 && kind === "cuf") {
+    const withTrailer = new Uint8Array(payload.length + 4);
+    withTrailer.set(payload, 0);
+    withTrailer.set([0xa0, 0x05, 0xa0, 0x01], payload.length);
+    candidateTargets.push({ lid: targetId, data: withTrailer });
+
+    const fallbackCufLids = [[0xb2], [0x31], [0x51], [0x43], [0xb1], [0x32]];
+    for (const altLid of fallbackCufLids) {
+      if (altLid.length === targetId.length && altLid.every((b, idx) => b === targetId[idx])) {
+        continue;
+      }
+      candidateTargets.push({ lid: altLid, data: payload });
+    }
+  } else if (activeProfile.service === 0x21 && kind === "kon") {
+    const withTrailer = new Uint8Array(payload.length + 4);
+    withTrailer.set(payload, 0);
+    withTrailer.set([0xa0, 0x05, 0xa0, 0x01], payload.length);
+    candidateTargets.push({ lid: targetId, data: withTrailer });
+  }
+
+  let rawWriteResponse = "";
+  let tokens: number[] = [];
+  let isPositive = false;
+  let usedTargetId = targetId;
+  let usedIdHex = idHex;
+
+  for (let attemptIdx = 0; attemptIdx < candidateTargets.length; attemptIdx++) {
+    const cand = candidateTargets[attemptIdx]!;
+    usedTargetId = cand.lid;
+    usedIdHex = cand.lid.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
+
+    rawWriteResponse = await sendCodingWritePdu(
+      elm,
+      activeProfile,
+      writeSvc,
+      cand.lid,
+      cand.data,
+    );
+    tokens = extractHexTokens(rawWriteResponse);
+    isPositive = hasPositiveWriteAck(tokens, expectPosSid, cand.lid);
+    if (isPositive) break;
+
+    // If first attempt failed with security/conditions/subFunction NRC, try unlocking KWP session 10 92 / 10 89 before next candidate
+    if (activeProfile.service === 0x21 && attemptIdx === 0 && candidateTargets.length > 1) {
+      try {
+        await elm.sendPayload("1092", 2_500);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 
   if (!isPositive) {
     // Check for negative response 7F <svc> <nrc>
     let nrcDetail = rawWriteResponse.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "NO DATA";
-    for (let i = 0; i + 2 < tokens.length; i++) {
-      if (tokens[i] === 0x7f && tokens[i + 1] === writeSvc) {
-        const nrc = tokens[i + 2]!.toString(16).padStart(2, "0").toUpperCase();
-        nrcDetail = `7F ${writeSvcHex} ${nrc}`;
-        break;
-      }
+    const nrcByte = hasNegativeResponseForService(tokens, writeSvc);
+    if (nrcByte !== null) {
+      const nrc = nrcByte.toString(16).padStart(2, "0").toUpperCase();
+      nrcDetail = `7F ${writeSvcHex} ${nrc}`;
     }
     try {
       await elm.sendCommand("ATFCSM0");
@@ -1180,8 +1401,8 @@ export async function writeEtacsSingleBlock(
   let verified = false;
   try {
     const readSvcHex = activeProfile.service.toString(16).padStart(2, "0").toUpperCase();
-    const verifyRaw = await elm.sendPayload(`${readSvcHex}${idHex}`, 10_000);
-    const verifyPayload = positiveEtacsPayload(verifyRaw, activeProfile.service, targetId);
+    const verifyRaw = await elm.sendPayload(`${readSvcHex}${usedIdHex}`, 10_000);
+    const verifyPayload = positiveEtacsPayload(verifyRaw, activeProfile.service, usedTargetId);
     if (verifyPayload && verifyPayload.length === payload.length) {
       verified = verifyPayload.every((b, idx) => b === payload[idx]);
     }
@@ -1198,18 +1419,18 @@ export async function writeEtacsSingleBlock(
   const note =
     kind === "kon"
       ? verified
-        ? `Variant (.kon, ${payload.length} Б) успешно записан и проверен по чтению! Внимание: при записи .kon блок ETACS сбрасывает настройки .cuf на базовые — теперь обязательно запишите ваш файл .cuf вторым шагом.`
-        : `Variant (.kon, ${payload.length} Б) принят блоком (ответ ${expectPosSid.toString(16).toUpperCase()} ${idHex}). Внимание: после записи .kon настройки .cuf сбрасываются на базовые — запишите ваш файл .cuf отдельно вторым шагом.`
+        ? `Variant (.kon, ${payload.length} Б) успешно записан и проверен по чтению! Внимание: при записи .kon блок ETACS сбрасывает настройки .cuf на базовые — теперь обязательно запишите ваш файл .cuf вторым шагом (затем выключите зажигание OFF на 5–10 сек).`
+        : `Variant (.kon, ${payload.length} Б) принят блоком (ответ ${expectPosSid.toString(16).toUpperCase()} ${usedIdHex}). Внимание: после записи .kon настройки .cuf сбрасываются на базовые — запишите ваш файл .cuf отдельно вторым шагом (затем выключите зажигание OFF на 5–10 сек).`
       : verified
-        ? `Custom (.cuf, ${payload.length} Б) успешно записан и проверен по чтению! Пользовательские настройки восстановлены.`
-        : `Custom (.cuf, ${payload.length} Б) принят блоком (ответ ${expectPosSid.toString(16).toUpperCase()} ${idHex}). Выключите зажигание на 5–10 секунд для фиксации в памяти.`;
+        ? `Custom (.cuf, ${payload.length} Б) успешно записан и проверен по чтению! Пользовательские настройки восстановлены. Выключите зажигание (OFF) на 5–10 секунд для фиксации изменений в блоке.`
+        : `Custom (.cuf, ${payload.length} Б) принят блоком (ответ ${expectPosSid.toString(16).toUpperCase()} ${usedIdHex}). Выключите зажигание (OFF) на 5–10 секунд для фиксации в памяти.`;
 
   return {
     kind,
     profileId: activeProfile.id,
     txHex: activeProfile.txId.toString(16).toUpperCase(),
     rxHex: activeProfile.rxId.toString(16).toUpperCase(),
-    writeCommandHex: `${writeSvcHex} ${idHex}`,
+    writeCommandHex: `${writeSvcHex} ${usedIdHex}`,
     writtenBytes: payload.length,
     verified,
     rawWriteResponse,

@@ -6,7 +6,7 @@ import {
   VLINKER_WRITE,
 } from "./vlinker-uuids";
 import type { BleAdapterInfo, BleLink } from "./ble-link";
-import { lineToElmBytes } from "./ble-link";
+import { chunkElmWriteBytes, lineToElmBytes } from "./ble-link";
 import { decodeDataView, ElmRxBuffer, readElmUntilQuietPrompt } from "./elm-buffer";
 
 export class CapacitorBleLink implements BleLink {
@@ -91,10 +91,16 @@ export class CapacitorBleLink implements BleLink {
   }
 
   async writeLine(line: string): Promise<void> {
-    const bytes = lineToElmBytes(line);
-    const view = new DataView(new ArrayBuffer(bytes.length));
-    bytes.forEach((b, i) => view.setUint8(i, b));
-    await BleClient.write(this.info.id, VLINKER_SERVICE, VLINKER_WRITE, view);
+    const chunks = chunkElmWriteBytes(lineToElmBytes(line));
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!;
+      const view = new DataView(new ArrayBuffer(chunk.length));
+      chunk.forEach((b, idx) => view.setUint8(idx, b));
+      await BleClient.write(this.info.id, VLINKER_SERVICE, VLINKER_WRITE, view);
+      if (chunks.length > 1 && i + 1 < chunks.length) {
+        await new Promise((resolve) => setTimeout(resolve, 8));
+      }
+    }
   }
 
   discardInput(): void {
