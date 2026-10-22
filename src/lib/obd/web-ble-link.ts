@@ -242,8 +242,11 @@ export class WebBleLink implements BleLink {
     this.rx.clear();
   }
 
-  async readUntilPrompt(timeoutMs = 8000): Promise<string> {
-    return readElmUntilQuietPrompt(this.rx, timeoutMs);
+  async readUntilPrompt(
+    timeoutMs = 8000,
+    options?: { quietMs?: number; allowBarePrompt?: boolean },
+  ): Promise<string> {
+    return readElmUntilQuietPrompt(this.rx, timeoutMs, options);
   }
 
   private async openSerial(): Promise<void> {

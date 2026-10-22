@@ -16,7 +16,10 @@ export interface BleLink {
   /** Called when the adapter drops the link. Ignored for an intentional disconnect. */
   setDisconnectListener(listener: (() => void) | null): void;
   /** Read ELM response until prompt `>` or timeout. */
-  readUntilPrompt(timeoutMs?: number): Promise<string>;
+  readUntilPrompt(
+    timeoutMs?: number,
+    options?: { quietMs?: number; allowBarePrompt?: boolean },
+  ): Promise<string>;
 }
 
 /**

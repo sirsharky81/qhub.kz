@@ -43,11 +43,15 @@ export class Elm327Client {
     return next;
   }
 
-  async sendCommand(command: string, timeoutMs?: number): Promise<string> {
+  async sendCommand(
+    command: string,
+    timeoutMs?: number,
+    options?: { quietMs?: number; allowBarePrompt?: boolean },
+  ): Promise<string> {
     return this.run(async () => {
       this.link.discardInput();
       await this.link.writeLine(command);
-      return this.link.readUntilPrompt(timeoutMs);
+      return this.link.readUntilPrompt(timeoutMs, options);
     });
   }
 
@@ -127,15 +131,19 @@ export class Elm327Client {
   }
 
   /** Send OBD/UDS payload bytes (without CAN ID — header must be set). */
-  async sendPayload(hexPayload: string, timeoutMs = 10_000): Promise<string> {
+  async sendPayload(
+    hexPayload: string,
+    timeoutMs = 10_000,
+    options?: { quietMs?: number; allowBarePrompt?: boolean },
+  ): Promise<string> {
     const trimmed = hexPayload.replace(/\s+/g, " ").trim();
-    // Preserve trailing frame-count digit in OBD mode (e.g. "010C0D 1"),
+    // Preserve trailing frame-count digit in OBD/ISO-TP mode (e.g. "010C0D 1" or "2140404040404040 0"),
     // otherwise strip internal spaces so ELM327 clones never misparse multi-byte UDS/SSM hex.
-    const frameMatch = trimmed.match(/^([0-9A-Fa-f\s]+?)\s+([1-9])$/);
+    const frameMatch = trimmed.match(/^([0-9A-Fa-f\s]+?)\s+([0-9])$/);
     const command = frameMatch
       ? `${frameMatch[1]!.replace(/\s+/g, "").toUpperCase()} ${frameMatch[2]}`
       : trimmed.replace(/\s+/g, "").toUpperCase();
-    return this.sendCommand(command, timeoutMs);
+    return this.sendCommand(command, timeoutMs, options);
   }
 
   async obdMode(command: string, timeoutMs = 10_000, broadcast = false): Promise<string> {

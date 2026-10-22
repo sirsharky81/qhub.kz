@@ -1252,9 +1252,12 @@ async function sendCodingWritePdu(
     return directResp;
   }
 
-  // Tier 2: STN / vLinker extended transmit `STPX` (supported on STN11xx/21xx & vLinker MC+/BM+/FD+/MC-IOS)
+  // Tier 2: STN / vLinker extended transmit `STPX` (supported on STN11xx/21xx & vLinker MC+/BM+/FD+/MC-IOS).
+  // Include explicit `r:<rxHex>` for non-standard CAN pairs like 620->504 so STPX listens on 504!
   const txHex = profile.txId.toString(16).padStart(3, "0").toUpperCase();
+  const rxHex = profile.rxId.toString(16).padStart(3, "0").toUpperCase();
   for (const stpxCmd of [
+    `STPXh:${txHex},r:${rxHex},d:${fullHex},t:10000`,
     `STPXh:${txHex},d:${fullHex},t:10000`,
     `STPXd:${fullHex},t:10000`,
   ]) {
@@ -1277,49 +1280,103 @@ async function sendCodingWritePdu(
   // Tier 3: Manual ISO-TP multi-frame transmission with ATCAF0 (raw 8-byte CAN frames)
   const frames = buildIsoTpFrames(pdu);
   try {
-    await elm.sendCommand("ATCAF0");
+    await elm.sendCommand("ATCAF0", 2_500, { quietMs: 5, allowBarePrompt: true });
     let lastReply = "";
     if (frames.length === 1) {
       lastReply = await elm.sendPayload(frames[0]!, 10_000);
     } else {
-      // Send First Frame (`10 LL ... 1`) — trailing `1` tells ELM327 to return immediately upon receiving
-      // the single Flow Control frame (`30 BS STmin ...`) from the ECU instead of waiting 1020ms (`ATSTFF`)!
-      let ffResp = await elm.sendPayload(`${frames[0]!} 1`, 5_000);
-      if (isElmSyntaxRejection(ffResp)) {
-        ffResp = await elm.sendPayload(frames[0]!, 5_000);
-      }
-
-      // Send Consecutive Frames (`21...`, `22...`, ...).
-      // Intermediate CFs have NO reply from the ECU, so we set `ATST01` (4ms timeout) so ELM returns
-      // `>` almost immediately if `0`-frame suffix isn't supported, and restore `ATSTFF` on the final CF.
-      if (frames.length > 2) {
+      // Refresh KWP diagnostic session (04 10 92 00 00 00 00 00) right before First Frame
+      // so the session timer S3 is 100% fresh when the First Frame hits the CAN bus.
+      if (profile.service === 0x21) {
         try {
-          await elm.sendCommand("ATST01");
+          await elm.sendPayload("0210920000000000 1", 2_000, { quietMs: 5, allowBarePrompt: true });
         } catch {
           /* ignore */
         }
       }
 
+      // Send First Frame (`10 LL ... 1`) — trailing `1` tells ELM327 to return immediately upon receiving
+      // the single Flow Control frame (`30 BS STmin ...`) from the ECU instead of waiting 1020ms (`ATSTFF`)!
+      let ffResp = await elm.sendPayload(`${frames[0]!} 1`, 5_000, {
+        quietMs: 5,
+        allowBarePrompt: true,
+      });
+      if (isElmSyntaxRejection(ffResp)) {
+        ffResp = await elm.sendPayload(frames[0]!, 5_000, {
+          quietMs: 5,
+          allowBarePrompt: true,
+        });
+      }
+
+      const ffTokens = extractHexTokens(ffResp);
+      // If ECU immediately replied with a negative response (e.g. 03 7F 3B 22 / 7F 3B 12 / 7F 3B 33) on the First Frame, return it!
+      if (hasNegativeResponseForService(ffTokens, writeSvc) !== null) {
+        return ffResp;
+      }
+
+      // Send Consecutive Frames (`21...`, `22...`, ...).
+      // Intermediate CFs have NO reply from the ECU:
+      // - First try ELM327 ` 0` frame-count suffix (`2140404040404040 0`), which tells ELM/vLinker
+      //   to transmit the frame and print `>` immediately with 0ms RX wait!
+      // - Also set `ATST01` (4ms timeout) as fallback in case a clone ignores ` 0`.
+      if (frames.length > 2) {
+        try {
+          await elm.sendCommand("ATST01", 2_000, { quietMs: 5, allowBarePrompt: true });
+        } catch {
+          /* ignore */
+        }
+      }
+
+      let useZeroReplySuffix = true;
       for (let i = 1; i < frames.length; i++) {
         const isLast = i === frames.length - 1;
-        if (isLast && frames.length > 2) {
-          try {
-            await elm.sendCommand("ATSTFF");
-          } catch {
-            /* ignore */
+        if (isLast) {
+          if (frames.length > 2) {
+            try {
+              await elm.sendCommand("ATSTFF", 2_000, { quietMs: 5, allowBarePrompt: true });
+            } catch {
+              /* ignore */
+            }
+          }
+          // On the final Consecutive Frame, expect 1 response frame (`02 7B B2 ...`) from the ECU
+          let cfResp = await elm.sendPayload(`${frames[i]!} 1`, 12_000, { quietMs: 20 });
+          if (isElmSyntaxRejection(cfResp)) {
+            cfResp = await elm.sendPayload(frames[i]!, 12_000, { quietMs: 20 });
+          }
+          lastReply = cfResp;
+        } else {
+          if (useZeroReplySuffix) {
+            const cf0Resp = await elm.sendPayload(`${frames[i]!} 0`, 1_500, {
+              quietMs: 2,
+              allowBarePrompt: true,
+            });
+            if (isElmSyntaxRejection(cf0Resp)) {
+              useZeroReplySuffix = false;
+              await elm.sendPayload(frames[i]!, 1_500, {
+                quietMs: 2,
+                allowBarePrompt: true,
+              });
+            }
+          } else {
+            await elm.sendPayload(frames[i]!, 1_500, {
+              quietMs: 2,
+              allowBarePrompt: true,
+            });
           }
         }
-        const cfResp = await elm.sendPayload(frames[i]!, isLast ? 12_000 : 1_500);
-        if (isLast) {
-          lastReply = cfResp;
-        }
+      }
+
+      // If final CF returned NO DATA, include First Frame response diagnostics so we can see if FC (30) arrived
+      if (isNoDataOrEmptyReply(lastReply) && !isNoDataOrEmptyReply(ffResp)) {
+        const ffClean = ffResp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
+        lastReply = `FF:${ffClean} -> CF:NO DATA`;
       }
     }
     return lastReply;
   } finally {
     try {
-      await elm.sendCommand("ATSTFF");
-      await elm.sendCommand("ATCAF1");
+      await elm.sendCommand("ATSTFF", 2_000, { quietMs: 5, allowBarePrompt: true });
+      await elm.sendCommand("ATCAF1", 2_000, { quietMs: 5, allowBarePrompt: true });
     } catch {
       /* restore ISO-TP auto formatting */
     }
@@ -1399,6 +1456,7 @@ export async function writeEtacsSingleBlock(
   }
 
   let rawWriteResponse = "";
+  let firstAttemptDiag = "";
   let tokens: number[] = [];
   let isPositive = false;
   let usedTargetId = targetId;
@@ -1427,6 +1485,9 @@ export async function writeEtacsSingleBlock(
       cand.lid,
       cand.data,
     );
+    if (attemptIdx === 0) {
+      firstAttemptDiag = rawWriteResponse;
+    }
     tokens = extractHexTokens(rawWriteResponse);
     isPositive = hasPositiveWriteAck(tokens, expectPosSid, cand.lid);
     if (isPositive) break;
@@ -1434,8 +1495,15 @@ export async function writeEtacsSingleBlock(
 
   if (!isPositive) {
     // Check for negative response 7F <svc> <nrc>
-    let nrcDetail = rawWriteResponse.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "NO DATA";
-    const nrcByte = hasNegativeResponseForService(tokens, writeSvc);
+    const bestDiag =
+      !isNoDataOrEmptyReply(firstAttemptDiag) && isNoDataOrEmptyReply(rawWriteResponse)
+        ? firstAttemptDiag
+        : firstAttemptDiag || rawWriteResponse;
+    let nrcDetail = bestDiag.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "NO DATA";
+    const diagTokens = extractHexTokens(bestDiag);
+    const nrcByte =
+      hasNegativeResponseForService(diagTokens, writeSvc) ??
+      hasNegativeResponseForService(tokens, writeSvc);
     if (nrcByte !== null) {
       const nrc = nrcByte.toString(16).padStart(2, "0").toUpperCase();
       nrcDetail = `7F ${writeSvcHex} ${nrc}`;

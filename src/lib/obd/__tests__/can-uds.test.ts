@@ -383,15 +383,15 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
         (link as unknown as { pending: string }).pending += "30 00 05 00 00 00 00 00\r>";
         return;
       }
-      if (line === "2900000000000000") {
+      if (line === "2900000000000000 1" || line === "2900000000000000") {
         link.written.push(line);
         // After final Consecutive Frame (29...), ECU responds with positive KWP 7B B2 (Single Frame 02 7B B2)
         (link as unknown as { pending: string }).pending += "02 7B B2 00 00 00 00 00\r>";
         return;
       }
-      if (/^2[1-8][0-9A-F]{14}$/.test(line)) {
+      if (/^2[1-8][0-9A-F]{14}(\s+0)?$/.test(line)) {
         link.written.push(line);
-        (link as unknown as { pending: string }).pending += "NO DATA\r>";
+        (link as unknown as { pending: string }).pending += ">";
         return;
       }
       await origWrite(line);
@@ -412,7 +412,9 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(
       link.written.some((cmd) => cmd.startsWith("10433BB240404040")),
     ).toBe(true);
-    expect(link.written).toContain("2900000000000000");
+    expect(
+      link.written.some((cmd) => cmd.startsWith("2900000000000000")),
+    ).toBe(true);
     expect(link.written).toContain("ATCAF1");
   });
 
