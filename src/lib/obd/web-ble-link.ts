@@ -76,12 +76,25 @@ function shortBluetoothUuid(uuid: string): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * Module-level cache of the last selected BluetoothDevice and active WebBleLink.
+ * On iOS (Bluefy / Safari Web Bluetooth) and Android Chrome, once a BLE peripheral
+ * is connected at the GATT layer, it stops advertising — so calling `bluetooth.requestDevice()`
+ * a second time from another modal shows an empty Bluetooth picker until the user backs out!
+ * Reusing the already-connected link or already-permitted `BluetoothDevice` avoids the duplicate picker.
+ */
+let cachedBluetoothDevice: BluetoothDevice | null = null;
+let cachedActiveDevice: BluetoothDevice | null = null;
+
 export class WebBleLink implements BleLink {
   readonly info: BleAdapterInfo;
   private device: BluetoothDevice | null = null;
   private userClosed = false;
   private disconnectListener: (() => void) | null = null;
   private readonly onGattLost = () => {
+    if (cachedActiveDevice === this.device) {
+      cachedActiveDevice = null;
+    }
     if (this.userClosed) return;
     this.disconnectListener?.();
   };
@@ -100,8 +113,47 @@ export class WebBleLink implements BleLink {
     if (!isWebBluetoothAvailable()) {
       throw new Error("Web Bluetooth недоступен в этом браузере");
     }
+    // 1. If there is already an active GATT-connected device, reuse it without reopening the BLE picker
+    if (cachedActiveDevice?.gatt?.connected) {
+      const dev = cachedActiveDevice;
+      return new WebBleLink(
+        {
+          id: dev.id,
+          name: dev.name ?? "vLinker",
+          transport: "web-bluetooth",
+        },
+        dev,
+      );
+    }
+    // 2. If we have a previously selected BluetoothDevice in this tab whose GATT is still connected, reuse it
+    if (cachedBluetoothDevice?.gatt?.connected) {
+      return new WebBleLink(
+        {
+          id: cachedBluetoothDevice.id,
+          name: cachedBluetoothDevice.name ?? "vLinker",
+          transport: "web-bluetooth",
+        },
+        cachedBluetoothDevice,
+      );
+    }
+
     const bluetooth = bluetoothApi();
+    // 3. Check `navigator.bluetooth.getDevices()` for an already permitted & connected OBD adapter
+    const permitted = await pickPermittedDevice(bluetooth, true);
+    if (permitted) {
+      cachedBluetoothDevice = permitted;
+      return new WebBleLink(
+        {
+          id: permitted.id,
+          name: permitted.name ?? "vLinker",
+          transport: "web-bluetooth",
+        },
+        permitted,
+      );
+    }
+
     const device = await requestObdDevice(bluetooth);
+    cachedBluetoothDevice = device;
     const info: BleAdapterInfo = {
       id: device.id,
       name: device.name ?? "vLinker",
@@ -122,6 +174,7 @@ export class WebBleLink implements BleLink {
     this.userClosed = false;
     try {
       await this.openSerial();
+      cachedActiveDevice = this.device;
     } catch (error) {
       throw new Error(formatBleFailure(error));
     }
@@ -129,6 +182,9 @@ export class WebBleLink implements BleLink {
 
   async disconnect(): Promise<void> {
     this.userClosed = true;
+    if (cachedActiveDevice === this.device) {
+      cachedActiveDevice = null;
+    }
     this.device?.removeEventListener?.("gattserverdisconnected", this.onGattLost);
     if (this.notifyChar && this.onNotify) {
       this.notifyChar.removeEventListener("characteristicvaluechanged", this.onNotify);
@@ -248,10 +304,21 @@ async function requestObdDevice(bluetooth: BluetoothNavigator): Promise<Bluetoot
   }
 }
 
-async function pickPermittedDevice(bluetooth: BluetoothNavigator): Promise<BluetoothDevice | null> {
+async function pickPermittedDevice(
+  bluetooth: BluetoothNavigator,
+  requireConnectedGatt = false,
+): Promise<BluetoothDevice | null> {
   if (!bluetooth.getDevices) return null;
   try {
     const devices = await bluetooth.getDevices();
+    if (requireConnectedGatt) {
+      const connectedAdapter = devices.find(
+        (device) => device.gatt?.connected && looksLikeObdAdapterName(device.name),
+      );
+      if (connectedAdapter) return connectedAdapter;
+      const anyConnected = devices.find((device) => device.gatt?.connected);
+      return anyConnected ?? null;
+    }
     const named = devices.find((device) => looksLikeObdAdapterName(device.name));
     if (named) return named;
     return devices.length === 1 ? devices[0] ?? null : null;

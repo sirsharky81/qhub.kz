@@ -12,7 +12,10 @@ import {
   type EtacsCodingDump,
   type EtacsWriteBlockResult,
 } from "@/lib/obd/mitsubishi-etacs";
-import { ObdBleSession, type ObdConnectionPhase } from "@/lib/obd/obd-session";
+import {
+  getSharedObdBleSession,
+  type ObdConnectionPhase,
+} from "@/lib/obd/obd-session";
 import { useObdTransportKind } from "@/lib/obd/use-obd-transport";
 import { saveEtacsDumpBackup, saveOriginalFileBackup } from "./etacs-backup";
 
@@ -80,22 +83,27 @@ export default function EtacsBlockUploadPanel({
   cufFallbackName,
   onPickCompanionCuf,
 }: Props) {
-  const [session] = useState(() => new ObdBleSession());
+  const [session] = useState(() => getSharedObdBleSession());
   const sessionRef = useRef(session);
   const { transport, ready: transportReady } = useObdTransportKind();
 
-  const [phase, setPhase] = useState<ObdConnectionPhase>("idle");
-  const [adapterLabel, setAdapterLabel] = useState<string | null>(null);
+  const [phase, setPhase] = useState<ObdConnectionPhase>(() => session.phase);
+  const [adapterLabel, setAdapterLabel] = useState<string | null>(() => session.adapterName);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<UploadStep>("idle");
-  const [statusLine, setStatusLine] = useState("");
+  const [statusLine, setStatusLine] = useState(() =>
+    session.phase === "vehicle" ? "vLinker уже подключён и ЭБУ на связи — готово к считыванию или записи" : "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const allProfiles = listMitsubishiEtacsProfiles();
   const profiles = allProfiles.filter((p) =>
     targetScenario === "engine_kon" ? p.moduleKind === "engine" : p.moduleKind !== "engine",
   );
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(() => {
+    const prevId = session.lastEtacsDump?.profileId;
+    return prevId && profiles.some((p) => p.id === prevId) ? prevId : null;
+  });
   const profileId =
     selectedProfileId && profiles.some((p) => p.id === selectedProfileId)
       ? selectedProfileId
@@ -103,7 +111,7 @@ export default function EtacsBlockUploadPanel({
         ? "engine-auto"
         : "auto";
   const companionCufInputRef = useRef<HTMLInputElement>(null);
-  const [lastDump, setLastDump] = useState<EtacsCodingDump | null>(null);
+  const [lastDump, setLastDump] = useState<EtacsCodingDump | null>(() => session.lastEtacsDump);
   const [konResult, setKonResult] = useState<EtacsWriteBlockResult | null>(null);
   const [cufResult, setCufResult] = useState<EtacsWriteBlockResult | null>(null);
   const [localBackupAAt, setLocalBackupAAt] = useState<string | null>(null);

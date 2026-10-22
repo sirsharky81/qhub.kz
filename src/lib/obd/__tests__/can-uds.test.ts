@@ -377,7 +377,7 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
         (link as unknown as { pending: string }).pending += "?\r>";
         return;
       }
-      if (line === "10433BB240404040") {
+      if (line === "10433BB240404040 1" || line === "10433BB240404040") {
         link.written.push(line);
         // ECU responds with ISO-TP Flow Control (30 00 05)
         (link as unknown as { pending: string }).pending += "30 00 05 00 00 00 00 00\r>";
@@ -409,7 +409,9 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(res.writeCommandHex).toBe("3B B2");
     expect(res.writtenBytes).toBe(65);
     expect(link.written).toContain("ATCAF0");
-    expect(link.written).toContain("10433BB240404040");
+    expect(
+      link.written.some((cmd) => cmd.startsWith("10433BB240404040")),
+    ).toBe(true);
     expect(link.written).toContain("2900000000000000");
     expect(link.written).toContain("ATCAF1");
   });

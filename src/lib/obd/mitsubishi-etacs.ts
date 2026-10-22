@@ -1147,6 +1147,13 @@ function isElmSyntaxRejection(raw: string): boolean {
   return tokens.length === 0 && clean.includes("?");
 }
 
+function isNoDataOrEmptyReply(raw: string): boolean {
+  const clean = raw.replace(/>/g, "").trim();
+  if (!clean) return true;
+  if (/^(NO DATA|STOPPED|\?|OK)$/i.test(clean)) return true;
+  return extractHexTokens(raw).length === 0;
+}
+
 function hasPositiveWriteAck(tokens: number[], expectPosSid: number, targetId: number[]): boolean {
   return tokens.some((b, idx) => {
     if (b !== expectPosSid) return false;
@@ -1165,14 +1172,62 @@ function hasNegativeResponseForService(tokens: number[], writeSvc: number): numb
 }
 
 /**
+ * Fast probe for active ETACS / Engine CAN profile and exact LID for writing,
+ * WITHOUT running the 60-second `probeExtraEtacsLids` scan (which lets the KWP
+ * diagnostic session time out before the write command is sent).
+ */
+async function resolveWriteProfileAndLid(
+  elm: Elm327Client,
+  profile: EtacsCanProfile,
+  kind: "kon" | "cuf",
+): Promise<{ activeProfile: EtacsCanProfile; detectedReadId?: string }> {
+  const candidates =
+    profile.id === "auto"
+      ? ETACS_PROFILES.filter((item) => item.id !== "auto" && item.moduleKind !== "engine")
+      : profile.id === "engine-auto"
+        ? ETACS_PROFILES.filter((item) => item.id !== "engine-auto" && item.moduleKind === "engine")
+        : [profile];
+
+  for (const cand of candidates) {
+    try {
+      await configureEtacsChannel(elm, cand);
+      const isEngine = cand.moduleKind === "engine" || cand.txId === 0x7e0;
+      const readList =
+        cand.service === 0x21
+          ? kind === "cuf"
+            ? [cand.customId, [0xb2], [0x31], [0x51], [0x43], [0xb1], [0x32]]
+            : isEngine
+              ? [cand.variantId, [0xc0], [0x32], [0x42], [0x52], [0x50]]
+              : [cand.variantId, [0xb0], [0x52], [0x42], [0x50], [0x40]]
+          : kind === "cuf"
+            ? [cand.customId, [0x01, 0x31], [0x01, 0x32], [0xb2, 0x01]]
+            : [cand.variantId, [0x01, 0x30], [0x01, 0x32], [0xb0, 0x01]];
+
+      const hit = await readCodingBlockWithFallbacks(elm, cand, readList, {
+        minBytes: kind === "cuf" ? 16 : isEngine ? 2 : 4,
+        fallbackSessions: cand.service === 0x21 ? ["1092", "1089", "1081"] : undefined,
+      });
+      return { activeProfile: cand, detectedReadId: hit.usedIdHex };
+    } catch {
+      /* try next candidate profile */
+    }
+  }
+
+  return {
+    activeProfile: candidates[0] ?? profile,
+    detectedReadId: undefined,
+  };
+}
+
+/**
  * Send a multi-byte write PDU (`3B <LID> <DATA...>` or `2E <DID_HI> <DID_LO> <DATA...>`)
  * with 3-tier fallback so it works on all ELM327 / STN / vLinker MC-IOS / Android adapters:
  *
  * 1. Direct hex line (`3BB2...`) — works on adapters with large UART line buffer & auto ISO-TP.
- * 2. STN / vLinker `STPX` command (`STPX h:620, d:3BB2..., t:10000`) if direct line returns `?`.
+ * 2. STN / vLinker `STPX` command (`STPX h:620, d:3BB2..., t:10000`) if direct line returns `?` or `NO DATA`.
  * 3. Explicit ISO-TP framing (`ATCAF0` + First Frame `10 xx ...` + Flow Control `30 ...` +
- *    Consecutive Frames `21 ...`, `22 ...`) — works on every ELM327 / vLinker because each command
- *    is a standard 8-byte (16-hex-char) CAN frame!
+ *    Consecutive Frames `21 ...`, `22 ...` with `0` at the end so ELM doesn't wait for a reply on intermediate CFs)
+ *    — works on every ELM327 / vLinker because each command is a standard 8-byte (16-hex-char) CAN frame!
  */
 async function sendCodingWritePdu(
   elm: Elm327Client,
@@ -1191,27 +1246,32 @@ async function sendCodingWritePdu(
 
   const fullHex = bytesToHex(pdu, "");
 
-  // Tier 1: Direct hex payload (fast path for adapters that support long lines & test mocks)
+  // Tier 1: Direct hex payload (fast path for single-frame or adapters with auto multi-frame TX & test mocks)
   const directResp = await elm.sendPayload(fullHex, 15_000);
-  if (!isElmSyntaxRejection(directResp)) {
+  if (!isElmSyntaxRejection(directResp) && (!isNoDataOrEmptyReply(directResp) || pdu.length <= 7)) {
     return directResp;
   }
 
   // Tier 2: STN / vLinker extended transmit `STPX` (supported on STN11xx/21xx & vLinker MC+/BM+/FD+/MC-IOS)
   const txHex = profile.txId.toString(16).padStart(3, "0").toUpperCase();
-  try {
-    const stpxResp = await elm.sendCommand(`STPXh:${txHex},d:${fullHex},t:10000`, 15_000);
-    if (!isElmSyntaxRejection(stpxResp)) {
-      const stpxTokens = extractHexTokens(stpxResp);
-      if (
-        hasPositiveWriteAck(stpxTokens, expectPosSid, targetId) ||
-        hasNegativeResponseForService(stpxTokens, writeSvc) !== null
-      ) {
-        return stpxResp;
+  for (const stpxCmd of [
+    `STPXh:${txHex},d:${fullHex},t:10000`,
+    `STPXd:${fullHex},t:10000`,
+  ]) {
+    try {
+      const stpxResp = await elm.sendCommand(stpxCmd, 15_000);
+      if (!isElmSyntaxRejection(stpxResp) && !isNoDataOrEmptyReply(stpxResp)) {
+        const stpxTokens = extractHexTokens(stpxResp);
+        if (
+          hasPositiveWriteAck(stpxTokens, expectPosSid, targetId) ||
+          hasNegativeResponseForService(stpxTokens, writeSvc) !== null
+        ) {
+          return stpxResp;
+        }
       }
+    } catch {
+      /* STPX variant not supported, continue */
     }
-  } catch {
-    /* STPX not supported, proceed to Tier 3 explicit ISO-TP framing */
   }
 
   // Tier 3: Manual ISO-TP multi-frame transmission with ATCAF0 (raw 8-byte CAN frames)
@@ -1222,25 +1282,19 @@ async function sendCodingWritePdu(
     if (frames.length === 1) {
       lastReply = await elm.sendPayload(frames[0]!, 10_000);
     } else {
-      // Send First Frame (10 LL ...) and expect Flow Control (30 BS STmin ...) from ECU on RX ID
-      const ffResp = await elm.sendPayload(frames[0]!, 5_000);
-      const ffTokens = extractHexTokens(ffResp);
-
-      // Extract STmin from Flow Control frame `30 <BS> <STmin>` if present (default 10ms)
-      let stMinMs = 10;
-      const fcIndex = ffTokens.findIndex((b) => (b & 0xf0) === 0x30);
-      if (fcIndex >= 0 && fcIndex + 2 < ffTokens.length) {
-        const rawStMin = ffTokens[fcIndex + 2]!;
-        if (rawStMin <= 0x7f) {
-          stMinMs = Math.max(5, rawStMin);
-        }
+      // Send First Frame (`10 LL ... 1`) — trailing `1` tells ELM327 to return immediately upon receiving
+      // the single Flow Control frame (`30 BS STmin ...`) from the ECU instead of waiting 1020ms (`ATSTFF`)!
+      let ffResp = await elm.sendPayload(`${frames[0]!} 1`, 5_000);
+      if (isElmSyntaxRejection(ffResp)) {
+        ffResp = await elm.sendPayload(frames[0]!, 5_000);
       }
 
-      // Send Consecutive Frames (21..., 22..., ...). Intermediate CFs have no ECU reply (`NO DATA` with ATST),
-      // so set a short ELM response timeout (`ATST06` ~ 24ms) for intermediate CFs and full timeout on the last CF.
+      // Send Consecutive Frames (`21...`, `22...`, ...).
+      // Intermediate CFs have NO reply from the ECU, so we set `ATST01` (4ms timeout) so ELM returns
+      // `>` almost immediately if `0`-frame suffix isn't supported, and restore `ATSTFF` on the final CF.
       if (frames.length > 2) {
         try {
-          await elm.sendCommand("ATST06");
+          await elm.sendCommand("ATST01");
         } catch {
           /* ignore */
         }
@@ -1258,8 +1312,6 @@ async function sendCodingWritePdu(
         const cfResp = await elm.sendPayload(frames[i]!, isLast ? 12_000 : 1_500);
         if (isLast) {
           lastReply = cfResp;
-        } else if (stMinMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, Math.min(stMinMs, 50)));
         }
       }
     }
@@ -1300,14 +1352,13 @@ export async function writeEtacsSingleBlock(
     throw new Error(`Слишком большой размер блока кодировки (${payload.length} байт, максимум 250 байт).`);
   }
 
-  // If "auto" or "engine-auto" was selected, resolve the concrete profile by probing read first
+  // If "auto" or "engine-auto" was selected, resolve the concrete profile quickly without 60s extra LID scan
   let activeProfile = profile;
   let detectedReadId: string | undefined;
   if (profile.id === "auto" || profile.id === "engine-auto") {
-    const currentDump = await readEtacsCoding(elm, profile);
-    const resolved = ETACS_PROFILES.find((p) => p.id === currentDump.profileId);
-    if (resolved) activeProfile = resolved;
-    detectedReadId = kind === "kon" ? currentDump.variantUsedId : currentDump.customUsedId;
+    const resolvedInfo = await resolveWriteProfileAndLid(elm, profile, kind);
+    activeProfile = resolvedInfo.activeProfile;
+    detectedReadId = resolvedInfo.detectedReadId;
   }
 
   await configureEtacsChannel(elm, activeProfile);
@@ -1358,6 +1409,17 @@ export async function writeEtacsSingleBlock(
     usedTargetId = cand.lid;
     usedIdHex = cand.lid.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
 
+    // Keep diagnostic session alive before each write candidate
+    if (attemptIdx > 0 && activeProfile.service === 0x21) {
+      const sessCmd = attemptIdx % 2 === 1 ? "1092" : "1089";
+      try {
+        await elm.sendPayload(sessCmd, 2_000);
+        await elm.sendPayload("3E", 1_500);
+      } catch {
+        /* ignore */
+      }
+    }
+
     rawWriteResponse = await sendCodingWritePdu(
       elm,
       activeProfile,
@@ -1368,15 +1430,6 @@ export async function writeEtacsSingleBlock(
     tokens = extractHexTokens(rawWriteResponse);
     isPositive = hasPositiveWriteAck(tokens, expectPosSid, cand.lid);
     if (isPositive) break;
-
-    // If first attempt failed with security/conditions/subFunction NRC, try unlocking KWP session 10 92 / 10 89 before next candidate
-    if (activeProfile.service === 0x21 && attemptIdx === 0 && candidateTargets.length > 1) {
-      try {
-        await elm.sendPayload("1092", 2_500);
-      } catch {
-        /* ignore */
-      }
-    }
   }
 
   if (!isPositive) {

@@ -147,6 +147,20 @@ export interface ModuleDtcTarget {
 
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
 
+let sharedObdBleSession: ObdBleSession | null = null;
+
+/**
+ * Returns a shared singleton `ObdBleSession` so that opening/closing modals
+ * ("Выгрузить с блока" -> editor -> "Загрузить в блок") or navigating between
+ * panels in the same tab preserves the active vLinker BLE connection and last read dump.
+ */
+export function getSharedObdBleSession(): ObdBleSession {
+  if (!sharedObdBleSession) {
+    sharedObdBleSession = new ObdBleSession();
+  }
+  return sharedObdBleSession;
+}
+
 /** Universal OBD-II over ELM327 BLE (any ISO15765/OBD2 vehicle). */
 export class ObdBleSession {
   private link: BleLink | null = null;
@@ -160,6 +174,7 @@ export class ObdBleSession {
   private canProtocol: CanProtocol | null = null;
   private linkLost: (() => void) | null = null;
   private leavePromise: Promise<void> | null = null;
+  lastEtacsDump: EtacsCodingDump | null = null;
   phase: ObdConnectionPhase = "idle";
 
   get transport(): ObdTransportKind {
@@ -253,7 +268,9 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
     await this.ensureUdsProfile("6");
     const profile = ETACS_PROFILES.find((item) => item.id === profileId) ?? ETACS_PROFILES[0]!;
-    return readEtacsCoding(this.elm!, profile);
+    const dump = await readEtacsCoding(this.elm!, profile);
+    this.lastEtacsDump = dump;
+    return dump;
   }
 
   async writeEtacsBlock(options: {
@@ -267,11 +284,18 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
     await this.ensureUdsProfile("6");
     const profile = ETACS_PROFILES.find((item) => item.id === options.profileId) ?? ETACS_PROFILES[0]!;
+    const cachedLid =
+      options.overrideLidHex ??
+      (this.lastEtacsDump
+        ? options.kind === "kon"
+          ? this.lastEtacsDump.variantUsedId
+          : this.lastEtacsDump.customUsedId
+        : undefined);
     return writeEtacsSingleBlock(this.elm!, {
       profile,
       kind: options.kind,
       payload: options.payload,
-      overrideLidHex: options.overrideLidHex,
+      overrideLidHex: cachedLid,
     });
   }
 
