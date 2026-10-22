@@ -67,6 +67,13 @@ function looksLikeCufBytes(coding: Uint8Array): boolean {
   return cufLike >= Math.ceil(coding.length * 0.45);
 }
 
+function detectFileKindFromName(fileName: string): "kon" | "cuf" | null {
+  const lower = String(fileName || "").toLowerCase();
+  if (/\.cuf(?=$|[^a-z])/i.test(lower)) return "cuf";
+  if (/\.kon(?=$|[^a-z])/i.test(lower)) return "kon";
+  return null;
+}
+
 function scoreCatalogProfile(
   profile: BlockDictionary,
   context: {
@@ -78,9 +85,9 @@ function scoreCatalogProfile(
   },
 ): number {
   let score = 0;
-  const ext = String(context.fileName || "").toLowerCase();
-  const isCufExt = ext.endsWith(".cuf");
-  const isKonExt = ext.endsWith(".kon");
+  const detectedKind = detectFileKindFromName(context.fileName || "");
+  const isCufExt = detectedKind === "cuf";
+  const isKonExt = detectedKind === "kon";
   const coding = context.coding;
 
   if (isCufExt) {
@@ -446,9 +453,16 @@ export function saveEtacsPayload(payload: {
     },
     {},
   );
-  const hint = String(payload.fileName || "").toLowerCase();
-  const ext = hint.endsWith(".cuf") ? ".cuf" : ".kon";
-  const fileName = payload.fileName || `${payload.ecuId}_${payload.vin}${ext}`;
+  const detectedKind = detectFileKindFromName(payload.fileName || "");
+  const ext = detectedKind === "cuf" ? ".cuf" : ".kon";
+  const rawName = String(payload.fileName || "").trim();
+  const stem = rawName
+    ? rawName
+        .replace(/\.(kon|cuf).*$/i, "")
+        .replace(/[^\w.\-()+\u0400-\u04FF ]+/g, "_")
+        .replace(/\.+$/g, "")
+    : "";
+  const fileName = `${stem || `${payload.ecuId}_${payload.vin}`}${ext}`;
   return {
     crc,
     crcVerified,

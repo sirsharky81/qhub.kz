@@ -6,8 +6,12 @@ import {
   formatMutCodingContainer,
   type EtacsCodingDump,
 } from "@/lib/obd/mitsubishi-etacs";
-import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { PickerButton } from "../random-picker/components/PickerButton";
+import {
+  canUseSaveFilePicker,
+  cleanCodingFileStem,
+  saveCodingBytesAs,
+} from "./etacs-backup";
 import EtacsBlockUploadPanel, {
   type ObdTargetScenario,
   type SlotBackupInfo,
@@ -71,6 +75,7 @@ export function EtacsObdReadModal({
   const [konSaved, setKonSaved] = useState(false);
   const [cufSaved, setCufSaved] = useState(false);
   const [busySave, setBusySave] = useState(false);
+  const [customBackupStem, setCustomBackupStem] = useState("");
 
   if (!open) return null;
 
@@ -85,51 +90,64 @@ export function EtacsObdReadModal({
       (!requiresCufBackup || cufSaved),
   );
 
-  const saveDumpKon = async () => {
+  const defaultDumpNames = () => {
+    const part = dump?.partNumber ?? (scenario === "engine_kon" ? "1860D362" : "8637C671");
+    const vin = dump?.vin ?? "UNKNOWNVIN0000000";
+    return etacsDownloadNames(`${part}_${vin}_orig`, { partNumber: part, vin });
+  };
+
+  const resolveDumpFileName = (ext: ".kon" | ".cuf") => {
+    const defaults = defaultDumpNames();
+    const fallbackName = ext === ".cuf" ? defaults.cuf : defaults.kon;
+    const stem = cleanCodingFileStem(customBackupStem || fallbackName, "coding");
+    return `${stem}${ext}`;
+  };
+
+  const saveDumpKon = async (method: "picker" | "download" | "share" = "download") => {
     if (!dump) return;
     setBusySave(true);
     try {
       const part = dump.partNumber ?? (scenario === "engine_kon" ? "1860D362" : "8637C671");
       const vin = dump.vin ?? "UNKNOWNVIN0000000";
       const now = new Date();
-      const names = etacsDownloadNames(`${part}_${vin}_orig`, { partNumber: part, vin });
+      const targetName = resolveDumpFileName(".kon");
       const bytes = formatMutCodingContainer({
         payload: dump.variant,
         partNumber: part,
         vin,
         timestamp: now,
       });
-      await saveBlobToDevice(new Blob([Uint8Array.from(bytes)]), names.kon);
+      await saveCodingBytesAs(new Uint8Array(bytes), targetName, method);
       setKonSaved(true);
     } finally {
       setBusySave(false);
     }
   };
 
-  const saveDumpCuf = async () => {
+  const saveDumpCuf = async (method: "picker" | "download" | "share" = "download") => {
     if (!dump || dump.custom.length === 0) return;
     setBusySave(true);
     try {
       const part = dump.partNumber ?? "8637C671";
       const vin = dump.vin ?? "UNKNOWNVIN0000000";
       const now = new Date();
-      const names = etacsDownloadNames(`${part}_${vin}_orig`, { partNumber: part, vin });
+      const targetName = resolveDumpFileName(".cuf");
       const bytes = formatMutCodingContainer({
         payload: dump.custom,
         partNumber: part,
         vin,
         timestamp: now,
       });
-      await saveBlobToDevice(new Blob([Uint8Array.from(bytes)]), names.cuf);
+      await saveCodingBytesAs(new Uint8Array(bytes), targetName, method);
       setCufSaved(true);
     } finally {
       setBusySave(false);
     }
   };
 
-  const saveBoth = async () => {
-    await saveDumpKon();
-    if (hasCufInDump) await saveDumpCuf();
+  const saveBoth = async (method: "picker" | "download" | "share" = "download") => {
+    await saveDumpKon(method);
+    if (hasCufInDump) await saveDumpCuf(method);
   };
 
   return (
@@ -198,6 +216,10 @@ export function EtacsObdReadModal({
               setDump(d);
               setKonSaved(false);
               setCufSaved(false);
+              const part = d.partNumber ?? (scenario === "engine_kon" ? "1860D362" : "8637C671");
+              const vin = d.vin ?? "UNKNOWNVIN0000000";
+              const names = etacsDownloadNames(`${part}_${vin}_orig`, { partNumber: part, vin });
+              setCustomBackupStem(cleanCodingFileStem(names.kon, `${part}_${vin}_orig`));
             }}
           />
         </div>
@@ -216,12 +238,36 @@ export function EtacsObdReadModal({
                     ? "Для редактирования ETACS .kon необходимо сохранить оба исходных файла: .kon (Variant) и .cuf (Custom, потребуется для восстановления настроек после заливки .kon)."
                     : "Сохраните считанный исходник .kon на устройство перед переходом к редактированию."}
             </p>
+            <div className="mt-2.5">
+              <label className="block text-[11px] font-medium text-amber-900">
+                Имя сохраняемого файла (без расширения .kon / .cuf):
+              </label>
+              <div className="mt-1 flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={customBackupStem}
+                  onChange={(e) => setCustomBackupStem(e.target.value.replace(/\.(kon|cuf)$/i, ""))}
+                  className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 font-mono text-xs text-gray-900 focus:border-amber-600 focus:outline-none"
+                  placeholder="Название файла…"
+                />
+                {customBackupStem ? (
+                  <button
+                    type="button"
+                    onClick={() => setCustomBackupStem("")}
+                    className="rounded border border-amber-300 bg-white px-2 py-1.5 text-xs text-gray-600 hover:bg-amber-100"
+                    title="Очистить"
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </div>
+            </div>
             <div className="mt-2.5 flex flex-wrap gap-2">
               {requiresKonBackup ? (
                 <PickerButton
                   variant={konSaved ? "secondary" : "primary"}
                   disabled={busySave}
-                  onClick={() => void saveDumpKon()}
+                  onClick={() => void saveDumpKon(canUseSaveFilePicker() ? "picker" : "download")}
                 >
                   {konSaved ? "✓ Исходник .kon сохранён" : "Сохранить исходник .kon"}
                 </PickerButton>
@@ -230,14 +276,14 @@ export function EtacsObdReadModal({
                 <PickerButton
                   variant={cufSaved ? "secondary" : "primary"}
                   disabled={busySave || !hasCufInDump}
-                  onClick={() => void saveDumpCuf()}
+                  onClick={() => void saveDumpCuf(canUseSaveFilePicker() ? "picker" : "download")}
                 >
                   {cufSaved ? "✓ Исходник .cuf сохранён" : "Сохранить исходник .cuf"}
                 </PickerButton>
               ) : null}
               {requiresKonBackup && requiresCufBackup && (!konSaved || !cufSaved) ? (
-                <PickerButton variant="secondary" disabled={busySave} onClick={() => void saveBoth()}>
-                  Сохранить оба файла (.kon и .cuf)
+                <PickerButton variant="secondary" disabled={busySave} onClick={() => void saveBoth("download")}>
+                  Скачать оба (.kon + .cuf)
                 </PickerButton>
               ) : null}
             </div>

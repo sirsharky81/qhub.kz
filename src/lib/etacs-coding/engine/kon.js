@@ -111,11 +111,19 @@ export function hexToBytes(hex) {
 export function parseKon(input) {
   const buffer = toUint8Array(input);
   const { body, bom } = stripBom(buffer);
-  const text = bytesToLatin1(body);
+  let text = bytesToLatin1(body);
   if (text.length !== RECORD_LENGTH) {
-    throw new Error(
-      `Длина записи ${text.length}, ожидалось ${RECORD_LENGTH} символов без BOM`,
-    );
+    // Strip trailing CR/LF if a text editor or OS appended a newline
+    const trimmed = text.replace(/[\r\n]+$/, "");
+    if (trimmed.length === RECORD_LENGTH) {
+      text = trimmed;
+    } else if (trimmed.length > 1220 && trimmed.length < RECORD_LENGTH) {
+      text = trimmed.padEnd(RECORD_LENGTH, " ");
+    } else {
+      throw new Error(
+        `Длина записи ${text.length}, ожидалось ${RECORD_LENGTH} символов без BOM`,
+      );
+    }
   }
 
   const vin = readField(text, LAYOUT.vin, LAYOUT.vinLength);

@@ -52,7 +52,7 @@ export function EtacsHexDiffView({
     const elWidth = el.offsetWidth;
     const cScroll = container.scrollLeft;
     const cWidth = container.clientWidth;
-    if (elLeft < cScroll + 32 || elLeft + elWidth > cScroll + cWidth - 16) {
+    if (elLeft < cScroll + 36 || elLeft + elWidth > cScroll + cWidth - 20) {
       container.scrollTo({
         left: Math.max(0, elLeft - cWidth / 2 + elWidth / 2),
         behavior: "smooth",
@@ -74,86 +74,91 @@ export function EtacsHexDiffView({
     selectedParamNameRu.toLowerCase() !== selectedParamName.toLowerCase();
 
   return (
-    <div className="etacs-hex-strip border-b border-gray-200 bg-slate-50/90 px-2 py-1 text-[10px]">
-      {/* Компактная однострочная шапка инфо по байтам */}
-      <div className="mb-0.5 flex items-center justify-between gap-2 overflow-x-auto whitespace-nowrap scrollbar-none">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-semibold uppercase tracking-wider text-[9px] text-gray-500 shrink-0">
-            HEX ({len}Б)
+    <div className="etacs-hex-strip border-b border-gray-200 bg-slate-50 px-2.5 py-2 text-[11px]">
+      {/* Шапка HEX: flex-wrap без наложений на узких экранах */}
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+          <span className="font-bold uppercase tracking-wider text-[10px] text-gray-600 shrink-0">
+            HEX ({len} Б)
           </span>
 
-          {selectedSet.size > 0 ? (
-            <span className="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0 text-[9.5px] font-medium text-blue-800 ring-1 ring-inset ring-blue-200">
-              <span className="truncate max-w-[220px] sm:max-w-[380px]">
-                {selectedParamId != null ? `#${selectedParamId} ` : ""}
-                {selectedParamName || "Параметр"}
-                {hasDistinctRu ? ` · ${selectedParamNameRu}` : ""}
-              </span>
-              <span className="font-mono font-bold text-blue-700">
-                →{" "}
-                {[...selectedSet]
-                  .map((i) => `#${i}(0x${i.toString(16).toUpperCase().padStart(2, "0")})`)
-                  .join(",")}
-              </span>
+          {changes.length > 0 ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-inset ring-amber-300">
+              Изм. байтов: {changes.length}
             </span>
           ) : (
-            <span className="text-[9.5px] text-gray-400">
-              Нажмите на строку для подсветки байта
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+              Без изм.
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          {changes.length > 0 ? (
-            <div className="flex items-center gap-1">
-              <span className="text-[9px] font-semibold text-amber-800">
-                Изм.({changes.length}):
-              </span>
-              {changes.slice(0, 6).map((c) => (
-                <span
-                  key={c.index}
-                  className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0 font-mono text-[9px] text-amber-950 ring-1 ring-inset ring-amber-300"
-                  title={`Байт #${c.index}: было ${c.from} → стало ${c.to}`}
-                >
-                  <span className="text-amber-700">#{c.index}</span>
-                  <span className="text-gray-500 line-through">{c.from}</span>
-                  <span>→</span>
-                  <span className="font-bold">{c.to}</span>
-                </span>
-              ))}
-              {changes.length > 6 ? (
-                <span className="text-[9px] text-amber-800">+{changes.length - 6}</span>
-              ) : null}
-            </div>
-          ) : (
-            <span className="text-[9px] text-gray-400">Без изм.</span>
-          )}
-
+        <div className="flex items-center gap-1.5 shrink-0">
           {onManualHexChange ? (
             <button
               type="button"
               onClick={() => setShowRawInput((v) => !v)}
-              className="rounded border border-gray-200 bg-white px-1 py-0 text-[9px] font-medium text-gray-600 hover:bg-gray-100"
+              className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-700 hover:bg-gray-100"
               title="Ввести или скопировать HEX-строку вручную"
             >
-              {showRawInput ? "Скрыть" : "HEX"}
+              {showRawInput ? "Скрыть строку HEX" : "Ручной HEX"}
             </button>
           ) : null}
         </div>
       </div>
 
-      {/* Две плотные синхронные строки БЫЛО / СТАЛО */}
+      {/* Информация о выбранном параметре отдельной аккуратной строкой без перекрытий */}
+      {selectedSet.size > 0 ? (
+        <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg border border-blue-200 bg-blue-50/80 px-2 py-1 text-[10.5px] text-blue-900">
+          <span className="font-semibold break-words">
+            {selectedParamId != null ? `#${selectedParamId} ` : ""}
+            {selectedParamName || "Параметр"}
+            {hasDistinctRu ? (
+              <span className="font-normal text-blue-700"> · {selectedParamNameRu}</span>
+            ) : null}
+          </span>
+          <span className="ml-auto font-mono text-[10px] font-bold text-blue-700 shrink-0">
+            Байт:{" "}
+            {[...selectedSet]
+              .map((i) => `#${i} (0x${i.toString(16).toUpperCase().padStart(2, "0")})`)
+              .join(", ")}
+          </span>
+        </div>
+      ) : null}
+
+      {/* Список изменённых байтов (если есть) */}
+      {changes.length > 0 ? (
+        <div className="mb-1.5 flex flex-wrap items-center gap-1">
+          {changes.slice(0, 8).map((c) => (
+            <span
+              key={c.index}
+              className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] text-amber-950 ring-1 ring-inset ring-amber-300"
+              title={`Байт #${c.index}: было ${c.from} → стало ${c.to}`}
+            >
+              <span className="text-amber-700">#{c.index}:</span>
+              <span className="text-gray-500 line-through">{c.from}</span>
+              <span>→</span>
+              <span className="font-bold">{c.to}</span>
+            </span>
+          ))}
+          {changes.length > 8 ? (
+            <span className="text-[10px] font-medium text-amber-800">+{changes.length - 8}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Две синхронные строки БЫЛО / СТАЛО */}
       <div
         ref={scrollContainerRef}
-        className="etacs-hex-scroll overflow-x-auto rounded border border-gray-200 bg-white px-1 py-0.5"
+        className="etacs-hex-scroll overflow-x-auto rounded-lg border border-gray-200 bg-white px-1.5 py-1"
       >
-        <div className="inline-flex min-w-full flex-col gap-0 font-mono text-[9.5px] leading-none">
+        <div className="inline-flex min-w-full flex-col gap-0.5 font-mono text-[10.5px] leading-none">
           {/* Строка БЫЛО */}
-          <div className="flex items-center h-[13px]">
-            <span className="sticky left-0 z-10 w-8 shrink-0 bg-white pr-1 text-[8px] font-sans font-semibold uppercase tracking-wider text-gray-400 select-none">
+          <div className="flex items-center h-[16px]">
+            <span className="sticky left-0 z-10 w-10 shrink-0 bg-white pr-1.5 text-[9px] font-sans font-semibold uppercase tracking-wider text-gray-400 select-none">
               Было
             </span>
-            <div className="flex items-center gap-0">
+            <div className="flex items-center gap-0.5">
               {Array.from({ length: len }, (_, i) => {
                 const was = opened[i] ?? "??";
                 const cur = current[i] ?? "??";
@@ -165,7 +170,7 @@ export function EtacsHexDiffView({
                     ref={i === firstSelectedIdx ? firstSelectedColRef : undefined}
                     title={`Байт #${i} (0x${i.toString(16).toUpperCase().padStart(2, "0")}) · Было: ${was}`}
                     className={[
-                      "w-[16px] shrink-0 text-center rounded-t py-[1px] tabular-nums select-all",
+                      "w-[18px] shrink-0 text-center rounded-t py-[1.5px] tabular-nums select-all",
                       diff
                         ? "bg-amber-50 text-amber-800/80 line-through decoration-amber-500/70"
                         : "text-gray-400",
@@ -182,11 +187,11 @@ export function EtacsHexDiffView({
           </div>
 
           {/* Строка СТАЛО */}
-          <div className="flex items-center h-[13px]">
-            <span className="sticky left-0 z-10 w-8 shrink-0 bg-white pr-1 text-[8px] font-sans font-semibold uppercase tracking-wider text-gray-600 select-none">
+          <div className="flex items-center h-[16px]">
+            <span className="sticky left-0 z-10 w-10 shrink-0 bg-white pr-1.5 text-[9px] font-sans font-semibold uppercase tracking-wider text-gray-700 select-none">
               Стало
             </span>
-            <div className="flex items-center gap-0">
+            <div className="flex items-center gap-0.5">
               {Array.from({ length: len }, (_, i) => {
                 const was = opened[i] ?? "??";
                 const cur = current[i] ?? "??";
@@ -201,7 +206,7 @@ export function EtacsHexDiffView({
                         : `Байт #${i} (0x${i.toString(16).toUpperCase().padStart(2, "0")}): ${cur}`
                     }
                     className={[
-                      "w-[16px] shrink-0 text-center rounded-b py-[1px] tabular-nums select-all",
+                      "w-[18px] shrink-0 text-center rounded-b py-[1.5px] tabular-nums select-all",
                       diff
                         ? "bg-amber-300/90 font-bold text-amber-950"
                         : "text-gray-800",
@@ -221,7 +226,7 @@ export function EtacsHexDiffView({
 
       {/* Опциональное поле ручного ввода HEX (скрыто по умолчанию) */}
       {showRawInput && onManualHexChange ? (
-        <div className="mt-1 flex items-center gap-1.5">
+        <div className="mt-1.5 flex items-center gap-1.5">
           <input
             type="text"
             spellCheck={false}
@@ -231,7 +236,7 @@ export function EtacsHexDiffView({
               setRawDraft(e.target.value);
               onManualHexChange(e.target.value);
             }}
-            className="w-full rounded border border-gray-300 bg-white px-2 py-0.5 font-mono text-[10px] text-gray-800 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1 font-mono text-[11px] text-gray-800 focus:border-blue-500 focus:outline-none"
             placeholder="HEX-строка кодировки…"
           />
         </div>
