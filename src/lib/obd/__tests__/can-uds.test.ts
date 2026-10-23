@@ -415,14 +415,10 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(res.writeCommandHex).toBe("3B B2");
     expect(res.writtenBytes).toBe(65);
     expect(link.written).toContain("ATCAF0");
-    expect(
-      link.written.some((cmd) => cmd.startsWith("10433BB240404040")),
-    ).toBe(true);
-    // 8th Consecutive Frame (28...) must request 1 Flow Control frame (` 1`) when BS=8
-    expect(link.written).toContain("2800000000000000 1");
-    expect(
-      link.written.some((cmd) => cmd.startsWith("290000000000FFFF")),
-    ).toBe(true);
+    expect(link.written).toContain("10433BB240404040");
+    // 8th Consecutive Frame (28...) is sent as a pure 16-hex-char frame (no ` 1` suffix that exceeds 8 CAN bytes)
+    expect(link.written).toContain("2800000000000000");
+    expect(link.written).toContain("290000000000FFFF");
     expect(link.written).toContain("ATCAF1");
   });
 
