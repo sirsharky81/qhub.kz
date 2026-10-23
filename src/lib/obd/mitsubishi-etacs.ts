@@ -1105,21 +1105,23 @@ function parseLidBytesFromReadId(
  * when ELM327 / vLinker rejects a single >7-byte hex string with `?` (because
  * standard ELM327 command parser only accepts up to 7/8 data bytes per line).
  *
- * - Single Frame (`len <= 7`): `[0x00 | len, ...pdu]` (padded to 8 bytes with `0x00`)
+ * - Single Frame (`len <= 7`): `[0x00 | len, ...pdu]` (padded to 8 bytes with `padByte`)
  * - First Frame (`len > 7`): `[0x10 | ((len >> 8) & 0x0F), len & 0xFF, pdu[0..5]]`
- * - Consecutive Frames: `[0x20 | (seq & 0x0F), ...chunk]` (seq = 1..15, wraps to 0..15, padded to 8 bytes with `0x00`)
+ * - Consecutive Frames: `[0x20 | (seq & 0x0F), ...chunk]` (seq = 1..15, wraps to 0..15, padded to 8 bytes with `padByte`)
+ *
+ * Note: Mitsubishi ETACS `620 -> 504` pads all ISO-TP frames with `0xFF` (`30 08 0A FF FF FF FF FF`).
  */
-export function buildIsoTpFrames(pdu: Uint8Array): string[] {
+export function buildIsoTpFrames(pdu: Uint8Array, padByte = 0xff): string[] {
   const totalLen = pdu.length;
   if (totalLen <= 7) {
-    const frame = new Uint8Array(8);
+    const frame = new Uint8Array(8).fill(padByte);
     frame[0] = totalLen & 0x0f;
     frame.set(pdu, 1);
     return [bytesToHex(frame, "")];
   }
 
   const frames: string[] = [];
-  const ff = new Uint8Array(8);
+  const ff = new Uint8Array(8).fill(padByte);
   ff[0] = 0x10 | ((totalLen >> 8) & 0x0f);
   ff[1] = totalLen & 0xff;
   ff.set(pdu.subarray(0, 6), 2);
@@ -1128,7 +1130,7 @@ export function buildIsoTpFrames(pdu: Uint8Array): string[] {
   let offset = 6;
   let seq = 1;
   while (offset < totalLen) {
-    const cf = new Uint8Array(8);
+    const cf = new Uint8Array(8).fill(padByte);
     cf[0] = 0x20 | (seq & 0x0f);
     const slice = pdu.subarray(offset, Math.min(offset + 7, totalLen));
     cf.set(slice, 1);
@@ -1313,25 +1315,32 @@ async function sendCodingWritePdu(
   }
 
   // Tier 3: Manual ISO-TP multi-frame transmission with ATCAF0 (raw 8-byte CAN frames)
-  const frames = buildIsoTpFrames(pdu);
+  const frames = buildIsoTpFrames(pdu, 0xff);
   try {
     await elm.sendCommand("ATCAF0", 2_500, { quietMs: 5, allowBarePrompt: true });
+    // Keep ATSTFF (1020ms RX timeout) active for the entire ISO-TP sequence!
+    // Why:
+    // 1. Intermediate CFs (`21... 0`) use the ` 0` frame-count suffix, so ELM/vLinker returns `>` immediately
+    //    without waiting for `ATST` at all.
+    // 2. On the 8th CF (`28... 1`, BlockSize=8 boundary) and on the final CF (`29... 1`), ELM MUST wait up to
+    //    1020ms (`ATSTFF`) for the ECU's Flow Control (`30 08 0A`) or EEPROM write completion (`02 7B B2`),
+    //    AND we must NOT send any `ATSTFF` command between `28...` and `29...` because `sendCommand` calls
+    //    `discardInput()` and adds a round-trip delay!
+    try {
+      await elm.sendCommand("ATSTFF", 2_000, { quietMs: 4, allowBarePrompt: true });
+    } catch {
+      /* ignore */
+    }
+
     let lastReply = "";
     if (frames.length === 1) {
       lastReply = await elm.sendPayload(frames[0]!, 10_000);
     } else {
-      // Refresh KWP diagnostic session (02 10 92 00 00 00 00 00) and pre-set ATST01 BEFORE First Frame
-      // so there is zero AT-command delay between receiving Flow Control (30 08 0A) and sending CF #1 (21...)!
+      // Refresh KWP diagnostic session (02 10 92 FF FF FF FF FF) right before First Frame
+      // so the session timer S3 is 100% fresh when the First Frame hits the CAN bus.
       if (profile.service === 0x21) {
         try {
-          await elm.sendPayload("0210920000000000 1", 2_000, { quietMs: 5, allowBarePrompt: true });
-        } catch {
-          /* ignore */
-        }
-      }
-      if (frames.length > 2) {
-        try {
-          await elm.sendCommand("ATST01", 2_000, { quietMs: 5, allowBarePrompt: true });
+          await elm.sendPayload("021092FFFFFFFFFF 1", 2_000, { quietMs: 5, allowBarePrompt: true });
         } catch {
           /* ignore */
         }
@@ -1361,7 +1370,8 @@ async function sendCodingWritePdu(
       let blockSize = fc?.blockSize ?? 8;
       let stMinMs = Math.max(fc?.stMinMs ?? 10, 10);
       let cfsSentInCurrentBlock = 0;
-      let lastFcDiag = ffResp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
+      const ffCleanDiag = ffResp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 28);
+      let fc2CleanDiag = "";
 
       let useZeroReplySuffix = true;
       for (let i = 1; i < frames.length; i++) {
@@ -1374,11 +1384,6 @@ async function sendCodingWritePdu(
         }
 
         if (isLast) {
-          try {
-            await elm.sendCommand("ATSTFF", 2_000, { quietMs: 4, allowBarePrompt: true });
-          } catch {
-            /* ignore */
-          }
           // On the final Consecutive Frame, expect 1 response frame (`02 7B B2 ...`) from the ECU
           let cfResp = await elm.sendPayload(`${frames[i]!} 1`, 12_000, { quietMs: 25 });
           if (isElmSyntaxRejection(cfResp)) {
@@ -1388,7 +1393,7 @@ async function sendCodingWritePdu(
           const cfTokens = extractHexTokens(cfResp);
           if (hasNegativeResponseForService(cfTokens, writeSvc) === 0x78) {
             try {
-              const followUp = await elm.sendPayload("3E 1", 8_000, { quietMs: 25 });
+              const followUp = await elm.sendPayload("013EFFFFFFFFFFFF 1", 8_000, { quietMs: 25 });
               if (!isNoDataOrEmptyReply(followUp)) cfResp = followUp;
             } catch {
               /* ignore */
@@ -1398,6 +1403,7 @@ async function sendCodingWritePdu(
         } else if (isBlockBoundary) {
           // After `blockSize` Consecutive Frames (e.g. 8th CF `28...` when BS=8), ISO 15765-2 requires
           // waiting for the ECU's next Flow Control frame (`30 08 0A ...`) before sending `29...`!
+          // Because `ATSTFF` (1020ms) is already active, `28... 1` waits properly for the ECU's FC2!
           let fc2Resp = await elm.sendPayload(`${frames[i]!} 1`, 3_000, {
             quietMs: 4,
             allowBarePrompt: true,
@@ -1408,15 +1414,19 @@ async function sendCodingWritePdu(
               allowBarePrompt: true,
             });
           }
+          fc2CleanDiag = fc2Resp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
           const fc2Tokens = extractHexTokens(fc2Resp);
           if (hasNegativeResponseForService(fc2Tokens, writeSvc) !== null) {
+            return fc2Resp;
+          }
+          // If the ECU already returned the positive write acknowledgement on `28...`, return immediately!
+          if (hasPositiveWriteAck(fc2Tokens, expectPosSid, targetId)) {
             return fc2Resp;
           }
           const nextFc = parseIsoTpFlowControl(fc2Tokens);
           if (nextFc) {
             blockSize = nextFc.blockSize;
             stMinMs = Math.max(nextFc.stMinMs, 10);
-            lastFcDiag = `FC2:${fc2Resp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 24)}`;
           }
           cfsSentInCurrentBlock = 0;
         } else {
@@ -1442,9 +1452,10 @@ async function sendCodingWritePdu(
         }
       }
 
-      // If final CF returned NO DATA, include First Frame / Flow Control diagnostics
+      // If final CF returned NO DATA, include both FF and FC2 diagnostics so we see the exact state
       if (isNoDataOrEmptyReply(lastReply) && !isNoDataOrEmptyReply(ffResp)) {
-        lastReply = `FF:${lastFcDiag} -> CF:NO DATA`;
+        const fc2Part = fc2CleanDiag ? ` / FC2:${fc2CleanDiag}` : "";
+        lastReply = `FF:${ffCleanDiag}${fc2Part} -> CF:NO DATA`;
       }
     }
     return lastReply;

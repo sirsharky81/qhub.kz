@@ -351,7 +351,7 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(chunks.length).toBe(7);
     expect(chunks.every((c) => c.length <= 20)).toBe(true);
 
-    // 2. Verify ISO-TP frame builder for 67-byte PDU (3B B2 + 65 bytes = 0x43 bytes -> 1 First Frame + 9 Consecutive Frames)
+    // 2. Verify ISO-TP frame builder for 67-byte PDU (3B B2 + 65 bytes = 0x43 bytes -> 1 First Frame + 9 Consecutive Frames, padded with 0xFF)
     const pdu = new Uint8Array(67);
     pdu[0] = 0x3b;
     pdu[1] = 0xb2;
@@ -360,7 +360,7 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(isoFrames).toHaveLength(10);
     expect(isoFrames[0]).toBe("10433BB240404040");
     expect(isoFrames[1]).toBe("2140404040404040");
-    expect(isoFrames[9]).toBe("2900000000000000");
+    expect(isoFrames[9]).toBe("290000000000FFFF");
 
     // 3. Verify writeEtacsSingleBlock succeeds via ISO-TP framing when direct 134-hex-char line and STPX return '?'
     const link = new FakeLink();
@@ -389,10 +389,10 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
         (link as unknown as { pending: string }).pending += "30 08 0A FF FF FF FF FF\r>";
         return;
       }
-      if (line === "2900000000000000 1" || line === "2900000000000000") {
+      if (line === "290000000000FFFF 1" || line === "290000000000FFFF") {
         link.written.push(line);
         // After final Consecutive Frame (29...), ECU responds with positive KWP 7B B2 (Single Frame 02 7B B2)
-        (link as unknown as { pending: string }).pending += "02 7B B2 00 00 00 00 00\r>";
+        (link as unknown as { pending: string }).pending += "02 7B B2 FF FF FF FF FF\r>";
         return;
       }
       if (/^2[1-7][0-9A-F]{14}(\s+0)?$/.test(line)) {
@@ -421,7 +421,7 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     // 8th Consecutive Frame (28...) must request 1 Flow Control frame (` 1`) when BS=8
     expect(link.written).toContain("2800000000000000 1");
     expect(
-      link.written.some((cmd) => cmd.startsWith("2900000000000000")),
+      link.written.some((cmd) => cmd.startsWith("290000000000FFFF")),
     ).toBe(true);
     expect(link.written).toContain("ATCAF1");
   });
