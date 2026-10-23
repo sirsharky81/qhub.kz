@@ -7,8 +7,17 @@ import { getRedisBackend } from "@/lib/redis/env";
 const REDIS_ETACS_BILLING_KEY = "qhub:etacs:billing:v1";
 const FILE_PATH = join(process.cwd(), ".data", "etacs-billing.json");
 
+/**
+ * Уровень доступа для конкретного VIN:
+ * - `cuf_only`: открыто сохранение и запись только `.cuf` (Custom Coding — зеркала, свет, замки, дворники)
+ * - `full`: открыто сохранение и запись и `.kon` (Variant Coding ETACS + ДВС), и `.cuf`
+ */
+export type EtacsVinAccessScope = "cuf_only" | "full";
+
 export interface EtacsUnlockedVinRecord {
   vin: string;
+  /** По умолчанию `"full"` для обратной совместимости */
+  scope?: EtacsVinAccessScope;
   ecuId?: string;
   contact?: string;
   note?: string;
@@ -19,7 +28,13 @@ export interface EtacsUnlockedVinRecord {
 
 export interface EtacsPromoCodeRecord {
   code: string;
-  kind: "single_vin" | "multi_vin" | "pro_unlimited";
+  /**
+   * - `cuf_single_vin`: доступ только к `.cuf` на 1 VIN навсегда (народный тариф)
+   * - `single_vin`: полный доступ (`.kon` + `.cuf`) на 1 VIN навсегда
+   * - `multi_vin`: полный доступ (`.kon` + `.cuf`) на N автомобилей
+   * - `pro_unlimited`: безлимит на любые автомобили (`.kon` + `.cuf`) на срок
+   */
+  kind: "cuf_single_vin" | "single_vin" | "multi_vin" | "pro_unlimited";
   maxUses: number;
   usedCount: number;
   usedVins: string[];
@@ -35,7 +50,7 @@ export interface EtacsUnlockRequestRecord {
   vin: string;
   ecuId?: string;
   contact: string;
-  plan: "single_vin" | "pro_month" | "pro_year";
+  plan: "cuf_vin" | "single_vin" | "pro_month" | "pro_year";
   comment?: string;
   status: "pending" | "approved" | "rejected";
   createdAt: string;
@@ -47,9 +62,12 @@ export interface EtacsBillingSettings {
   /**
    * Когда `enforcePaywall === false`, сохранение и запись работают свободно для всех (режим открытого теста),
    * но статус и кабинет лицензий уже видны. Когда `true` — сохранение и запись в блок требуют
-   * разблокированного VIN, активного PRO-кода или сессии администратора QHub.
+   * разблокированного VIN (по уровню `.cuf` или `.kon + .cuf`), активного PRO-кода или сессии администратора QHub.
    */
   enforcePaywall: boolean;
+  /** Народный тариф: только Custom Coding (.cuf — зеркала, комфорт) на 1 VIN */
+  cufVinPriceKzt: number;
+  /** Полный тариф на 1 VIN: Variant (.kon) + Custom (.cuf) */
   singleVinPriceKzt: number;
   proMonthPriceKzt: number;
   proYearPriceKzt: number;
@@ -68,7 +86,8 @@ function defaultSettings(): EtacsBillingSettings {
   const envEnforce = process.env.ETACS_PAYWALL_ENFORCED;
   return {
     enforcePaywall: envEnforce === "1" || envEnforce === "true",
-    singleVinPriceKzt: 3000,
+    cufVinPriceKzt: 1500,
+    singleVinPriceKzt: 3500,
     proMonthPriceKzt: 8000,
     proYearPriceKzt: 30000,
     paymentInstructions:
@@ -163,6 +182,19 @@ export function normalizePromoCode(code: string | undefined | null): string {
     .trim();
 }
 
+export function detectFileKindForBilling(
+  fileName?: string | null,
+  codingHex?: string | null,
+): "kon" | "cuf" {
+  const lower = String(fileName ?? "").toLowerCase();
+  if (/\.cuf(?=$|[^a-z])/i.test(lower)) return "cuf";
+  if (/\.kon(?=$|[^a-z])/i.test(lower)) return "kon";
+  const cleanHex = String(codingHex ?? "").replace(/\s+/g, "");
+  // ETACS .cuf is 65 bytes (130 hex chars), whereas .kon is 90 bytes (180 hex chars)
+  if (cleanHex.length === 130) return "cuf";
+  return "kon";
+}
+
 function isNotExpired(expiresAt?: string | null): boolean {
   if (!expiresAt) return true;
   const ts = Date.parse(expiresAt);
@@ -172,9 +204,21 @@ function isNotExpired(expiresAt?: string | null): boolean {
 
 export interface EtacsAccessCheckResult {
   allowed: boolean;
+  /** Разрешено ли сохранение/запись `.cuf` для этого VIN */
+  allowedCuf: boolean;
+  /** Разрешено ли сохранение/запись `.kon` (и `.cuf`) для этого VIN */
+  allowedKon: boolean;
   enforcePaywall: boolean;
-  reason: "admin" | "paywall_disabled" | "vin_unlocked" | "pro_code" | "locked";
+  reason:
+    | "admin"
+    | "paywall_disabled"
+    | "vin_unlocked_full"
+    | "vin_unlocked_cuf"
+    | "pro_code"
+    | "cuf_only_need_kon_upgrade"
+    | "locked";
   vin: string;
+  fileKind: "kon" | "cuf";
   vinRecord?: EtacsUnlockedVinRecord | null;
   promoRecord?: {
     code: string;
@@ -188,14 +232,19 @@ export interface EtacsAccessCheckResult {
 export async function checkEtacsAccess(options: {
   vin?: string | null;
   promoCode?: string | null;
+  fileKind?: "kon" | "cuf" | null;
   isAdmin?: boolean;
 }): Promise<EtacsAccessCheckResult> {
   const store = await loadEtacsBillingStore();
   const vin = normalizeVin(options.vin);
   const code = normalizePromoCode(options.promoCode);
+  const fileKind: "kon" | "cuf" = options.fileKind === "cuf" ? "cuf" : "kon";
 
   const vinRec = vin ? store.unlockedVins[vin] : undefined;
   const validVinRec = vinRec && isNotExpired(vinRec.expiresAt) ? vinRec : null;
+  const vinScope: EtacsVinAccessScope | null = validVinRec
+    ? validVinRec.scope ?? "full"
+    : null;
 
   const promoRec = code ? store.promoCodes[code] : undefined;
   const validPromo =
@@ -223,56 +272,106 @@ export async function checkEtacsAccess(options: {
   if (options.isAdmin) {
     return {
       allowed: true,
+      allowedCuf: true,
+      allowedKon: true,
       enforcePaywall: store.settings.enforcePaywall,
       reason: "admin",
       vin,
+      fileKind,
       vinRecord: validVinRec,
       promoRecord: promoSummary,
       settings: store.settings,
     };
   }
 
-  if (validVinRec) {
+  // Full PRO code or full multi/single VIN promo code
+  if (validPromo && validPromo.kind !== "cuf_single_vin") {
     return {
       allowed: true,
-      enforcePaywall: store.settings.enforcePaywall,
-      reason: "vin_unlocked",
-      vin,
-      vinRecord: validVinRec,
-      promoRecord: promoSummary,
-      settings: store.settings,
-    };
-  }
-
-  if (validPromo) {
-    return {
-      allowed: true,
+      allowedCuf: true,
+      allowedKon: true,
       enforcePaywall: store.settings.enforcePaywall,
       reason: "pro_code",
       vin,
+      fileKind,
       vinRecord: validVinRec,
       promoRecord: promoSummary,
       settings: store.settings,
     };
   }
+
+  // Full VIN unlock
+  if (vinScope === "full") {
+    return {
+      allowed: true,
+      allowedCuf: true,
+      allowedKon: true,
+      enforcePaywall: store.settings.enforcePaywall,
+      reason: "vin_unlocked_full",
+      vin,
+      fileKind,
+      vinRecord: validVinRec,
+      promoRecord: promoSummary,
+      settings: store.settings,
+    };
+  }
+
+  // CUF-only VIN unlock (or CUF-only promo code)
+  const hasCufAccess =
+    vinScope === "cuf_only" || Boolean(validPromo && validPromo.kind === "cuf_single_vin");
 
   if (!store.settings.enforcePaywall) {
     return {
       allowed: true,
+      allowedCuf: true,
+      allowedKon: true,
       enforcePaywall: false,
-      reason: "paywall_disabled",
+      reason: hasCufAccess ? "vin_unlocked_cuf" : "paywall_disabled",
       vin,
-      vinRecord: null,
-      promoRecord: null,
+      fileKind,
+      vinRecord: validVinRec,
+      promoRecord: promoSummary,
+      settings: store.settings,
+    };
+  }
+
+  if (hasCufAccess) {
+    if (fileKind === "cuf") {
+      return {
+        allowed: true,
+        allowedCuf: true,
+        allowedKon: false,
+        enforcePaywall: true,
+        reason: "vin_unlocked_cuf",
+        vin,
+        fileKind,
+        vinRecord: validVinRec,
+        promoRecord: promoSummary,
+        settings: store.settings,
+      };
+    }
+    return {
+      allowed: false,
+      allowedCuf: true,
+      allowedKon: false,
+      enforcePaywall: true,
+      reason: "cuf_only_need_kon_upgrade",
+      vin,
+      fileKind,
+      vinRecord: validVinRec,
+      promoRecord: promoSummary,
       settings: store.settings,
     };
   }
 
   return {
     allowed: false,
+    allowedCuf: false,
+    allowedKon: false,
     enforcePaywall: true,
     reason: "locked",
     vin,
+    fileKind,
     vinRecord: null,
     promoRecord: null,
     settings: store.settings,
@@ -316,14 +415,16 @@ export async function redeemEtacsPromoCode(options: {
     }
     return {
       ok: true,
-      message: "Код PRO Мастер активирован! Доступ ко всем VIN открыт.",
+      message: "Код PRO Мастер активирован! Полный доступ (.kon + .cuf) ко всем автомобилям открыт.",
       promoRecord: promo,
       vinRecord: null,
     };
   }
 
   if (!cleanVin || cleanVin.length < 6) {
-    throw new Error("Для активации кода на автомобиль сначала откройте файл .kon / .cuf с вашим VIN в слоте A");
+    throw new Error(
+      "Для активации кода на автомобиль сначала откройте файл .kon / .cuf с вашим VIN в слоте A",
+    );
   }
 
   if (!promo.usedVins.includes(cleanVin)) {
@@ -340,9 +441,14 @@ export async function redeemEtacsPromoCode(options: {
       ? new Date(now.getTime() + promo.durationDays * 86_400_000).toISOString()
       : null;
 
+  const existingVin = store.unlockedVins[cleanVin];
+  const newScope: EtacsVinAccessScope =
+    promo.kind === "cuf_single_vin" && existingVin?.scope !== "full" ? "cuf_only" : "full";
+
   const vinRecord: EtacsUnlockedVinRecord = {
     vin: cleanVin,
-    ecuId: options.ecuId?.trim() || undefined,
+    scope: newScope,
+    ecuId: options.ecuId?.trim() || existingVin?.ecuId || undefined,
     note: `По коду ${cleanCode}`,
     unlockedAt: now.toISOString(),
     expiresAt,
@@ -353,7 +459,10 @@ export async function redeemEtacsPromoCode(options: {
 
   return {
     ok: true,
-    message: `VIN ${cleanVin} успешно разблокирован! Сохранение и запись в блок открыты.`,
+    message:
+      newScope === "cuf_only"
+        ? `Доступ Custom Coding (.cuf) для VIN ${cleanVin} успешно открыт! Теперь вы можете без ограничений сохранять и записывать .cuf в блок.`
+        : `Полный доступ (.kon + .cuf) для VIN ${cleanVin} успешно открыт!`,
     promoRecord: promo,
     vinRecord,
   };
@@ -361,6 +470,7 @@ export async function redeemEtacsPromoCode(options: {
 
 export async function unlockVinManually(options: {
   vin: string;
+  scope?: EtacsVinAccessScope;
   ecuId?: string;
   contact?: string;
   note?: string;
@@ -380,6 +490,7 @@ export async function unlockVinManually(options: {
 
   const rec: EtacsUnlockedVinRecord = {
     vin: cleanVin,
+    scope: options.scope ?? "full",
     ecuId: options.ecuId?.trim() || undefined,
     contact: options.contact?.trim() || undefined,
     note: options.note?.trim() || undefined,
@@ -417,9 +528,15 @@ export async function createEtacsPromoCode(options: {
   note?: string;
 }): Promise<EtacsPromoCodeRecord> {
   const store = await loadEtacsBillingStore();
+  const defaultPrefix =
+    options.kind === "pro_unlimited"
+      ? "PRO"
+      : options.kind === "cuf_single_vin"
+        ? "CUF"
+        : "VIN";
   const code = options.customCode
     ? normalizePromoCode(options.customCode)
-    : generatePromoCodeString(options.kind === "pro_unlimited" ? "PRO" : "VIN");
+    : generatePromoCodeString(defaultPrefix);
   if (!code || code.length < 4) {
     throw new Error("Слишком короткий код");
   }
@@ -433,7 +550,7 @@ export async function createEtacsPromoCode(options: {
   const maxUses =
     options.kind === "pro_unlimited"
       ? 9999
-      : options.kind === "single_vin"
+      : options.kind === "single_vin" || options.kind === "cuf_single_vin"
         ? 1
         : Math.max(1, options.maxUses ?? 5);
 
@@ -512,12 +629,23 @@ export async function approveEtacsUnlockRequest(
   req.status = "approved";
   req.resolvedAt = now.toISOString();
 
-  if (req.plan === "single_vin" && req.vin && req.vin !== "PRO-TARIFF") {
+  if (
+    (req.plan === "cuf_vin" || req.plan === "single_vin") &&
+    req.vin &&
+    req.vin !== "PRO-TARIFF"
+  ) {
+    const existing = store.unlockedVins[req.vin];
+    const scope: EtacsVinAccessScope =
+      req.plan === "cuf_vin" && existing?.scope !== "full" ? "cuf_only" : "full";
     const vinRec: EtacsUnlockedVinRecord = {
       vin: req.vin,
-      ecuId: req.ecuId,
+      scope,
+      ecuId: req.ecuId ?? existing?.ecuId,
       contact: req.contact,
-      note: `Заявка ${req.id}`,
+      note:
+        scope === "cuf_only"
+          ? `Заявка ${req.id} (только .cuf)`
+          : `Заявка ${req.id} (.kon + .cuf)`,
       unlockedAt: now.toISOString(),
       expiresAt: null,
       source: "request",
@@ -547,6 +675,7 @@ export async function approveEtacsUnlockRequest(
   if (req.vin && req.vin !== "PRO-TARIFF") {
     store.unlockedVins[req.vin] = {
       vin: req.vin,
+      scope: "full",
       ecuId: req.ecuId,
       contact: req.contact,
       note: `PRO по заявке ${req.id} (${code})`,

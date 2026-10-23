@@ -19,7 +19,7 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * GET /api/etacs-coding/license?vin=...&promoCode=...
+ * GET /api/etacs-coding/license?vin=...&promoCode=...&fileKind=cuf|kon
  * Также поддерживает быстрый клик из Telegram:
  * GET /api/etacs-coding/license?approveId=ET-...&sig=...
  */
@@ -37,6 +37,10 @@ export async function GET(request: Request) {
     }
     try {
       const res = await approveEtacsUnlockRequest(approveId);
+      const scopeLabel =
+        res.vinRecord?.scope === "cuf_only"
+          ? "Custom Coding (.cuf)"
+          : "Полный (.kon + .cuf)";
       const html = `<!doctype html>
 <html lang="ru">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявка подтверждена</title></head>
@@ -47,7 +51,7 @@ export async function GET(request: Request) {
   ${
     res.promoRecord
       ? `<p><strong>Выдан PRO-код:</strong> <code style="font-size:16px;font-weight:bold;">${escapeHtml(res.promoRecord.code)}</code></p>`
-      : `<p>Доступ к сохранению и записи для VIN <code>${escapeHtml(res.request.vin)}</code> открыт.</p>`
+      : `<p>Открыт доступ <strong>${escapeHtml(scopeLabel)}</strong> для VIN <code>${escapeHtml(res.request.vin)}</code>.</p>`
   }
   <p style="margin-top:20px;"><a href="/tools/etacs-coding" style="color:#047857;font-weight:600;">Перейти в ETACS Coding →</a></p>
 </body>
@@ -66,15 +70,17 @@ export async function GET(request: Request) {
 
   const vin = url.searchParams.get("vin") || "";
   const promoCode = url.searchParams.get("promoCode") || "";
+  const rawKind = url.searchParams.get("fileKind");
+  const fileKind = rawKind === "cuf" ? "cuf" : "kon";
   const isAdmin = await isAdminAuthenticated().catch(() => false);
-  const status = await checkEtacsAccess({ vin, promoCode, isAdmin });
+  const status = await checkEtacsAccess({ vin, promoCode, fileKind, isAdmin });
   return NextResponse.json(status);
 }
 
 /**
  * POST /api/etacs-coding/license
- * - { action: "redeem", code, vin, ecuId } — активировать промокод или PRO-код
- * - { action: "request", vin, ecuId, contact, plan, comment } — отправить заявку на разблокировку (с уведомлением в Telegram)
+ * - { action: "redeem", code, vin, ecuId } — активировать промокод (.cuf / .kon / PRO)
+ * - { action: "request", vin, ecuId, contact, plan, comment } — отправить заявку на разблокировку
  */
 export async function POST(request: Request) {
   try {
@@ -84,7 +90,7 @@ export async function POST(request: Request) {
       vin?: string;
       ecuId?: string;
       contact?: string;
-      plan?: "single_vin" | "pro_month" | "pro_year";
+      plan?: "cuf_vin" | "single_vin" | "pro_month" | "pro_year";
       comment?: string;
     };
 
@@ -102,7 +108,7 @@ export async function POST(request: Request) {
         vin: body.vin,
         ecuId: body.ecuId,
         contact: body.contact || "",
-        plan: body.plan || "single_vin",
+        plan: body.plan || "cuf_vin",
         comment: body.comment,
       });
 
@@ -114,10 +120,12 @@ export async function POST(request: Request) {
 
       const planLabel =
         reqRecord.plan === "pro_year"
-          ? "PRO Мастер (1 год)"
+          ? "PRO СТО (1 год)"
           : reqRecord.plan === "pro_month"
-            ? "PRO Мастер (1 месяц)"
-            : "1 Автомобиль (по VIN)";
+            ? "PRO Мастер (30 дней)"
+            : reqRecord.plan === "single_vin"
+              ? "Полный авто .kon + .cuf (1 VIN)"
+              : "Народный Custom .cuf (1 VIN — зеркала/комфорт)";
 
       const tgText = [
         `🚗 <b>Заявка ETACS Coding ${escapeHtml(reqRecord.id)}</b>`,

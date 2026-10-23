@@ -13,13 +13,14 @@ import {
   verifyQuickApproveToken,
 } from "../licensing";
 
-describe("ETACS Coding licensing & monetization store", () => {
+describe("ETACS Coding licensing & monetization store (.cuf vs .kon + .cuf tiers)", () => {
   beforeEach(async () => {
     resetEtacsBillingMemoryCache();
     await saveEtacsBillingStore({
       settings: {
         enforcePaywall: true,
-        singleVinPriceKzt: 3000,
+        cufVinPriceKzt: 1500,
+        singleVinPriceKzt: 3500,
         proMonthPriceKzt: 8000,
         proYearPriceKzt: 30000,
         paymentInstructions: "Kaspi transfer",
@@ -31,16 +32,61 @@ describe("ETACS Coding licensing & monetization store", () => {
     });
   });
 
-  it("blocks unactivated VIN when enforcePaywall is true and unlocks after manual VIN unlock", async () => {
+  it("blocks unactivated VIN when enforcePaywall is true and unlocks full (.kon + .cuf) after manual full unlock", async () => {
     const vin = "MMEMCY1XXNH003447";
-    const before = await checkEtacsAccess({ vin });
+    const before = await checkEtacsAccess({ vin, fileKind: "cuf" });
     expect(before.allowed).toBe(false);
     expect(before.reason).toBe("locked");
 
-    await unlockVinManually({ vin, ecuId: "8637C671", note: "Test owner" });
-    const after = await checkEtacsAccess({ vin });
-    expect(after.allowed).toBe(true);
-    expect(after.reason).toBe("vin_unlocked");
+    await unlockVinManually({ vin, scope: "full", ecuId: "8637C671", note: "Test owner" });
+    const afterCuf = await checkEtacsAccess({ vin, fileKind: "cuf" });
+    const afterKon = await checkEtacsAccess({ vin, fileKind: "kon" });
+    expect(afterCuf.allowed).toBe(true);
+    expect(afterKon.allowed).toBe(true);
+    expect(afterKon.reason).toBe("vin_unlocked_full");
+  });
+
+  it("unlocks only .cuf with cuf_single_vin code while keeping .kon locked until full upgrade", async () => {
+    const vin = "MMEMCY1XXNH003447";
+    const cufCode = await createEtacsPromoCode({
+      customCode: "CUF-MIRROR1",
+      kind: "cuf_single_vin",
+    });
+    expect(cufCode.code).toBe("CUF-MIRROR1");
+
+    const redeem = await redeemEtacsPromoCode({
+      code: "CUF-MIRROR1",
+      vin,
+      ecuId: "8637C671",
+    });
+    expect(redeem.ok).toBe(true);
+    expect(redeem.vinRecord?.scope).toBe("cuf_only");
+
+    // .cuf is allowed
+    const checkCuf = await checkEtacsAccess({ vin, fileKind: "cuf" });
+    expect(checkCuf.allowed).toBe(true);
+    expect(checkCuf.allowedCuf).toBe(true);
+    expect(checkCuf.allowedKon).toBe(false);
+    expect(checkCuf.reason).toBe("vin_unlocked_cuf");
+
+    // .kon is still locked and prompts for upgrade
+    const checkKon = await checkEtacsAccess({ vin, fileKind: "kon" });
+    expect(checkKon.allowed).toBe(false);
+    expect(checkKon.allowedCuf).toBe(true);
+    expect(checkKon.allowedKon).toBe(false);
+    expect(checkKon.reason).toBe("cuf_only_need_kon_upgrade");
+
+    // Upgrading the same VIN with a full single_vin code unlocks .kon as well
+    await createEtacsPromoCode({
+      customCode: "VIN-FULL01",
+      kind: "single_vin",
+    });
+    await redeemEtacsPromoCode({ code: "VIN-FULL01", vin });
+
+    const checkKonAfterUpgrade = await checkEtacsAccess({ vin, fileKind: "kon" });
+    expect(checkKonAfterUpgrade.allowed).toBe(true);
+    expect(checkKonAfterUpgrade.allowedKon).toBe(true);
+    expect(checkKonAfterUpgrade.reason).toBe("vin_unlocked_full");
   });
 
   it("allows single-VIN promo code redemption and locks second distinct VIN", async () => {
@@ -57,9 +103,9 @@ describe("ETACS Coding licensing & monetization store", () => {
     });
     expect(redeem1.ok).toBe(true);
 
-    const check1 = await checkEtacsAccess({ vin: "MMEMCY1XXNH003447" });
+    const check1 = await checkEtacsAccess({ vin: "MMEMCY1XXNH003447", fileKind: "kon" });
     expect(check1.allowed).toBe(true);
-    expect(check1.reason).toBe("vin_unlocked");
+    expect(check1.reason).toBe("vin_unlocked_full");
 
     // Second different VIN with the same 1-VIN code should be rejected
     await expect(
@@ -70,7 +116,7 @@ describe("ETACS Coding licensing & monetization store", () => {
     ).rejects.toThrow(/исчерпан/);
   });
 
-  it("supports unlimited PRO promo codes across any VIN", async () => {
+  it("supports unlimited PRO promo codes across any VIN for both .kon and .cuf", async () => {
     const pro = await createEtacsPromoCode({
       customCode: "PRO-MASTER77",
       kind: "pro_unlimited",
@@ -81,6 +127,7 @@ describe("ETACS Coding licensing & monetization store", () => {
     const accessA = await checkEtacsAccess({
       vin: "MMEMCY1XXNH003447",
       promoCode: "PRO-MASTER77",
+      fileKind: "kon",
     });
     expect(accessA.allowed).toBe(true);
     expect(accessA.reason).toBe("pro_code");
@@ -88,18 +135,19 @@ describe("ETACS Coding licensing & monetization store", () => {
     const accessB = await checkEtacsAccess({
       vin: "JMBXKR1WHEZ000888",
       promoCode: "PRO-MASTER77",
+      fileKind: "cuf",
     });
     expect(accessB.allowed).toBe(true);
     expect(accessB.reason).toBe("pro_code");
   });
 
-  it("creates unlock requests, signs Telegram quick-approve tokens, and approves requests", async () => {
+  it("creates cuf_vin unlock requests, signs Telegram quick-approve tokens, and approves cuf_only scope", async () => {
     const req = await createEtacsUnlockRequest({
       vin: "MMEMCY1XXNH003447",
       ecuId: "8637C671",
       contact: "+77015554433",
-      plan: "single_vin",
-      comment: "Kaspi 3000",
+      plan: "cuf_vin",
+      comment: "Kaspi 1500 for mirrors",
     });
     expect(req.status).toBe("pending");
 
@@ -109,15 +157,20 @@ describe("ETACS Coding licensing & monetization store", () => {
 
     const approved = await approveEtacsUnlockRequest(req.id);
     expect(approved.request.status).toBe("approved");
+    expect(approved.vinRecord?.scope).toBe("cuf_only");
 
-    const access = await checkEtacsAccess({ vin: "MMEMCY1XXNH003447" });
-    expect(access.allowed).toBe(true);
-    expect(access.reason).toBe("vin_unlocked");
+    const accessCuf = await checkEtacsAccess({ vin: "MMEMCY1XXNH003447", fileKind: "cuf" });
+    expect(accessCuf.allowed).toBe(true);
+    expect(accessCuf.reason).toBe("vin_unlocked_cuf");
+
+    const accessKon = await checkEtacsAccess({ vin: "MMEMCY1XXNH003447", fileKind: "kon" });
+    expect(accessKon.allowed).toBe(false);
+    expect(accessKon.reason).toBe("cuf_only_need_kon_upgrade");
   });
 
   it("allows free access when enforcePaywall is toggled off in admin settings", async () => {
     await updateEtacsBillingSettings({ enforcePaywall: false });
-    const access = await checkEtacsAccess({ vin: "ANYVIN00000000001" });
+    const access = await checkEtacsAccess({ vin: "ANYVIN00000000001", fileKind: "kon" });
     expect(access.allowed).toBe(true);
     expect(access.reason).toBe("paywall_disabled");
   });

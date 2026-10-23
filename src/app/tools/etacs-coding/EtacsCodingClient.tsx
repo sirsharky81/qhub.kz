@@ -134,31 +134,41 @@ export default function EtacsCodingClient() {
       .catch(() => setReady(false));
   }, []);
 
+  const extKind = (name: string): "kon" | "cuf" | null => {
+    if (/\.kon(?=$|[^a-zA-Z])/i.test(name)) return "kon";
+    if (/\.cuf(?=$|[^a-zA-Z])/i.test(name)) return "cuf";
+    return null;
+  };
+
   const currentVin = slotA.view?.vin ?? "";
+  const currentFileKind: "kon" | "cuf" =
+    extKind(slotA.displayName) === "cuf" || slotA.view?.codingBytes === 65 ? "cuf" : "kon";
 
   const refreshLicenseStatus = useCallback(
-    async (vinOverride?: string, codeOverride?: string) => {
+    async (vinOverride?: string, codeOverride?: string, kindOverride?: "kon" | "cuf") => {
       try {
         const res = await fetchEtacsLicenseStatus({
           vin: vinOverride ?? currentVin,
           promoCode: codeOverride ?? storedPromoCode,
+          fileKind: kindOverride ?? currentFileKind,
         });
         setLicenseStatus(res);
       } catch {
         /* ignore */
       }
     },
-    [currentVin, storedPromoCode],
+    [currentVin, storedPromoCode, currentFileKind],
   );
 
   useEffect(() => {
     void fetchEtacsLicenseStatus({
       vin: currentVin,
       promoCode: storedPromoCode,
+      fileKind: currentFileKind,
     })
       .then((res) => setLicenseStatus(res))
       .catch(() => null);
-  }, [currentVin, storedPromoCode]);
+  }, [currentVin, storedPromoCode, currentFileKind]);
 
   const handleSavePromoCode = useCallback(
     (code: string) => {
@@ -171,16 +181,10 @@ export default function EtacsCodingClient() {
       } catch {
         /* ignore */
       }
-      void refreshLicenseStatus(currentVin, code);
+      void refreshLicenseStatus(currentVin, code, currentFileKind);
     },
-    [refreshLicenseStatus, currentVin],
+    [refreshLicenseStatus, currentVin, currentFileKind],
   );
-
-  const extKind = (name: string): "kon" | "cuf" | null => {
-    if (/\.kon(?=$|[^a-zA-Z])/i.test(name)) return "kon";
-    if (/\.cuf(?=$|[^a-zA-Z])/i.test(name)) return "cuf";
-    return null;
-  };
 
   const comparing = Boolean(
     slotA.view &&
@@ -962,7 +966,8 @@ export default function EtacsCodingClient() {
                     type="button"
                     onClick={() => setUnlockModalOpen(true)}
                     className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
-                      licenseStatus?.reason === "vin_unlocked" ||
+                      licenseStatus?.reason === "vin_unlocked_full" ||
+                      licenseStatus?.reason === "vin_unlocked_cuf" ||
                       licenseStatus?.reason === "pro_code" ||
                       licenseStatus?.reason === "admin"
                         ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
@@ -970,17 +975,21 @@ export default function EtacsCodingClient() {
                           ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
                           : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
                     }`}
-                    title="Проверить доступ по VIN или ввести код активации PRO"
+                    title="Проверить доступ по VIN (.cuf / .kon) или ввести код активации"
                   >
                     {licenseStatus?.reason === "pro_code"
                       ? "★ PRO активен"
-                      : licenseStatus?.reason === "vin_unlocked"
-                        ? "✓ VIN открыт"
-                        : licenseStatus?.reason === "admin"
-                          ? "★ Admin PRO"
-                          : licenseStatus?.enforcePaywall
-                            ? "🔒 Разблокировать VIN / PRO"
-                            : "🔑 Код / PRO"}
+                      : licenseStatus?.reason === "vin_unlocked_full"
+                        ? "✓ VIN (.kon + .cuf)"
+                        : licenseStatus?.reason === "vin_unlocked_cuf"
+                          ? "✓ VIN (.cuf открыт)"
+                          : licenseStatus?.reason === "cuf_only_need_kon_upgrade"
+                            ? "🔒 Открыть .kon"
+                            : licenseStatus?.reason === "admin"
+                              ? "★ Admin PRO"
+                              : licenseStatus?.enforcePaywall
+                                ? `🔒 Открыть ${currentFileKind === "cuf" ? ".cuf" : ".kon"} / PRO`
+                                : "🔑 Тарифы / PRO"}
                   </button>
                   {!slotB.view ? (
                     <PickerButton
@@ -1704,6 +1713,7 @@ export default function EtacsCodingClient() {
           vin={slotA.view?.vin}
           ecuId={slotA.view?.ecuId}
           model={slotA.view?.model}
+          fileKind={currentFileKind}
           licenseStatus={licenseStatus}
           storedPromoCode={storedPromoCode}
           onSavePromoCode={handleSavePromoCode}

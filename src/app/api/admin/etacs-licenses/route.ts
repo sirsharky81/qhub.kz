@@ -9,6 +9,7 @@ import {
   unlockVinManually,
   updateEtacsBillingSettings,
   type EtacsPromoCodeRecord,
+  type EtacsVinAccessScope,
 } from "@/lib/etacs-coding/licensing";
 
 export async function GET() {
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
         | "approve_request"
         | "update_settings";
       vin?: string;
+      scope?: EtacsVinAccessScope;
       ecuId?: string;
       contact?: string;
       note?: string;
@@ -43,6 +45,7 @@ export async function POST(request: Request) {
       code?: string;
       requestId?: string;
       enforcePaywall?: boolean;
+      cufVinPriceKzt?: number;
       singleVinPriceKzt?: number;
       proMonthPriceKzt?: number;
       proYearPriceKzt?: number;
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
       case "unlock_vin": {
         await unlockVinManually({
           vin: body.vin || "",
+          scope: body.scope ?? "full",
           ecuId: body.ecuId,
           contact: body.contact,
           note: body.note,
@@ -68,7 +72,7 @@ export async function POST(request: Request) {
       case "create_promo": {
         await createEtacsPromoCode({
           customCode: body.customCode,
-          kind: body.kind || "single_vin",
+          kind: body.kind || "cuf_single_vin",
           maxUses: body.maxUses,
           durationDays: body.durationDays,
           note: body.note,
@@ -87,6 +91,9 @@ export async function POST(request: Request) {
         await updateEtacsBillingSettings({
           ...(typeof body.enforcePaywall === "boolean"
             ? { enforcePaywall: body.enforcePaywall }
+            : {}),
+          ...(typeof body.cufVinPriceKzt === "number"
+            ? { cufVinPriceKzt: body.cufVinPriceKzt }
             : {}),
           ...(typeof body.singleVinPriceKzt === "number"
             ? { singleVinPriceKzt: body.singleVinPriceKzt }

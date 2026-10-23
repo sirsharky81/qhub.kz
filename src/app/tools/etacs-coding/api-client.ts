@@ -118,10 +118,12 @@ export async function saveEtacsCoding(payload: {
 export async function fetchEtacsLicenseStatus(params: {
   vin?: string;
   promoCode?: string;
+  fileKind?: "kon" | "cuf";
 }): Promise<EtacsAccessCheckResult> {
   const url = new URL(`${BASE}/license`, window.location.origin);
   if (params.vin) url.searchParams.set("vin", params.vin);
   if (params.promoCode) url.searchParams.set("promoCode", params.promoCode);
+  if (params.fileKind) url.searchParams.set("fileKind", params.fileKind);
   const response = await fetch(url, { cache: "no-store" });
   return parseJson(response);
 }
@@ -143,7 +145,7 @@ export async function requestEtacsUnlockApi(payload: {
   vin?: string;
   ecuId?: string;
   contact: string;
-  plan: "single_vin" | "pro_month" | "pro_year";
+  plan: "cuf_vin" | "single_vin" | "pro_month" | "pro_year";
   comment?: string;
 }): Promise<{ ok: boolean; message: string }> {
   const response = await fetch(`${BASE}/license`, {

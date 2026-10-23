@@ -11,6 +11,7 @@ interface Props {
   vin?: string;
   ecuId?: string;
   model?: string;
+  fileKind?: "kon" | "cuf";
   licenseStatus: EtacsAccessCheckResult | null;
   storedPromoCode: string;
   onSavePromoCode: (code: string) => void;
@@ -23,15 +24,18 @@ export function EtacsUnlockModal({
   vin,
   ecuId,
   model,
+  fileKind = "cuf",
   licenseStatus,
   storedPromoCode,
   onSavePromoCode,
   onRefreshStatus,
 }: Props) {
-  const [tab, setTab] = useState<"code" | "request">("code");
+  const [tab, setTab] = useState<"request" | "code">("request");
   const [codeDraft, setCodeDraft] = useState(storedPromoCode);
   const [contact, setContact] = useState("");
-  const [plan, setPlan] = useState<"single_vin" | "pro_month" | "pro_year">("single_vin");
+  const [plan, setPlan] = useState<"cuf_vin" | "single_vin" | "pro_month" | "pro_year">(() =>
+    fileKind === "kon" ? "single_vin" : "cuf_vin",
+  );
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +45,8 @@ export function EtacsUnlockModal({
 
   const settings = licenseStatus?.settings ?? {
     enforcePaywall: false,
-    singleVinPriceKzt: 3000,
+    cufVinPriceKzt: 1500,
+    singleVinPriceKzt: 3500,
     proMonthPriceKzt: 8000,
     proYearPriceKzt: 30000,
     paymentInstructions:
@@ -95,13 +100,21 @@ export function EtacsUnlockModal({
 
   const reasonLabel = () => {
     if (!licenseStatus) return "Проверка…";
-    if (licenseStatus.reason === "admin") return "Администратор (Полный доступ)";
-    if (licenseStatus.reason === "vin_unlocked") return `VIN ${licenseStatus.vin} разблокирован`;
+    if (licenseStatus.reason === "admin") return "Администратор (Полный доступ .kon + .cuf)";
+    if (licenseStatus.reason === "vin_unlocked_full") {
+      return `VIN ${licenseStatus.vin} открыт полностью (.kon + .cuf)`;
+    }
+    if (licenseStatus.reason === "vin_unlocked_cuf") {
+      return `VIN ${licenseStatus.vin}: открыт Custom (.cuf — зеркала и комфорт)`;
+    }
+    if (licenseStatus.reason === "cuf_only_need_kon_upgrade") {
+      return `VIN ${licenseStatus.vin}: открыт .cuf (для .kon нужен полный доступ)`;
+    }
     if (licenseStatus.reason === "pro_code") {
-      return `Активен PRO-код (${licenseStatus.promoRecord?.code || storedPromoCode})`;
+      return `Активен PRO-ключ (${licenseStatus.promoRecord?.code || storedPromoCode})`;
     }
     if (!licenseStatus.enforcePaywall) return "Открытый доступ (Free + запись)";
-    return "Бесплатный режим (Только просмотр и выгрузка бэкапа)";
+    return "Бесплатный режим (Чтение с блока, бэкап и просмотр параметров)";
   };
 
   return (
@@ -118,11 +131,13 @@ export function EtacsUnlockModal({
         <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-3">
           <div>
             <h2 className="text-base font-semibold text-gray-900">
-              Доступ и активация ETACS Coding (Free / PRO)
+              Доступ к сохранению и записи в блок
             </h2>
             <p className="mt-0.5 text-xs text-gray-500">
               Чтение с блока, сохранение заводского оригинала и просмотр всех параметров —{" "}
-              <strong className="text-gray-700">бесплатно</strong>. Сохранение изменённых файлов и запись в блок — по VIN или PRO-доступу.
+              <strong className="text-gray-700">всегда бесплатно</strong>. Для записи изменений выберите народный тариф{" "}
+              <code className="font-mono font-semibold text-emerald-700">.cuf</code> (зеркала, комфорт) или полный{" "}
+              <code className="font-mono font-semibold text-blue-700">.kon + .cuf</code>.
             </p>
           </div>
           <PickerButton variant="ghost" onClick={onClose} disabled={busy} ariaLabel="Закрыть">
@@ -156,19 +171,6 @@ export function EtacsUnlockModal({
           <button
             type="button"
             onClick={() => {
-              setTab("code");
-              setError(null);
-              setSuccessMsg(null);
-            }}
-            className={`rounded-lg py-1.5 text-xs font-semibold transition ${
-              tab === "code" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            Ввести код активации
-          </button>
-          <button
-            type="button"
-            onClick={() => {
               setTab("request");
               setError(null);
               setSuccessMsg(null);
@@ -179,7 +181,20 @@ export function EtacsUnlockModal({
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
-            Открыть доступ (Kaspi / PRO)
+            Выбрать тариф (Kaspi)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTab("code");
+              setError(null);
+              setSuccessMsg(null);
+            }}
+            className={`rounded-lg py-1.5 text-xs font-semibold transition ${
+              tab === "code" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            У меня есть код
           </button>
         </div>
 
@@ -195,108 +210,96 @@ export function EtacsUnlockModal({
           </div>
         ) : null}
 
-        {tab === "code" ? (
-          <form onSubmit={handleRedeem} className="mt-3.5 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700">
-                Промокод на 1 VIN или ключ PRO Мастер
-              </label>
-              <div className="mt-1 flex gap-2">
-                <input
-                  type="text"
-                  value={codeDraft}
-                  onChange={(e) => setCodeDraft(e.target.value.toUpperCase())}
-                  placeholder="Например: VIN-8K4M2P или PRO-..."
-                  className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-2 font-mono text-xs uppercase text-gray-900 focus:border-gray-900 focus:outline-none sm:text-sm"
-                />
-                <button
-                  type="submit"
-                  disabled={busy || !codeDraft.trim()}
-                  className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
-                >
-                  {busy ? "Проверка…" : "Активировать"}
-                </button>
-              </div>
-              {storedPromoCode ? (
-                <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-500">
-                  <span>
-                    Сохранённый на устройстве код: <code className="font-mono font-bold">{storedPromoCode}</code>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCodeDraft("");
-                      onSavePromoCode("");
-                    }}
-                    className="text-red-600 hover:underline"
-                  >
-                    Сбросить код
-                  </button>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-600">
-              <p className="font-semibold text-gray-800">Как работают коды:</p>
-              <ul className="mt-1 list-disc space-y-1 pl-4">
-                <li>
-                  <strong>Код на автомобиль (VIN)</strong> — навсегда привязывается к VIN открытого файла ({vin || "откройте файл в слоте A"}) и открывает безлимитное сохранение и запись в блок для этой машины.
-                </li>
-                <li>
-                  <strong>Код PRO Мастер</strong> — сохраняется в вашем браузере и открывает доступ к любым автомобилям без ограничений по VIN.
-                </li>
-              </ul>
-            </div>
-          </form>
-        ) : (
+        {tab === "request" ? (
           <form onSubmit={handleRequest} className="mt-3.5 space-y-3">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2">
+              {/* Народный тариф CUF */}
+              <button
+                type="button"
+                onClick={() => setPlan("cuf_vin")}
+                className={`relative flex flex-col rounded-xl border p-2.5 text-left transition ${
+                  plan === "cuf_vin"
+                    ? "border-emerald-700 bg-emerald-900 text-white ring-1 ring-emerald-700"
+                    : "border-emerald-200 bg-emerald-50/50 text-gray-900 hover:border-emerald-300"
+                }`}
+              >
+                <span className="flex items-center justify-between gap-1 text-[10px] font-bold uppercase">
+                  <span>Custom (.cuf)</span>
+                  <span
+                    className={`rounded px-1.5 py-0.2 text-[9px] ${
+                      plan === "cuf_vin"
+                        ? "bg-emerald-500 text-white"
+                        : "bg-emerald-200 text-emerald-900"
+                    }`}
+                  >
+                    ХИТ
+                  </span>
+                </span>
+                <span className="mt-0.5 text-base font-extrabold">
+                  {settings.cufVinPriceKzt.toLocaleString("ru")} ₸
+                </span>
+                <span className="mt-1 text-[10.5px] leading-tight opacity-85">
+                  Зеркала, свет, замки, дворники (1 VIN навсегда)
+                </span>
+              </button>
+
+              {/* Полный тариф KON + CUF */}
               <button
                 type="button"
                 onClick={() => setPlan("single_vin")}
                 className={`flex flex-col rounded-xl border p-2.5 text-left transition ${
                   plan === "single_vin"
-                    ? "border-gray-900 bg-gray-900 text-white"
+                    ? "border-gray-900 bg-gray-900 text-white ring-1 ring-gray-900"
                     : "border-gray-200 bg-white text-gray-900 hover:border-gray-300"
                 }`}
               >
-                <span className="text-[10px] font-semibold uppercase opacity-75">Мой авто (1 VIN)</span>
-                <span className="mt-0.5 text-sm font-bold">
+                <span className="text-[10px] font-bold uppercase opacity-80">
+                  Полный (.kon + .cuf)
+                </span>
+                <span className="mt-0.5 text-base font-extrabold">
                   {settings.singleVinPriceKzt.toLocaleString("ru")} ₸
                 </span>
-                <span className="mt-1 text-[10.5px] opacity-80">Навсегда для 1 VIN</span>
+                <span className="mt-1 text-[10.5px] leading-tight opacity-85">
+                  Все скрытые опции ETACS + ДВС + .cuf (1 VIN)
+                </span>
               </button>
 
+              {/* PRO Мастер 30 дней */}
               <button
                 type="button"
                 onClick={() => setPlan("pro_month")}
                 className={`flex flex-col rounded-xl border p-2.5 text-left transition ${
                   plan === "pro_month"
-                    ? "border-gray-900 bg-gray-900 text-white"
+                    ? "border-gray-900 bg-gray-900 text-white ring-1 ring-gray-900"
                     : "border-gray-200 bg-white text-gray-900 hover:border-gray-300"
                 }`}
               >
-                <span className="text-[10px] font-semibold uppercase opacity-75">PRO Мастер (30 дн)</span>
+                <span className="text-[10px] font-semibold uppercase opacity-75">
+                  PRO Мастер (30 дн)
+                </span>
                 <span className="mt-0.5 text-sm font-bold">
                   {settings.proMonthPriceKzt.toLocaleString("ru")} ₸
                 </span>
-                <span className="mt-1 text-[10.5px] opacity-80">Безлимит по VIN</span>
+                <span className="mt-0.5 text-[10px] opacity-80">Любые авто без лимита VIN</span>
               </button>
 
+              {/* PRO СТО 1 год */}
               <button
                 type="button"
                 onClick={() => setPlan("pro_year")}
                 className={`flex flex-col rounded-xl border p-2.5 text-left transition ${
                   plan === "pro_year"
-                    ? "border-gray-900 bg-gray-900 text-white"
+                    ? "border-gray-900 bg-gray-900 text-white ring-1 ring-gray-900"
                     : "border-gray-200 bg-white text-gray-900 hover:border-gray-300"
                 }`}
               >
-                <span className="text-[10px] font-semibold uppercase opacity-75">PRO СТО (1 год)</span>
+                <span className="text-[10px] font-semibold uppercase opacity-75">
+                  PRO СТО (1 год)
+                </span>
                 <span className="mt-0.5 text-sm font-bold">
                   {settings.proYearPriceKzt.toLocaleString("ru")} ₸
                 </span>
-                <span className="mt-1 text-[10.5px] opacity-80">Все авто 365 дней</span>
+                <span className="mt-0.5 text-[10px] opacity-80">Все авто (.kon + .cuf) 365 дн</span>
               </button>
             </div>
 
@@ -326,7 +329,7 @@ export function EtacsUnlockModal({
 
             <div>
               <label className="block text-xs font-medium text-gray-700">
-                Комментарий (последние 4 цифры карты / имя отправителя)
+                Комментарий (имя отправителя в Kaspi)
               </label>
               <input
                 type="text"
@@ -344,10 +347,69 @@ export function EtacsUnlockModal({
             >
               {busy
                 ? "Отправка заявки…"
-                : plan === "single_vin"
-                  ? `Отправить заявку на разблокировку VIN ${vin || ""}`
-                  : "Отправить заявку на получение ключа PRO"}
+                : plan === "cuf_vin"
+                  ? `Открыть Custom (.cuf) за ${settings.cufVinPriceKzt.toLocaleString("ru")} ₸`
+                  : plan === "single_vin"
+                    ? `Открыть Полный (.kon + .cuf) за ${settings.singleVinPriceKzt.toLocaleString("ru")} ₸`
+                    : "Отправить заявку на получение ключа PRO"}
             </button>
+          </form>
+        ) : (
+          <form onSubmit={handleRedeem} className="mt-3.5 space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700">
+                Код активации (`CUF-...`, `VIN-...` или `PRO-...`)
+              </label>
+              <div className="mt-1 flex gap-2">
+                <input
+                  type="text"
+                  value={codeDraft}
+                  onChange={(e) => setCodeDraft(e.target.value.toUpperCase())}
+                  placeholder="Например: CUF-8K4M2P или VIN-..."
+                  className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-2 font-mono text-xs uppercase text-gray-900 focus:border-gray-900 focus:outline-none sm:text-sm"
+                />
+                <button
+                  type="submit"
+                  disabled={busy || !codeDraft.trim()}
+                  className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {busy ? "Проверка…" : "Активировать"}
+                </button>
+              </div>
+              {storedPromoCode ? (
+                <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-500">
+                  <span>
+                    Сохранённый на устройстве код:{" "}
+                    <code className="font-mono font-bold">{storedPromoCode}</code>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCodeDraft("");
+                      onSavePromoCode("");
+                    }}
+                    className="text-red-600 hover:underline"
+                  >
+                    Сбросить код
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-600">
+              <p className="font-semibold text-gray-800">Типы кодов активации:</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">
+                <li>
+                  <strong>CUF-... (Custom Coding .cuf)</strong> — открывает сохранение и запись кастомных настроек (зеркала, замки, дворники, свет) для вашего VIN навсегда.
+                </li>
+                <li>
+                  <strong>VIN-... (Полный .kon + .cuf)</strong> — открывает сохранение и запись любых файлов (`.kon` и `.cuf`) для вашего VIN навсегда.
+                </li>
+                <li>
+                  <strong>PRO-... (Мастер / СТО)</strong> — открывает работу с любыми автомобилями без ограничений по VIN.
+                </li>
+              </ul>
+            </div>
           </form>
         )}
       </div>
