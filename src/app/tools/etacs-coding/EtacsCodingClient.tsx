@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { EtacsDecodedRow, EtacsFileView } from "@/lib/etacs-coding/types";
+import type { EtacsAccessCheckResult } from "@/lib/etacs-coding/licensing";
 import {
   applyEtacsCoding,
   decodeEtacsCoding,
+  fetchEtacsLicenseStatus,
   fetchEtacsStatus,
   parseEtacsFile,
   saveEtacsCoding,
@@ -26,6 +28,7 @@ import {
   type EtacsSaveFileDialogRequest,
   type SaveDialogMethod,
 } from "./EtacsSaveFileModal";
+import { EtacsUnlockModal } from "./EtacsUnlockModal";
 import {
   etacsDownloadNames,
   formatMutCodingContainer,
@@ -91,6 +94,16 @@ export default function EtacsCodingClient() {
   const [, setHexDraft] = useState("");
   const [readModalOpen, setReadModalOpen] = useState(false);
   const [writeModalOpen, setWriteModalOpen] = useState(false);
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
+  const [licenseStatus, setLicenseStatus] = useState<EtacsAccessCheckResult | null>(null);
+  const [storedPromoCode, setStoredPromoCode] = useState<string>(() => {
+    try {
+      if (typeof window === "undefined") return "";
+      return window.localStorage.getItem("qhub_etacs_promo_code") || "";
+    } catch {
+      return "";
+    }
+  });
   const [saveDialogRequest, setSaveDialogRequest] = useState<EtacsSaveFileDialogRequest | null>(
     null,
   );
@@ -120,6 +133,48 @@ export default function EtacsCodingClient() {
       .then((s) => setReady(s.ready))
       .catch(() => setReady(false));
   }, []);
+
+  const currentVin = slotA.view?.vin ?? "";
+
+  const refreshLicenseStatus = useCallback(
+    async (vinOverride?: string, codeOverride?: string) => {
+      try {
+        const res = await fetchEtacsLicenseStatus({
+          vin: vinOverride ?? currentVin,
+          promoCode: codeOverride ?? storedPromoCode,
+        });
+        setLicenseStatus(res);
+      } catch {
+        /* ignore */
+      }
+    },
+    [currentVin, storedPromoCode],
+  );
+
+  useEffect(() => {
+    void fetchEtacsLicenseStatus({
+      vin: currentVin,
+      promoCode: storedPromoCode,
+    })
+      .then((res) => setLicenseStatus(res))
+      .catch(() => null);
+  }, [currentVin, storedPromoCode]);
+
+  const handleSavePromoCode = useCallback(
+    (code: string) => {
+      setStoredPromoCode(code);
+      try {
+        if (typeof window !== "undefined") {
+          if (code) window.localStorage.setItem("qhub_etacs_promo_code", code);
+          else window.localStorage.removeItem("qhub_etacs_promo_code");
+        }
+      } catch {
+        /* ignore */
+      }
+      void refreshLicenseStatus(currentVin, code);
+    },
+    [refreshLicenseStatus, currentVin],
+  );
 
   const extKind = (name: string): "kon" | "cuf" | null => {
     if (/\.kon(?=$|[^a-zA-Z])/i.test(name)) return "kon";
@@ -414,6 +469,7 @@ export default function EtacsCodingClient() {
         crc: slot.view.crc,
         bom: slot.view.bom,
         fileName: requestedName,
+        promoCode: storedPromoCode || undefined,
       });
       const bytes = Uint8Array.from(atob(body.bytes), (c) => c.charCodeAt(0));
       const targetName = ensureCodingFileName(body.fileName || requestedName, ext);
@@ -450,8 +506,13 @@ export default function EtacsCodingClient() {
           : `Файл ${side.toUpperCase()} сохранён как «${savedName}» с CRC ${body.crc} (сумма не подтверждена формулой).`,
       );
     } catch (error) {
-      const err = error as Error & { status?: number; name?: string };
+      const err = error as Error & { status?: number; code?: string; name?: string };
       if (err?.name === "AbortError") throw err;
+      if (err.status === 402 || err.code === "PAYMENT_REQUIRED") {
+        setBanner(err.message || "Требуется активация доступа для этого VIN или ключ PRO");
+        setUnlockModalOpen(true);
+        throw err;
+      }
       if (err.status === 409 && !force) {
         const agreed = window.confirm(`${err.message}\n\nСохранить всё равно?`);
         if (agreed) return performSaveEdited(side, customFileName, method, true);
@@ -465,6 +526,10 @@ export default function EtacsCodingClient() {
   const openSaveEditedDialog = (side: Side, preferShare = false): Promise<void> => {
     const slot = side === "a" ? slotA : slotB;
     if (!slot.view) return Promise.resolve();
+    if (licenseStatus && licenseStatus.enforcePaywall && !licenseStatus.allowed) {
+      setUnlockModalOpen(true);
+      return Promise.resolve();
+    }
     if (preferShare && canShareFiles) {
       return performSaveEdited(side, slot.displayName, "share");
     }
@@ -701,20 +766,32 @@ export default function EtacsCodingClient() {
 
   const selectedRow = slotA.view?.rows.find((r) => r.id === selectedId);
 
-  const buildFileBytes = useCallback(async (slot: FileSlot): Promise<Uint8Array> => {
-    if (!slot.view) throw new Error("Файл не открыт");
-    const body = await saveEtacsCoding({
-      force: true,
-      vin: slot.view.vin,
-      date: slot.view.date,
-      ecuId: slot.view.ecuId,
-      codingHex: slot.view.codingHex,
-      crc: slot.view.crc,
-      bom: slot.view.bom,
-      fileName: slot.displayName || undefined,
-    });
-    return Uint8Array.from(atob(body.bytes), (c) => c.charCodeAt(0));
-  }, []);
+  const buildFileBytes = useCallback(
+    async (slot: FileSlot): Promise<Uint8Array> => {
+      if (!slot.view) throw new Error("Файл не открыт");
+      try {
+        const body = await saveEtacsCoding({
+          force: true,
+          vin: slot.view.vin,
+          date: slot.view.date,
+          ecuId: slot.view.ecuId,
+          codingHex: slot.view.codingHex,
+          crc: slot.view.crc,
+          bom: slot.view.bom,
+          fileName: slot.displayName || undefined,
+          promoCode: storedPromoCode || undefined,
+        });
+        return Uint8Array.from(atob(body.bytes), (c) => c.charCodeAt(0));
+      } catch (err) {
+        const e = err as Error & { status?: number; code?: string };
+        if (e.status === 402 || e.code === "PAYMENT_REQUIRED") {
+          setUnlockModalOpen(true);
+        }
+        throw err;
+      }
+    },
+    [storedPromoCode],
+  );
 
   const getCurrentBytesA = useCallback(() => buildFileBytes(slotA), [buildFileBytes, slotA]);
   const getCurrentBytesB = useCallback(async () => {
@@ -844,7 +921,13 @@ export default function EtacsCodingClient() {
                     variant="secondary"
                     className="!px-2.5 !py-1 !text-[11.5px] !rounded-md"
                     disabled={!slotA.view}
-                    onClick={() => setWriteModalOpen(true)}
+                    onClick={() => {
+                      if (licenseStatus && licenseStatus.enforcePaywall && !licenseStatus.allowed) {
+                        setUnlockModalOpen(true);
+                        return;
+                      }
+                      setWriteModalOpen(true);
+                    }}
                   >
                     Загрузить в блок
                   </PickerButton>
@@ -875,6 +958,30 @@ export default function EtacsCodingClient() {
                       Закрыть
                     </PickerButton>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setUnlockModalOpen(true)}
+                    className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+                      licenseStatus?.reason === "vin_unlocked" ||
+                      licenseStatus?.reason === "pro_code" ||
+                      licenseStatus?.reason === "admin"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                        : licenseStatus?.enforcePaywall && !licenseStatus?.allowed
+                          ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+                    }`}
+                    title="Проверить доступ по VIN или ввести код активации PRO"
+                  >
+                    {licenseStatus?.reason === "pro_code"
+                      ? "★ PRO активен"
+                      : licenseStatus?.reason === "vin_unlocked"
+                        ? "✓ VIN открыт"
+                        : licenseStatus?.reason === "admin"
+                          ? "★ Admin PRO"
+                          : licenseStatus?.enforcePaywall
+                            ? "🔒 Разблокировать VIN / PRO"
+                            : "🔑 Код / PRO"}
+                  </button>
                   {!slotB.view ? (
                     <PickerButton
                       variant="secondary"
@@ -1589,6 +1696,18 @@ export default function EtacsCodingClient() {
         <EtacsSaveFileModal
           request={saveDialogRequest}
           onClose={() => setSaveDialogRequest(null)}
+        />
+
+        <EtacsUnlockModal
+          open={unlockModalOpen}
+          onClose={() => setUnlockModalOpen(false)}
+          vin={slotA.view?.vin}
+          ecuId={slotA.view?.ecuId}
+          model={slotA.view?.model}
+          licenseStatus={licenseStatus}
+          storedPromoCode={storedPromoCode}
+          onSavePromoCode={handleSavePromoCode}
+          onRefreshStatus={() => refreshLicenseStatus()}
         />
 
         <EtacsObdReadModal

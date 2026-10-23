@@ -3,6 +3,7 @@ import type {
   EtacsFileView,
   EtacsSaveResult,
 } from "@/lib/etacs-coding/types";
+import type { EtacsAccessCheckResult } from "@/lib/etacs-coding/licensing";
 
 const BASE = "/api/etacs-coding";
 
@@ -83,13 +84,26 @@ export async function saveEtacsCoding(payload: {
   crc: string;
   bom: boolean;
   fileName?: string;
+  promoCode?: string;
 }): Promise<EtacsSaveResult> {
   const response = await fetch(`${BASE}/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const body = (await response.json()) as EtacsSaveResult & { error?: string; crcVerified?: boolean };
+  const body = (await response.json()) as EtacsSaveResult & {
+    error?: string;
+    code?: string;
+    crcVerified?: boolean;
+  };
+  if (response.status === 402 || body.code === "PAYMENT_REQUIRED") {
+    const err = new Error(
+      body.error || "Требуется активация доступа для этого VIN или код PRO",
+    ) as Error & { status?: number; code?: string };
+    err.status = 402;
+    err.code = "PAYMENT_REQUIRED";
+    throw err;
+  }
   if (response.status === 409) {
     const err = new Error(body.error || "CRC не подтверждена") as Error & { status?: number };
     err.status = 409;
@@ -99,4 +113,43 @@ export async function saveEtacsCoding(payload: {
     throw new Error(body.error || "Не удалось сохранить");
   }
   return body;
+}
+
+export async function fetchEtacsLicenseStatus(params: {
+  vin?: string;
+  promoCode?: string;
+}): Promise<EtacsAccessCheckResult> {
+  const url = new URL(`${BASE}/license`, window.location.origin);
+  if (params.vin) url.searchParams.set("vin", params.vin);
+  if (params.promoCode) url.searchParams.set("promoCode", params.promoCode);
+  const response = await fetch(url, { cache: "no-store" });
+  return parseJson(response);
+}
+
+export async function redeemEtacsCodeApi(payload: {
+  code: string;
+  vin?: string;
+  ecuId?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const response = await fetch(`${BASE}/license`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "redeem", ...payload }),
+  });
+  return parseJson(response);
+}
+
+export async function requestEtacsUnlockApi(payload: {
+  vin?: string;
+  ecuId?: string;
+  contact: string;
+  plan: "single_vin" | "pro_month" | "pro_year";
+  comment?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const response = await fetch(`${BASE}/license`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "request", ...payload }),
+  });
+  return parseJson(response);
 }
