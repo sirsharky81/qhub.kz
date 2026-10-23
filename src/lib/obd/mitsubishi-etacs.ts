@@ -1172,6 +1172,41 @@ function hasNegativeResponseForService(tokens: number[], writeSvc: number): numb
 }
 
 /**
+ * Parse ISO 15765-2 Flow Control frame (`30 <BlockSize> <STmin> ...`):
+ * - Byte 0: `0x30` (ClearToSend), `0x31` (Wait), `0x32` (Overflow)
+ * - Byte 1 (`blockSize`): number of Consecutive Frames allowed before the sender MUST stop
+ *   and wait for the next Flow Control frame from the ECU (`0` = unlimited).
+ *   On Mitsubishi ETACS `8637C671` (`620 -> 504`), the ECU responds `30 08 0A FF FF FF FF FF`
+ *   (`blockSize = 8`, `stMinMs = 10ms`)!
+ * - Byte 2 (`stMinMs`): minimum separation time between Consecutive Frames (`0x00..0x7F` = 0..127 ms).
+ */
+export function parseIsoTpFlowControl(tokens: number[]): {
+  status: "cts" | "wait" | "overflow";
+  blockSize: number;
+  stMinMs: number;
+} | null {
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    const pci = tokens[i]!;
+    if (pci === 0x30 || pci === 0x31 || pci === 0x32) {
+      const blockSize = tokens[i + 1]!;
+      const rawSt = tokens[i + 2]!;
+      let stMinMs = 10;
+      if (rawSt <= 0x7f) {
+        stMinMs = rawSt;
+      } else if (rawSt >= 0xf1 && rawSt <= 0xf9) {
+        stMinMs = 1;
+      }
+      return {
+        status: pci === 0x30 ? "cts" : pci === 0x31 ? "wait" : "overflow",
+        blockSize,
+        stMinMs,
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Fast probe for active ETACS / Engine CAN profile and exact LID for writing,
  * WITHOUT running the 60-second `probeExtraEtacsLids` scan (which lets the KWP
  * diagnostic session time out before the write command is sent).
@@ -1285,8 +1320,8 @@ async function sendCodingWritePdu(
     if (frames.length === 1) {
       lastReply = await elm.sendPayload(frames[0]!, 10_000);
     } else {
-      // Refresh KWP diagnostic session (04 10 92 00 00 00 00 00) right before First Frame
-      // so the session timer S3 is 100% fresh when the First Frame hits the CAN bus.
+      // Refresh KWP diagnostic session (02 10 92 00 00 00 00 00) and pre-set ATST01 BEFORE First Frame
+      // so there is zero AT-command delay between receiving Flow Control (30 08 0A) and sending CF #1 (21...)!
       if (profile.service === 0x21) {
         try {
           await elm.sendPayload("0210920000000000 1", 2_000, { quietMs: 5, allowBarePrompt: true });
@@ -1294,16 +1329,23 @@ async function sendCodingWritePdu(
           /* ignore */
         }
       }
+      if (frames.length > 2) {
+        try {
+          await elm.sendCommand("ATST01", 2_000, { quietMs: 5, allowBarePrompt: true });
+        } catch {
+          /* ignore */
+        }
+      }
 
       // Send First Frame (`10 LL ... 1`) — trailing `1` tells ELM327 to return immediately upon receiving
-      // the single Flow Control frame (`30 BS STmin ...`) from the ECU instead of waiting 1020ms (`ATSTFF`)!
+      // the single Flow Control frame (`30 BS STmin ...`, e.g. `30 08 0A FF FF FF FF FF`) from the ECU!
       let ffResp = await elm.sendPayload(`${frames[0]!} 1`, 5_000, {
-        quietMs: 5,
+        quietMs: 4,
         allowBarePrompt: true,
       });
       if (isElmSyntaxRejection(ffResp)) {
         ffResp = await elm.sendPayload(frames[0]!, 5_000, {
-          quietMs: 5,
+          quietMs: 4,
           allowBarePrompt: true,
         });
       }
@@ -1314,36 +1356,69 @@ async function sendCodingWritePdu(
         return ffResp;
       }
 
-      // Send Consecutive Frames (`21...`, `22...`, ...).
-      // Intermediate CFs have NO reply from the ECU:
-      // - First try ELM327 ` 0` frame-count suffix (`2140404040404040 0`), which tells ELM/vLinker
-      //   to transmit the frame and print `>` immediately with 0ms RX wait!
-      // - Also set `ATST01` (4ms timeout) as fallback in case a clone ignores ` 0`.
-      if (frames.length > 2) {
-        try {
-          await elm.sendCommand("ATST01", 2_000, { quietMs: 5, allowBarePrompt: true });
-        } catch {
-          /* ignore */
-        }
-      }
+      // Parse Flow Control parameters from ECU (`30 08 0A` -> blockSize = 8, stMinMs = 10ms)
+      const fc = parseIsoTpFlowControl(ffTokens);
+      let blockSize = fc?.blockSize ?? 8;
+      let stMinMs = Math.max(fc?.stMinMs ?? 10, 10);
+      let cfsSentInCurrentBlock = 0;
+      let lastFcDiag = ffResp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
 
       let useZeroReplySuffix = true;
       for (let i = 1; i < frames.length; i++) {
         const isLast = i === frames.length - 1;
+        const isBlockBoundary = !isLast && blockSize > 0 && cfsSentInCurrentBlock + 1 >= blockSize;
+
+        // Enforce STmin separation between Consecutive Frames so ETACS (STmin = 0x0A = 10ms) never drops a CF
+        if (stMinMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, Math.min(stMinMs, 50)));
+        }
+
         if (isLast) {
-          if (frames.length > 2) {
+          try {
+            await elm.sendCommand("ATSTFF", 2_000, { quietMs: 4, allowBarePrompt: true });
+          } catch {
+            /* ignore */
+          }
+          // On the final Consecutive Frame, expect 1 response frame (`02 7B B2 ...`) from the ECU
+          let cfResp = await elm.sendPayload(`${frames[i]!} 1`, 12_000, { quietMs: 25 });
+          if (isElmSyntaxRejection(cfResp)) {
+            cfResp = await elm.sendPayload(frames[i]!, 12_000, { quietMs: 25 });
+          }
+          // Handle KWP 7F 3B 78 (ResponsePending — EEPROM write in progress)
+          const cfTokens = extractHexTokens(cfResp);
+          if (hasNegativeResponseForService(cfTokens, writeSvc) === 0x78) {
             try {
-              await elm.sendCommand("ATSTFF", 2_000, { quietMs: 5, allowBarePrompt: true });
+              const followUp = await elm.sendPayload("3E 1", 8_000, { quietMs: 25 });
+              if (!isNoDataOrEmptyReply(followUp)) cfResp = followUp;
             } catch {
               /* ignore */
             }
           }
-          // On the final Consecutive Frame, expect 1 response frame (`02 7B B2 ...`) from the ECU
-          let cfResp = await elm.sendPayload(`${frames[i]!} 1`, 12_000, { quietMs: 20 });
-          if (isElmSyntaxRejection(cfResp)) {
-            cfResp = await elm.sendPayload(frames[i]!, 12_000, { quietMs: 20 });
-          }
           lastReply = cfResp;
+        } else if (isBlockBoundary) {
+          // After `blockSize` Consecutive Frames (e.g. 8th CF `28...` when BS=8), ISO 15765-2 requires
+          // waiting for the ECU's next Flow Control frame (`30 08 0A ...`) before sending `29...`!
+          let fc2Resp = await elm.sendPayload(`${frames[i]!} 1`, 3_000, {
+            quietMs: 4,
+            allowBarePrompt: true,
+          });
+          if (isElmSyntaxRejection(fc2Resp)) {
+            fc2Resp = await elm.sendPayload(frames[i]!, 3_000, {
+              quietMs: 4,
+              allowBarePrompt: true,
+            });
+          }
+          const fc2Tokens = extractHexTokens(fc2Resp);
+          if (hasNegativeResponseForService(fc2Tokens, writeSvc) !== null) {
+            return fc2Resp;
+          }
+          const nextFc = parseIsoTpFlowControl(fc2Tokens);
+          if (nextFc) {
+            blockSize = nextFc.blockSize;
+            stMinMs = Math.max(nextFc.stMinMs, 10);
+            lastFcDiag = `FC2:${fc2Resp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 24)}`;
+          }
+          cfsSentInCurrentBlock = 0;
         } else {
           if (useZeroReplySuffix) {
             const cf0Resp = await elm.sendPayload(`${frames[i]!} 0`, 1_500, {
@@ -1363,13 +1438,13 @@ async function sendCodingWritePdu(
               allowBarePrompt: true,
             });
           }
+          cfsSentInCurrentBlock++;
         }
       }
 
-      // If final CF returned NO DATA, include First Frame response diagnostics so we can see if FC (30) arrived
+      // If final CF returned NO DATA, include First Frame / Flow Control diagnostics
       if (isNoDataOrEmptyReply(lastReply) && !isNoDataOrEmptyReply(ffResp)) {
-        const ffClean = ffResp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
-        lastReply = `FF:${ffClean} -> CF:NO DATA`;
+        lastReply = `FF:${lastFcDiag} -> CF:NO DATA`;
       }
     }
     return lastReply;

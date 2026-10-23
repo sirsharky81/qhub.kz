@@ -379,8 +379,14 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
       }
       if (line === "10433BB240404040 1" || line === "10433BB240404040") {
         link.written.push(line);
-        // ECU responds with ISO-TP Flow Control (30 00 05)
-        (link as unknown as { pending: string }).pending += "30 00 05 00 00 00 00 00\r>";
+        // Real Mitsubishi ETACS 8637C671 responds with Flow Control: 30 08 0A FF FF FF FF FF (BS = 8, STmin = 10ms)
+        (link as unknown as { pending: string }).pending += "30 08 0A FF FF FF FF FF\r>";
+        return;
+      }
+      if (line === "2800000000000000 1" || line === "2800000000000000") {
+        link.written.push(line);
+        // On the 8th Consecutive Frame (28...), ECU sends the second Flow Control frame (30 08 0A) allowing CF #9 (29...)
+        (link as unknown as { pending: string }).pending += "30 08 0A FF FF FF FF FF\r>";
         return;
       }
       if (line === "2900000000000000 1" || line === "2900000000000000") {
@@ -389,7 +395,7 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
         (link as unknown as { pending: string }).pending += "02 7B B2 00 00 00 00 00\r>";
         return;
       }
-      if (/^2[1-8][0-9A-F]{14}(\s+0)?$/.test(line)) {
+      if (/^2[1-7][0-9A-F]{14}(\s+0)?$/.test(line)) {
         link.written.push(line);
         (link as unknown as { pending: string }).pending += ">";
         return;
@@ -412,6 +418,8 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(
       link.written.some((cmd) => cmd.startsWith("10433BB240404040")),
     ).toBe(true);
+    // 8th Consecutive Frame (28...) must request 1 Flow Control frame (` 1`) when BS=8
+    expect(link.written).toContain("2800000000000000 1");
     expect(
       link.written.some((cmd) => cmd.startsWith("2900000000000000")),
     ).toBe(true);
