@@ -88,7 +88,7 @@ export function EtacsUnlockModal({
       }
       if (!clean.startsWith("PRO-") && hasValidVin) {
         const agreed = window.confirm(
-          `Внимание! Код активации ${clean} будет навсегда привязан к выгруженному вами VIN:\n\n${cleanVin}\n\nПродолжить активацию?`,
+          `Внимание! Код активации ${clean} будет привязан к выгруженному вами VIN:\n\n${cleanVin}\n\nПродолжить активацию?`,
         );
         if (!agreed) {
           setBusy(false);
@@ -164,6 +164,9 @@ export function EtacsUnlockModal({
     if (licenseStatus.reason === "cuf_only_need_kon_upgrade") {
       return `VIN ${licenseStatus.vin}: открыт .cuf (для .kon нужен полный доступ)`;
     }
+    if (licenseStatus.reason === "pro_device_limit_exceeded") {
+      return "PRO-ключ заблокирован на этом устройстве (превышен лимит устройств)";
+    }
     if (licenseStatus.reason === "pro_code") {
       return `Активен PRO-ключ (${licenseStatus.promoRecord?.code || storedPromoCode})`;
     }
@@ -189,7 +192,7 @@ export function EtacsUnlockModal({
             </h2>
             <p className="mt-0.5 text-xs text-gray-500">
               Чтение с блока, сохранение заводского оригинала и просмотр всех параметров —{" "}
-              <strong className="text-gray-700">всегда бесплатно</strong>. Для записи изменений выберите народный тариф{" "}
+              <strong className="text-gray-700">бесплатно</strong>. Для записи изменений выберите народный тариф{" "}
               <code className="font-mono font-semibold text-emerald-700">.cuf</code> (зеркала, комфорт) или полный{" "}
               <code className="font-mono font-semibold text-blue-700">.kon + .cuf</code>.
             </p>
@@ -326,7 +329,7 @@ export function EtacsUnlockModal({
                   {cufPrice.toLocaleString("ru")} {currSymbol}
                 </span>
                 <span className="mt-1 text-[10.5px] leading-tight opacity-85">
-                  Зеркала, свет, замки, дворники (1 VIN навсегда)
+                  Зеркала, свет, замки, дворники (привязка к 1 VIN)
                 </span>
               </button>
 
@@ -347,7 +350,7 @@ export function EtacsUnlockModal({
                   {singlePrice.toLocaleString("ru")} {currSymbol}
                 </span>
                 <span className="mt-1 text-[10.5px] leading-tight opacity-85">
-                  Все скрытые опции ETACS + ДВС + .cuf (1 VIN)
+                  Все опции ETACS + ДВС + .cuf (привязка к 1 VIN)
                 </span>
               </button>
 
@@ -367,7 +370,7 @@ export function EtacsUnlockModal({
                 <span className="mt-0.5 text-sm font-bold">
                   {proMonthPrice.toLocaleString("ru")} {currSymbol}
                 </span>
-                <span className="mt-0.5 text-[10px] opacity-80">Любые авто без лимита VIN</span>
+                <span className="mt-0.5 text-[10px] opacity-80">Любые VIN · до 2 устройств</span>
               </button>
 
               {/* PRO СТО 1 год */}
@@ -386,7 +389,7 @@ export function EtacsUnlockModal({
                 <span className="mt-0.5 text-sm font-bold">
                   {proYearPrice.toLocaleString("ru")} {currSymbol}
                 </span>
-                <span className="mt-0.5 text-[10px] opacity-80">Все авто (.kon + .cuf) 365 дн</span>
+                <span className="mt-0.5 text-[10px] opacity-80">Любые VIN · до 3 устройств</span>
               </button>
             </div>
 
@@ -394,7 +397,7 @@ export function EtacsUnlockModal({
             {isSingleVinPlan ? (
               hasValidVin ? (
                 <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
-                  <strong>Внимание:</strong> после подтверждения оплаты доступ будет навсегда привязан к выгруженному/открытому вами автомобилю:
+                  <strong>Внимание:</strong> после подтверждения оплаты доступ будет привязан к выгруженному/открытому вами автомобилю:
                   <div className="mt-1 font-mono text-xs font-bold text-gray-900">
                     VIN: {cleanVin}
                     {ecuId ? ` (${ecuId}${model ? ` · ${model}` : ""})` : ""}
@@ -497,7 +500,7 @@ export function EtacsUnlockModal({
               </div>
             ) : (
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-950">
-                Для активации кода на 1 авто (<code>CUF-...</code> / <code>VIN-...</code>) сначала откройте или выгрузите файл с вашим VIN в слот A.
+                Для активации кода на 1 авто (<code>CUF-...</code> / <code>VIN-...</code>) сначала откройте или выгрузите файл с вашим VIN в слоте A.
               </div>
             )}
 
@@ -545,18 +548,23 @@ export function EtacsUnlockModal({
               <p className="font-semibold text-gray-800">Типы кодов активации:</p>
               <ul className="mt-1 list-disc space-y-1 pl-4">
                 <li>
-                  <strong>CUF-... (Custom Coding .cuf)</strong> — открывает сохранение и запись кастомных настроек (зеркала, замки, дворники, свет) для вашего VIN навсегда.
+                  <strong>CUF-... (Custom Coding .cuf)</strong> — открывает сохранение и запись кастомных настроек (зеркала, замки, дворники, свет) для 1 VIN.
                 </li>
                 <li>
-                  <strong>VIN-... (Полный .kon + .cuf)</strong> — открывает сохранение и запись любых файлов (`.kon` и `.cuf`) для вашего VIN навсегда.
+                  <strong>VIN-... (Полный .kon + .cuf)</strong> — открывает сохранение и запись любых файлов (`.kon` и `.cuf`) для 1 VIN.
                 </li>
                 <li>
-                  <strong>PRO-... (Мастер / СТО)</strong> — открывает работу с любыми автомобилями без ограничений по VIN.
+                  <strong>PRO-... (Мастер / СТО)</strong> — открывает работу с любыми автомобилями (привязывается к рабочим устройствам мастера, передача третьим лицам запрещена).
                 </li>
               </ul>
             </div>
           </form>
         )}
+
+        {/* Юридическая оговорка (дисклеймер) */}
+        <div className="mt-3.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-[10.5px] leading-snug text-gray-500">
+          <strong>Важное уведомление:</strong> изменение кодировок ЭБУ требует профессиональных знаний автоэлектрики и диагностики. Сервис предоставляется «как есть» (AS IS): пользователь самостоятельно несёт полную ответственность за любые изменения параметров, запись файлов в блоки автомобиля и возможные последствия их применения.
+        </div>
       </div>
     </div>
   );

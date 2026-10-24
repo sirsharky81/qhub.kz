@@ -1715,6 +1715,10 @@ export default function EtacsCodingClient() {
               </div>
             </section>
           </main>
+
+          <footer className="border-t border-gray-200 bg-white px-3 py-1.5 text-[10.5px] leading-snug text-gray-400">
+            <strong>Ответственность:</strong> изменение параметров и кодировок ЭБУ требует профессиональных знаний автоэлектрики. Сервис предоставляется «как есть» — пользователь самостоятельно несёт полную ответственность за применение изменений и запись файлов в блоки автомобиля.
+          </footer>
         </div>
 
         <EtacsSaveFileModal

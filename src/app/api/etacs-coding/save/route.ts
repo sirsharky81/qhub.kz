@@ -13,22 +13,26 @@ export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as Parameters<typeof saveEtacsPayload>[0] & {
       promoCode?: string;
+      deviceId?: string;
     };
     const isAdmin = await isAdminAuthenticated().catch(() => false);
     const fileKind = detectFileKindForBilling(payload.fileName, payload.codingHex);
     const access = await checkEtacsAccess({
       vin: payload.vin,
       promoCode: payload.promoCode,
+      deviceId: payload.deviceId,
       fileKind,
       isAdmin,
     });
     if (!access.allowed) {
       const msg =
-        access.reason === "cuf_only_need_kon_upgrade"
-          ? `Для VIN ${payload.vin || "автомобиля"} открыт тариф Custom (.cuf). Для сохранения и записи комплектации Variant (.kon) откройте полный доступ (.kon + .cuf) или введите код PRO.`
-          : fileKind === "cuf"
-            ? `Для сохранения и записи Custom Coding (.cuf) активируйте доступ .cuf (${access.settings.cufVinPriceKzt.toLocaleString("ru")} ₸) для VIN ${payload.vin || "автомобиля"} или введите код.`
-            : `Для сохранения и записи Variant Coding (.kon) активируйте полный доступ (.kon + .cuf) для VIN ${payload.vin || "автомобиля"} или введите код PRO.`;
+        access.reason === "pro_device_limit_exceeded"
+          ? "Превышен лимит привязанных устройств для вашего PRO-ключа. Передача ключа третьим лицам запрещена. Для сброса привязки обратитесь к администратору."
+          : access.reason === "cuf_only_need_kon_upgrade"
+            ? `Для VIN ${payload.vin || "автомобиля"} открыт тариф Custom (.cuf). Для сохранения и записи комплектации Variant (.kon) откройте полный доступ (.kon + .cuf) или введите код PRO.`
+            : fileKind === "cuf"
+              ? `Для сохранения и записи Custom Coding (.cuf) активируйте доступ .cuf (${access.settings.cufVinPriceKzt.toLocaleString("ru")} ₸) для VIN ${payload.vin || "автомобиля"} или введите код.`
+              : `Для сохранения и записи Variant Coding (.kon) активируйте полный доступ (.kon + .cuf) для VIN ${payload.vin || "автомобиля"} или введите код PRO.`;
       return etacsJson(
         request,
         {

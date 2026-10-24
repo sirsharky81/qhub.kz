@@ -29,15 +29,19 @@ export interface EtacsUnlockedVinRecord {
 export interface EtacsPromoCodeRecord {
   code: string;
   /**
-   * - `cuf_single_vin`: доступ только к `.cuf` на 1 VIN навсегда (народный тариф)
-   * - `single_vin`: полный доступ (`.kon` + `.cuf`) на 1 VIN навсегда
+   * - `cuf_single_vin`: доступ только к `.cuf` на 1 VIN (народный тариф)
+   * - `single_vin`: полный доступ (`.kon` + `.cuf`) на 1 VIN
    * - `multi_vin`: полный доступ (`.kon` + `.cuf`) на N автомобилей
-   * - `pro_unlimited`: безлимит на любые автомобили (`.kon` + `.cuf`) на срок
+   * - `pro_unlimited`: безлимит на любые автомобили (`.kon` + `.cuf`) на срок, с антифрод-лимитом устройств
    */
   kind: "cuf_single_vin" | "single_vin" | "multi_vin" | "pro_unlimited";
   maxUses: number;
   usedCount: number;
   usedVins: string[];
+  /** Антифрод для PRO-ключей: максимальное число привязанных устройств (по умолчанию 2 для PRO Мастер, 3 для PRO СТО) */
+  maxDevices?: number;
+  /** Список привязанных ID устройств (браузеров/телефонов) */
+  boundDevices?: string[];
   durationDays?: number | null;
   note?: string;
   createdAt: string;
@@ -198,6 +202,13 @@ export function normalizePromoCode(code: string | undefined | null): string {
     .trim();
 }
 
+export function normalizeDeviceId(deviceId: string | undefined | null): string {
+  return String(deviceId ?? "")
+    .replace(/[^A-Za-z0-9\-_]/g, "")
+    .slice(0, 64)
+    .trim();
+}
+
 export function detectFileKindForBilling(
   fileName?: string | null,
   codingHex?: string | null,
@@ -231,6 +242,7 @@ export interface EtacsAccessCheckResult {
     | "vin_unlocked_full"
     | "vin_unlocked_cuf"
     | "pro_code"
+    | "pro_device_limit_exceeded"
     | "cuf_only_need_kon_upgrade"
     | "locked";
   vin: string;
@@ -240,6 +252,8 @@ export interface EtacsAccessCheckResult {
     code: string;
     kind: EtacsPromoCodeRecord["kind"];
     remainingUses: number;
+    maxDevices?: number;
+    boundDevicesCount?: number;
     expiresAt?: string | null;
   } | null;
   settings: EtacsBillingSettings;
@@ -248,12 +262,14 @@ export interface EtacsAccessCheckResult {
 export async function checkEtacsAccess(options: {
   vin?: string | null;
   promoCode?: string | null;
+  deviceId?: string | null;
   fileKind?: "kon" | "cuf" | null;
   isAdmin?: boolean;
 }): Promise<EtacsAccessCheckResult> {
   const store = await loadEtacsBillingStore();
   const vin = normalizeVin(options.vin);
   const code = normalizePromoCode(options.promoCode);
+  const deviceId = normalizeDeviceId(options.deviceId);
   const fileKind: "kon" | "cuf" = options.fileKind === "cuf" ? "cuf" : "kon";
 
   const vinRec = vin ? store.unlockedVins[vin] : undefined;
@@ -273,6 +289,21 @@ export async function checkEtacsAccess(options: {
       ? promoRec
       : null;
 
+  let proDeviceBlocked = false;
+  if (validPromo && validPromo.kind === "pro_unlimited" && deviceId) {
+    const maxDev = validPromo.maxDevices ?? 2;
+    const bound = validPromo.boundDevices ?? [];
+    if (!bound.includes(deviceId)) {
+      if (bound.length >= maxDev) {
+        proDeviceBlocked = true;
+      } else {
+        bound.push(deviceId);
+        validPromo.boundDevices = bound;
+        await saveEtacsBillingStore(store);
+      }
+    }
+  }
+
   const promoSummary = validPromo
     ? {
         code: validPromo.code,
@@ -281,6 +312,8 @@ export async function checkEtacsAccess(options: {
           validPromo.kind === "pro_unlimited"
             ? 9999
             : Math.max(0, validPromo.maxUses - validPromo.usedCount),
+        maxDevices: validPromo.maxDevices ?? (validPromo.kind === "pro_unlimited" ? 2 : undefined),
+        boundDevicesCount: validPromo.boundDevices?.length ?? 0,
         expiresAt: validPromo.expiresAt,
       }
     : null;
@@ -292,6 +325,21 @@ export async function checkEtacsAccess(options: {
       allowedKon: true,
       enforcePaywall: store.settings.enforcePaywall,
       reason: "admin",
+      vin,
+      fileKind,
+      vinRecord: validVinRec,
+      promoRecord: promoSummary,
+      settings: store.settings,
+    };
+  }
+
+  if (proDeviceBlocked) {
+    return {
+      allowed: false,
+      allowedCuf: false,
+      allowedKon: false,
+      enforcePaywall: store.settings.enforcePaywall,
+      reason: "pro_device_limit_exceeded",
       vin,
       fileKind,
       vinRecord: validVinRec,
@@ -401,6 +449,7 @@ export async function redeemEtacsPromoCode(options: {
   code: string;
   vin?: string | null;
   ecuId?: string | null;
+  deviceId?: string | null;
 }): Promise<{
   ok: boolean;
   message: string;
@@ -410,6 +459,7 @@ export async function redeemEtacsPromoCode(options: {
   const store = await loadEtacsBillingStore();
   const cleanCode = normalizePromoCode(options.code);
   const cleanVin = normalizeVin(options.vin);
+  const cleanDevice = normalizeDeviceId(options.deviceId);
 
   if (!cleanCode) {
     throw new Error("Введите код активации");
@@ -424,14 +474,27 @@ export async function redeemEtacsPromoCode(options: {
   }
 
   if (promo.kind === "pro_unlimited") {
+    const maxDev = promo.maxDevices ?? 2;
+    const bound = promo.boundDevices ?? [];
+    if (cleanDevice) {
+      if (!bound.includes(cleanDevice)) {
+        if (bound.length >= maxDev) {
+          throw new Error(
+            `Превышен лимит устройств (${maxDev} из ${maxDev}) для этого PRO-ключа. Передача ключа третьим лицам запрещена. Для сброса привязки обратитесь к администратору.`,
+          );
+        }
+        bound.push(cleanDevice);
+        promo.boundDevices = bound;
+      }
+    }
     if (cleanVin && !promo.usedVins.includes(cleanVin)) {
       promo.usedVins.push(cleanVin);
       promo.usedCount = promo.usedVins.length;
-      await saveEtacsBillingStore(store);
     }
+    await saveEtacsBillingStore(store);
     return {
       ok: true,
-      message: "Код PRO Мастер активирован! Полный доступ (.kon + .cuf) ко всем автомобилям открыт.",
+      message: `Ключ PRO активирован на этом устройстве (${(promo.boundDevices ?? []).length} из ${maxDev} устр.)! Полный доступ (.kon + .cuf) открыт.`,
       promoRecord: promo,
       vinRecord: null,
     };
@@ -540,6 +603,7 @@ export async function createEtacsPromoCode(options: {
   customCode?: string;
   kind: EtacsPromoCodeRecord["kind"];
   maxUses?: number;
+  maxDevices?: number;
   durationDays?: number | null;
   note?: string;
 }): Promise<EtacsPromoCodeRecord> {
@@ -570,12 +634,21 @@ export async function createEtacsPromoCode(options: {
         ? 1
         : Math.max(1, options.maxUses ?? 5);
 
+  const defaultMaxDevices =
+    options.kind === "pro_unlimited"
+      ? options.durationDays && options.durationDays >= 180
+        ? 3
+        : 2
+      : undefined;
+
   const rec: EtacsPromoCodeRecord = {
     code,
     kind: options.kind,
     maxUses,
     usedCount: 0,
     usedVins: [],
+    maxDevices: options.maxDevices ?? defaultMaxDevices,
+    boundDevices: [],
     durationDays: options.durationDays ?? null,
     note: options.note?.trim() || undefined,
     createdAt: now.toISOString(),
@@ -585,6 +658,15 @@ export async function createEtacsPromoCode(options: {
   store.promoCodes[code] = rec;
   await saveEtacsBillingStore(store);
   return rec;
+}
+
+export async function resetEtacsPromoDevices(code: string): Promise<void> {
+  const clean = normalizePromoCode(code);
+  const store = await loadEtacsBillingStore();
+  const promo = store.promoCodes[clean];
+  if (!promo) throw new Error("Код не найден");
+  promo.boundDevices = [];
+  await saveEtacsBillingStore(store);
 }
 
 export async function deleteEtacsPromoCode(code: string): Promise<void> {
@@ -681,6 +763,7 @@ export async function approveEtacsUnlockRequest(
   }
 
   const durationDays = req.plan === "pro_year" ? 365 : 30;
+  const maxDevices = req.plan === "pro_year" ? 3 : 2;
   const code = generatePromoCodeString("PRO");
   const expiresAt = new Date(now.getTime() + durationDays * 86_400_000).toISOString();
   const promoRec: EtacsPromoCodeRecord = {
@@ -689,6 +772,8 @@ export async function approveEtacsUnlockRequest(
     maxUses: 9999,
     usedCount: req.vin && req.vin !== "PRO-TARIFF" ? 1 : 0,
     usedVins: req.vin && req.vin !== "PRO-TARIFF" ? [req.vin] : [],
+    maxDevices,
+    boundDevices: [],
     durationDays,
     note: `Заявка ${req.id} (${req.contact})`,
     createdAt: now.toISOString(),

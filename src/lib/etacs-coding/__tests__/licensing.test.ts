@@ -6,6 +6,7 @@ import {
   createEtacsUnlockRequest,
   redeemEtacsPromoCode,
   resetEtacsBillingMemoryCache,
+  resetEtacsPromoDevices,
   saveEtacsBillingStore,
   signQuickApproveToken,
   unlockVinManually,
@@ -116,29 +117,62 @@ describe("ETACS Coding licensing & monetization store (.cuf vs .kon + .cuf tiers
     ).rejects.toThrow(/исчерпан/);
   });
 
-  it("supports unlimited PRO promo codes across any VIN for both .kon and .cuf", async () => {
+  it("supports unlimited PRO promo codes across any VIN for both .kon and .cuf and enforces anti-fraud device limit", async () => {
     const pro = await createEtacsPromoCode({
       customCode: "PRO-MASTER77",
       kind: "pro_unlimited",
       durationDays: 30,
+      maxDevices: 2,
     });
     expect(pro.kind).toBe("pro_unlimited");
+    expect(pro.maxDevices).toBe(2);
 
-    const accessA = await checkEtacsAccess({
+    // Device 1 binds and succeeds
+    const redeemDev1 = await redeemEtacsPromoCode({
+      code: "PRO-MASTER77",
       vin: "MMEMCY1XXNH003447",
-      promoCode: "PRO-MASTER77",
-      fileKind: "kon",
+      deviceId: "DEV_PHONE_1",
     });
-    expect(accessA.allowed).toBe(true);
-    expect(accessA.reason).toBe("pro_code");
+    expect(redeemDev1.ok).toBe(true);
 
-    const accessB = await checkEtacsAccess({
+    // Device 2 binds and succeeds
+    const accessDev2 = await checkEtacsAccess({
       vin: "JMBXKR1WHEZ000888",
       promoCode: "PRO-MASTER77",
+      deviceId: "DEV_LAPTOP_2",
       fileKind: "cuf",
     });
-    expect(accessB.allowed).toBe(true);
-    expect(accessB.reason).toBe("pro_code");
+    expect(accessDev2.allowed).toBe(true);
+    expect(accessDev2.reason).toBe("pro_code");
+
+    // Device 3 (shared with a friend) is blocked by anti-fraud device limit!
+    await expect(
+      redeemEtacsPromoCode({
+        code: "PRO-MASTER77",
+        vin: "JMBXKR1WHEZ000999",
+        deviceId: "DEV_FRIEND_3",
+      }),
+    ).rejects.toThrow(/Превышен лимит устройств/i);
+
+    const accessDev3 = await checkEtacsAccess({
+      vin: "JMBXKR1WHEZ000999",
+      promoCode: "PRO-MASTER77",
+      deviceId: "DEV_FRIEND_3",
+      fileKind: "kon",
+    });
+    expect(accessDev3.allowed).toBe(false);
+    expect(accessDev3.reason).toBe("pro_device_limit_exceeded");
+
+    // Admin resets bound devices -> Device 3 can now bind
+    await resetEtacsPromoDevices("PRO-MASTER77");
+    const afterReset = await checkEtacsAccess({
+      vin: "JMBXKR1WHEZ000999",
+      promoCode: "PRO-MASTER77",
+      deviceId: "DEV_FRIEND_3",
+      fileKind: "kon",
+    });
+    expect(afterReset.allowed).toBe(true);
+    expect(afterReset.reason).toBe("pro_code");
   });
 
   it("creates cuf_vin unlock requests, signs Telegram quick-approve tokens, and approves cuf_only scope", async () => {

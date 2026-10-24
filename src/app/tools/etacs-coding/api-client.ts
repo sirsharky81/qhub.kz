@@ -6,6 +6,24 @@ import type {
 import type { EtacsAccessCheckResult } from "@/lib/etacs-coding/licensing";
 
 const BASE = "/api/etacs-coding";
+const DEVICE_ID_STORAGE_KEY = "qhub_etacs_device_id";
+
+export function getOrCreateEtacsDeviceId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    let existing = window.localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+    if (existing && existing.length >= 8) return existing;
+    const randomPart =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID().replace(/-/g, "").slice(0, 16)
+        : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    existing = `DEV_${randomPart.toUpperCase()}`;
+    window.localStorage.setItem(DEVICE_ID_STORAGE_KEY, existing);
+    return existing;
+  } catch {
+    return "DEV_FALLBACK";
+  }
+}
 
 async function parseJson<T>(response: Response): Promise<T> {
   const body = (await response.json()) as T & { error?: string };
@@ -86,10 +104,11 @@ export async function saveEtacsCoding(payload: {
   fileName?: string;
   promoCode?: string;
 }): Promise<EtacsSaveResult> {
+  const deviceId = getOrCreateEtacsDeviceId();
   const response = await fetch(`${BASE}/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, deviceId }),
   });
   const body = (await response.json()) as EtacsSaveResult & {
     error?: string;
@@ -120,9 +139,11 @@ export async function fetchEtacsLicenseStatus(params: {
   promoCode?: string;
   fileKind?: "kon" | "cuf";
 }): Promise<EtacsAccessCheckResult> {
+  const deviceId = getOrCreateEtacsDeviceId();
   const url = new URL(`${BASE}/license`, window.location.origin);
   if (params.vin) url.searchParams.set("vin", params.vin);
   if (params.promoCode) url.searchParams.set("promoCode", params.promoCode);
+  if (deviceId) url.searchParams.set("deviceId", deviceId);
   if (params.fileKind) url.searchParams.set("fileKind", params.fileKind);
   const response = await fetch(url, { cache: "no-store" });
   return parseJson(response);
@@ -133,10 +154,11 @@ export async function redeemEtacsCodeApi(payload: {
   vin?: string;
   ecuId?: string;
 }): Promise<{ ok: boolean; message: string }> {
+  const deviceId = getOrCreateEtacsDeviceId();
   const response = await fetch(`${BASE}/license`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "redeem", ...payload }),
+    body: JSON.stringify({ action: "redeem", ...payload, deviceId }),
   });
   return parseJson(response);
 }

@@ -426,10 +426,10 @@ export function EtacsAdminSection() {
             onChange={(e) => setPromoKind(e.target.value as EtacsPromoCodeRecord["kind"])}
             className="rounded-xl border border-gray-200 px-3 py-2 text-xs"
           >
-            <option value="cuf_single_vin">Народный .cuf (1 VIN навсегда)</option>
-            <option value="single_vin">Полный .kon + .cuf (1 VIN навсегда)</option>
+            <option value="cuf_single_vin">Народный .cuf (1 VIN)</option>
+            <option value="single_vin">Полный .kon + .cuf (1 VIN)</option>
             <option value="multi_vin">Пакет .kon + .cuf на несколько VIN</option>
-            <option value="pro_unlimited">PRO Безлимит (по сроку)</option>
+            <option value="pro_unlimited">PRO Безлимит (по сроку, антифрод по устр.)</option>
           </select>
 
           {promoKind === "multi_vin" ? (
@@ -492,7 +492,7 @@ export function EtacsAdminSection() {
                   </code>
                   <span className="text-gray-600">
                     {p.kind === "pro_unlimited"
-                      ? `PRO Безлимит (${p.usedCount} авто)`
+                      ? `PRO Безлимит (${p.usedCount} авто · Устройств: ${p.boundDevices?.length ?? 0} / ${p.maxDevices ?? 2})`
                       : p.kind === "cuf_single_vin"
                         ? `Только .cuf (${p.usedCount} / ${p.maxUses} VIN)`
                         : `Полный .kon+.cuf (${p.usedCount} / ${p.maxUses} VIN)`}
@@ -504,14 +504,29 @@ export function EtacsAdminSection() {
                   ) : null}
                   {p.note ? <span className="text-gray-500">· {p.note}</span> : null}
                 </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void postAction({ action: "delete_promo", code: p.code })}
-                  className="text-red-600 hover:underline"
-                >
-                  Удалить
-                </button>
+                <div className="flex items-center gap-3">
+                  {p.kind === "pro_unlimited" && (p.boundDevices?.length ?? 0) > 0 ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void postAction({ action: "reset_promo_devices", code: p.code })
+                      }
+                      className="text-blue-600 hover:underline"
+                      title="Сбросить привязанные устройства мастера (если он сменил телефон)"
+                    >
+                      Сбросить устройства ({p.boundDevices?.length ?? 0})
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void postAction({ action: "delete_promo", code: p.code })}
+                    className="text-red-600 hover:underline"
+                  >
+                    Удалить
+                  </button>
+                </div>
               </div>
             ))}
           </div>

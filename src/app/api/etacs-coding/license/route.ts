@@ -70,16 +70,17 @@ export async function GET(request: Request) {
 
   const vin = url.searchParams.get("vin") || "";
   const promoCode = url.searchParams.get("promoCode") || "";
+  const deviceId = url.searchParams.get("deviceId") || "";
   const rawKind = url.searchParams.get("fileKind");
   const fileKind = rawKind === "cuf" ? "cuf" : "kon";
   const isAdmin = await isAdminAuthenticated().catch(() => false);
-  const status = await checkEtacsAccess({ vin, promoCode, fileKind, isAdmin });
+  const status = await checkEtacsAccess({ vin, promoCode, deviceId, fileKind, isAdmin });
   return NextResponse.json(status);
 }
 
 /**
  * POST /api/etacs-coding/license
- * - { action: "redeem", code, vin, ecuId } — активировать промокод (.cuf / .kon / PRO)
+ * - { action: "redeem", code, vin, ecuId, deviceId } — активировать промокод (.cuf / .kon / PRO)
  * - { action: "request", vin, ecuId, contact, plan, comment } — отправить заявку на разблокировку
  */
 export async function POST(request: Request) {
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
       code?: string;
       vin?: string;
       ecuId?: string;
+      deviceId?: string;
       contact?: string;
       plan?: "cuf_vin" | "single_vin" | "pro_month" | "pro_year";
       currency?: "KZT" | "RUB";
@@ -100,6 +102,7 @@ export async function POST(request: Request) {
         code: body.code || "",
         vin: body.vin,
         ecuId: body.ecuId,
+        deviceId: body.deviceId,
       });
       return NextResponse.json(result);
     }

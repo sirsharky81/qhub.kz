@@ -6,6 +6,7 @@ import {
   deleteEtacsPromoCode,
   loadEtacsBillingStore,
   removeUnlockedVin,
+  resetEtacsPromoDevices,
   unlockVinManually,
   updateEtacsBillingSettings,
   type EtacsPromoCodeRecord,
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
         | "remove_vin"
         | "create_promo"
         | "delete_promo"
+        | "reset_promo_devices"
         | "approve_request"
         | "update_settings";
       vin?: string;
@@ -42,6 +44,7 @@ export async function POST(request: Request) {
       customCode?: string;
       kind?: EtacsPromoCodeRecord["kind"];
       maxUses?: number;
+      maxDevices?: number;
       code?: string;
       requestId?: string;
       enforcePaywall?: boolean;
@@ -80,6 +83,7 @@ export async function POST(request: Request) {
           customCode: body.customCode,
           kind: body.kind || "cuf_single_vin",
           maxUses: body.maxUses,
+          maxDevices: body.maxDevices,
           durationDays: body.durationDays,
           note: body.note,
         });
@@ -87,6 +91,10 @@ export async function POST(request: Request) {
       }
       case "delete_promo": {
         await deleteEtacsPromoCode(body.code || "");
+        break;
+      }
+      case "reset_promo_devices": {
+        await resetEtacsPromoDevices(body.code || "");
         break;
       }
       case "approve_request": {
