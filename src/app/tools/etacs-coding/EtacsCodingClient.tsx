@@ -386,7 +386,11 @@ export default function EtacsCodingClient() {
   };
 
   const completeObdReadToEditor = useCallback(
-    async (dump: EtacsCodingDump, scenario: ObdTargetScenario) => {
+    async (
+      dump: EtacsCodingDump,
+      scenario: ObdTargetScenario,
+      savedNames?: { kon?: string; cuf?: string },
+    ) => {
       setLastObdScenario(scenario);
       const part = dump.partNumber ?? (scenario === "engine_kon" ? "1860D362" : "8637C671");
       const vin = dump.vin ?? "UNKNOWNVIN0000000";
@@ -394,6 +398,8 @@ export default function EtacsCodingClient() {
       const iso = ts.toISOString();
       const prefix = `${part}_${vin}_ecu`;
       const names = etacsDownloadNames(prefix, { partNumber: part, vin });
+      const chosenKonName = savedNames?.kon || names.kon;
+      const chosenCufName = savedNames?.cuf || names.cuf;
 
       if (scenario === "etacs_cuf") {
         const cufBytes = formatMutCodingContainer({
@@ -404,7 +410,9 @@ export default function EtacsCodingClient() {
         });
         await loadFile(
           "a",
-          new File([Uint8Array.from(cufBytes)], names.cuf, { type: "application/octet-stream" }),
+          new File([Uint8Array.from(cufBytes)], chosenCufName, {
+            type: "application/octet-stream",
+          }),
           null,
           { loadSource: "obd", backupSavedAt: iso },
         );
@@ -422,7 +430,9 @@ export default function EtacsCodingClient() {
       });
       await loadFile(
         "a",
-        new File([Uint8Array.from(konBytes)], names.kon, { type: "application/octet-stream" }),
+        new File([Uint8Array.from(konBytes)], chosenKonName, {
+          type: "application/octet-stream",
+        }),
         null,
         { loadSource: "obd", backupSavedAt: iso },
       );
@@ -435,7 +445,7 @@ export default function EtacsCodingClient() {
           timestamp: ts,
         });
         setCufFallbackBytes(new Uint8Array(cufBytes));
-        setCufFallbackName(names.cuf);
+        setCufFallbackName(chosenCufName);
       } else {
         setCufFallbackBytes(null);
         setCufFallbackName("");
@@ -1729,8 +1739,8 @@ export default function EtacsCodingClient() {
           getCurrentBytesB={getCurrentBytesB}
           onBackupSavedA={(iso) => setSlotA((s) => ({ ...s, backupSavedAt: iso }))}
           onBackupSavedB={(iso) => setSlotB((s) => ({ ...s, backupSavedAt: iso }))}
-          onCompleteToEditor={async (dump, scenario) => {
-            await completeObdReadToEditor(dump, scenario);
+          onCompleteToEditor={async (dump, scenario, savedNames) => {
+            await completeObdReadToEditor(dump, scenario, savedNames);
           }}
         />
 
