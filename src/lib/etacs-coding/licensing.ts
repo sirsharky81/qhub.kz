@@ -589,7 +589,14 @@ export async function createEtacsUnlockRequest(options: {
   if (contact.length < 3) {
     throw new Error("Укажите ваш номер телефона, Kaspi или Telegram для связи");
   }
-  const cleanVin = normalizeVin(options.vin) || "PRO-TARIFF";
+  const rawVin = normalizeVin(options.vin);
+  const isSingleVinPlan = options.plan === "cuf_vin" || options.plan === "single_vin";
+  if (isSingleVinPlan && (!rawVin || rawVin.length < 6 || rawVin === "PROTARIFF")) {
+    throw new Error(
+      "Для отправки заявки на 1 VIN сначала откройте файл .kon / .cuf в слоте A или выгрузите кодировку с блока, чтобы определить VIN вашего автомобиля.",
+    );
+  }
+  const cleanVin = rawVin || "PRO-TARIFF";
   const store = await loadEtacsBillingStore();
   const id = `ET-${randomBytes(3).toString("hex").toUpperCase()}`;
 

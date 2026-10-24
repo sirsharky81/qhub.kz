@@ -54,6 +54,11 @@ export function EtacsUnlockModal({
     kaspiPhoneOrLink: "По номеру Kaspi / в Telegram",
   };
 
+  const cleanVin = (vin ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const hasValidVin = cleanVin.length >= 6 && cleanVin !== "PROTARIFF";
+  const isSingleVinPlan = plan === "cuf_vin" || plan === "single_vin";
+  const isVinMissingForPlan = isSingleVinPlan && !hasValidVin;
+
   const handleRedeem = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -61,9 +66,23 @@ export function EtacsUnlockModal({
     setSuccessMsg(null);
     try {
       const clean = codeDraft.trim().toUpperCase();
+      if (!clean.startsWith("PRO-") && !hasValidVin) {
+        throw new Error(
+          "Для активации кода на 1 автомобиль сначала откройте файл .kon / .cuf в слоте A или выгрузите кодировку с блока, чтобы определить ваш VIN.",
+        );
+      }
+      if (!clean.startsWith("PRO-") && hasValidVin) {
+        const agreed = window.confirm(
+          `Внимание! Код активации ${clean} будет навсегда привязан к выгруженному вами VIN:\n\n${cleanVin}\n\nПродолжить активацию?`,
+        );
+        if (!agreed) {
+          setBusy(false);
+          return;
+        }
+      }
       const res = await redeemEtacsCodeApi({
         code: clean,
-        vin,
+        vin: cleanVin || undefined,
         ecuId,
       });
       onSavePromoCode(clean);
@@ -78,12 +97,31 @@ export function EtacsUnlockModal({
 
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
     setError(null);
     setSuccessMsg(null);
+
+    if (isSingleVinPlan && !hasValidVin) {
+      setError(
+        "Сначала откройте файл .kon / .cuf в слоте A или выгрузите кодировку с блока, чтобы определить VIN вашего автомобиля.",
+      );
+      return;
+    }
+
+    if (isSingleVinPlan && hasValidVin) {
+      const tariffName =
+        plan === "cuf_vin"
+          ? `Custom Coding (.cuf) — ${settings.cufVinPriceKzt.toLocaleString("ru")} ₸`
+          : `Полный доступ (.kon + .cuf) — ${settings.singleVinPriceKzt.toLocaleString("ru")} ₸`;
+      const agreed = window.confirm(
+        `Внимание! Доступ по тарифу «${tariffName}» будет привязан к открытому/выгруженному вами VIN:\n\nVIN: ${cleanVin}\n\nОтправить заявку на этот VIN?`,
+      );
+      if (!agreed) return;
+    }
+
+    setBusy(true);
     try {
       const res = await requestEtacsUnlockApi({
-        vin,
+        vin: cleanVin || undefined,
         ecuId: [ecuId, model].filter(Boolean).join(" · "),
         contact,
         plan,
@@ -158,11 +196,15 @@ export function EtacsUnlockModal({
               <span className="text-[11px] uppercase tracking-wider opacity-75">Статус: </span>
               <strong className="font-semibold">{reasonLabel()}</strong>
             </div>
-            {vin ? (
+            {hasValidVin ? (
               <span className="rounded bg-white/80 px-2 py-0.5 font-mono text-[11px] font-bold text-gray-800">
-                VIN: {vin}
+                VIN: {cleanVin}
               </span>
-            ) : null}
+            ) : (
+              <span className="rounded bg-red-100 px-2 py-0.5 text-[10.5px] font-semibold text-red-800">
+                Файл не открыт (VIN не определён)
+              </span>
+            )}
           </div>
         </div>
 
@@ -303,6 +345,28 @@ export function EtacsUnlockModal({
               </button>
             </div>
 
+            {/* Блок предупреждения о привязке к VIN (или блокировки, если файл ещё не открыт) */}
+            {isSingleVinPlan ? (
+              hasValidVin ? (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
+                  <strong>Внимание:</strong> после подтверждения оплаты доступ будет навсегда привязан к выгруженному/открытому вами автомобилю:
+                  <div className="mt-1 font-mono text-xs font-bold text-gray-900">
+                    VIN: {cleanVin}
+                    {ecuId ? ` (${ecuId}${model ? ` · ${model}` : ""})` : ""}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs leading-relaxed text-red-900">
+                  <strong>Внимание — файл ещё не открыт!</strong>
+                  <p className="mt-1">
+                    Чтобы привязать доступ к вашему автомобилю, сначала нажмите{" "}
+                    <strong>«Выгрузить с блока»</strong> или <strong>«Открыть»</strong> файл{" "}
+                    <code>.cuf</code> / <code>.kon</code> в слоте A. Как только в редакторе появится ваш VIN, отправка заявки станет доступна.
+                  </p>
+                </div>
+              )
+            ) : null}
+
             <div className="rounded-xl border border-blue-200 bg-blue-50/80 p-3 text-xs text-blue-950">
               <p className="font-semibold">Реквизиты / как активировать:</p>
               <p className="mt-1 leading-relaxed">{settings.paymentInstructions}</p>
@@ -320,10 +384,11 @@ export function EtacsUnlockModal({
               <input
                 type="text"
                 required
+                disabled={isVinMissingForPlan}
                 value={contact}
                 onChange={(e) => setContact(e.target.value)}
                 placeholder="+7 701 ... или @username"
-                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none sm:text-sm"
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 sm:text-sm"
               />
             </div>
 
@@ -333,29 +398,43 @@ export function EtacsUnlockModal({
               </label>
               <input
                 type="text"
+                disabled={isVinMissingForPlan}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="Например: перевод с Kaspi от Армана"
-                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none sm:text-sm"
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 sm:text-sm"
               />
             </div>
 
             <button
               type="submit"
-              disabled={busy || !contact.trim()}
-              className="w-full rounded-xl bg-gray-900 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-gray-800 disabled:opacity-50"
+              disabled={busy || !contact.trim() || isVinMissingForPlan}
+              className="w-full rounded-xl bg-gray-900 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-gray-800 disabled:opacity-40"
             >
-              {busy
-                ? "Отправка заявки…"
-                : plan === "cuf_vin"
-                  ? `Открыть Custom (.cuf) за ${settings.cufVinPriceKzt.toLocaleString("ru")} ₸`
-                  : plan === "single_vin"
-                    ? `Открыть Полный (.kon + .cuf) за ${settings.singleVinPriceKzt.toLocaleString("ru")} ₸`
-                    : "Отправить заявку на получение ключа PRO"}
+              {isVinMissingForPlan
+                ? "Сначала откройте или выгрузите файл с вашим VIN"
+                : busy
+                  ? "Отправка заявки…"
+                  : plan === "cuf_vin"
+                    ? `Открыть Custom (.cuf) для VIN ${cleanVin} (${settings.cufVinPriceKzt.toLocaleString("ru")} ₸)`
+                    : plan === "single_vin"
+                      ? `Открыть Полный (.kon + .cuf) для VIN ${cleanVin} (${settings.singleVinPriceKzt.toLocaleString("ru")} ₸)`
+                      : "Отправить заявку на получение ключа PRO"}
             </button>
           </form>
         ) : (
           <form onSubmit={handleRedeem} className="mt-3.5 space-y-3">
+            {hasValidVin ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-950">
+                Внимание: код на 1 авто (<code>CUF-...</code> или <code>VIN-...</code>) будет привязан к открытому вами VIN:{" "}
+                <strong className="font-mono">{cleanVin}</strong>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-950">
+                Для активации кода на 1 авто (<code>CUF-...</code> / <code>VIN-...</code>) сначала откройте или выгрузите файл с вашим VIN в слот A.
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-gray-700">
                 Код активации (`CUF-...`, `VIN-...` или `PRO-...`)

@@ -166,6 +166,15 @@ describe("ETACS Coding licensing & monetization store (.cuf vs .kon + .cuf tiers
     const accessKon = await checkEtacsAccess({ vin: "MMEMCY1XXNH003447", fileKind: "kon" });
     expect(accessKon.allowed).toBe(false);
     expect(accessKon.reason).toBe("cuf_only_need_kon_upgrade");
+
+    // Rejects cuf_vin or single_vin request when VIN is missing (file not opened/read yet)
+    await expect(
+      createEtacsUnlockRequest({
+        vin: "",
+        contact: "+77071913395",
+        plan: "cuf_vin",
+      }),
+    ).rejects.toThrow(/сначала откройте файл/i);
   });
 
   it("allows free access when enforcePaywall is toggled off in admin settings", async () => {
