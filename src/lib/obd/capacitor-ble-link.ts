@@ -1,5 +1,7 @@
 import { BleClient } from "@capacitor-community/bluetooth-le";
 import {
+  ELM_BLE_CHAR_PAIRS,
+  ELM_BLE_OPTIONAL_SERVICES,
   VLINKER_NAME_PREFIXES,
   VLINKER_NOTIFY,
   VLINKER_SERVICE,
@@ -15,6 +17,10 @@ export class CapacitorBleLink implements BleLink {
   private notifyStarted = false;
   private userClosed = false;
   private disconnectListener: (() => void) | null = null;
+  private activeService = VLINKER_SERVICE;
+  private activeNotify = VLINKER_NOTIFY;
+  private activeWrite = VLINKER_WRITE;
+  private useWriteWithoutResponse = false;
 
   private constructor(info: BleAdapterInfo) {
     this.info = info;
@@ -33,7 +39,7 @@ export class CapacitorBleLink implements BleLink {
 
     const device = await BleClient.requestDevice({
       namePrefix: VLINKER_NAME_PREFIXES[0],
-      optionalServices: [VLINKER_SERVICE],
+      optionalServices: [...ELM_BLE_OPTIONAL_SERVICES],
     });
 
     const info: BleAdapterInfo = {
@@ -60,11 +66,13 @@ export class CapacitorBleLink implements BleLink {
       this.disconnectListener?.();
     });
 
+    await this.resolveGattChannel();
+
     if (!this.notifyStarted) {
       await BleClient.startNotifications(
         this.info.id,
-        VLINKER_SERVICE,
-        VLINKER_NOTIFY,
+        this.activeService,
+        this.activeNotify,
         (value) => {
           this.rx.appendChunk(decodeDataView(value));
         },
@@ -73,11 +81,53 @@ export class CapacitorBleLink implements BleLink {
     }
   }
 
+  private async resolveGattChannel(): Promise<void> {
+    try {
+      const services = await BleClient.getServices(this.info.id);
+      if (!services || services.length === 0) return;
+      for (const svc of services) {
+        const chars = svc.characteristics ?? [];
+        for (const [notifyUuid, writeUuid] of ELM_BLE_CHAR_PAIRS) {
+          const nChar = chars.find((c) => c.uuid.toLowerCase() === notifyUuid.toLowerCase());
+          const wChar = chars.find((c) => c.uuid.toLowerCase() === writeUuid.toLowerCase());
+          if (nChar && wChar) {
+            this.activeService = svc.uuid;
+            this.activeNotify = nChar.uuid;
+            this.activeWrite = wChar.uuid;
+            this.useWriteWithoutResponse = Boolean(
+              wChar.properties?.writeWithoutResponse && !wChar.properties?.write,
+            );
+            return;
+          }
+        }
+        const nFallback = chars.find((c) => c.properties?.notify || c.properties?.indicate);
+        const wFallback = chars.find(
+          (c) => c.properties?.write || c.properties?.writeWithoutResponse,
+        );
+        if (nFallback && wFallback) {
+          this.activeService = svc.uuid;
+          this.activeNotify = nFallback.uuid;
+          this.activeWrite = wFallback.uuid;
+          this.useWriteWithoutResponse = Boolean(
+            wFallback.properties?.writeWithoutResponse && !wFallback.properties?.write,
+          );
+          return;
+        }
+      }
+    } catch {
+      /* keep default FFF0 / FFF1 / FFF2 */
+    }
+  }
+
   async disconnect(): Promise<void> {
     this.userClosed = true;
     try {
       if (this.notifyStarted) {
-        await BleClient.stopNotifications(this.info.id, VLINKER_SERVICE, VLINKER_NOTIFY);
+        await BleClient.stopNotifications(
+          this.info.id,
+          this.activeService,
+          this.activeNotify,
+        );
       }
     } catch {
       /* ignore */
@@ -96,7 +146,31 @@ export class CapacitorBleLink implements BleLink {
       const chunk = chunks[i]!;
       const view = new DataView(new ArrayBuffer(chunk.length));
       chunk.forEach((b, idx) => view.setUint8(idx, b));
-      await BleClient.write(this.info.id, VLINKER_SERVICE, VLINKER_WRITE, view);
+      if (this.useWriteWithoutResponse) {
+        await BleClient.writeWithoutResponse(
+          this.info.id,
+          this.activeService,
+          this.activeWrite,
+          view,
+        );
+      } else {
+        try {
+          await BleClient.write(
+            this.info.id,
+            this.activeService,
+            this.activeWrite,
+            view,
+          );
+        } catch {
+          await BleClient.writeWithoutResponse(
+            this.info.id,
+            this.activeService,
+            this.activeWrite,
+            view,
+          );
+          this.useWriteWithoutResponse = true;
+        }
+      }
       if (chunks.length > 1 && i + 1 < chunks.length) {
         await new Promise((resolve) => setTimeout(resolve, 8));
       }

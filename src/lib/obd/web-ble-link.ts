@@ -23,10 +23,12 @@ type BluetoothCharacteristicProperties = {
 };
 
 type BluetoothRemoteGATTCharacteristic = {
+  uuid?: string;
   properties?: BluetoothCharacteristicProperties;
   startNotifications(): Promise<BluetoothRemoteGATTCharacteristic>;
   stopNotifications(): Promise<BluetoothRemoteGATTCharacteristic>;
   writeValue(value: BufferSource): Promise<void>;
+  writeValueWithResponse?(value: BufferSource): Promise<void>;
   writeValueWithoutResponse?(value: BufferSource): Promise<void>;
   addEventListener(type: string, listener: (ev: Event) => void): void;
   removeEventListener(type: string, listener: (ev: Event) => void): void;
@@ -34,6 +36,7 @@ type BluetoothRemoteGATTCharacteristic = {
 };
 
 type BluetoothRemoteGATTService = {
+  uuid?: string;
   getCharacteristic(uuid: string): Promise<BluetoothRemoteGATTCharacteristic>;
   getCharacteristics?(): Promise<BluetoothRemoteGATTCharacteristic[]>;
 };
@@ -113,7 +116,7 @@ export class WebBleLink implements BleLink {
     if (!isWebBluetoothAvailable()) {
       throw new Error("Web Bluetooth недоступен в этом браузере");
     }
-    // 1. If there is already an active GATT-connected device, reuse it without reopening the BLE picker
+    // 1. If there is already an active GATT-connected device whose serial channel opened in this tab, reuse it
     if (cachedActiveDevice?.gatt?.connected) {
       const dev = cachedActiveDevice;
       return new WebBleLink(
@@ -125,31 +128,34 @@ export class WebBleLink implements BleLink {
         dev,
       );
     }
-    // 2. If we have a previously selected BluetoothDevice in this tab whose GATT is still connected, reuse it
-    if (cachedBluetoothDevice?.gatt?.connected) {
-      return new WebBleLink(
-        {
-          id: cachedBluetoothDevice.id,
-          name: cachedBluetoothDevice.name ?? "vLinker",
-          transport: "web-bluetooth",
-        },
-        cachedBluetoothDevice,
-      );
-    }
 
     const bluetooth = bluetoothApi();
-    // 3. Check `navigator.bluetooth.getDevices()` for an already permitted & connected OBD adapter
-    const permitted = await pickPermittedDevice(bluetooth, true);
-    if (permitted) {
-      cachedBluetoothDevice = permitted;
-      return new WebBleLink(
-        {
-          id: permitted.id,
-          name: permitted.name ?? "vLinker",
-          transport: "web-bluetooth",
-        },
-        permitted,
-      );
+    // 2. On Bluefy (iOS), check `navigator.bluetooth.getDevices()` for an already connected OBD adapter.
+    // On Chrome (Android/Desktop), always go through `requestDevice` when not yet active in this tab
+    // so Chrome grants permission to all `ELM_BLE_OPTIONAL_SERVICES` (including 0x18F0 and ISSC UART for vLinker MC-IOS).
+    if (isBluefyBrowser()) {
+      if (cachedBluetoothDevice?.gatt?.connected) {
+        return new WebBleLink(
+          {
+            id: cachedBluetoothDevice.id,
+            name: cachedBluetoothDevice.name ?? "vLinker",
+            transport: "web-bluetooth",
+          },
+          cachedBluetoothDevice,
+        );
+      }
+      const permitted = await pickPermittedDevice(bluetooth, true);
+      if (permitted) {
+        cachedBluetoothDevice = permitted;
+        return new WebBleLink(
+          {
+            id: permitted.id,
+            name: permitted.name ?? "vLinker",
+            transport: "web-bluetooth",
+          },
+          permitted,
+        );
+      }
     }
 
     const device = await requestObdDevice(bluetooth);
@@ -176,6 +182,17 @@ export class WebBleLink implements BleLink {
       await this.openSerial();
       cachedActiveDevice = this.device;
     } catch (error) {
+      if (cachedActiveDevice === this.device) {
+        cachedActiveDevice = null;
+      }
+      if (cachedBluetoothDevice === this.device) {
+        cachedBluetoothDevice = null;
+      }
+      try {
+        this.device?.gatt?.disconnect();
+      } catch {
+        /* ignore */
+      }
       throw new Error(formatBleFailure(error));
     }
   }
@@ -205,27 +222,40 @@ export class WebBleLink implements BleLink {
     if (!char) throw new Error("Адаптер не подключён");
     const chunks = chunkElmWriteBytes(lineToElmBytes(line));
     const withoutResponse = char.writeValueWithoutResponse?.bind(char);
-    const withResponse = char.writeValue.bind(char);
+    const withResponse = (char.writeValueWithResponse ?? char.writeValue).bind(char);
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]!;
-      const attempts: Array<() => Promise<void>> = [];
+      const attempts: Array<{ withoutResp: boolean; fn: () => Promise<void> }> = [];
       if (this.useWriteWithoutResponse && withoutResponse) {
-        attempts.push(() => withoutResponse(chunk));
-        attempts.push(() => withResponse(chunk));
+        attempts.push({ withoutResp: true, fn: () => withoutResponse(chunk) });
+        attempts.push({ withoutResp: false, fn: () => withResponse(chunk) });
       } else {
-        attempts.push(() => withResponse(chunk));
-        if (withoutResponse) attempts.push(() => withoutResponse(chunk));
+        attempts.push({ withoutResp: false, fn: () => withResponse(chunk) });
+        if (withoutResponse) {
+          attempts.push({ withoutResp: true, fn: () => withoutResponse(chunk) });
+        }
       }
       let last: unknown;
       let sent = false;
       for (const attempt of attempts) {
         try {
-          await attempt();
+          await attempt.fn();
+          this.useWriteWithoutResponse = attempt.withoutResp;
           sent = true;
           break;
         } catch (error) {
           last = error;
+          // Brief backoff in case Android GATT stack had an in-flight notification
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          try {
+            await attempt.fn();
+            this.useWriteWithoutResponse = attempt.withoutResp;
+            sent = true;
+            break;
+          } catch (retryError) {
+            last = retryError;
+          }
         }
       }
       if (!sent) {
@@ -263,6 +293,8 @@ export class WebBleLink implements BleLink {
     };
     this.notifyChar.addEventListener("characteristicvaluechanged", this.onNotify);
     await this.notifyChar.startNotifications();
+    // Give Android/iOS GATT stack 50ms to finish writing the CCCD (0x2902) descriptor before ATZ is sent
+    await new Promise((resolve) => setTimeout(resolve, 50));
     this.device?.removeEventListener?.("gattserverdisconnected", this.onGattLost);
     this.device?.addEventListener?.("gattserverdisconnected", this.onGattLost);
   }
@@ -271,12 +303,19 @@ export class WebBleLink implements BleLink {
     const gatt = this.device?.gatt;
     if (!gatt) throw new Error("GATT недоступен");
     if (gatt.connected) return gatt;
-    try {
-      return await gatt.connect();
-    } catch (error) {
-      if (gatt.connected) return gatt;
-      throw error;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await gatt.connect();
+      } catch (error) {
+        if (gatt.connected) return gatt;
+        lastError = error;
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
     }
+    throw lastError;
   }
 }
 
@@ -330,7 +369,7 @@ async function pickPermittedDevice(
   }
 }
 
-async function bindSerial(server: BluetoothGATTServer): Promise<{
+export async function bindSerial(server: BluetoothGATTServer): Promise<{
   notify: BluetoothRemoteGATTCharacteristic;
   write: BluetoothRemoteGATTCharacteristic;
 }> {
@@ -343,24 +382,55 @@ async function bindSerial(server: BluetoothGATTServer): Promise<{
       lastError = error;
     }
   }
+  // Fallback for split-service BLE adapters (e.g. notify on 0xFFE0 and write on 0xFFE5)
+  const cross = await bindAcrossServices(services);
+  if (cross) return cross;
+
   throw new Error(formatBleFailure(lastError ?? 2));
 }
 
-async function collectServices(server: BluetoothGATTServer): Promise<BluetoothRemoteGATTService[]> {
+async function collectServicesOnce(
+  server: BluetoothGATTServer,
+): Promise<BluetoothRemoteGATTService[]> {
   const found: BluetoothRemoteGATTService[] = [];
   for (const uuid of ELM_BLE_OPTIONAL_SERVICES) {
     const service = await getService(server, uuid);
-    if (service) found.push(service);
+    if (service && !found.includes(service)) {
+      found.push(service);
+    }
   }
-  if (found.length > 0) return found;
   if (server.getPrimaryServices) {
     try {
       const all = await server.getPrimaryServices();
-      if (all.length > 0) return all;
+      for (const svc of all) {
+        if (!found.includes(svc)) {
+          found.push(svc);
+        }
+      }
     } catch {
-      /* Bluefy may not implement getPrimaryServices */
+      /* Bluefy or strict Chrome when no optional services match */
     }
   }
+  return found;
+}
+
+async function collectServices(server: BluetoothGATTServer): Promise<BluetoothRemoteGATTService[]> {
+  let found = await collectServicesOnce(server);
+  if (found.length > 0) return found;
+
+  // On Android Chrome, GATT service discovery right after connect() can take a brief moment
+  // or drop if the adapter was switching from another phone. Reconnect if needed and retry once.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (!server.connected) {
+    try {
+      await server.connect();
+    } catch {
+      /* ignore */
+    }
+  }
+  found = await collectServicesOnce(server);
+  if (found.length > 0) return found;
+
   throw new Error(formatBleFailure(2));
 }
 
@@ -381,6 +451,16 @@ async function getService(
   }
 }
 
+function canCharNotify(char: BluetoothRemoteGATTCharacteristic): boolean {
+  if (!char.properties) return true;
+  return Boolean(char.properties.notify || char.properties.indicate);
+}
+
+function canCharWrite(char: BluetoothRemoteGATTCharacteristic): boolean {
+  if (!char.properties) return true;
+  return Boolean(char.properties.write || char.properties.writeWithoutResponse);
+}
+
 async function bindOnService(service: BluetoothRemoteGATTService): Promise<{
   notify: BluetoothRemoteGATTCharacteristic;
   write: BluetoothRemoteGATTCharacteristic;
@@ -389,7 +469,12 @@ async function bindOnService(service: BluetoothRemoteGATTService): Promise<{
     try {
       const notify = await getCharacteristic(service, notifyId);
       const write = await getCharacteristic(service, writeId);
-      return { notify, write };
+      if (canCharNotify(notify) && canCharWrite(write)) {
+        return { notify, write };
+      }
+      if (canCharNotify(write) && canCharWrite(notify)) {
+        return { notify: write, write: notify };
+      }
     } catch {
       /* try the next known pair */
     }
@@ -397,10 +482,38 @@ async function bindOnService(service: BluetoothRemoteGATTService): Promise<{
   if (service.getCharacteristics) {
     const chars = await service.getCharacteristics();
     const notify = chars.find((char) => char.properties?.notify || char.properties?.indicate);
-    const write = chars.find((char) => char.properties?.write || char.properties?.writeWithoutResponse);
+    const write = chars.find(
+      (char) => char.properties?.write || char.properties?.writeWithoutResponse,
+    );
     if (notify && write) return { notify, write };
   }
   throw new Error("На сервисе адаптера нет характеристик чтения и записи");
+}
+
+async function bindAcrossServices(
+  services: BluetoothRemoteGATTService[],
+): Promise<{
+  notify: BluetoothRemoteGATTCharacteristic;
+  write: BluetoothRemoteGATTCharacteristic;
+} | null> {
+  let notify: BluetoothRemoteGATTCharacteristic | undefined;
+  let write: BluetoothRemoteGATTCharacteristic | undefined;
+  for (const service of services) {
+    if (!service.getCharacteristics) continue;
+    try {
+      const chars = await service.getCharacteristics();
+      if (!notify) {
+        notify = chars.find((c) => c.properties?.notify || c.properties?.indicate);
+      }
+      if (!write) {
+        write = chars.find((c) => c.properties?.write || c.properties?.writeWithoutResponse);
+      }
+      if (notify && write) return { notify, write };
+    } catch {
+      /* ignore service without accessible characteristics */
+    }
+  }
+  return null;
 }
 
 async function getCharacteristic(

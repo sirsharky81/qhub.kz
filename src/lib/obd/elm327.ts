@@ -56,7 +56,13 @@ export class Elm327Client {
   }
 
   async resetAndIdentify(): Promise<ElmIdentity> {
-    const raw = await this.sendCommand("ATZ", 12_000);
+    let raw: string;
+    try {
+      raw = await this.sendCommand("ATZ", 6_000);
+    } catch {
+      // Wake up sleeping BLE UART bridge on vLinker MC-IOS / Android Chrome and retry ATZ
+      raw = await this.sendCommand("ATZ", 10_000);
+    }
     const lines = raw.split(/\r|\n/).map((l) => l.trim()).filter(Boolean);
     const versionLine =
       lines.find((l) => /ELM|STN|OBD|vLink/i.test(l) && !l.startsWith("AT")) ??

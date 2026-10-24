@@ -423,7 +423,8 @@ export default function EtacsBlockUploadPanel({
             </li>
             <li>
               <strong>Android:</strong> открывайте в браузере{" "}
-              <strong className="text-slate-900">Google Chrome</strong> (или Edge / Opera, не внутри Telegram/WhatsApp) либо в приложении QHub.
+              <strong className="text-slate-900">Google Chrome</strong> (не внутри Telegram/WhatsApp), в списке Bluetooth выбирайте{" "}
+              <strong className="text-slate-900">vLinker MC-IOS</strong> (канал BLE 4.0). Если до этого подключались с iPhone — отключите Bluetooth на втором телефоне.
             </li>
           </ul>
           {transportReady && transport === "none" ? (
