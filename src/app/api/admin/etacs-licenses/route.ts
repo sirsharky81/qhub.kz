@@ -49,8 +49,14 @@ export async function POST(request: Request) {
       singleVinPriceKzt?: number;
       proMonthPriceKzt?: number;
       proYearPriceKzt?: number;
+      cufVinPriceRub?: number;
+      singleVinPriceRub?: number;
+      proMonthPriceRub?: number;
+      proYearPriceRub?: number;
       paymentInstructions?: string;
       kaspiPhoneOrLink?: string;
+      sbpInstructions?: string;
+      sbpPhoneOrBank?: string;
     };
 
     switch (body.action) {
@@ -104,11 +110,29 @@ export async function POST(request: Request) {
           ...(typeof body.proYearPriceKzt === "number"
             ? { proYearPriceKzt: body.proYearPriceKzt }
             : {}),
+          ...(typeof body.cufVinPriceRub === "number"
+            ? { cufVinPriceRub: body.cufVinPriceRub }
+            : {}),
+          ...(typeof body.singleVinPriceRub === "number"
+            ? { singleVinPriceRub: body.singleVinPriceRub }
+            : {}),
+          ...(typeof body.proMonthPriceRub === "number"
+            ? { proMonthPriceRub: body.proMonthPriceRub }
+            : {}),
+          ...(typeof body.proYearPriceRub === "number"
+            ? { proYearPriceRub: body.proYearPriceRub }
+            : {}),
           ...(typeof body.paymentInstructions === "string"
             ? { paymentInstructions: body.paymentInstructions }
             : {}),
           ...(typeof body.kaspiPhoneOrLink === "string"
             ? { kaspiPhoneOrLink: body.kaspiPhoneOrLink }
+            : {}),
+          ...(typeof body.sbpInstructions === "string"
+            ? { sbpInstructions: body.sbpInstructions }
+            : {}),
+          ...(typeof body.sbpPhoneOrBank === "string"
+            ? { sbpPhoneOrBank: body.sbpPhoneOrBank }
             : {}),
         });
         break;

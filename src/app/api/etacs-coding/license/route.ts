@@ -91,6 +91,7 @@ export async function POST(request: Request) {
       ecuId?: string;
       contact?: string;
       plan?: "cuf_vin" | "single_vin" | "pro_month" | "pro_year";
+      currency?: "KZT" | "RUB";
       comment?: string;
     };
 
@@ -109,6 +110,7 @@ export async function POST(request: Request) {
         ecuId: body.ecuId,
         contact: body.contact || "",
         plan: body.plan || "cuf_vin",
+        currency: body.currency || "KZT",
         comment: body.comment,
       });
 
@@ -126,13 +128,16 @@ export async function POST(request: Request) {
             : reqRecord.plan === "single_vin"
               ? "Полный авто .kon + .cuf (1 VIN)"
               : "Народный Custom .cuf (1 VIN — зеркала/комфорт)";
+      const paymentRegion =
+        reqRecord.currency === "RUB" ? "РФ (СБП / ₽)" : "Казахстан (Kaspi / ₸)";
 
       const tgText = [
         `🚗 <b>Заявка ETACS Coding ${escapeHtml(reqRecord.id)}</b>`,
         "",
         `<b>Тариф:</b> ${escapeHtml(planLabel)}`,
+        `<b>Оплата:</b> ${escapeHtml(paymentRegion)}`,
         `<b>VIN:</b> <code>${escapeHtml(reqRecord.vin)}</code>${reqRecord.ecuId ? ` (${escapeHtml(reqRecord.ecuId)})` : ""}`,
-        `<b>Контакт / Kaspi:</b> ${escapeHtml(reqRecord.contact)}`,
+        `<b>Контакт:</b> ${escapeHtml(reqRecord.contact)}`,
         reqRecord.comment ? `<b>Комментарий:</b> ${escapeHtml(reqRecord.comment)}` : "",
         "",
         `👉 <a href="${approveUrl}">✅ Подтвердить доступ в 1 клик</a>`,

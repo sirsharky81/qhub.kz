@@ -31,6 +31,7 @@ export function EtacsUnlockModal({
   onRefreshStatus,
 }: Props) {
   const [tab, setTab] = useState<"request" | "code">("request");
+  const [currency, setCurrency] = useState<"KZT" | "RUB">("KZT");
   const [codeDraft, setCodeDraft] = useState(storedPromoCode);
   const [contact, setContact] = useState("");
   const [plan, setPlan] = useState<"cuf_vin" | "single_vin" | "pro_month" | "pro_year">(() =>
@@ -49,10 +50,24 @@ export function EtacsUnlockModal({
     singleVinPriceKzt: 3500,
     proMonthPriceKzt: 8000,
     proYearPriceKzt: 30000,
+    cufVinPriceRub: 300,
+    singleVinPriceRub: 700,
+    proMonthPriceRub: 1600,
+    proYearPriceRub: 6000,
     paymentInstructions:
       "Переведите сумму выбранного тарифа на Kaspi и укажите ваш телефон или Telegram в заявке ниже. После подтверждения доступ к VIN или PRO-код активируется мгновенно.",
     kaspiPhoneOrLink: "По номеру Kaspi / в Telegram",
+    sbpInstructions:
+      "Переведите сумму выбранного тарифа по СБП (Система быстрых платежей) или на карту РФ и укажите ваш телефон / Telegram и имя отправителя в заявке ниже.",
+    sbpPhoneOrBank: "По номеру телефона СБП / в Telegram",
   };
+
+  const isRub = currency === "RUB";
+  const cufPrice = isRub ? (settings.cufVinPriceRub ?? 300) : settings.cufVinPriceKzt;
+  const singlePrice = isRub ? (settings.singleVinPriceRub ?? 700) : settings.singleVinPriceKzt;
+  const proMonthPrice = isRub ? (settings.proMonthPriceRub ?? 1600) : settings.proMonthPriceKzt;
+  const proYearPrice = isRub ? (settings.proYearPriceRub ?? 6000) : settings.proYearPriceKzt;
+  const currSymbol = isRub ? "₽" : "₸";
 
   const cleanVin = (vin ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   const hasValidVin = cleanVin.length >= 6 && cleanVin !== "PROTARIFF";
@@ -110,8 +125,8 @@ export function EtacsUnlockModal({
     if (isSingleVinPlan && hasValidVin) {
       const tariffName =
         plan === "cuf_vin"
-          ? `Custom Coding (.cuf) — ${settings.cufVinPriceKzt.toLocaleString("ru")} ₸`
-          : `Полный доступ (.kon + .cuf) — ${settings.singleVinPriceKzt.toLocaleString("ru")} ₸`;
+          ? `Custom Coding (.cuf) — ${cufPrice.toLocaleString("ru")} ${currSymbol}`
+          : `Полный доступ (.kon + .cuf) — ${singlePrice.toLocaleString("ru")} ${currSymbol}`;
       const agreed = window.confirm(
         `Внимание! Доступ по тарифу «${tariffName}» будет привязан к открытому/выгруженному вами VIN:\n\nVIN: ${cleanVin}\n\nОтправить заявку на этот VIN?`,
       );
@@ -125,6 +140,7 @@ export function EtacsUnlockModal({
         ecuId: [ecuId, model].filter(Boolean).join(" · "),
         contact,
         plan,
+        currency,
         comment,
       });
       setSuccessMsg(res.message);
@@ -223,7 +239,7 @@ export function EtacsUnlockModal({
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
-            Выбрать тариф (Kaspi)
+            Выбрать тариф (Kaspi / СБП)
           </button>
           <button
             type="button"
@@ -254,6 +270,35 @@ export function EtacsUnlockModal({
 
         {tab === "request" ? (
           <form onSubmit={handleRequest} className="mt-3.5 space-y-3">
+            {/* Переключатель страны / способа оплаты: Казахстан (Kaspi ₸) vs РФ (СБП ₽) */}
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5">
+              <span className="text-[11px] font-medium text-gray-600">Способ оплаты:</span>
+              <div className="inline-flex rounded-lg bg-gray-200/80 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setCurrency("KZT")}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                    currency === "KZT"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  🇰🇿 Kaspi (₸)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrency("RUB")}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                    currency === "RUB"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  🇷🇺 СБП РФ (₽)
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               {/* Народный тариф CUF */}
               <button
@@ -278,7 +323,7 @@ export function EtacsUnlockModal({
                   </span>
                 </span>
                 <span className="mt-0.5 text-base font-extrabold">
-                  {settings.cufVinPriceKzt.toLocaleString("ru")} ₸
+                  {cufPrice.toLocaleString("ru")} {currSymbol}
                 </span>
                 <span className="mt-1 text-[10.5px] leading-tight opacity-85">
                   Зеркала, свет, замки, дворники (1 VIN навсегда)
@@ -299,7 +344,7 @@ export function EtacsUnlockModal({
                   Полный (.kon + .cuf)
                 </span>
                 <span className="mt-0.5 text-base font-extrabold">
-                  {settings.singleVinPriceKzt.toLocaleString("ru")} ₸
+                  {singlePrice.toLocaleString("ru")} {currSymbol}
                 </span>
                 <span className="mt-1 text-[10.5px] leading-tight opacity-85">
                   Все скрытые опции ETACS + ДВС + .cuf (1 VIN)
@@ -320,7 +365,7 @@ export function EtacsUnlockModal({
                   PRO Мастер (30 дн)
                 </span>
                 <span className="mt-0.5 text-sm font-bold">
-                  {settings.proMonthPriceKzt.toLocaleString("ru")} ₸
+                  {proMonthPrice.toLocaleString("ru")} {currSymbol}
                 </span>
                 <span className="mt-0.5 text-[10px] opacity-80">Любые авто без лимита VIN</span>
               </button>
@@ -339,7 +384,7 @@ export function EtacsUnlockModal({
                   PRO СТО (1 год)
                 </span>
                 <span className="mt-0.5 text-sm font-bold">
-                  {settings.proYearPriceKzt.toLocaleString("ru")} ₸
+                  {proYearPrice.toLocaleString("ru")} {currSymbol}
                 </span>
                 <span className="mt-0.5 text-[10px] opacity-80">Все авто (.kon + .cuf) 365 дн</span>
               </button>
@@ -368,9 +413,22 @@ export function EtacsUnlockModal({
             ) : null}
 
             <div className="rounded-xl border border-blue-200 bg-blue-50/80 p-3 text-xs text-blue-950">
-              <p className="font-semibold">Реквизиты / как активировать:</p>
-              <p className="mt-1 leading-relaxed">{settings.paymentInstructions}</p>
-              {settings.kaspiPhoneOrLink ? (
+              <p className="font-semibold">
+                {isRub ? "Реквизиты СБП (РФ) / как активировать:" : "Реквизиты Kaspi (КЗ) / как активировать:"}
+              </p>
+              <p className="mt-1 leading-relaxed">
+                {isRub
+                  ? settings.sbpInstructions ||
+                    "Переведите сумму выбранного тарифа по СБП или на карту РФ и укажите ваш телефон / Telegram и имя отправителя в заявке ниже."
+                  : settings.paymentInstructions}
+              </p>
+              {isRub ? (
+                settings.sbpPhoneOrBank ? (
+                  <p className="mt-1.5 font-mono text-xs font-bold text-blue-900">
+                    СБП / Карта РФ: {settings.sbpPhoneOrBank}
+                  </p>
+                ) : null
+              ) : settings.kaspiPhoneOrLink ? (
                 <p className="mt-1.5 font-mono text-xs font-bold text-blue-900">
                   Kaspi / Контакт: {settings.kaspiPhoneOrLink}
                 </p>
@@ -379,7 +437,7 @@ export function EtacsUnlockModal({
 
             <div>
               <label className="block text-xs font-medium text-gray-700">
-                Ваш телефон (Kaspi / WhatsApp) или @username в Telegram
+                Ваш телефон ({isRub ? "СБП / WhatsApp" : "Kaspi / WhatsApp"}) или @username в Telegram
               </label>
               <input
                 type="text"
@@ -387,21 +445,25 @@ export function EtacsUnlockModal({
                 disabled={isVinMissingForPlan}
                 value={contact}
                 onChange={(e) => setContact(e.target.value)}
-                placeholder="+7 701 ... или @username"
+                placeholder="+7 ... или @username"
                 className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 sm:text-sm"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-gray-700">
-                Комментарий (имя отправителя в Kaspi)
+                Комментарий ({isRub ? "имя отправителя и банк СБП" : "имя отправителя в Kaspi"})
               </label>
               <input
                 type="text"
                 disabled={isVinMissingForPlan}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Например: перевод с Kaspi от Армана"
+                placeholder={
+                  isRub
+                    ? "Например: СБП Сбер от Ивана П."
+                    : "Например: перевод с Kaspi от Армана"
+                }
                 className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 sm:text-sm"
               />
             </div>
@@ -416,10 +478,14 @@ export function EtacsUnlockModal({
                 : busy
                   ? "Отправка заявки…"
                   : plan === "cuf_vin"
-                    ? `Открыть Custom (.cuf) для VIN ${cleanVin} (${settings.cufVinPriceKzt.toLocaleString("ru")} ₸)`
+                    ? `Открыть Custom (.cuf) для VIN ${cleanVin} (${cufPrice.toLocaleString("ru")} ${currSymbol})`
                     : plan === "single_vin"
-                      ? `Открыть Полный (.kon + .cuf) для VIN ${cleanVin} (${settings.singleVinPriceKzt.toLocaleString("ru")} ₸)`
-                      : "Отправить заявку на получение ключа PRO"}
+                      ? `Открыть Полный (.kon + .cuf) для VIN ${cleanVin} (${singlePrice.toLocaleString("ru")} ${currSymbol})`
+                      : `Отправить заявку на получение ключа PRO (${
+                          plan === "pro_year"
+                            ? proYearPrice.toLocaleString("ru")
+                            : proMonthPrice.toLocaleString("ru")
+                        } ${currSymbol})`}
             </button>
           </form>
         ) : (

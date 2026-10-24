@@ -16,7 +16,10 @@ import {
   getSharedObdBleSession,
   type ObdConnectionPhase,
 } from "@/lib/obd/obd-session";
-import { useObdTransportKind } from "@/lib/obd/use-obd-transport";
+import {
+  explainObdTransportBlocked,
+  useObdTransportKind,
+} from "@/lib/obd/use-obd-transport";
 import { saveEtacsDumpBackup, saveOriginalFileBackup } from "./etacs-backup";
 
 type UploadStep =
@@ -407,6 +410,29 @@ export default function EtacsBlockUploadPanel({
                 : "Зажигание ON, двигатель заглушен. Будут считаны оба файла ETACS (.kon и .cuf): после сохранения обоих исходников в слот A откроется .kon для редактирования, а .cuf сохранится для восстановления настроек после заливки .kon."}
           </p>
         ) : null}
+
+        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] leading-snug text-slate-700">
+          <div>
+            <strong>📱 Какой браузер нужен для работы с vLinker по Bluetooth:</strong>
+          </div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-slate-600">
+            <li>
+              <strong>iPhone / iPad:</strong> установите из App Store браузер{" "}
+              <strong className="text-slate-900">Bluefy — Web BLE Browser</strong> и открывайте{" "}
+              <code>qhub.kz</code> в нём (в обычном Safari Bluetooth LE не поддерживается).
+            </li>
+            <li>
+              <strong>Android:</strong> открывайте в браузере{" "}
+              <strong className="text-slate-900">Google Chrome</strong> (или Edge / Opera, не внутри Telegram/WhatsApp) либо в приложении QHub.
+            </li>
+          </ul>
+          {transportReady && transport === "none" ? (
+            <p className="mt-1.5 rounded bg-amber-100/90 px-2 py-1 font-medium text-amber-950">
+              ⚠️ В текущем браузере Bluetooth LE недоступен: {explainObdTransportBlocked()}
+            </p>
+          ) : null}
+        </div>
+
         <label className="mt-2 block text-xs text-gray-500">
           Профиль CAN
           <select
@@ -428,8 +454,15 @@ export default function EtacsBlockUploadPanel({
               Отключить BLE
             </button>
           ) : (
-            <button type="button" className={btnPrimary} disabled={busy || !transportReady} onClick={() => void connectBle()}>
-              Подключить vLinker
+            <button
+              type="button"
+              className={btnPrimary}
+              disabled={busy || !transportReady || transport === "none"}
+              onClick={() => void connectBle()}
+            >
+              {transportReady && transport === "none"
+                ? "Откройте в Bluefy (iPhone) или Chrome (Android)"
+                : "Подключить vLinker"}
             </button>
           )}
           {showReadBtn ? (

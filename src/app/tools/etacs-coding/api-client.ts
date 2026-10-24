@@ -146,6 +146,7 @@ export async function requestEtacsUnlockApi(payload: {
   ecuId?: string;
   contact: string;
   plan: "cuf_vin" | "single_vin" | "pro_month" | "pro_year";
+  currency?: "KZT" | "RUB";
   comment?: string;
 }): Promise<{ ok: boolean; message: string }> {
   const response = await fetch(`${BASE}/license`, {

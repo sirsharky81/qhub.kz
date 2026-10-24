@@ -911,8 +911,13 @@ export default function EtacsCodingClient() {
                     {slotA.displayName}
                   </div>
                 ) : (
-                  <div className="text-[11px] text-gray-400">
-                    Файл не выбран — откройте .kon / .cuf или считайте с блока
+                  <div className="space-y-0.5 text-[11px] text-gray-500">
+                    <div>Файл не выбран — откройте .kon / .cuf с диска или нажмите «Выгрузить с блока».</div>
+                    <div className="text-[10.5px] text-gray-400">
+                      📡 Для подключения vLinker по Bluetooth: на <strong>iPhone</strong> открывайте сайт в браузере{" "}
+                      <strong className="text-gray-600">Bluefy</strong> (App Store), на <strong>Android</strong> — в{" "}
+                      <strong className="text-gray-600">Google Chrome</strong> или приложении QHub.
+                    </div>
                   </div>
                 )}
 

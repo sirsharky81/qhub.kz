@@ -25,13 +25,21 @@ export function EtacsAdminSection() {
   const [promoCustomCode, setPromoCustomCode] = useState("");
   const [promoNote, setPromoNote] = useState("");
 
-  // Настройки цен и реквизитов
+  // Настройки цен и реквизитов КЗ (Kaspi, ₸)
   const [cufPrice, setCufPrice] = useState(1500);
   const [singlePrice, setSinglePrice] = useState(3500);
   const [proMonthPrice, setProMonthPrice] = useState(8000);
   const [proYearPrice, setProYearPrice] = useState(30000);
   const [kaspiContact, setKaspiContact] = useState("");
   const [instructions, setInstructions] = useState("");
+
+  // Настройки цен и реквизитов РФ (СБП, ₽)
+  const [cufPriceRub, setCufPriceRub] = useState(300);
+  const [singlePriceRub, setSinglePriceRub] = useState(700);
+  const [proMonthPriceRub, setProMonthPriceRub] = useState(1600);
+  const [proYearPriceRub, setProYearPriceRub] = useState(6000);
+  const [sbpContact, setSbpContact] = useState("");
+  const [sbpInstructions, setSbpInstructions] = useState("");
 
   const applyStoreState = useCallback((data: EtacsBillingStoreData) => {
     setStore(data);
@@ -41,6 +49,16 @@ export function EtacsAdminSection() {
     setProYearPrice(data.settings.proYearPriceKzt ?? 30000);
     setKaspiContact(data.settings.kaspiPhoneOrLink);
     setInstructions(data.settings.paymentInstructions);
+
+    setCufPriceRub(data.settings.cufVinPriceRub ?? 300);
+    setSinglePriceRub(data.settings.singleVinPriceRub ?? 700);
+    setProMonthPriceRub(data.settings.proMonthPriceRub ?? 1600);
+    setProYearPriceRub(data.settings.proYearPriceRub ?? 6000);
+    setSbpContact(data.settings.sbpPhoneOrBank ?? "");
+    setSbpInstructions(
+      data.settings.sbpInstructions ??
+        "Переведите сумму выбранного тарифа по СБП (Система быстрых платежей) или на карту РФ и укажите ваш телефон / Telegram и имя отправителя в заявке ниже.",
+    );
   }, []);
 
   useEffect(() => {
@@ -97,7 +115,7 @@ export function EtacsAdminSection() {
         </div>
       ) : null}
 
-      {/* 1. Режим монетизации (Paywall Вкл / Выкл) и тарифы */}
+      {/* 1. Режим монетизации (Paywall Вкл / Выкл) и тарифы КЗ + РФ */}
       <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-3">
           <div>
@@ -106,7 +124,7 @@ export function EtacsAdminSection() {
             </h2>
             <p className="mt-0.5 text-xs text-gray-500">
               Чтение с блока, сохранение заводского оригинала и просмотр параметров — всегда бесплатны.
-              В платном режиме сохранение и запись разделены на доступный тариф <code>.cuf</code> (зеркала, комфорт) и полный <code>.kon + .cuf</code>.
+              В платном режиме поддерживаются переводы Kaspi (КЗ, ₸) и СБП (РФ, ₽).
             </p>
           </div>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-900">
@@ -137,78 +155,157 @@ export function EtacsAdminSection() {
               singleVinPriceKzt: Number(singlePrice) || 3500,
               proMonthPriceKzt: Number(proMonthPrice) || 8000,
               proYearPriceKzt: Number(proYearPrice) || 30000,
+              cufVinPriceRub: Number(cufPriceRub) || 300,
+              singleVinPriceRub: Number(singlePriceRub) || 700,
+              proMonthPriceRub: Number(proMonthPriceRub) || 1600,
+              proYearPriceRub: Number(proYearPriceRub) || 6000,
               kaspiPhoneOrLink: kaspiContact,
               paymentInstructions: instructions,
+              sbpPhoneOrBank: sbpContact,
+              sbpInstructions,
             });
           }}
-          className="grid grid-cols-1 gap-3 sm:grid-cols-4"
+          className="space-y-4"
         >
+          {/* Блок КЗ (Kaspi, ₸) */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 space-y-3">
+            <p className="text-xs font-bold text-gray-800">🇰🇿 Тарифы и реквизиты для Казахстана (Kaspi, ₸)</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <div>
+                <label className="block text-xs font-medium text-emerald-800">
+                  Народный .cuf (1 VIN, ₸)
+                </label>
+                <input
+                  type="number"
+                  value={cufPrice}
+                  onChange={(e) => setCufPrice(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-sm font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">Полный .kon + .cuf (1 VIN, ₸)</label>
+                <input
+                  type="number"
+                  value={singlePrice}
+                  onChange={(e) => setSinglePrice(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">PRO Мастер 30 дней (₸)</label>
+                <input
+                  type="number"
+                  value={proMonthPrice}
+                  onChange={(e) => setProMonthPrice(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">PRO СТО 1 год (₸)</label>
+                <input
+                  type="number"
+                  value={proYearPrice}
+                  onChange={(e) => setProYearPrice(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div className="sm:col-span-4">
+                <label className="block text-xs text-gray-500">
+                  Реквизиты Kaspi / Телефон / Ссылка для перевода
+                </label>
+                <input
+                  type="text"
+                  value={kaspiContact}
+                  onChange={(e) => setKaspiContact(e.target.value)}
+                  placeholder="+7 707 ... (Имя И.) или ссылка Kaspi"
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div className="sm:col-span-4">
+                <label className="block text-xs text-gray-500">Инструкция по оплате Kaspi</label>
+                <textarea
+                  rows={2}
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Блок РФ (СБП, ₽) */}
+          <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3 space-y-3">
+            <p className="text-xs font-bold text-blue-950">🇷🇺 Тарифы и реквизиты для РФ (СБП / Карта РФ, ₽)</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <div>
+                <label className="block text-xs font-medium text-emerald-800">
+                  Народный .cuf (1 VIN, ₽)
+                </label>
+                <input
+                  type="number"
+                  value={cufPriceRub}
+                  onChange={(e) => setCufPriceRub(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-sm font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">Полный .kon + .cuf (1 VIN, ₽)</label>
+                <input
+                  type="number"
+                  value={singlePriceRub}
+                  onChange={(e) => setSinglePriceRub(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">PRO Мастер 30 дней (₽)</label>
+                <input
+                  type="number"
+                  value={proMonthPriceRub}
+                  onChange={(e) => setProMonthPriceRub(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">PRO СТО 1 год (₽)</label>
+                <input
+                  type="number"
+                  value={proYearPriceRub}
+                  onChange={(e) => setProYearPriceRub(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div className="sm:col-span-4">
+                <label className="block text-xs text-gray-500">
+                  Реквизиты СБП (номер телефона + банк + получатель) или номер карты МИР
+                </label>
+                <input
+                  type="text"
+                  value={sbpContact}
+                  onChange={(e) => setSbpContact(e.target.value)}
+                  placeholder="+7 9... (Сбербанк / Т-Банк, Имя И.)"
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div className="sm:col-span-4">
+                <label className="block text-xs text-gray-500">Инструкция по оплате СБП (РФ)</label>
+                <textarea
+                  rows={2}
+                  value={sbpInstructions}
+                  onChange={(e) => setSbpInstructions(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
           <div>
-            <label className="block text-xs font-medium text-emerald-800">
-              Народный .cuf (1 VIN, ₸)
-            </label>
-            <input
-              type="number"
-              value={cufPrice}
-              onChange={(e) => setCufPrice(Number(e.target.value))}
-              className="mt-1 w-full rounded-xl border border-emerald-300 bg-emerald-50/40 px-3 py-1.5 text-sm font-semibold"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500">Полный .kon + .cuf (1 VIN, ₸)</label>
-            <input
-              type="number"
-              value={singlePrice}
-              onChange={(e) => setSinglePrice(Number(e.target.value))}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500">PRO Мастер 30 дней (₸)</label>
-            <input
-              type="number"
-              value={proMonthPrice}
-              onChange={(e) => setProMonthPrice(Number(e.target.value))}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500">PRO СТО 1 год (₸)</label>
-            <input
-              type="number"
-              value={proYearPrice}
-              onChange={(e) => setProYearPrice(Number(e.target.value))}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm"
-            />
-          </div>
-          <div className="sm:col-span-4">
-            <label className="block text-xs text-gray-500">
-              Реквизиты Kaspi / Телефон / Ссылка для перевода
-            </label>
-            <input
-              type="text"
-              value={kaspiContact}
-              onChange={(e) => setKaspiContact(e.target.value)}
-              placeholder="+7 701 ... (Имя И.) или ссылка Kaspi"
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm"
-            />
-          </div>
-          <div className="sm:col-span-4">
-            <label className="block text-xs text-gray-500">Инструкция по оплате в окне клиента</label>
-            <textarea
-              rows={2}
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm"
-            />
-          </div>
-          <div className="sm:col-span-4">
             <button
               type="submit"
               disabled={busy}
               className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
             >
-              Сохранить тарифы и реквизиты
+              Сохранить тарифы и реквизиты (КЗ + РФ)
             </button>
           </div>
         </form>
@@ -232,6 +329,7 @@ export function EtacsAdminSection() {
                     : req.plan === "pro_year"
                       ? "PRO 1 год"
                       : "PRO 30 дн";
+              const currBadge = req.currency === "RUB" ? "🇷🇺 СБП (₽)" : "🇰🇿 Kaspi (₸)";
               return (
                 <div
                   key={req.id}
@@ -248,6 +346,9 @@ export function EtacsAdminSection() {
                         }`}
                       >
                         {planBadge}
+                      </span>
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10.5px] font-medium text-gray-700">
+                        {currBadge}
                       </span>
                       <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-gray-800">
                         VIN: {req.vin}

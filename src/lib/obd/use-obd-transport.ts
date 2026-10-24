@@ -47,16 +47,16 @@ export function obdTransportHint(kind: ObdTransportKind): string | null {
 /** Why connect stays disabled when transport is `none`. */
 export function explainObdTransportBlocked(): string {
   if (typeof navigator === "undefined") {
-    return "Откройте страницу в браузере на телефоне.";
+    return "Откройте страницу в браузере с поддержкой Web Bluetooth (Bluefy на iPhone или Chrome на Android).";
   }
   if (isIOSDevice() && isStandalonePWA()) {
     return (
       "На iPhone Bluetooth в ярлыке «На экран Домой» (PWA) не работает. " +
-      "Удалите старый ярлык Mitsubishi/OBD. Откройте в Safari вкладку: qhub.kz/tools/obd-diag"
+      "Установите бесплатный браузер Bluefy — Web BLE Browser из App Store и откройте сайт в нём."
     );
   }
   if (isIOSDevice() && !webBluetoothSupported()) {
-    return "На этом iPhone Web Bluetooth недоступен (нужен Safari, актуальный iOS). Либо используйте QHub на Android.";
+    return "На iPhone / iPad стандартный Safari и Chrome не поддерживают Web Bluetooth. Установите из App Store бесплатный браузер «Bluefy — Web BLE Browser» и откройте qhub.kz в нём.";
   }
-  return "Android — приложение QHub из APK. iPhone — Safari (не Chrome, не Telegram). ПК — обычно не поддерживается.";
+  return "Для подключения к блоку по Bluetooth LE: на iPhone / iPad откройте сайт в браузере Bluefy (из App Store); на Android — в браузере Google Chrome (не внутри Telegram/WhatsApp) или в приложении QHub.";
 }

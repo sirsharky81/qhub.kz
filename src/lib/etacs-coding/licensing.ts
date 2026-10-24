@@ -51,6 +51,7 @@ export interface EtacsUnlockRequestRecord {
   ecuId?: string;
   contact: string;
   plan: "cuf_vin" | "single_vin" | "pro_month" | "pro_year";
+  currency?: "KZT" | "RUB";
   comment?: string;
   status: "pending" | "approved" | "rejected";
   createdAt: string;
@@ -65,14 +66,22 @@ export interface EtacsBillingSettings {
    * разблокированного VIN (по уровню `.cuf` или `.kon + .cuf`), активного PRO-кода или сессии администратора QHub.
    */
   enforcePaywall: boolean;
-  /** Народный тариф: только Custom Coding (.cuf — зеркала, комфорт) на 1 VIN */
+  /** Народный тариф (КЗ): только Custom Coding (.cuf — зеркала, комфорт) на 1 VIN в ₸ */
   cufVinPriceKzt: number;
-  /** Полный тариф на 1 VIN: Variant (.kon) + Custom (.cuf) */
+  /** Полный тариф (КЗ) на 1 VIN: Variant (.kon) + Custom (.cuf) в ₸ */
   singleVinPriceKzt: number;
   proMonthPriceKzt: number;
   proYearPriceKzt: number;
+  /** Народный тариф (РФ / СБП): только Custom Coding (.cuf) на 1 VIN в ₽ */
+  cufVinPriceRub?: number;
+  /** Полный тариф (РФ / СБП) на 1 VIN: Variant (.kon) + Custom (.cuf) в ₽ */
+  singleVinPriceRub?: number;
+  proMonthPriceRub?: number;
+  proYearPriceRub?: number;
   paymentInstructions: string;
   kaspiPhoneOrLink: string;
+  sbpInstructions?: string;
+  sbpPhoneOrBank?: string;
 }
 
 export interface EtacsBillingStoreData {
@@ -90,9 +99,16 @@ function defaultSettings(): EtacsBillingSettings {
     singleVinPriceKzt: 3500,
     proMonthPriceKzt: 8000,
     proYearPriceKzt: 30000,
+    cufVinPriceRub: 300,
+    singleVinPriceRub: 700,
+    proMonthPriceRub: 1600,
+    proYearPriceRub: 6000,
     paymentInstructions:
       "Переведите сумму выбранного тарифа на Kaspi и укажите ваш телефон или Telegram в заявке ниже. После подтверждения доступ к VIN или PRO-код активируется мгновенно.",
     kaspiPhoneOrLink: process.env.ETACS_KASPI_CONTACT?.trim() || "По номеру Kaspi / в Telegram",
+    sbpInstructions:
+      "Переведите сумму выбранного тарифа по СБП (Система быстрых платежей) или на карту РФ и укажите ваш телефон / Telegram и имя отправителя в заявке ниже.",
+    sbpPhoneOrBank: process.env.ETACS_SBP_CONTACT?.trim() || "По номеру телефона СБП / в Telegram",
   };
 }
 
@@ -583,11 +599,12 @@ export async function createEtacsUnlockRequest(options: {
   ecuId?: string | null;
   contact: string;
   plan: EtacsUnlockRequestRecord["plan"];
+  currency?: "KZT" | "RUB";
   comment?: string;
 }): Promise<EtacsUnlockRequestRecord> {
   const contact = String(options.contact ?? "").trim();
   if (contact.length < 3) {
-    throw new Error("Укажите ваш номер телефона, Kaspi или Telegram для связи");
+    throw new Error("Укажите ваш номер телефона, Kaspi, СБП или Telegram для связи");
   }
   const rawVin = normalizeVin(options.vin);
   const isSingleVinPlan = options.plan === "cuf_vin" || options.plan === "single_vin";
@@ -606,6 +623,7 @@ export async function createEtacsUnlockRequest(options: {
     ecuId: options.ecuId?.trim() || undefined,
     contact,
     plan: options.plan,
+    currency: options.currency ?? "KZT",
     comment: options.comment?.trim() || undefined,
     status: "pending",
     createdAt: new Date().toISOString(),
