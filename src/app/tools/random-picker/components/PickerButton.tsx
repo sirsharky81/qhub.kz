@@ -42,7 +42,7 @@ export function PickerButton({
       disabled={isDisabled}
       title={isDisabled ? (disabledReason ?? undefined) : undefined}
       aria-label={ariaLabel}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border font-medium transition-all active:scale-[0.98] touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed ${pad} ${variants[variant]} ${className}`}
+      className={`inline-flex max-w-full min-w-0 items-center justify-center gap-1.5 rounded-lg border font-medium transition-all active:scale-[0.98] touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed ${pad} ${variants[variant]} ${className}`}
     >
       {children}
     </button>

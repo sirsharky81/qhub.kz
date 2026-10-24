@@ -163,136 +163,175 @@ export function EtacsObdReadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3">
-      <div className="max-h-[92dvh] w-full max-w-lg overflow-auto rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
-        <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-3">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">Выгрузить кодировку с блока (OBD)</h2>
-            <p className="mt-0.5 text-xs text-gray-500">
-              Выберите, что именно вы хотите выгрузить и редактировать в слоте A. Слот B всегда остаётся свободным для сравнения однотипных файлов.
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-2.5 border-b border-gray-100 bg-white px-3.5 py-3 sm:px-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold leading-snug text-gray-900 sm:text-base">
+              Выгрузить кодировку с блока (OBD)
+            </h2>
+            <p className="mt-0.5 text-xs leading-snug text-gray-500">
+              Выберите, что именно вы хотите выгрузить и редактировать в слоте A. Слот B остаётся свободным для сравнения.
             </p>
           </div>
-          <PickerButton variant="ghost" onClick={onClose} ariaLabel="Закрыть">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-sm font-bold text-gray-700 transition hover:bg-gray-100 active:scale-95"
+          >
             ✕
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3.5 py-3 sm:px-4">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              1. Что выгружаем и редактируем
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              {SCENARIO_OPTIONS.map((opt) => {
+                const active = scenario === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setScenario(opt.id);
+                      setDump(null);
+                      setKonSavedName(null);
+                      setCufSavedName(null);
+                    }}
+                    className={`flex w-full min-w-0 flex-col items-start rounded-xl border p-2.5 text-left transition-all ${
+                      active
+                        ? "border-gray-900 bg-gray-50 ring-1 ring-gray-900"
+                        : "border-gray-200 bg-white hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-1.5">
+                      <span className="min-w-0 text-xs font-semibold text-gray-900">{opt.title}</span>
+                      <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
+                        {opt.badge}
+                      </span>
+                    </div>
+                    <span className="mt-1 text-[11px] leading-snug text-gray-500">{opt.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <EtacsBlockUploadPanel
+              embedded
+              panelMode="readOnly"
+              targetScenario={scenario}
+              slotA={slotA}
+              slotB={slotB}
+              getCurrentBytesA={getCurrentBytesA}
+              getCurrentBytesB={getCurrentBytesB}
+              onBackupSavedA={onBackupSavedA}
+              onBackupSavedB={onBackupSavedB}
+              onObdDumpRead={(d) => {
+                setDump(d);
+                setKonSavedName(null);
+                setCufSavedName(null);
+              }}
+            />
+          </div>
+
+          {dump ? (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              <p className="font-semibold">
+                2. Сохраните выгруженные исходники (режим «Сохранить как…»)
+              </p>
+              <p className="mt-1 leading-relaxed">
+                {scenario === "etacs_cuf"
+                  ? "Нажмите кнопку ниже — откроется окно выбора названия и места сохранения исходного файла .cuf (папка на устройстве, Загрузки или «Сохранить в Файлы» на iPhone/Android). После этого файл сразу откроется в слоте A."
+                  : scenario === "engine_kon"
+                    ? "Нажмите кнопку ниже — откроется окно выбора названия и места сохранения исходника .kon ЭБУ двигателя."
+                    : hasCufInDump
+                      ? "Сохраните оба исходных файла (.kon и .cuf) через окно выбора имени и места сохранения."
+                      : "Сохраните считанный исходник .kon через окно выбора имени и места сохранения."}
+              </p>
+
+              <div className="mt-2.5 flex flex-col gap-2">
+                {requiresKonBackup ? (
+                  <div className="space-y-1.5">
+                    <PickerButton
+                      variant={konSavedName ? "secondary" : "primary"}
+                      className="w-full"
+                      onClick={() => openSaveDumpModal(".kon")}
+                    >
+                      {konSavedName
+                        ? "✓ Исходник .kon сохранён (пересохранить…)"
+                        : "Сохранить исходник .kon как…"}
+                    </PickerButton>
+                    {konSavedName ? (
+                      <div className="rounded-lg border border-emerald-200 bg-white/90 px-2.5 py-1.5 text-[11px] leading-snug text-emerald-950">
+                        <span className="font-semibold text-emerald-700">Файл .kon: </span>
+                        <span className="break-all font-mono">{konSavedName}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {requiresCufBackup ? (
+                  <div className="space-y-1.5">
+                    <PickerButton
+                      variant={cufSavedName ? "secondary" : "primary"}
+                      className="w-full"
+                      disabled={!hasCufInDump}
+                      onClick={() => openSaveDumpModal(".cuf")}
+                    >
+                      {cufSavedName
+                        ? "✓ Исходник .cuf сохранён (пересохранить…)"
+                        : "Сохранить исходник .cuf как…"}
+                    </PickerButton>
+                    {cufSavedName ? (
+                      <div className="rounded-lg border border-emerald-200 bg-white/90 px-2.5 py-1.5 text-[11px] leading-snug text-emerald-950">
+                        <span className="font-semibold text-emerald-700">Файл .cuf: </span>
+                        <span className="break-all font-mono">{cufSavedName}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-3 border-t border-amber-200/80 pt-3">
+                <PickerButton
+                  variant="primary"
+                  className="w-full"
+                  disabled={!canEnterEditor}
+                  disabledReason={!canEnterEditor ? "Сначала сохраните исходник кнопкой выше" : null}
+                  onClick={async () => {
+                    await onCompleteToEditor(dump, scenario, {
+                      kon: konSavedName ?? undefined,
+                      cuf: cufSavedName ?? undefined,
+                    });
+                    setDump(null);
+                    onClose();
+                  }}
+                >
+                  {scenario === "etacs_cuf"
+                    ? "Открыть .cuf в слоте A для редактирования"
+                    : "Открыть .kon в слоте A для редактирования"}
+                </PickerButton>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end border-t border-gray-100 bg-gray-50/80 px-3.5 py-2.5 sm:px-4">
+          <PickerButton variant="secondary" className="w-full sm:w-auto" onClick={onClose}>
+            Закрыть окно
           </PickerButton>
         </div>
-
-        <div className="mt-3 space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            1. Что выгружаем и редактируем
-          </p>
-          <div className="grid grid-cols-1 gap-2">
-            {SCENARIO_OPTIONS.map((opt) => {
-              const active = scenario === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => {
-                    setScenario(opt.id);
-                    setDump(null);
-                    setKonSavedName(null);
-                    setCufSavedName(null);
-                  }}
-                  className={`flex flex-col items-start rounded-xl border p-2.5 text-left transition-all ${
-                    active
-                      ? "border-gray-900 bg-gray-50 ring-1 ring-gray-900"
-                      : "border-gray-200 bg-white hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex w-full items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-gray-900">{opt.title}</span>
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
-                      {opt.badge}
-                    </span>
-                  </div>
-                  <span className="mt-1 text-[11px] leading-snug text-gray-500">{opt.desc}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="mt-3">
-          <EtacsBlockUploadPanel
-            embedded
-            panelMode="readOnly"
-            targetScenario={scenario}
-            slotA={slotA}
-            slotB={slotB}
-            getCurrentBytesA={getCurrentBytesA}
-            getCurrentBytesB={getCurrentBytesB}
-            onBackupSavedA={onBackupSavedA}
-            onBackupSavedB={onBackupSavedB}
-            onObdDumpRead={(d) => {
-              setDump(d);
-              setKonSavedName(null);
-              setCufSavedName(null);
-            }}
-          />
-        </div>
-
-        {dump ? (
-          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
-            <p className="font-semibold">
-              2. Сохраните выгруженные исходники (режим «Сохранить как…»)
-            </p>
-            <p className="mt-1 leading-relaxed">
-              {scenario === "etacs_cuf"
-                ? "Нажмите кнопку ниже — откроется окно выбора названия и места сохранения исходного файла .cuf (папка на устройстве, Загрузки или «Сохранить в Файлы» на iPhone/Android). После этого файл сразу откроется в слоте A и повторно сохранять его не потребуется."
-                : scenario === "engine_kon"
-                  ? "Нажмите кнопку ниже — откроется окно выбора названия и места сохранения исходника .kon ЭБУ двигателя."
-                  : hasCufInDump
-                    ? "Сохраните оба исходных файла (.kon и .cuf) через окно выбора имени и места сохранения."
-                    : "Сохраните считанный исходник .kon через окно выбора имени и места сохранения."}
-            </p>
-
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              {requiresKonBackup ? (
-                <PickerButton
-                  variant={konSavedName ? "secondary" : "primary"}
-                  onClick={() => openSaveDumpModal(".kon")}
-                >
-                  {konSavedName
-                    ? `✓ Исходник .kon сохранён (${konSavedName})`
-                    : "Сохранить исходник .kon как…"}
-                </PickerButton>
-              ) : null}
-              {requiresCufBackup ? (
-                <PickerButton
-                  variant={cufSavedName ? "secondary" : "primary"}
-                  disabled={!hasCufInDump}
-                  onClick={() => openSaveDumpModal(".cuf")}
-                >
-                  {cufSavedName
-                    ? `✓ Исходник .cuf сохранён (${cufSavedName})`
-                    : "Сохранить исходник .cuf как…"}
-                </PickerButton>
-              ) : null}
-            </div>
-
-            <div className="mt-3 border-t border-amber-200/80 pt-3">
-              <PickerButton
-                variant="primary"
-                className="w-full"
-                disabled={!canEnterEditor}
-                disabledReason={!canEnterEditor ? "Сначала сохраните исходник кнопкой выше" : null}
-                onClick={async () => {
-                  await onCompleteToEditor(dump, scenario, {
-                    kon: konSavedName ?? undefined,
-                    cuf: cufSavedName ?? undefined,
-                  });
-                  setDump(null);
-                  onClose();
-                }}
-              >
-                {scenario === "etacs_cuf"
-                  ? "Открыть .cuf в слоте A для редактирования"
-                  : "Открыть .kon в слоте A для редактирования"}
-              </PickerButton>
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <EtacsSaveFileModal
@@ -352,71 +391,91 @@ export function EtacsObdWriteModal({
         : "Загрузить кодировку в ETACS (.kon + восстановление .cuf)";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3">
-      <div className="max-h-[92dvh] w-full max-w-lg overflow-auto rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
-        <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-3">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-            <p className="mt-0.5 text-xs text-gray-500">
-              Файл в слоте A: <span className="font-mono font-medium text-gray-800">{slotA.displayName || "—"}</span>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-2.5 border-b border-gray-100 bg-white px-3.5 py-3 sm:px-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold leading-snug text-gray-900 sm:text-base">{title}</h2>
+            <p className="mt-1 break-all rounded-lg border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] leading-snug text-gray-500">
+              Файл в слоте A:{" "}
+              <span className="font-mono font-medium text-gray-800">{slotA.displayName || "—"}</span>
             </p>
           </div>
-          <PickerButton variant="ghost" onClick={onClose} ariaLabel="Закрыть">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-sm font-bold text-gray-700 transition hover:bg-gray-100 active:scale-95"
+          >
             ✕
-          </PickerButton>
+          </button>
         </div>
 
-        {hasUnsavedEdits ? (
-          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
-            <p className="font-semibold">Прежде чем загрузить в блок, сохраните отредактированные файлы</p>
-            <p className="mt-1 leading-relaxed">
-              В редакторе есть несохранённые изменения. Сохраните модифицированный файл на устройство — только после этого откроется подключение к блоку и запись.
-            </p>
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              {dirtyA ? (
-                <PickerButton variant="primary" onClick={() => void onSaveEditedA()}>
-                  Сохранить модифицированный файл A ({slotA.displayName})
-                </PickerButton>
-              ) : null}
-              {dirtyB ? (
-                <PickerButton variant="primary" onClick={() => void onSaveEditedB()}>
-                  Сохранить файл B ({slotB.displayName})
-                </PickerButton>
-              ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3.5 py-3 sm:px-4">
+          {hasUnsavedEdits ? (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              <p className="font-semibold">Прежде чем загрузить в блок, сохраните отредактированные файлы</p>
+              <p className="mt-1 leading-relaxed">
+                В редакторе есть несохранённые изменения. Сохраните модифицированный файл на устройство — только после этого откроется подключение к блоку и запись.
+              </p>
+              <div className="mt-2.5 flex flex-col gap-2">
+                {dirtyA ? (
+                  <PickerButton variant="primary" className="w-full" onClick={() => void onSaveEditedA()}>
+                    Сохранить модифицированный файл A
+                  </PickerButton>
+                ) : null}
+                {dirtyB ? (
+                  <PickerButton variant="primary" className="w-full" onClick={() => void onSaveEditedB()}>
+                    Сохранить модифицированный файл B
+                  </PickerButton>
+                ) : null}
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="mt-3">
-            {writeScenario === "etacs_kon" ? (
-              <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-950">
-                <strong>Предупреждение ETACS (.kon):</strong> после загрузки модифицированного файла <code>.kon</code> пользовательские настройки в блоке будут сброшены! Обязательно вторым шагом загрузите файл <code>.cuf</code>, чтобы восстановить настройки.
-              </div>
-            ) : writeScenario === "etacs_cuf" ? (
-              <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-950">
-                <strong>Режим Custom Coding (.cuf):</strong> в слоте A открыт файл <code>.cuf</code>. Записывается только он в 1 шаг — таблица <code>.kon</code> не затрагивается.
-              </div>
-            ) : (
-              <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-950">
-                <strong>Режим ЭБУ Двигателя (ECM):</strong> записывается модифицированный файл <code>.kon</code> двигателя в 1 шаг.
-              </div>
-            )}
-            <EtacsBlockUploadPanel
-              embedded
-              panelMode="writeOnly"
-              targetScenario={writeScenario}
-              uploadAllowed={!hasUnsavedEdits}
-              slotA={slotA}
-              slotB={slotB}
-              getCurrentBytesA={getCurrentBytesA}
-              getCurrentBytesB={getCurrentBytesB}
-              onBackupSavedA={onBackupSavedA}
-              onBackupSavedB={onBackupSavedB}
-              cufFallbackBytes={cufBackupBytes}
-              cufFallbackName={cufBackupName}
-              onPickCompanionCuf={onPickCompanionCuf}
-            />
-          </div>
-        )}
+          ) : (
+            <div>
+              {writeScenario === "etacs_kon" ? (
+                <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-950">
+                  <strong>Предупреждение ETACS (.kon):</strong> после загрузки модифицированного файла <code>.kon</code> пользовательские настройки в блоке будут сброшены! Обязательно вторым шагом загрузите файл <code>.cuf</code>, чтобы восстановить настройки.
+                </div>
+              ) : writeScenario === "etacs_cuf" ? (
+                <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-950">
+                  <strong>Режим Custom Coding (.cuf):</strong> в слоте A открыт файл <code>.cuf</code>. Записывается только он в 1 шаг — таблица <code>.kon</code> не затрагивается.
+                </div>
+              ) : (
+                <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-950">
+                  <strong>Режим ЭБУ Двигателя (ECM):</strong> записывается модифицированный файл <code>.kon</code> двигателя в 1 шаг.
+                </div>
+              )}
+              <EtacsBlockUploadPanel
+                embedded
+                panelMode="writeOnly"
+                targetScenario={writeScenario}
+                uploadAllowed={!hasUnsavedEdits}
+                slotA={slotA}
+                slotB={slotB}
+                getCurrentBytesA={getCurrentBytesA}
+                getCurrentBytesB={getCurrentBytesB}
+                onBackupSavedA={onBackupSavedA}
+                onBackupSavedB={onBackupSavedB}
+                cufFallbackBytes={cufBackupBytes}
+                cufFallbackName={cufBackupName}
+                onPickCompanionCuf={onPickCompanionCuf}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end border-t border-gray-100 bg-gray-50/80 px-3.5 py-2.5 sm:px-4">
+          <PickerButton variant="secondary" className="w-full sm:w-auto" onClick={onClose}>
+            Закрыть окно
+          </PickerButton>
+        </div>
       </div>
     </div>
   );

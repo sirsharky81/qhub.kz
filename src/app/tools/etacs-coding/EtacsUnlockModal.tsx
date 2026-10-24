@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import type { EtacsAccessCheckResult } from "@/lib/etacs-coding/licensing";
-import { PickerButton } from "../random-picker/components/PickerButton";
 import { redeemEtacsCodeApi, requestEtacsUnlockApi } from "./api-client";
 
 interface Props {
@@ -176,31 +175,39 @@ export function EtacsUnlockModal({
 
   return (
     <div
-      className="fixed inset-0 z-[65] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[65] flex items-center justify-center bg-black/50 p-3 sm:p-4"
       onClick={() => {
         if (!busy) onClose();
       }}
     >
       <div
-        className="max-h-[92dvh] w-full max-w-lg overflow-auto rounded-t-2xl border border-gray-200 bg-white p-4 shadow-2xl sm:rounded-2xl sm:p-5"
+        className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-3">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">
+        <div className="flex shrink-0 items-start justify-between gap-2.5 border-b border-gray-100 bg-white px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold leading-snug text-gray-900 sm:text-base">
               Доступ к сохранению и записи в блок
             </h2>
-            <p className="mt-0.5 text-xs text-gray-500">
+            <p className="mt-0.5 text-xs leading-snug text-gray-500">
               Чтение с блока, сохранение заводского оригинала и просмотр всех параметров —{" "}
               <strong className="text-gray-700">бесплатно</strong>. Для записи изменений выберите народный тариф{" "}
               <code className="font-mono font-semibold text-emerald-700">.cuf</code> (зеркала, комфорт) или полный{" "}
               <code className="font-mono font-semibold text-blue-700">.kon + .cuf</code>.
             </p>
           </div>
-          <PickerButton variant="ghost" onClick={onClose} disabled={busy} ariaLabel="Закрыть">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Закрыть"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-sm font-bold text-gray-700 transition hover:bg-gray-100 active:scale-95 disabled:opacity-50"
+          >
             ✕
-          </PickerButton>
+          </button>
         </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3.5">
 
         {/* Текущий статус */}
         <div
@@ -564,6 +571,7 @@ export function EtacsUnlockModal({
         {/* Юридическая оговорка (дисклеймер) */}
         <div className="mt-3.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-[10.5px] leading-snug text-gray-500">
           <strong>Важное уведомление:</strong> изменение кодировок ЭБУ требует профессиональных знаний автоэлектрики и диагностики. Сервис предоставляется «как есть» (AS IS): пользователь самостоятельно несёт полную ответственность за любые изменения параметров, запись файлов в блоки автомобиля и возможные последствия их применения.
+        </div>
         </div>
       </div>
     </div>

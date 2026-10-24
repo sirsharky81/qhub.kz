@@ -116,9 +116,10 @@
   color: #1f2937;
   font-weight: 500;
   font-family: Consolas, ui-monospace, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .etacs-editor-frame .slot-backup {
@@ -137,6 +138,8 @@
   color: var(--warn);
   font-size: 12px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Компактная сетка метаданных файла A / B */

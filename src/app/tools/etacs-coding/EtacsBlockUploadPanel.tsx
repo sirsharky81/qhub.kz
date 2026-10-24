@@ -363,18 +363,18 @@ export default function EtacsBlockUploadPanel({
   const btnWarn =
     "w-full rounded-lg border border-amber-600 bg-amber-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-40";
   const sectionTitle = "text-[11px] font-semibold uppercase tracking-wider text-gray-400";
-  const sectionBox = "rounded-xl border border-gray-200 bg-white p-3 shadow-sm";
+  const sectionBox = "min-w-0 rounded-xl border border-gray-200 bg-white p-3 shadow-sm";
 
   const writeDisabled = busy || phase !== "vehicle" || !uploadAllowed;
   const showReadBtn = panelMode !== "writeOnly";
   const showWriteSection = panelMode !== "readOnly";
 
   return (
-    <div className={`flex flex-col gap-3 ${embedded ? "" : "mt-4 pb-4"}`}>
+    <div className={`flex min-w-0 flex-col gap-3 ${embedded ? "" : "mt-4 pb-4"}`}>
       {showStatusBar ? (
         <div
           className={[
-            "rounded-xl border px-3 py-2.5 text-xs leading-relaxed",
+            "min-w-0 rounded-xl border px-3 py-2.5 text-xs leading-relaxed",
             step === "error"
               ? "border-red-200 bg-red-50 text-red-800"
               : step === "done"
@@ -385,7 +385,7 @@ export default function EtacsBlockUploadPanel({
           {step !== "idle" ? <div className="font-semibold text-gray-900">{stepLabel[step]}</div> : null}
           {statusLine ? <div className="mt-0.5 break-words">{statusLine}</div> : null}
           {phase !== "idle" ? (
-            <div className="mt-1 font-mono text-[10px] text-gray-500">
+            <div className="mt-1 break-all font-mono text-[10px] text-gray-500">
               {phaseLabels[phase]} · {transportReady ? transport : "…"}
               {adapterLabel ? ` · ${adapterLabel}` : ""}
             </div>
@@ -434,10 +434,10 @@ export default function EtacsBlockUploadPanel({
           ) : null}
         </div>
 
-        <label className="mt-2 block text-xs text-gray-500">
+        <label className="mt-2 block min-w-0 text-xs text-gray-500">
           Профиль CAN
           <select
-            className="mt-1 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs text-gray-900"
+            className="mt-1 w-full min-w-0 max-w-full truncate rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs text-gray-900"
             value={profileId}
             disabled={busy}
             onChange={(e) => setSelectedProfileId(e.target.value)}
@@ -554,11 +554,11 @@ export default function EtacsBlockUploadPanel({
         </p>
 
         {targetScenario === "etacs_kon" ? (
-          <div className="mt-2 rounded-lg border border-amber-200 bg-white p-2 text-xs text-gray-700">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>
+          <div className="mt-2 min-w-0 rounded-lg border border-amber-200 bg-white p-2 text-xs text-gray-700">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+              <span className="min-w-0 break-all">
                 Файл <code>.cuf</code> для шага 2:{" "}
-                <strong className="font-mono text-gray-900">
+                <strong className="break-all font-mono text-gray-900">
                   {cufFallbackName || (slotB.displayName && /\.cuf$/i.test(slotB.displayName) ? slotB.displayName : "не выбран")}
                 </strong>
               </span>

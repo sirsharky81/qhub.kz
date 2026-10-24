@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PickerButton } from "../random-picker/components/PickerButton";
 import {
   canUseSaveFilePicker,
   cleanCodingFileStem,
@@ -50,13 +49,18 @@ function EtacsSaveFileModalInner({
   request: EtacsSaveFileDialogRequest;
   onClose: () => void;
 }) {
-  const baseStem = cleanCodingFileStem(
+  const rawBaseStem = cleanCodingFileStem(
     request.originalDisplayName,
     [request.ecuId, request.vin].filter(Boolean).join("_") || `file_${request.side}`,
   );
+  const baseStem =
+    rawBaseStem.replace(/_(?:orig|mod)(?:_\d{8}(?:_\d{4})?)?$/i, "") || rawBaseStem;
+  const alreadyHasDate = /_\d{8}(?:_\d+)?$/.test(baseStem);
   const [stem, setStem] = useState(() =>
     request.mode === "original"
-      ? `${baseStem}_orig_${makeTimestampTag()}`
+      ? alreadyHasDate
+        ? `${baseStem}_orig`
+        : `${baseStem}_orig_${makeTimestampTag()}`
       : `${baseStem}_mod_${makeTimestampTag()}`,
   );
   const [busy, setBusy] = useState(false);
@@ -108,44 +112,50 @@ function EtacsSaveFileModalInner({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-4"
       onClick={() => {
         if (!busy) onClose();
       }}
     >
       <div
-        className="w-full max-w-md rounded-t-2xl border border-gray-200 bg-white p-4 shadow-2xl sm:rounded-2xl sm:p-5"
+        className="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-3">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">
+        <div className="flex shrink-0 items-start justify-between gap-2.5 border-b border-gray-100 bg-white px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold leading-snug text-gray-900 sm:text-base">
               {request.mode === "original"
                 ? `Сохранить оригинал (Файл ${request.side.toUpperCase()})`
                 : `Сохранить изменённый файл ${request.side.toUpperCase()}`}
             </h2>
-            <p className="mt-0.5 text-xs text-gray-500">
+            <p className="mt-0.5 text-xs leading-snug text-gray-500">
               Задайте название файла и выберите, куда его сохранить. Расширение{" "}
               <code className="rounded bg-gray-100 px-1 font-mono font-semibold text-gray-800">
                 {ext}
               </code>{" "}
-              всегда ставится строго в конце, чтобы файл корректно читался в MMCodingWriter и MUT-III.
+              всегда ставится строго в конце.
             </p>
           </div>
-          <PickerButton variant="ghost" onClick={onClose} disabled={busy} ariaLabel="Закрыть">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Закрыть"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-sm font-bold text-gray-700 transition hover:bg-gray-100 active:scale-95 disabled:opacity-50"
+          >
             ✕
-          </PickerButton>
+          </button>
         </div>
 
-        <div className="mt-3.5 space-y-3">
-          <div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-4 py-3.5">
+          <div className="min-w-0">
             <label
               htmlFor="etacs-save-filename"
               className="block text-xs font-medium text-gray-700"
             >
               Имя файла (можно стереть или дописать заметку)
             </label>
-            <div className="mt-1 flex items-stretch rounded-xl border border-gray-300 bg-white focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-500/20">
+            <div className="mt-1 flex w-full min-w-0 items-stretch overflow-hidden rounded-xl border border-gray-300 bg-white focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-500/20">
               <input
                 ref={inputRef}
                 id="etacs-save-filename"
@@ -163,7 +173,7 @@ function EtacsSaveFileModalInner({
                   }
                 }}
                 placeholder={baseStem}
-                className="min-w-0 flex-1 rounded-l-xl bg-transparent px-3 py-2 font-mono text-xs text-gray-900 focus:outline-none sm:text-sm"
+                className="w-0 min-w-0 flex-1 rounded-l-xl bg-transparent px-3 py-2 font-mono text-xs text-gray-900 focus:outline-none sm:text-sm"
               />
               {stem ? (
                 <button
@@ -173,12 +183,12 @@ function EtacsSaveFileModalInner({
                     inputRef.current?.focus();
                   }}
                   title="Очистить название"
-                  className="px-2 text-xs text-gray-400 hover:text-gray-700"
+                  className="shrink-0 px-2 text-xs text-gray-400 hover:text-gray-700"
                 >
                   ✕
                 </button>
               ) : null}
-              <span className="inline-flex select-none items-center rounded-r-xl border-l border-gray-200 bg-gray-100 px-3 font-mono text-xs font-bold text-gray-800 sm:text-sm">
+              <span className="inline-flex shrink-0 select-none items-center rounded-r-xl border-l border-gray-200 bg-gray-100 px-2.5 font-mono text-xs font-bold text-gray-800 sm:px-3 sm:text-sm">
                 {ext}
               </span>
             </div>
@@ -216,7 +226,7 @@ function EtacsSaveFileModalInner({
             </div>
           </div>
 
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-950">
+          <div className="min-w-0 overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs leading-snug text-emerald-950">
             <span className="text-emerald-700">Итоговый файл: </span>
             <strong className="break-all font-mono">{finalPreview}</strong>
           </div>
