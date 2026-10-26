@@ -8,11 +8,13 @@ import { EXTENDED_COMMANDS, decodeExtendedSignals } from "../extended-signals";
 import {
   ETACS_PROFILES,
   buildIsoTpFrames,
+  computeMitsubishiSecurityKey,
   crc16X25Ascii,
   formatMutCodingContainer,
   parseMitsubishiCodingFileBytes,
   positiveEtacsPayload,
   readEtacsCoding,
+  resolveMitsubishiSecurityPresets,
   writeEtacsSingleBlock,
 } from "../mitsubishi-etacs";
 import {
@@ -420,6 +422,85 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(link.written).toContain("2800000000000000");
     expect(link.written).toContain("290000000000FFFF");
     expect(link.written).toContain("ATCAF1");
+  });
+
+  it("computes Mitsubishi SecurityAccess (27 01 -> 27 02) keys for Continental, Lear, Omron, Denso, and Melco and unlocks 3B B0 before writing 90-byte .kon", async () => {
+    // Verify Continental ETACS (preset 2: A=0x00F7, C=0x3C8A) against real log Seed 0xB7EE7C90 -> Key 0xB32C6B7A
+    const contiKey = computeMitsubishiSecurityKey([0xb7, 0xee, 0x7c, 0x90], 2);
+    expect(Array.from(contiKey)).toEqual([0xb3, 0x2c, 0x6b, 0x7a]);
+
+    // Verify preset resolution for Continental 8637C671 (supplier 0x9D)
+    const presets = resolveMitsubishiSecurityPresets({
+      isEngine: false,
+      supplierByte: 0x9d,
+      partNumber: "8637C671",
+    });
+    expect(presets[0]).toBe(2);
+
+    const kon90 = new Uint8Array(90).fill(0x22);
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    let securityUnlocked = false;
+    link.writeLine = async (line: string) => {
+      if (line === "1A87") {
+        link.written.push(line);
+        // Continental ETACS 8637C671 identification (supplier byte 0x9D at payload[1])
+        (link as unknown as { pending: string }).pending +=
+          "5A 87 04 9D 06 08 FF 0A 00 02 00 00 38 36 33 37 43 36 37 31 20 20\r>";
+        return;
+      }
+      if (line === "21B0") {
+        link.written.push(line);
+        // ECU returns 94 bytes: 90 coding bytes + 4-byte KWP trailer FF FF FF FF
+        const body94 = `${"22 ".repeat(90)}FF FF FF FF`.trim();
+        (link as unknown as { pending: string }).pending += `61 B0 ${body94}\r>`;
+        return;
+      }
+      if (line === "2701") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "67 01 B7 EE 7C 90\r>";
+        return;
+      }
+      if (line === "2702B32C6B7A") {
+        link.written.push(line);
+        securityUnlocked = true;
+        (link as unknown as { pending: string }).pending += "67 02 34\r>";
+        return;
+      }
+      if (line.startsWith("3BB0")) {
+        link.written.push(line);
+        if (!securityUnlocked) {
+          (link as unknown as { pending: string }).pending += "7F 3B 33\r>";
+          return;
+        }
+        // Expect 3BB0 + 94 bytes (90 coding bytes + 4-byte ECU tail FF FF FF FF) = 192 hex chars
+        if (line.length === 4 + 94 * 2 && line.endsWith("FFFFFFFF")) {
+          (link as unknown as { pending: string }).pending += "7B B0\r>";
+          return;
+        }
+        (link as unknown as { pending: string }).pending += "7F 3B 22\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+
+    const elm = new Elm327Client(link);
+    const p620 = ETACS_PROFILES.find((p) => p.id === "620-504")!;
+    const res = await writeEtacsSingleBlock(elm, {
+      profile: p620,
+      kind: "kon",
+      payload: kon90,
+      overrideLidHex: "21 B0",
+    });
+
+    expect(securityUnlocked).toBe(true);
+    expect(link.written).toContain("2701");
+    expect(link.written).toContain("2702B32C6B7A");
+    expect(link.written).toContain("8502FF0002");
+    expect(link.written).toContain("8502FF0001");
+    expect(res.writeCommandHex).toBe("3B B0");
+    expect(res.writtenBytes).toBe(90);
+    expect(res.verified).toBe(true);
   });
 
   it("skips 1-byte 21 30 status (02) on ETACS 8637C671 in favor of multi-byte 21 52 / 21 42", async () => {

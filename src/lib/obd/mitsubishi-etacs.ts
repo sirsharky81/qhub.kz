@@ -146,6 +146,7 @@ export function positiveEtacsPayload(
   raw: string,
   service: number,
   identifier: number[],
+  options?: { keepKwpTrailer?: boolean },
 ): Uint8Array | null {
   const { declaredLength } = stripElmMultiline(raw);
   const bytes = extractHexTokens(raw);
@@ -172,6 +173,7 @@ export function positiveEtacsPayload(
     }
     // Strip Mitsubishi KWP 4-byte coding block footer ("A0 xx A0 yy", e.g. "A0 05 A0 01" or "A0 01 A0 16")
     if (
+      !options?.keepKwpTrailer &&
       service === 0x21 &&
       data.length >= 5 &&
       data[data.length - 4] === 0xa0 &&
@@ -182,6 +184,117 @@ export function positiveEtacsPayload(
     if (data.length > 0) return Uint8Array.from(data);
   }
   return null;
+}
+
+export type MitsubishiSecurityPreset =
+  | 1 // ETACS Lear (8637Axxx): A = 0x0085, C = 0x2706
+  | 2 // ETACS Continental (8637Bxxx / 8637Cxxx, e.g. 8637C671): A = 0x00F7, C = 0x3C8A
+  | 3 // Mut / Immo 3: A = 0x0088, C = 0x1209
+  | 4 // Mut 4: A = 0x0084, C = 0x1102
+  | 5 // Mut 5: A = 0x0089, C = 0x1213
+  | 6 // Engine Denso (1860xxxx): A = 0x0089, C = 0x2012
+  | 7 // Mut 7: A = 0x0089, C = 0xC369
+  | 8 // ETACS Omron (8637B2xx / 8637A84x / 8637A99x / 8637B73x): A = 0x0021, C = 0x5261
+  | 9 // Engine Melco / Mitsubishi Electric (1860Cxxx / 1860Dxxx): A = 0x0028, C = 0x0326
+  | 10 // Mut 10: A = 0x0067, C = 0x4206
+  | 11 // Mut 11: A = 0x004A, C = 0x0DEA
+  | 12 // Immo Lear: A = 0x0085, C = 0x1392
+  | 13 // Immo Continental: A = 0x00F7, C = 0xDB0C
+  | 14; // Mut 14: A = 0x009C, C = 0x19D5
+
+const MITSUBISHI_SECURITY_COEFFS: Record<MitsubishiSecurityPreset, { a: number; c: number }> = {
+  1: { a: 0x0085, c: 0x2706 },
+  2: { a: 0x00f7, c: 0x3c8a },
+  3: { a: 0x0088, c: 0x1209 },
+  4: { a: 0x0084, c: 0x1102 },
+  5: { a: 0x0089, c: 0x1213 },
+  6: { a: 0x0089, c: 0x2012 },
+  7: { a: 0x0089, c: 0xc369 },
+  8: { a: 0x0021, c: 0x5261 },
+  9: { a: 0x0028, c: 0x0326 },
+  10: { a: 0x0067, c: 0x4206 },
+  11: { a: 0x004a, c: 0x0dea },
+  12: { a: 0x0085, c: 0x1392 },
+  13: { a: 0x00f7, c: 0xdb0c },
+  14: { a: 0x009c, c: 0x19d5 },
+};
+
+/**
+ * Compute 4-byte Mitsubishi KWP2000 SecurityAccess (`27 01` -> `27 02`) key from a 4-byte seed:
+ * Each 16-bit half (`seedHi = seed[0..1]`, `seedLo = seed[2..3]`) is transformed as:
+ *   `keyHalf = (seedHalf * A + C) & 0xFFFF`
+ */
+export function computeMitsubishiSecurityKey(
+  seedBytes: Uint8Array | number[],
+  preset: MitsubishiSecurityPreset,
+): Uint8Array {
+  if (seedBytes.length < 4) {
+    throw new Error(`Invalid Mitsubishi SecurityAccess seed length (${seedBytes.length})`);
+  }
+  const { a, c } = MITSUBISHI_SECURITY_COEFFS[preset];
+  const seedHi = ((seedBytes[0]! & 0xff) << 8) | (seedBytes[1]! & 0xff);
+  const seedLo = ((seedBytes[2]! & 0xff) << 8) | (seedBytes[3]! & 0xff);
+  const keyHi = (Math.imul(seedHi, a) + c) & 0xffff;
+  const keyLo = (Math.imul(seedLo, a) + c) & 0xffff;
+  return new Uint8Array([
+    (keyHi >>> 8) & 0xff,
+    keyHi & 0xff,
+    (keyLo >>> 8) & 0xff,
+    keyLo & 0xff,
+  ]);
+}
+
+/**
+ * Determine the priority-ordered list of Mitsubishi SecurityAccess (`27 01` / `27 02`)
+ * presets for the connected ETACS or Engine ECU based on `1A 87` supplier byte (`payload[1]`)
+ * and ECU Part Number (`8637xxxx` / `1860xxxx`).
+ */
+export function resolveMitsubishiSecurityPresets(options: {
+  isEngine: boolean;
+  supplierByte?: number | null;
+  partNumber?: string | null;
+}): MitsubishiSecurityPreset[] {
+  const { isEngine, supplierByte, partNumber } = options;
+  const pn = (partNumber ?? "").toUpperCase();
+  const order: MitsubishiSecurityPreset[] = [];
+  const push = (p: MitsubishiSecurityPreset) => {
+    if (!order.includes(p)) order.push(p);
+  };
+
+  if (isEngine) {
+    if (supplierByte === 0x85) push(9); // Mitsubishi Electric (Melco)
+    if (supplierByte === 0x25) push(6); // Denso
+    if (/1860(?:C90[123]|C44[05]|D)/.test(pn)) {
+      push(9);
+      push(6);
+    } else {
+      push(6);
+      push(9);
+    }
+    return order;
+  }
+
+  // ETACS supplier byte from 1A 87 (`5A 87 04 <supplierByte> ...`):
+  // - 0x9D (157): Continental -> preset 2
+  // - 0x82 (130): Lear        -> preset 1
+  // - 0x64 (100): Omron       -> preset 8
+  if (supplierByte === 0x9d) push(2);
+  else if (supplierByte === 0x82) push(1);
+  else if (supplierByte === 0x64) push(8);
+
+  if (/8637(?:B2|A99|A84|B73|B051|B054|B074|A910)/.test(pn)) {
+    push(8);
+  } else if (pn.includes("8637A")) {
+    push(1);
+  } else if (pn.includes("8637B") || pn.includes("8637C")) {
+    push(2);
+  }
+
+  // Fallback order for ETACS: Continental (2), Lear (1), Omron (8)
+  push(2);
+  push(1);
+  push(8);
+  return order;
 }
 
 async function configureEtacsChannel(elm: Elm327Client, profile: EtacsCanProfile): Promise<void> {
@@ -1272,6 +1385,7 @@ async function sendCodingWritePdu(
   writeSvc: number,
   targetId: number[],
   payload: Uint8Array,
+  options?: { securityUnlocked?: boolean; skipSessionRefresh?: boolean },
 ): Promise<string> {
   const expectPosSid = (writeSvc + 0x40) & 0xff;
   const pdu = new Uint8Array(1 + targetId.length + payload.length);
@@ -1290,24 +1404,24 @@ async function sendCodingWritePdu(
   }
 
   // Tier 2: vLinker (`VTPX`) / STN (`STPX`) hardware-timed multi-frame ISO-TP transmitter.
-  // Why this is critical on vLinker MC-IOS / BM+ / MC+:
-  // When given `VTPX` or `STPX`, the adapter's internal ARM MCU formats the First Frame (`10 43 ...`),
-  // waits for Flow Control (`30 08 0A`), paces all 8 Consecutive Frames (`21..28`) at exact 10ms intervals
-  // on the CAN bus without BLE round-trips, waits for the second Flow Control (`30 08 0A`), sends `29...`,
-  // and returns the ECU's `7B B2` response!
+  // Skip the 8-command probe when SecurityAccess (`27 01` -> `27 02`) is active (`securityUnlocked`),
+  // so that S3 session timeout (~5s) never expires and locks the ECU before Tier 3 begins!
   const txHex = profile.txId.toString(16).padStart(3, "0").toUpperCase();
   const rxHex = profile.rxId.toString(16).padStart(3, "0").toUpperCase();
   let hwTxDiag = "";
-  for (const hwCmd of [
-    `VTPX h:${txHex}, r:${rxHex}, d:${fullHex}, t:5000`,
-    `VTPX h:${txHex}, d:${fullHex}, t:5000`,
-    `VTPXh:${txHex},r:${rxHex},d:${fullHex},t:5000`,
-    `VTPXd:${fullHex},t:5000`,
-    `STPX h:${txHex}, r:${rxHex}, d:${fullHex}, t:5000`,
-    `STPX h:${txHex}, d:${fullHex}, t:5000`,
-    `STPXh:${txHex},r:${rxHex},d:${fullHex},t:5000`,
-    `STPXd:${fullHex},t:5000`,
-  ]) {
+  const hwCommands = options?.securityUnlocked
+    ? [`STPX h:${txHex}, r:${rxHex}, d:${fullHex}, t:5000`]
+    : [
+        `VTPX h:${txHex}, r:${rxHex}, d:${fullHex}, t:5000`,
+        `VTPX h:${txHex}, d:${fullHex}, t:5000`,
+        `VTPXh:${txHex},r:${rxHex},d:${fullHex},t:5000`,
+        `VTPXd:${fullHex},t:5000`,
+        `STPX h:${txHex}, r:${rxHex}, d:${fullHex}, t:5000`,
+        `STPX h:${txHex}, d:${fullHex}, t:5000`,
+        `STPXh:${txHex},r:${rxHex},d:${fullHex},t:5000`,
+        `STPXd:${fullHex},t:5000`,
+      ];
+  for (const hwCmd of hwCommands) {
     try {
       const hwResp = await elm.sendCommand(hwCmd, 10_000);
       const cleanHw = hwResp.replace(/>/g, "").replace(/\s+/g, " ").trim();
@@ -1329,18 +1443,6 @@ async function sendCodingWritePdu(
   }
 
   // Tier 3: Manual ISO-TP multi-frame transmission with ATCAF0 (raw 8-byte CAN frames).
-  //
-  // ROOT CAUSE OF PREVIOUS `FF:30 08 0A / CF1:NO DATA / FC2:NO DATA -> CF:NO DATA` ON vLinker MC-IOS:
-  // 1. `initForObd()` enables `ATAT2` (Aggressive Adaptive Timing). When `ATAT2` is left ON, after the ECU
-  //    replies `30 08 0A` in 1ms on the First Frame, ELM327's adaptive timer shrinks the effective RX timeout
-  //    to ~4ms AND overrides `ATST` unless `ATAT0` (Adaptive Timing OFF) is explicitly sent!
-  // 2. Sending ANY `ATSTxx` commands in the middle of an active ISO-TP block (after `10 43...` or before `28...` / `29...`)
-  //    adds extra BLE round-trips (60–120ms each) inside the ECU's strict multi-frame window AND resets the
-  //    adapter's CAN transceiver state between frames!
-  // 3. Therefore, we MUST:
-  //    - Disable Adaptive Timing (`ATAT0`) and set a single fixed short timeout (`ATST04` = 16ms) BEFORE the First Frame;
-  //    - Send `10 43...` and all `21..28` Consecutive Frames back-to-back with ZERO intervening `AT` commands;
-  //    - Only on the final frame (`29...`), append `1` or wait for the `02 7B B2` EEPROM write response!
   const frames = buildIsoTpFrames(pdu, 0xff);
   try {
     await elm.sendCommand("ATCAF0", 2_000, { quietMs: 3, allowBarePrompt: true });
@@ -1356,12 +1458,17 @@ async function sendCodingWritePdu(
       await elm.sendCommand("ATST64", 2_000, { quietMs: 3, allowBarePrompt: true });
       lastReply = await elm.sendPayload(frames[0]!, 10_000);
     } else {
-      // Refresh KWP diagnostic session (02 10 92 FF FF FF FF FF) right before First Frame
-      // so the session timer S3 is 100% fresh when the First Frame hits the CAN bus.
-      if (profile.service === 0x21) {
+      // Refresh KWP diagnostic session right before First Frame ONLY when SecurityAccess is NOT unlocked!
+      // IMPORTANT: On Mitsubishi ETACS / Engine ECU, sending `10 92` AFTER `27 01` / `27 02` resets the
+      // unlocked SecurityAccess state back to locked (`7F 3B 33`)! When `securityUnlocked` is true,
+      // send KWP TesterPresent (`01 3E FF FF FF FF FF FF`) instead so S3 stays fresh AND SecurityAccess stays unlocked.
+      if (profile.service === 0x21 && !options?.skipSessionRefresh) {
         try {
           await elm.sendCommand("ATST19", 2_000, { quietMs: 3, allowBarePrompt: true });
-          await elm.sendPayload("021092FFFFFFFFFF", 2_000, { quietMs: 3, allowBarePrompt: true });
+          const keepAliveFrame = options?.securityUnlocked
+            ? "013EFFFFFFFFFFFF"
+            : "021092FFFFFFFFFF";
+          await elm.sendPayload(keepAliveFrame, 2_000, { quietMs: 3, allowBarePrompt: true });
         } catch {
           /* ignore */
         }
@@ -1487,11 +1594,127 @@ async function sendCodingWritePdu(
 }
 
 /**
+ * Broadcast KWP ControlDTCSetting (`85 02 FF 00 02` to disable or `85 02 FF 00 01` to enable)
+ * on functional CAN IDs `7DF` and `01C`, then restore the active ECU's TX/RX headers.
+ * Matches MMCodingWriter's `Uds.DisableDtcSetting` / `Uds.EnableDtcSetting` during Variant Coding write.
+ */
+async function sendMitsubishiDtcSettingBroadcast(
+  elm: Elm327Client,
+  profile: EtacsCanProfile,
+  enable: boolean,
+): Promise<void> {
+  const cmdHex = enable ? "8502FF0001" : "8502FF0002";
+  try {
+    await elm.setCanHeader(0x7df);
+    await elm.sendPayload(cmdHex, 1_500, { quietMs: 5, allowBarePrompt: true });
+  } catch {
+    /* broadcast 7DF may return NO DATA, which is expected */
+  }
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  try {
+    await elm.setCanHeader(0x01c);
+    await elm.sendPayload(cmdHex, 1_500, { quietMs: 5, allowBarePrompt: true });
+  } catch {
+    /* broadcast 01C may return NO DATA, which is expected */
+  }
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  const standardPair = profile.rxId === ((profile.txId + 8) & 0x7ff);
+  if (standardPair) {
+    await elm.clearRxFilter();
+    await elm.setCanHeader(profile.txId);
+  } else {
+    await elm.setCanHeader(profile.txId, profile.rxId);
+  }
+}
+
+/**
+ * Unlock Mitsubishi KWP2000 SecurityAccess (`27 01` -> `67 01 <4-byte seed>` -> `27 02 <4-byte key>` -> `67 02 34`)
+ * required before writing Variant Coding (`.kon`, `3B B0` on ETACS `620->504` or `3B C0` / `3B 52` on Engine `7E0->7E8`).
+ * Without this unlock, the ECU immediately rejects `3B B0` on the First Frame with `7F 3B 33` (`securityAccessDenied`).
+ */
+async function unlockMitsubishiCodingSecurityAccess(
+  elm: Elm327Client,
+  profile: EtacsCanProfile,
+): Promise<boolean> {
+  if (profile.service !== 0x21) return false;
+  const isEngine = profile.moduleKind === "engine" || profile.txId === 0x7e0;
+
+  let supplierByte: number | null = null;
+  let partNumber: string | null = null;
+  try {
+    const idRaw = await elm.sendPayload("1A87", 2_500);
+    const idPayload = positiveEtacsPayload(idRaw, 0x1a, [0x87], { keepKwpTrailer: true });
+    if (idPayload && idPayload.length >= 4) {
+      supplierByte = idPayload[1] ?? null;
+      partNumber =
+        extractPartNumberFromBytes(idPayload) ??
+        extractPartNumberFromAscii(extractCleanAscii(idPayload));
+    }
+  } catch {
+    /* proceed with fallback preset order */
+  }
+
+  const presets = resolveMitsubishiSecurityPresets({
+    isEngine,
+    supplierByte,
+    partNumber,
+  });
+
+  for (let i = 0; i < presets.length; i++) {
+    const preset = presets[i]!;
+    if (i > 0) {
+      try {
+        await elm.sendPayload("1092", 2_000);
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      const seedRaw = await elm.sendPayload("2701", 3_000);
+      const seedTokens = extractHexTokens(seedRaw);
+      // If ECU responds `67 01 00 00 00 00`, security access is already unlocked!
+      const seedPayload = positiveEtacsPayload(seedRaw, 0x27, [0x01], { keepKwpTrailer: true });
+      if (!seedPayload || seedPayload.length < 4) {
+        if (seedTokens.includes(0x67) && seedTokens.includes(0x34)) return true;
+        continue;
+      }
+      if (
+        seedPayload[0] === 0x00 &&
+        seedPayload[1] === 0x00 &&
+        seedPayload[2] === 0x00 &&
+        seedPayload[3] === 0x00
+      ) {
+        return true;
+      }
+
+      const keyBytes = computeMitsubishiSecurityKey(seedPayload.subarray(0, 4), preset);
+      const keyHex = bytesToHex(keyBytes, "");
+      const authRaw = await elm.sendPayload(`2702${keyHex}`, 3_000);
+      const authTokens = extractHexTokens(authRaw);
+      // Positive response is `67 02 34` (or `67 02`)
+      for (let k = 0; k + 1 < authTokens.length; k++) {
+        if (authTokens[k] === 0x67 && authTokens[k + 1] === 0x02) {
+          const status = authTokens[k + 2];
+          if (status === undefined || status === 0x34 || status === 0x00) {
+            return true;
+          }
+        }
+      }
+    } catch {
+      /* try next preset */
+    }
+  }
+
+  return false;
+}
+
+/**
  * Write a single coding block (either `.kon` Variant OR `.cuf` Custom) to Mitsubishi ETACS or Engine ECU.
  *
  * Why `.kon` and `.cuf` MUST be written separately and sequentially:
- * - Writing `.kon` (Variant Coding, `3B 30` / `2E 0130`) causes the ETACS ECU to re-initialize
- *   its feature matrix and reset Custom Coding (`.cuf`, `LID 31`) back to factory defaults.
+ * - Writing `.kon` (Variant Coding, `3B B0` / `3B 30` / `2E 0130`) requires KWP SecurityAccess (`27 01` -> `27 02`)
+ *   and causes the ETACS ECU to re-initialize its feature matrix and reset Custom Coding (`.cuf`, `LID B2`) back to factory defaults.
  * - Therefore, the user must first write `.kon` (Step 1), let the ECU commit Variant Coding,
  *   and then separately write the saved `.cuf` file (Step 2) to restore all custom settings.
  */
@@ -1530,15 +1753,70 @@ export async function writeEtacsSingleBlock(
   const expectPosSid = (writeSvc + 0x40) & 0xff; // 0x7B for KWP 3B, 0x6E for UDS 2E
   const writeSvcHex = writeSvc.toString(16).padStart(2, "0").toUpperCase();
 
-  // Build candidate write attempts:
-  // 1. Primary targetId + exact payload
-  // 2. If ETACS KWP 0x21 .cuf (65 bytes) is rejected with NRC 0x12 / 0x13 / 0x22 / 0x31 on `3B B2`,
-  //    also try with the 4-byte KWP coding trailer `A0 05 A0 01` and fallback ETACS Custom LIDs (`31`, `51`, `43`).
-  const candidateTargets: { lid: number[]; data: Uint8Array }[] = [
-    { lid: targetId, data: payload },
-  ];
+  // For Variant Coding (`.kon`) over KWP2000 (`service === 0x21`):
+  // 1. Read the current Variant block (`21 B0` / `21 C0` / `21 52`) WITH its 4-byte KWP trailer preserved!
+  //    On Mitsubishi ETACS (e.g. `8637C671`), `21 B0` returns 94 bytes: 90 coding bytes + 4-byte trailer
+  //    (`FF FF FF FF` or `A0 01 A0 16` or `A0 05 A0 01`), and `3B B0` requires all 94 bytes (`payload` + 4-byte trailer).
+  // 2. Disable DTC setting (`85 02 FF 00 02` on `7DF` and `01C`).
+  // 3. Unlock KWP SecurityAccess (`27 01` -> `67 01 <seed>` -> `27 02 <key>` -> `67 02 34`),
+  //    otherwise the ECU rejects `3B B0` with `7F 3B 33` (`securityAccessDenied`)!
+  let ecuCurrentFullVariant: Uint8Array | null = null;
+  let dtcDisabled = false;
+  if (activeProfile.service === 0x21 && kind === "kon") {
+    try {
+      const readSvcHex = activeProfile.service.toString(16).padStart(2, "0").toUpperCase();
+      const rawCurrent = await elm.sendPayload(`${readSvcHex}${idHex}`, 8_000);
+      ecuCurrentFullVariant = positiveEtacsPayload(
+        rawCurrent,
+        activeProfile.service,
+        targetId,
+        { keepKwpTrailer: true },
+      );
+    } catch {
+      /* ignore if pre-read fails */
+    }
 
-  if (activeProfile.service === 0x21 && kind === "cuf") {
+    await sendMitsubishiDtcSettingBroadcast(elm, activeProfile, false);
+    dtcDisabled = true;
+    await unlockMitsubishiCodingSecurityAccess(elm, activeProfile);
+  }
+
+  // Build candidate write attempts:
+  const candidateTargets: { lid: number[]; data: Uint8Array }[] = [];
+
+  if (activeProfile.service === 0x21 && kind === "kon") {
+    // If the ECU's current Variant response (`21 B0` / `21 C0`) is exactly `payload.length + 4` bytes
+    // (e.g. 90 + 4 = 94 bytes on ETACS `21 B0`, or 16 + 4 = 20 bytes on Engine `21 C0`),
+    // MMCodingWriter copies the 90-byte `.kon` payload into indices `0..89` and preserves the ECU's
+    // exact 4-byte tail (`FF FF FF FF`, `A0 01 A0 16`, `00 00 00 00`, etc.) as the primary write payload!
+    if (ecuCurrentFullVariant && ecuCurrentFullVariant.length === payload.length + 4) {
+      const mergedWithEcuTail = new Uint8Array(ecuCurrentFullVariant.length);
+      mergedWithEcuTail.set(payload, 0);
+      mergedWithEcuTail.set(ecuCurrentFullVariant.subarray(payload.length), payload.length);
+      candidateTargets.push({ lid: targetId, data: mergedWithEcuTail });
+    }
+    candidateTargets.push({ lid: targetId, data: payload });
+
+    const tailCandidates: number[][] = [
+      [0xff, 0xff, 0xff, 0xff],
+      [0xa0, 0x05, 0xa0, 0x01],
+      [0xa0, 0x01, 0xa0, 0x16],
+    ];
+    for (const tail of tailCandidates) {
+      const withTail = new Uint8Array(payload.length + 4);
+      withTail.set(payload, 0);
+      withTail.set(tail, payload.length);
+      const alreadyAdded = candidateTargets.some(
+        (c) =>
+          c.data.length === withTail.length &&
+          c.data.every((b, idx) => b === withTail[idx]),
+      );
+      if (!alreadyAdded) {
+        candidateTargets.push({ lid: targetId, data: withTail });
+      }
+    }
+  } else if (activeProfile.service === 0x21 && kind === "cuf") {
+    candidateTargets.push({ lid: targetId, data: payload });
     const withTrailer = new Uint8Array(payload.length + 4);
     withTrailer.set(payload, 0);
     withTrailer.set([0xa0, 0x05, 0xa0, 0x01], payload.length);
@@ -1551,11 +1829,8 @@ export async function writeEtacsSingleBlock(
       }
       candidateTargets.push({ lid: altLid, data: payload });
     }
-  } else if (activeProfile.service === 0x21 && kind === "kon") {
-    const withTrailer = new Uint8Array(payload.length + 4);
-    withTrailer.set(payload, 0);
-    withTrailer.set([0xa0, 0x05, 0xa0, 0x01], payload.length);
-    candidateTargets.push({ lid: targetId, data: withTrailer });
+  } else {
+    candidateTargets.push({ lid: targetId, data: payload });
   }
 
   let rawWriteResponse = "";
@@ -1570,14 +1845,17 @@ export async function writeEtacsSingleBlock(
     usedTargetId = cand.lid;
     usedIdHex = cand.lid.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
 
-    // Keep diagnostic session alive before each write candidate
+    // Keep diagnostic session (and SecurityAccess for .kon) alive before each retry candidate
     if (attemptIdx > 0 && activeProfile.service === 0x21) {
-      const sessCmd = attemptIdx % 2 === 1 ? "1092" : "1089";
+      const sessCmd = kind === "kon" ? "1092" : attemptIdx % 2 === 1 ? "1092" : "1089";
       try {
         await elm.sendPayload(sessCmd, 2_000);
         await elm.sendPayload("3E", 1_500);
       } catch {
         /* ignore */
+      }
+      if (kind === "kon") {
+        await unlockMitsubishiCodingSecurityAccess(elm, activeProfile);
       }
     }
 
@@ -1587,6 +1865,10 @@ export async function writeEtacsSingleBlock(
       writeSvc,
       cand.lid,
       cand.data,
+      {
+        securityUnlocked: activeProfile.service === 0x21 && kind === "kon",
+        skipSessionRefresh: activeProfile.service === 0x21 && kind === "kon",
+      },
     );
     if (attemptIdx === 0) {
       firstAttemptDiag = rawWriteResponse;
@@ -1595,9 +1877,31 @@ export async function writeEtacsSingleBlock(
     isPositive = hasPositiveWriteAck(tokens, expectPosSid, cand.lid);
     if (isPositive) break;
 
-    // Crucial fallback: If the ECU committed the coding bytes to EEPROM after the final Consecutive Frame
-    // (`29...`), but the short `ATST06` window missed the `02 7B B2` frame on the CAN bus, read back the
-    // same LID (`21 B2` / `21 30`) and check if the bytes in the ECU already match `payload`!
+    // If `.kon` returned `7F 3B 33` (`securityAccessDenied`), re-unlock SecurityAccess right here and retry!
+    if (
+      activeProfile.service === 0x21 &&
+      kind === "kon" &&
+      hasNegativeResponseForService(tokens, writeSvc) === 0x33
+    ) {
+      const unlocked = await unlockMitsubishiCodingSecurityAccess(elm, activeProfile);
+      if (unlocked) {
+        rawWriteResponse = await sendCodingWritePdu(
+          elm,
+          activeProfile,
+          writeSvc,
+          cand.lid,
+          cand.data,
+          { securityUnlocked: true, skipSessionRefresh: true },
+        );
+        tokens = extractHexTokens(rawWriteResponse);
+        isPositive = hasPositiveWriteAck(tokens, expectPosSid, cand.lid);
+        if (isPositive) break;
+      }
+    }
+
+    // Crucial fallback: If the ECU committed the coding bytes to EEPROM after the final Consecutive Frame,
+    // but the short `ATST06` window missed the `02 7B B0` / `02 7B B2` frame on the CAN bus, read back the
+    // same LID (`21 B0` / `21 B2`) and check if the bytes in the ECU already match `payload`!
     if (hasNegativeResponseForService(tokens, writeSvc) === null) {
       try {
         const readSvcHex = activeProfile.service.toString(16).padStart(2, "0").toUpperCase();
@@ -1605,8 +1909,8 @@ export async function writeEtacsSingleBlock(
         const checkPayload = positiveEtacsPayload(checkRaw, activeProfile.service, cand.lid);
         if (
           checkPayload &&
-          checkPayload.length === payload.length &&
-          checkPayload.every((b, idx) => b === payload[idx])
+          checkPayload.length >= payload.length &&
+          payload.every((b, idx) => b === checkPayload[idx])
         ) {
           isPositive = true;
           break;
@@ -1615,6 +1919,10 @@ export async function writeEtacsSingleBlock(
         /* ignore and try next candidate */
       }
     }
+  }
+
+  if (dtcDisabled) {
+    await sendMitsubishiDtcSettingBroadcast(elm, activeProfile, true);
   }
 
   if (!isPositive) {
@@ -1648,11 +1956,20 @@ export async function writeEtacsSingleBlock(
     const readSvcHex = activeProfile.service.toString(16).padStart(2, "0").toUpperCase();
     const verifyRaw = await elm.sendPayload(`${readSvcHex}${usedIdHex}`, 10_000);
     const verifyPayload = positiveEtacsPayload(verifyRaw, activeProfile.service, usedTargetId);
-    if (verifyPayload && verifyPayload.length === payload.length) {
-      verified = verifyPayload.every((b, idx) => b === payload[idx]);
+    if (verifyPayload && verifyPayload.length >= payload.length) {
+      verified = payload.every((b, idx) => b === verifyPayload[idx]);
     }
   } catch {
     /* verification read is best-effort */
+  }
+
+  // After Variant Coding (`.kon`) is written, MMCodingWriter sends ECU Reset (`11 01`) so the new Variant configuration takes effect
+  if (activeProfile.service === 0x21 && kind === "kon") {
+    try {
+      await elm.sendPayload("1101", 2_000);
+    } catch {
+      /* optional ECU reset */
+    }
   }
 
   try {
