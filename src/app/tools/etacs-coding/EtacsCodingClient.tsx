@@ -468,6 +468,12 @@ export default function EtacsCodingClient() {
     method: SaveDialogMethod = "download",
     force = false,
     existingPickerHandle?: FileSystemFileHandle | null,
+    prebuiltBodyPromise?: Promise<{
+      crc: string;
+      crcVerified: boolean;
+      bytes: string;
+      fileName: string;
+    }>,
   ): Promise<void> => {
     const slot = side === "a" ? slotA : slotB;
     if (!slot.view) return;
@@ -486,19 +492,21 @@ export default function EtacsCodingClient() {
             ? await requestSaveFileHandle(requestedName)
             : null;
 
-      const body = await saveEtacsCoding({
-        force,
-        vin: slot.view.vin,
-        date: slot.view.date,
-        ecuId: slot.view.ecuId,
-        codingHex: slot.view.codingHex,
-        crc: slot.view.crc,
-        bom: slot.view.bom,
-        fileName: requestedName,
-        promoCode: storedPromoCode || undefined,
-      });
+      const body = prebuiltBodyPromise
+        ? await prebuiltBodyPromise
+        : await saveEtacsCoding({
+            force,
+            vin: slot.view.vin,
+            date: slot.view.date,
+            ecuId: slot.view.ecuId,
+            codingHex: slot.view.codingHex,
+            crc: slot.view.crc,
+            bom: slot.view.bom,
+            fileName: requestedName,
+            promoCode: storedPromoCode || undefined,
+          });
       const bytes = Uint8Array.from(atob(body.bytes), (c) => c.charCodeAt(0));
-      const targetName = ensureCodingFileName(body.fileName || requestedName, ext);
+      const targetName = ensureCodingFileName(requestedName, ext);
 
       let savedName = targetName;
       if (pickedHandle) {
@@ -563,6 +571,24 @@ export default function EtacsCodingClient() {
     if (preferShare && canShareFiles) {
       return performSaveEdited(side, slot.displayName, "share");
     }
+    // Запускаем предзагрузку подписанного контейнера пока пользователь открыл окно «Сохранить как…»,
+    // чтобы на iPhone / iPad (Safari / Bluefy) нажатие кнопки «Сохранить как…» мгновенно открывало
+    // системное меню «Сохранить в Файлы» без потери user activation gesture на сетевом запросе.
+    const ext = detectCodingExtension(slot.displayName);
+    const defaultName = ensureCodingFileName(slot.displayName || `coding_${side}${ext}`, ext);
+    const prebuiltPromise = saveEtacsCoding({
+      force: true,
+      vin: slot.view.vin,
+      date: slot.view.date,
+      ecuId: slot.view.ecuId,
+      codingHex: slot.view.codingHex,
+      crc: slot.view.crc,
+      bom: slot.view.bom,
+      fileName: defaultName,
+      promoCode: storedPromoCode || undefined,
+    });
+    void prebuiltPromise.catch(() => null);
+
     return new Promise<void>((resolve) => {
       setSaveDialogRequest({
         side,
@@ -573,7 +599,7 @@ export default function EtacsCodingClient() {
         hasFileHandle: Boolean(slot.fileHandle),
         canShareFiles,
         onConfirm: async (finalFileName, method) => {
-          await performSaveEdited(side, finalFileName, method);
+          await performSaveEdited(side, finalFileName, method, false, undefined, prebuiltPromise);
           resolve();
         },
       });

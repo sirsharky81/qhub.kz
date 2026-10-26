@@ -93,11 +93,16 @@ function EtacsSaveFileModalInner({
     inputRef.current?.focus();
   };
 
-  const handleConfirm = async (method: SaveDialogMethod) => {
+  const handleConfirm = async () => {
     setBusy(true);
     setError(null);
     try {
-      await request.onConfirm(finalPreview, method);
+      const preferredMethod: SaveDialogMethod = supportsPicker
+        ? "picker"
+        : request.canShareFiles
+          ? "share"
+          : "download";
+      await request.onConfirm(finalPreview, preferredMethod);
       onClose();
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") {
@@ -169,7 +174,7 @@ function EtacsSaveFileModalInner({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    void handleConfirm(supportsPicker ? "picker" : "download");
+                    void handleConfirm();
                   }
                 }}
                 placeholder={baseStem}
@@ -241,7 +246,7 @@ function EtacsSaveFileModalInner({
             <button
               type="button"
               disabled={busy}
-              onClick={() => void handleConfirm(supportsPicker ? "picker" : "download")}
+              onClick={() => void handleConfirm()}
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-900 bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-800 active:scale-[0.99] disabled:opacity-50"
             >
               <span>{busy ? "Сохранение…" : "Сохранить как…"}</span>

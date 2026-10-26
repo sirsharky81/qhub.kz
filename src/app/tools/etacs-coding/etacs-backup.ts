@@ -154,9 +154,9 @@ export async function saveCodingBytesAs(
       if ((err as { name?: string })?.name === "AbortError") {
         throw err;
       }
-      // Если браузер заблокировал File Picker (например, в iframe/webview), скачиваем напрямую
+      // Если браузер заблокировал File Picker, пробуем системное меню сохранения («Сохранить в Файлы» на iOS)
     }
-    downloadBlobDirect(blob, finalName);
+    await saveBlobToDevice(blob, finalName);
     return finalName;
   }
 

@@ -503,6 +503,76 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
     expect(res.verified).toBe(true);
   });
 
+  it("reports 7F 3B 31 (requestOutOfRange) immediately when ETACS rejects an unsupported .kon value after 14 ISO-TP frames", async () => {
+    const kon90 = new Uint8Array(90).fill(0x33);
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    link.writeLine = async (line: string) => {
+      if (line === "1A87") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending +=
+          "5A 87 04 9D 06 08 FF 0A 00 02 00 00 38 36 33 37 43 36 37 31 20 20\r>";
+        return;
+      }
+      if (line === "21B0") {
+        link.written.push(line);
+        const body94 = `${"22 ".repeat(90)}FF FF FF FF`.trim();
+        (link as unknown as { pending: string }).pending += `61 B0 ${body94}\r>`;
+        return;
+      }
+      if (line === "2701") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "67 01 B7 EE 7C 90\r>";
+        return;
+      }
+      if (line === "2702B32C6B7A") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "67 02 34\r>";
+        return;
+      }
+      if (line.startsWith("3BB0") && line.length > 16) {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "?\r>";
+        return;
+      }
+      if (line.startsWith("10603BB0")) {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "30 08 0A FF FF FF FF FF\r>";
+        return;
+      }
+      if (line.startsWith("28")) {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "30 08 0A FF FF FF FF FF\r>";
+        return;
+      }
+      if (line.startsWith("2D")) {
+        link.written.push(line);
+        // Simulate Continental ETACS replying 03 7F 3B 31 (requestOutOfRange) ~120ms after the 13th CF (`2D...`)
+        (link as unknown as { pending: string }).pending += "03 7F 3B 31 FF FF FF FF\r>";
+        return;
+      }
+      if (/^2[1-79A-C][0-9A-F]{14}$/.test(line)) {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "NO DATA\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+
+    const elm = new Elm327Client(link);
+    const p620 = ETACS_PROFILES.find((p) => p.id === "620-504")!;
+    await expect(
+      writeEtacsSingleBlock(elm, {
+        profile: p620,
+        kind: "kon",
+        payload: kon90,
+        overrideLidHex: "21 B0",
+      }),
+    ).rejects.toThrow(/7F 3B 31 — requestOutOfRange/);
+    // Ensure ATST96 was set before the final CF `2D...` so the delayed 7F 3B 31 / 7B B0 response is captured
+    expect(link.written).toContain("ATST96");
+  });
+
   it("skips 1-byte 21 30 status (02) on ETACS 8637C671 in favor of multi-byte 21 52 / 21 42", async () => {
     const link = new FakeLink();
     const origWrite = link.writeLine.bind(link);

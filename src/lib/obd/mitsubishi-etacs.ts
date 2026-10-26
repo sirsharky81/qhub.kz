@@ -1404,13 +1404,13 @@ async function sendCodingWritePdu(
   }
 
   // Tier 2: vLinker (`VTPX`) / STN (`STPX`) hardware-timed multi-frame ISO-TP transmitter.
-  // Skip the 8-command probe when SecurityAccess (`27 01` -> `27 02`) is active (`securityUnlocked`),
-  // so that S3 session timeout (~5s) never expires and locks the ECU before Tier 3 begins!
+  // Skip when `securityUnlocked` is active because `vLinker MC-IOS` replies `?` to `STPX`/`VTPX`
+  // and the extra BLE round-trips consume the ECU's SecurityAccess window before Tier 3 begins!
   const txHex = profile.txId.toString(16).padStart(3, "0").toUpperCase();
   const rxHex = profile.rxId.toString(16).padStart(3, "0").toUpperCase();
   let hwTxDiag = "";
   const hwCommands = options?.securityUnlocked
-    ? [`STPX h:${txHex}, r:${rxHex}, d:${fullHex}, t:5000`]
+    ? []
     : [
         `VTPX h:${txHex}, r:${rxHex}, d:${fullHex}, t:5000`,
         `VTPX h:${txHex}, d:${fullHex}, t:5000`,
@@ -1508,18 +1508,24 @@ async function sendCodingWritePdu(
         const isBlockBoundary = !isLast && blockSize > 0 && cfsSentInCurrentBlock + 1 >= blockSize;
 
         if (isLast) {
-          // Send the final Consecutive Frame (`29...`) immediately (with `ATST06` still active so there is
-          // zero AT-command delay after `28...`!). If EEPROM write takes >24ms and `29...` returns `NO DATA`,
-          // we immediately listen for the delayed `02 7B B2` reply or verify via readback!
+          // On the final Consecutive Frame (`29...` for .cuf or `2D...` for .kon), set `ATST96` (600ms)
+          // BEFORE sending the frame so the adapter listens on the CAN bus for up to 600ms while ETACS
+          // flashes EEPROM and sends back `02 7B B0` / `02 7B B2` or `03 7F 3B 31` (`requestOutOfRange`)!
+          // (On the final frame, the ECU's N_Cr inter-CF timeout is 1000ms, so a 40ms `ATST96` round-trip is 100% safe.)
+          try {
+            await elm.sendCommand("ATST96", 2_000, { quietMs: 2, allowBarePrompt: true });
+          } catch {
+            /* ignore */
+          }
           let cfResp = await elm.sendPayload(frames[i]!, 8_000, { quietMs: 15 });
           let cfTokens = extractHexTokens(cfResp);
 
-          // If `29...` returned `NO DATA` because ETACS took >24ms to flash EEPROM (or if it returned 7F 3B 78 ResponsePending),
-          // set `ATST64` (400ms) and send a KWP TesterPresent (`01 3E FF FF FF FF FF FF`) to collect the pending response!
           if (
             isNoDataOrEmptyReply(cfResp) ||
             hasNegativeResponseForService(cfTokens, writeSvc) === 0x78
           ) {
+            // Brief settle pause (250ms) while ETACS flashes EEPROM before probing `01 3E`
+            await new Promise((resolve) => setTimeout(resolve, 250));
             try {
               await elm.sendCommand("ATST64", 2_000, { quietMs: 3, allowBarePrompt: true });
               const followUp = await elm.sendPayload("013EFFFFFFFFFFFF", 5_000, { quietMs: 15 });
@@ -1557,7 +1563,7 @@ async function sendCodingWritePdu(
           }
           cfsSentInCurrentBlock = 0;
         } else {
-          // Intermediate Consecutive Frame (`21..27`): sent immediately with NO prior AT command!
+          // Intermediate Consecutive Frame (`21..27`, `29..2C`): sent immediately with NO prior AT command!
           const cfResp = await elm.sendPayload(frames[i]!, 1_500, {
             quietMs: 2,
             allowBarePrompt: true,
@@ -1877,11 +1883,19 @@ export async function writeEtacsSingleBlock(
     isPositive = hasPositiveWriteAck(tokens, expectPosSid, cand.lid);
     if (isPositive) break;
 
+    const candidateNrc = hasNegativeResponseForService(tokens, writeSvc);
+    // If the ECU returned `7F 3B 31` (`requestOutOfRange` — unsupported coding value in `.kon` / `.cuf` payload),
+    // stop immediately instead of retrying with different 4-byte tails, so `7F 3B 31` is reported to the user!
+    if (candidateNrc === 0x31) {
+      firstAttemptDiag = rawWriteResponse;
+      break;
+    }
+
     // If `.kon` returned `7F 3B 33` (`securityAccessDenied`), re-unlock SecurityAccess right here and retry!
     if (
       activeProfile.service === 0x21 &&
       kind === "kon" &&
-      hasNegativeResponseForService(tokens, writeSvc) === 0x33
+      candidateNrc === 0x33
     ) {
       const unlocked = await unlockMitsubishiCodingSecurityAccess(elm, activeProfile);
       if (unlocked) {
@@ -1899,11 +1913,20 @@ export async function writeEtacsSingleBlock(
       }
     }
 
-    // Crucial fallback: If the ECU committed the coding bytes to EEPROM after the final Consecutive Frame,
-    // but the short `ATST06` window missed the `02 7B B0` / `02 7B B2` frame on the CAN bus, read back the
-    // same LID (`21 B0` / `21 B2`) and check if the bytes in the ECU already match `payload`!
+    // Crucial fallback: If the ECU committed the coding bytes to EEPROM after the final Consecutive Frame
+    // (`2D...` for .kon or `29...` for .cuf), or if Continental ETACS reset its diagnostic session upon
+    // committing `.kon` (as shown in MMCodingWriter logs where `3B B0` finishes with `Receive timeout`),
+    // re-open `10 92`, read back `21 B0` / `21 B2`, and check if the bytes in the ECU match `payload`!
     if (hasNegativeResponseForService(tokens, writeSvc) === null) {
       try {
+        if (activeProfile.service === 0x21 && kind === "kon") {
+          await new Promise((resolve) => setTimeout(resolve, 350));
+          try {
+            await elm.sendPayload("1092", 2_500);
+          } catch {
+            /* ignore */
+          }
+        }
         const readSvcHex = activeProfile.service.toString(16).padStart(2, "0").toUpperCase();
         const checkRaw = await elm.sendPayload(`${readSvcHex}${usedIdHex}`, 8_000);
         const checkPayload = positiveEtacsPayload(checkRaw, activeProfile.service, cand.lid);
@@ -1945,6 +1968,11 @@ export async function writeEtacsSingleBlock(
     } catch {
       /* ignore */
     }
+    if (nrcByte === 0x31) {
+      throw new Error(
+        `Блок ${activeProfile.txId.toString(16).toUpperCase()}/${activeProfile.rxId.toString(16).toUpperCase()} отклонил запись ${writeSvcHex} ${idHex} (${nrcDetail} — requestOutOfRange): одно из выбранных вами значений параметров в файле не поддерживается прошивкой этого блока ETACS. Верните последнее изменённое значение и попробуйте снова.`,
+      );
+    }
     throw new Error(
       `Блок ${activeProfile.txId.toString(16).toUpperCase()}/${activeProfile.rxId.toString(16).toUpperCase()} отклонил запись ${writeSvcHex} ${idHex} (${nrcDetail}). Проверьте, что зажигание в положении ON (двигатель заглушен), а размер файла (${payload.length} Б) точно соответствует этому блоку.`,
     );
@@ -1953,6 +1981,13 @@ export async function writeEtacsSingleBlock(
   // Read back the same LID/DID to verify bytes were committed to EEPROM
   let verified = false;
   try {
+    if (activeProfile.service === 0x21 && kind === "kon") {
+      try {
+        await elm.sendPayload("1092", 2_500);
+      } catch {
+        /* ignore */
+      }
+    }
     const readSvcHex = activeProfile.service.toString(16).padStart(2, "0").toUpperCase();
     const verifyRaw = await elm.sendPayload(`${readSvcHex}${usedIdHex}`, 10_000);
     const verifyPayload = positiveEtacsPayload(verifyRaw, activeProfile.service, usedTargetId);
