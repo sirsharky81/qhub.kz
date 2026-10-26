@@ -15,8 +15,10 @@ import {
 import {
   detectCodingExtension,
   ensureCodingFileName,
+  requestSaveFileHandle,
   saveCodingBytesAs,
   saveOriginalFileBackup,
+  writeBytesToFileHandle,
 } from "./etacs-backup";
 import { PickerButton } from "../random-picker/components/PickerButton";
 import { EtacsObdLink } from "./EtacsPageHeader";
@@ -465,6 +467,7 @@ export default function EtacsCodingClient() {
     customFileName?: string,
     method: SaveDialogMethod = "download",
     force = false,
+    existingPickerHandle?: FileSystemFileHandle | null,
   ): Promise<void> => {
     const slot = side === "a" ? slotA : slotB;
     if (!slot.view) return;
@@ -474,6 +477,15 @@ export default function EtacsCodingClient() {
         customFileName || slot.displayName || `coding_${side}${ext}`,
         ext,
       );
+      // Открываем системный диалог выбора папки (`showSaveFilePicker`) ДО сетевого запроса,
+      // чтобы браузер не сбрасывал user activation gesture и не скачивал файл молча без спроса.
+      const pickedHandle =
+        existingPickerHandle !== undefined
+          ? existingPickerHandle
+          : method === "picker"
+            ? await requestSaveFileHandle(requestedName)
+            : null;
+
       const body = await saveEtacsCoding({
         force,
         vin: slot.view.vin,
@@ -489,14 +501,18 @@ export default function EtacsCodingClient() {
       const targetName = ensureCodingFileName(body.fileName || requestedName, ext);
 
       let savedName = targetName;
-      if (method === "overwrite" && slot.fileHandle) {
+      if (pickedHandle) {
+        const writtenName = await writeBytesToFileHandle(pickedHandle, bytes);
+        savedName = writtenName || targetName;
+      } else if (method === "overwrite" && slot.fileHandle) {
         const writable = await slot.fileHandle.createWritable();
         const copy = new Uint8Array(bytes);
         await writable.write(copy.buffer as ArrayBuffer);
         await writable.close();
         savedName = slot.fileHandle.name || targetName;
       } else {
-        const effectiveMethod = method === "overwrite" ? "download" : method;
+        const effectiveMethod =
+          method === "overwrite" || method === "picker" ? "download" : method;
         savedName = await saveCodingBytesAs(bytes, targetName, effectiveMethod);
       }
 
@@ -529,7 +545,7 @@ export default function EtacsCodingClient() {
       }
       if (err.status === 409 && !force) {
         const agreed = window.confirm(`${err.message}\n\nСохранить всё равно?`);
-        if (agreed) return performSaveEdited(side, customFileName, method, true);
+        if (agreed) return performSaveEdited(side, customFileName, method, true, null);
         return;
       }
       setBanner(err.message || "Не удалось сохранить");

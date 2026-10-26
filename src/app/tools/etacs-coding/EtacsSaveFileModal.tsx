@@ -129,7 +129,7 @@ function EtacsSaveFileModalInner({
                 : `Сохранить изменённый файл ${request.side.toUpperCase()}`}
             </h2>
             <p className="mt-0.5 text-xs leading-snug text-gray-500">
-              Задайте название файла и выберите, куда его сохранить. Расширение{" "}
+              Задайте название файла и нажмите «Сохранить как…». Расширение{" "}
               <code className="rounded bg-gray-100 px-1 font-mono font-semibold text-gray-800">
                 {ext}
               </code>{" "}
@@ -237,70 +237,18 @@ function EtacsSaveFileModalInner({
             </div>
           ) : null}
 
-          <div className="space-y-2 pt-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-              Куда сохранить
-            </p>
-
-            {supportsPicker ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void handleConfirm("picker")}
-                className="flex w-full items-center justify-between rounded-xl border border-gray-900 bg-gray-900 px-3.5 py-2.5 text-left text-xs font-semibold text-white shadow-sm transition hover:bg-gray-800 disabled:opacity-50"
-              >
-                <span>Выбрать папку на устройстве (Сохранить как…)</span>
-                <span className="ml-2 rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">
-                  Папка
-                </span>
-              </button>
-            ) : null}
-
+          <div className="pt-1">
             <button
               type="button"
               disabled={busy}
-              onClick={() => void handleConfirm("download")}
-              className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition disabled:opacity-50 ${
-                supportsPicker
-                  ? "border-gray-200 bg-white text-gray-900 hover:bg-gray-50"
-                  : "border-gray-900 bg-gray-900 text-white shadow-sm hover:bg-gray-800"
-              }`}
+              onClick={() => void handleConfirm(supportsPicker ? "picker" : "download")}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-900 bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-800 active:scale-[0.99] disabled:opacity-50"
             >
-              <span>Скачать файл в «Загрузки» браузера</span>
-              <span
-                className={`ml-2 rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                  supportsPicker ? "bg-gray-100 text-gray-700" : "bg-white/15 text-white"
-                }`}
-              >
+              <span>{busy ? "Сохранение…" : "Сохранить как…"}</span>
+              <span className="rounded bg-white/15 px-2 py-0.5 font-mono text-xs">
                 {ext}
               </span>
             </button>
-
-            {request.canShareFiles ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void handleConfirm("share")}
-                className="flex w-full items-center justify-between rounded-xl border border-blue-200 bg-blue-50/80 px-3.5 py-2.5 text-left text-xs font-semibold text-blue-900 transition hover:bg-blue-100 disabled:opacity-50"
-              >
-                <span>Выбрать место («Сохранить в Файлы» / Поделиться)</span>
-                <span className="ml-2 rounded bg-blue-200/60 px-1.5 py-0.5 font-mono text-[10px] text-blue-900">
-                  iOS / Android
-                </span>
-              </button>
-            ) : null}
-
-            {request.mode === "edited" && request.hasFileHandle ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void handleConfirm("overwrite")}
-                className="flex w-full items-center justify-between rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-2 text-left text-xs font-medium text-amber-950 transition hover:bg-amber-100 disabled:opacity-50"
-              >
-                <span>Перезаписать исходный открытый файл на месте</span>
-                <span className="ml-2 font-mono text-[10px] text-amber-800">Замена</span>
-              </button>
-            ) : null}
           </div>
         </div>
       </div>

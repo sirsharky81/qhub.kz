@@ -65,15 +65,9 @@ export function canUseSaveFilePicker(): boolean {
   return Boolean(window.isSecureContext && typeof win.showSaveFilePicker === "function");
 }
 
-/**
- * Сохраняет файл через системный диалог выбора папки и имени (`showSaveFilePicker`),
- * если браузер его поддерживает. Возвращает итоговое имя файла или `null`, если диалог недоступен.
- * При отмене пользователем выбрасывает AbortError.
- */
-export async function saveBytesWithFilePicker(
-  bytes: Uint8Array,
+export async function requestSaveFileHandle(
   suggestedName: string,
-): Promise<string | null> {
+): Promise<FileSystemFileHandle | null> {
   if (!canUseSaveFilePicker()) return null;
   const ext = detectCodingExtension(suggestedName);
   const cleanSuggested = ensureCodingFileName(suggestedName, ext);
@@ -85,26 +79,55 @@ export async function saveBytesWithFilePicker(
   };
   if (!win.showSaveFilePicker) return null;
 
-  const handle = await win.showSaveFilePicker({
-    suggestedName: cleanSuggested,
-    types: [
-      {
-        description:
-          ext === ".cuf"
-            ? "Файл Custom Coding Mitsubishi (.cuf)"
-            : "Файл Variant Coding Mitsubishi (.kon)",
-        accept: {
-          "application/octet-stream": [ext],
+  try {
+    return await win.showSaveFilePicker({
+      suggestedName: cleanSuggested,
+      types: [
+        {
+          description:
+            ext === ".cuf"
+              ? "Файл Custom Coding Mitsubishi (.cuf)"
+              : "Файл Variant Coding Mitsubishi (.kon)",
+          accept: {
+            "application/octet-stream": [ext],
+          },
         },
-      },
-    ],
-  });
+      ],
+    });
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError") {
+      throw err;
+    }
+    return null;
+  }
+}
 
+export async function writeBytesToFileHandle(
+  handle: FileSystemFileHandle,
+  bytes: Uint8Array,
+): Promise<string> {
   const writable = await handle.createWritable();
   const copy = new Uint8Array(bytes);
   await writable.write(copy.buffer as ArrayBuffer);
   await writable.close();
-  return handle.name || cleanSuggested;
+  return handle.name;
+}
+
+/**
+ * Сохраняет файл через системный диалог выбора папки и имени (`showSaveFilePicker`),
+ * если браузер его поддерживает. Возвращает итоговое имя файла или `null`, если диалог недоступен.
+ * При отмене пользователем выбрасывает AbortError.
+ */
+export async function saveBytesWithFilePicker(
+  bytes: Uint8Array,
+  suggestedName: string,
+): Promise<string | null> {
+  const handle = await requestSaveFileHandle(suggestedName);
+  if (!handle) return null;
+  const ext = detectCodingExtension(suggestedName);
+  const cleanSuggested = ensureCodingFileName(suggestedName, ext);
+  const savedName = await writeBytesToFileHandle(handle, bytes);
+  return savedName || cleanSuggested;
 }
 
 /**
