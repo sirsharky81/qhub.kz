@@ -1508,15 +1508,12 @@ async function sendCodingWritePdu(
         const isBlockBoundary = !isLast && blockSize > 0 && cfsSentInCurrentBlock + 1 >= blockSize;
 
         if (isLast) {
-          // On the final Consecutive Frame (`29...` for .cuf or `2D...` for .kon), set `ATST96` (600ms)
-          // BEFORE sending the frame so the adapter listens on the CAN bus for up to 600ms while ETACS
-          // flashes EEPROM and sends back `02 7B B0` / `02 7B B2` or `03 7F 3B 31` (`requestOutOfRange`)!
-          // (On the final frame, the ECU's N_Cr inter-CF timeout is 1000ms, so a 40ms `ATST96` round-trip is 100% safe.)
-          try {
-            await elm.sendCommand("ATST96", 2_000, { quietMs: 2, allowBarePrompt: true });
-          } catch {
-            /* ignore */
-          }
+          // CRITICAL: Send the final Consecutive Frame (`29...` for .cuf or `2D...` for .kon)
+          // IMMEDIATELY with `ATST06` still active and ZERO prior `AT` commands!
+          // Sending `ATST96` or `ATSTFF` before `2D...` / `29...` resets the CAN transceiver state
+          // on `vLinker MC-IOS` in the middle of the ISO-TP stream (exactly why PR #142 removed it!).
+          // If the ECU takes >24ms to flash EEPROM and `2D...` returns `NO DATA` (or `7F 3B 78`),
+          // we set `ATST64` AFTER `2D...` has already been transmitted on the CAN bus and poll with `01 3E`!
           let cfResp = await elm.sendPayload(frames[i]!, 8_000, { quietMs: 15 });
           let cfTokens = extractHexTokens(cfResp);
 
@@ -1524,18 +1521,21 @@ async function sendCodingWritePdu(
             isNoDataOrEmptyReply(cfResp) ||
             hasNegativeResponseForService(cfTokens, writeSvc) === 0x78
           ) {
-            // Brief settle pause (250ms) while ETACS flashes EEPROM before probing `01 3E`
-            await new Promise((resolve) => setTimeout(resolve, 250));
             try {
               await elm.sendCommand("ATST64", 2_000, { quietMs: 3, allowBarePrompt: true });
-              const followUp = await elm.sendPayload("013EFFFFFFFFFFFF", 5_000, { quietMs: 15 });
-              const followTokens = extractHexTokens(followUp);
-              if (
-                hasPositiveWriteAck(followTokens, expectPosSid, targetId) ||
-                hasNegativeResponseForService(followTokens, writeSvc) !== null
-              ) {
-                cfResp = followUp;
-                cfTokens = followTokens;
+              for (let poll = 0; poll < 2; poll++) {
+                const followUp = await elm.sendPayload("013EFFFFFFFFFFFF", 5_000, { quietMs: 15 });
+                const followTokens = extractHexTokens(followUp);
+                if (
+                  hasPositiveWriteAck(followTokens, expectPosSid, targetId) ||
+                  (hasNegativeResponseForService(followTokens, writeSvc) !== null &&
+                    hasNegativeResponseForService(followTokens, writeSvc) !== 0x78)
+                ) {
+                  cfResp = followUp;
+                  cfTokens = followTokens;
+                  break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 150));
               }
             } catch {
               /* ignore */
@@ -1791,22 +1791,25 @@ export async function writeEtacsSingleBlock(
   const candidateTargets: { lid: number[]; data: Uint8Array }[] = [];
 
   if (activeProfile.service === 0x21 && kind === "kon") {
-    // If the ECU's current Variant response (`21 B0` / `21 C0`) is exactly `payload.length + 4` bytes
-    // (e.g. 90 + 4 = 94 bytes on ETACS `21 B0`, or 16 + 4 = 20 bytes on Engine `21 C0`),
-    // MMCodingWriter copies the 90-byte `.kon` payload into indices `0..89` and preserves the ECU's
-    // exact 4-byte tail (`FF FF FF FF`, `A0 01 A0 16`, `00 00 00 00`, etc.) as the primary write payload!
+    // 1. If we pre-read `21 B0` / `21 C0` with `keepKwpTrailer: true`:
+    //    - If `ecuCurrentFullVariant.length === payload.length + 4` (e.g. 94 bytes = 90 coding + 4-byte ECU tail),
+    //      send `payload` + the ECU's exact 4-byte tail first, then `payload` (90 bytes) second.
+    //    - If `ecuCurrentFullVariant.length === payload.length` (the ECU returned exactly 90 bytes with NO 4-byte tail),
+    //      send `payload` (90 bytes) first, and only try 94-byte tail variants as fallbacks!
     if (ecuCurrentFullVariant && ecuCurrentFullVariant.length === payload.length + 4) {
       const mergedWithEcuTail = new Uint8Array(ecuCurrentFullVariant.length);
       mergedWithEcuTail.set(payload, 0);
       mergedWithEcuTail.set(ecuCurrentFullVariant.subarray(payload.length), payload.length);
       candidateTargets.push({ lid: targetId, data: mergedWithEcuTail });
+      candidateTargets.push({ lid: targetId, data: payload });
+    } else {
+      candidateTargets.push({ lid: targetId, data: payload });
     }
-    candidateTargets.push({ lid: targetId, data: payload });
 
     const tailCandidates: number[][] = [
       [0xff, 0xff, 0xff, 0xff],
-      [0xa0, 0x05, 0xa0, 0x01],
       [0xa0, 0x01, 0xa0, 0x16],
+      [0xa0, 0x05, 0xa0, 0x01],
     ];
     for (const tail of tailCandidates) {
       const withTail = new Uint8Array(payload.length + 4);
@@ -1845,14 +1848,28 @@ export async function writeEtacsSingleBlock(
   let isPositive = false;
   let usedTargetId = targetId;
   let usedIdHex = idHex;
+  const triedSizes: number[] = [];
 
   for (let attemptIdx = 0; attemptIdx < candidateTargets.length; attemptIdx++) {
     const cand = candidateTargets[attemptIdx]!;
+    if (!triedSizes.includes(cand.data.length)) {
+      triedSizes.push(cand.data.length);
+    }
     usedTargetId = cand.lid;
     usedIdHex = cand.lid.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
 
     // Keep diagnostic session (and SecurityAccess for .kon) alive before each retry candidate
     if (attemptIdx > 0 && activeProfile.service === 0x21) {
+      try {
+        // Re-configure channel & Flow Control (`ATFCSH620`, `ATFCSD300000`, `ATFCSM1`) before re-unlocking
+        const txHex = activeProfile.txId.toString(16).padStart(3, "0").toUpperCase();
+        await elm.setCanHeader(activeProfile.txId, activeProfile.rxId);
+        await elm.sendCommand(`ATFCSH${txHex}`, 2_000, { quietMs: 3, allowBarePrompt: true });
+        await elm.sendCommand("ATFCSD300000", 2_000, { quietMs: 3, allowBarePrompt: true });
+        await elm.sendCommand("ATFCSM1", 2_000, { quietMs: 3, allowBarePrompt: true });
+      } catch {
+        /* ignore */
+      }
       const sessCmd = kind === "kon" ? "1092" : attemptIdx % 2 === 1 ? "1092" : "1089";
       try {
         await elm.sendPayload(sessCmd, 2_000);

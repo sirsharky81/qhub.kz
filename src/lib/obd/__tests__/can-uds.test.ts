@@ -569,8 +569,11 @@ describe("Mitsubishi ETACS .kon / .cuf dump", () => {
         overrideLidHex: "21 B0",
       }),
     ).rejects.toThrow(/7F 3B 31 — requestOutOfRange/);
-    // Ensure ATST96 was set before the final CF `2D...` so the delayed 7F 3B 31 / 7B B0 response is captured
-    expect(link.written).toContain("ATST96");
+    // Ensure ZERO ATST commands were sent between 2C... and the final CF 2D...
+    const idx2C = link.written.findIndex((cmd) => cmd.startsWith("2C"));
+    const idx2D = link.written.findIndex((cmd) => cmd.startsWith("2D"));
+    expect(idx2C).toBeGreaterThan(0);
+    expect(idx2D).toBe(idx2C + 1);
   });
 
   it("skips 1-byte 21 30 status (02) on ETACS 8637C671 in favor of multi-byte 21 52 / 21 42", async () => {
