@@ -897,8 +897,12 @@ describe("sendUds gate", () => {
     expect(formatUdsPayload([0x10, 0x41, 0xff, 0xe2], 0x22, "746")).toContain("-3.0°");
     expect(formatUdsPayload([0x10, 0x41, 0x00, 0x00], 0x22, "746")).toContain("0.0°");
 
-    // 752 DID 1021: 0xA4 = 2.26 bar (32.8 PSI)
+    // 752 DID 1021: 0xA4 = 2.26 bar (32.8 PSI); 0xE6 = 230 kPa for metric cars
     expect(formatUdsPayload([0x10, 0x21, 0xa4], 0x22, "752")).toContain("2.26 бар");
+    expect(formatUdsPayload([0x10, 0x21, 0xe6], 0x22, "752")).toContain("2.30 бар");
+    expect(formatUdsPayload([0x10, 0x21, 0x00, 0xe6], 0x22, "752")).toContain("2.30 бар");
+    expect(formatUdsPayload([0x10, 0x3d, 0x5a], 0x22, "7E1")).toContain("50 °C");
+    expect(formatUdsPayload([0x10, 0x3d, 0x01, 0x72], 0x22, "7E1")).toContain("37 °C");
 
     // 783 DID 1041: 0x52 (82/255 = 32%)
     expect(formatUdsPayload([0x10, 0x41, 0x52], 0x22, "783")).toContain("32%");

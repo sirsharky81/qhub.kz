@@ -56,7 +56,7 @@ export function ObdScrollShell({ children }: { children: ReactNode }) {
     <ObdScrollContext.Provider value={scrollContextValue}>
       <div
         ref={scrollRef}
-        className="bg-slate-950 text-slate-100"
+        className="bg-white text-gray-900"
         style={{
           position: "fixed",
           inset: 0,

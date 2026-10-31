@@ -24,6 +24,7 @@
 /etacs-dictionaries-local/
 
 # misc
+/subaru-open-bases-export.json
 .DS_Store
 *.pem
 

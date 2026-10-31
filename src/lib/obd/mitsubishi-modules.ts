@@ -1,5 +1,6 @@
 import type { Elm327Client } from "./elm327";
 import { extractHexTokens, stripElmMultiline } from "./hex";
+import { decodeSubaruTpmsBytes } from "./subaru-decode";
 import { parseUdsResponse } from "./uds";
 
 export interface MitsubishiTcmTelemetry {
@@ -559,6 +560,160 @@ const DEFAULT_WHEEL_NAMES: Record<1 | 2 | 3 | 4 | 5, string> = {
   5: "Колесо 5 (Запаска / Spare)",
 };
 
+function decodeMitsubishiTpmsTemp(rawT: number): number | null {
+  if (rawT === 0xff || rawT === 0x00) return null;
+  const as50 = rawT - 50;
+  const as40 = rawT - 40;
+  if (as50 >= -30 && as50 <= 95) return as50;
+  if (as40 >= -30 && as40 <= 95) return as40;
+  return as50;
+}
+
+/** Decode P/T byte pair from KWP 21 xx or UDS 22 102x (several MUT scaling variants). */
+export function decodeMitsubishiTpmsWheelBytes(rawP: number, rawT: number): {
+  pressureBar: number | null;
+  pressureKpa: number | null;
+  pressurePsi: number | null;
+  temperatureC: number | null;
+  statusText: string;
+} {
+  if (rawP === 0xff || rawP === 0x00) {
+    return {
+      pressureBar: null,
+      pressureKpa: null,
+      pressurePsi: null,
+      temperatureC: rawT !== 0xff ? decodeMitsubishiTpmsTemp(rawT) : null,
+      statusText: "Нет давления (0/FF) — датчик спит или нет связи; поездка >30 км/ч",
+    };
+  }
+
+  let best: { kpa: number; bar: number; psi: number } | null = null;
+  for (const mul of [1.373, 2.5, 1.0]) {
+    const kpa = Math.round(rawP * mul);
+    const bar = Number((kpa / 100).toFixed(2));
+    if (bar >= 0.9 && bar <= 5) {
+      best = { kpa, bar, psi: Number((kpa * 0.145038).toFixed(1)) };
+      break;
+    }
+  }
+  if (!best && rawP >= 90 && rawP <= 350) {
+    best = {
+      kpa: rawP,
+      bar: Number((rawP / 100).toFixed(2)),
+      psi: Number((rawP * 0.145038).toFixed(1)),
+    };
+  }
+  if (!best) {
+    const subaruStyle = decodeSubaruTpmsBytes([rawP, rawT]);
+    if (subaruStyle && subaruStyle.bar >= 0.9 && subaruStyle.bar <= 5) {
+      return {
+        pressureBar: subaruStyle.bar,
+        pressureKpa: Math.round(subaruStyle.kpa),
+        pressurePsi: subaruStyle.psi,
+        temperatureC: subaruStyle.temperatureC,
+        statusText: "OK (UDS-style)",
+      };
+    }
+    return {
+      pressureBar: null,
+      pressureKpa: null,
+      pressurePsi: null,
+      temperatureC: decodeMitsubishiTpmsTemp(rawT),
+      statusText: `Сырые P=${rawP} T=${rawT} — не удалось масштабировать`,
+    };
+  }
+  return {
+    pressureBar: best.bar,
+    pressureKpa: best.kpa,
+    pressurePsi: best.psi,
+    temperatureC: decodeMitsubishiTpmsTemp(rawT),
+    statusText: "OK",
+  };
+}
+
+async function readTpmsWheelsUds(
+  elm: Elm327Client,
+  tx: number,
+  rx: number,
+): Promise<{ wheels: TpmsWheelReading[]; rawHex: string } | null> {
+  await elm.setCanHeader(tx, rx);
+  try {
+    await elm.sendPayload("3E00", 800);
+  } catch {
+    /* ignore */
+  }
+  try {
+    await elm.sendPayload("1003", 1_200);
+  } catch {
+    try {
+      await elm.sendPayload("1092", 1_200);
+    } catch {
+      /* ignore */
+    }
+  }
+  const wheels: TpmsWheelReading[] = [];
+  const rawParts: string[] = [];
+  for (const [idx, didHex] of (["1021", "1022", "1023", "1024"] as const).entries()) {
+    const wheelIndex = (idx + 1) as 1 | 2 | 3 | 4;
+    try {
+      const raw = await elm.sendPayload(`22${didHex}`, 1_400);
+      const parsed = parseUdsResponse(raw, 0x22);
+      if (parsed.kind !== "positive" || parsed.payload.length < 3) {
+        wheels.push({
+          wheelIndex,
+          defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
+          sensorIdHex: null,
+          pressureBar: null,
+          pressureKpa: null,
+          pressurePsi: null,
+          temperatureC: null,
+          statusText: "Нет ответа UDS",
+        });
+        continue;
+      }
+      const dataBytes = parsed.payload.slice(2);
+      rawParts.push(`${didHex}:${dataBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}`);
+      const sub = decodeSubaruTpmsBytes(dataBytes);
+      const decoded =
+        sub && sub.bar >= 0.9
+          ? {
+              pressureBar: sub.bar,
+              pressureKpa: Math.round(sub.kpa),
+              pressurePsi: sub.psi,
+              temperatureC: sub.temperatureC,
+              statusText: "OK (UDS)",
+            }
+          : dataBytes.length >= 2
+            ? decodeMitsubishiTpmsWheelBytes(dataBytes[0]!, dataBytes[1]!)
+            : decodeMitsubishiTpmsWheelBytes(dataBytes[0]!, 0xff);
+      wheels.push({
+        wheelIndex,
+        defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
+        sensorIdHex: null,
+        ...decoded,
+      });
+    } catch {
+      wheels.push({
+        wheelIndex,
+        defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
+        sensorIdHex: null,
+        pressureBar: null,
+        pressureKpa: null,
+        pressurePsi: null,
+        temperatureC: null,
+        statusText: "Ошибка UDS",
+      });
+    }
+  }
+  try {
+    await elm.sendPayload("1001", 800);
+  } catch {
+    /* ignore */
+  }
+  if (wheels.every((w) => w.pressureBar == null) && rawParts.length === 0) return null;
+  return { wheels, rawHex: rawParts.join(" ") || "UDS TPMS" };
+}
+
 /**
  * Decode Mitsubishi TPMS sensor data from `773 -> 774` (Pajero Sport III OSS/TPMS) or `600 -> 500` (KOS/TPMS).
  */
@@ -604,22 +759,12 @@ export function decodeMitsubishiTpmsPayload(options: {
       }
       // On Pajero Sport 3G (773 -> 774), pressure byte P and temp byte T:
       // P in kPa = P * 1.373 (or P * 2.5 kPa) -> bar = kPa / 100; Temp = T - 50 °C (or T - 40 °C)
-      const rawP = data[0]!;
-      const rawT = data[1]!;
-      const valid = rawP !== 0xff && rawP !== 0x00;
-      const kpa = valid ? Math.round(rawP * 1.373) : null;
-      const bar = kpa != null ? Number((kpa / 100).toFixed(2)) : null;
-      const psi = kpa != null ? Number((kpa * 0.145038).toFixed(1)) : null;
-      const tempC = valid && rawT !== 0xff ? rawT - 50 : null;
+      const decoded = decodeMitsubishiTpmsWheelBytes(data[0]!, data[1]!);
       return {
         wheelIndex,
         defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
         sensorIdHex: sensorIds[idx] ?? null,
-        pressureBar: bar,
-        pressureKpa: kpa,
-        pressurePsi: psi,
-        temperatureC: tempC,
-        statusText: valid ? "OK" : "Датчик не активен",
+        ...decoded,
       };
     });
   }
@@ -642,22 +787,12 @@ export function decodeMitsubishiTpmsPayload(options: {
           statusText: "Не используется",
         };
       }
-      const rawP = combined[offset]!;
-      const rawT = combined[offset + 1]!;
-      const valid = rawP !== 0xff && rawP !== 0x00;
-      const kpa = valid ? Math.round(rawP * 1.373) : null;
-      const bar = kpa != null ? Number((kpa / 100).toFixed(2)) : null;
-      const psi = kpa != null ? Number((kpa * 0.145038).toFixed(1)) : null;
-      const tempC = valid && rawT !== 0xff ? rawT - 50 : null;
+      const decoded = decodeMitsubishiTpmsWheelBytes(combined[offset]!, combined[offset + 1]!);
       return {
         wheelIndex,
         defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
         sensorIdHex: sensorIds[idx] ?? null,
-        pressureBar: bar,
-        pressureKpa: kpa,
-        pressurePsi: psi,
-        temperatureC: tempC,
-        statusText: valid ? "OK" : "Прочерк (FF)",
+        ...decoded,
       };
     });
   }
@@ -713,22 +848,20 @@ export async function readTpmsSensors(
         const raw = await elm.sendPayload(`22${didHex}`, 1_200);
         const parsed = parseUdsResponse(raw, 0x22);
         if (parsed.kind === "positive" && parsed.payload.length >= 3) {
-          const a = parsed.payload[2]!;
-          const tempByte = parsed.payload[3];
-          const kpa = Math.round(a * 1.379);
-          const bar = Number((a * 0.01379).toFixed(2));
-          const psi = Number((a * 0.2).toFixed(1));
-          const temperatureC = tempByte != null && tempByte !== 0xff ? tempByte - 50 : null;
-          rawParts.push(`${didHex}:${a.toString(16).padStart(2, "0").toUpperCase()}`);
+          const dataBytes = parsed.payload.slice(2);
+          const decoded = decodeSubaruTpmsBytes(dataBytes);
+          rawParts.push(
+            `${didHex}:${dataBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}`,
+          );
           wheels.push({
             wheelIndex,
             defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
             sensorIdHex: null,
-            pressureBar: bar,
-            pressureKpa: kpa,
-            pressurePsi: psi,
-            temperatureC,
-            statusText: a > 0 ? "OK" : "0 бар",
+            pressureBar: decoded?.bar ?? null,
+            pressureKpa: decoded ? Math.round(decoded.kpa) : null,
+            pressurePsi: decoded?.psi ?? null,
+            temperatureC: decoded?.temperatureC ?? null,
+            statusText: decoded ? "OK" : "Нет давления",
           });
         } else {
           wheels.push({
@@ -779,9 +912,9 @@ export async function readTpmsSensors(
       : target === "mitsubishi-600"
         ? [{ tx: 0x600, rx: 0x500, name: "Mitsubishi KOS / TPMS (600 → 500 · Outlander / ASX)" }]
         : [
-            { tx: 0x773, rx: 0x774, name: "Mitsubishi OSS / TPMS (773 → 774 · Pajero Sport III)" },
             { tx: 0x600, rx: 0x500, name: "Mitsubishi KOS / TPMS (600 → 500 · Outlander / ASX)" },
-            { tx: 0x620, rx: 0x504, name: "Mitsubishi ETACS / TPMS (620 → 504)" },
+            { tx: 0x773, rx: 0x774, name: "Mitsubishi OSS / TPMS (773 → 774 · Pajero Sport III)" },
+            { tx: 0x620, rx: 0x504, name: "Mitsubishi ETACS (620 → 504 · UDS/KWP)" },
           ];
 
   let lastErr = "Нет ответа от блока TPMS (773→774 / 600→500)";
@@ -796,7 +929,7 @@ export async function readTpmsSensors(
       let lid2128: number[] | null = null;
       const individualWheels: (number[] | null)[] = [null, null, null, null, null];
 
-      for (const lid of [0x01, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x28]) {
+      for (const lid of [0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x28]) {
         const lidHex = lid.toString(16).padStart(2, "0").toUpperCase();
         try {
           const raw = await elm.sendPayload(`21${lidHex}`, 1_800);
@@ -806,7 +939,9 @@ export async function readTpmsSensors(
               `21${lidHex}: ${data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`,
             );
             if (lid === 0x01) lid2101 = data;
-            else if (lid === 0x10) {
+            else if (lid >= 0x02 && lid <= 0x05 && data.length >= 2) {
+              individualWheels[lid - 0x02] = data;
+            } else if (lid === 0x10) {
               lid2110 = data;
               if (data.length <= 6) individualWheels[0] = data;
             } else if (lid >= 0x11 && lid <= 0x15) {
@@ -827,6 +962,21 @@ export async function readTpmsSensors(
           lid2128,
           individualWheels: individualWheels.some(Boolean) ? individualWheels : undefined,
         });
+        if (!wheels.some((w) => w.pressureBar != null)) {
+          const udsAttempt = await readTpmsWheelsUds(elm, mod.tx, mod.rx);
+          if (udsAttempt?.wheels.some((w) => w.pressureBar != null)) {
+            return {
+              brand: "mitsubishi",
+              moduleName: `${mod.name} · UDS 22 1021–1024`,
+              txHex: mod.tx.toString(16).toUpperCase(),
+              rxHex: mod.rx.toString(16).toUpperCase(),
+              partNumber: passport.partNumber,
+              activeSet: 1,
+              wheels: udsAttempt.wheels,
+              rawHex: `${rawLogs.join(" | ")} | ${udsAttempt.rawHex}`,
+            };
+          }
+        }
         return {
           brand: "mitsubishi",
           moduleName: mod.name,
@@ -842,6 +992,43 @@ export async function readTpmsSensors(
       lastErr = e instanceof Error ? e.message : String(e);
     } finally {
       await closeMitsubishiKwpSession(elm);
+    }
+
+    const udsAttempt = await readTpmsWheelsUds(elm, mod.tx, mod.rx);
+    if (udsAttempt && udsAttempt.wheels.some((w) => w.pressureBar != null)) {
+      return {
+        brand: "mitsubishi",
+        moduleName: `${mod.name} · UDS 22 1021–1024`,
+        txHex: mod.tx.toString(16).toUpperCase(),
+        rxHex: mod.rx.toString(16).toUpperCase(),
+        partNumber: null,
+        activeSet: 1,
+        wheels: udsAttempt.wheels,
+        rawHex: udsAttempt.rawHex,
+      };
+    }
+  }
+
+  for (const mod of [
+    { tx: 0x620, rx: 0x504, name: "Mitsubishi ETACS (620 → 504)" },
+    { tx: 0x7a1, rx: 0x509, name: "Mitsubishi ETACS alt (7A1 → 509)" },
+  ]) {
+    try {
+      const udsAttempt = await readTpmsWheelsUds(elm, mod.tx, mod.rx);
+      if (udsAttempt && udsAttempt.wheels.some((w) => w.pressureBar != null)) {
+        return {
+          brand: "mitsubishi",
+          moduleName: `${mod.name} · UDS TPMS`,
+          txHex: mod.tx.toString(16).toUpperCase(),
+          rxHex: mod.rx.toString(16).toUpperCase(),
+          partNumber: null,
+          activeSet: 1,
+          wheels: udsAttempt.wheels,
+          rawHex: udsAttempt.rawHex,
+        };
+      }
+    } catch {
+      /* next */
     }
   }
 

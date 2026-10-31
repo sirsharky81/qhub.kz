@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#059669",
+  themeColor: "#ffffff",
   // Keep the layout height still while the browser chrome shows and hides.
   interactiveWidget: "resizes-visual",
 };

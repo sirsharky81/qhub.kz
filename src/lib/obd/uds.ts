@@ -1,5 +1,12 @@
 import { extractHexTokens, stripElmMultiline } from "./hex";
 import { describeDtcCode } from "./dtc-descriptions";
+import { remedyForDtcCode } from "./dtc-remedies";
+import {
+  decodeSubaruTemperatureBytes,
+  decodeSubaruTpmsBytes,
+  formatSubaruTempText,
+  formatSubaruTpmsText,
+} from "./subaru-decode";
 
 export interface UdsTemplate {
   id: string;
@@ -48,6 +55,10 @@ export const DID_LABELS: Record<string, string> = {
 };
 
 export const MODULE_DID_LABELS: Record<string, Record<string, string>> = {
+  "7E1": {
+    "103D": "Температура жидкости вариатора CVTF (103D)",
+    "101B": "Напряжение питания блока TCM (101B)",
+  },
   "7A2": {
     "1001": "Температура агрегата 1 (1001)",
     "1005": "Температура агрегата 2 (1005)",
@@ -408,6 +419,7 @@ export interface ParsedUdsDtc {
   statusByte: number;
   active: boolean;
   description: string;
+  remedy: string;
 }
 
 export function parseUdsDtcs1902(payload: number[]): ParsedUdsDtc[] {
@@ -427,6 +439,7 @@ export function parseUdsDtcs1902(payload: number[]): ParsedUdsDtc[] {
       statusByte: status,
       active,
       description: describeDtcCode(code),
+      remedy: remedyForDtcCode(code),
     });
   }
   return out;
@@ -455,6 +468,7 @@ export function parseKwpDtcs18(payload: number[]): ParsedUdsDtc[] {
       statusByte: status,
       active,
       description: describeDtcCode(code),
+      remedy: remedyForDtcCode(code),
     });
   }
   return out;
@@ -588,11 +602,20 @@ export function formatUdsPayload(payload: number[], requestSid?: number, txHex?:
       const dir = s16 === 0 ? "ровно 0.0°" : s16 < 0 ? `${deg}° (вправо)` : `+${deg}° (влево)`;
       return `${label ? `${label}: ` : ""}${dir}  [${dataHex} · знак=${s16}]`;
     }
-    if (cleanTx === "752" && ["1021", "1022", "1023", "1024"].includes(didHex) && dataBytes.length === 1) {
-      const a = dataBytes[0]!;
-      const bar = (a * 0.01379).toFixed(2);
-      const psi = (a * 0.2).toFixed(1);
-      return `${label ? `${label}: ` : ""}${bar} бар (${psi} PSI)  [${dataHex}=${a}]`;
+    if (cleanTx === "752" && ["1021", "1022", "1023", "1024"].includes(didHex) && dataBytes.length >= 1) {
+      const tpms = decodeSubaruTpmsBytes(dataBytes);
+      if (tpms) {
+        return `${label ? `${label}: ` : ""}${formatSubaruTpmsText(tpms)}  [${dataHex}]`;
+      }
+    }
+    if (
+      (didHex === "103D" || didHex === "1297" || didHex === "1298" || didHex === "10CB" || didHex === "10CC") &&
+      dataBytes.length >= 1
+    ) {
+      const temp = decodeSubaruTemperatureBytes(dataBytes);
+      if (temp) {
+        return `${label ? `${label}: ` : ""}${formatSubaruTempText(temp)}  [${dataHex}]`;
+      }
     }
     if (cleanTx === "783" && (didHex === "1041" || didHex === "1042") && dataBytes.length === 1) {
       const a = dataBytes[0]!;

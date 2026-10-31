@@ -40,7 +40,6 @@ import {
   type DecodedBroadcastSignal,
   type MitsubishiMeterReport,
   type MitsubishiTcmTelemetry,
-  type SasCalibrationResult,
   type TpmsModuleReport,
 } from "@/lib/obd/mitsubishi-modules";
 
@@ -49,7 +48,7 @@ type TpmsWheelPosition = "FL" | "FR" | "RR" | "RL" | "SPARE";
 const RECORD_LIMIT = 50_000;
 const TAPE_LIMIT = 40;
 
-type CanSubView = "dashboard" | "steering" | "safety" | "dtcs" | "expert" | "monitor";
+type CanSubView = "dashboard" | "safety" | "dtcs" | "expert" | "monitor";
 
 interface FrameRow {
   id: string;
@@ -124,22 +123,6 @@ export default function CanUdsPanel({
   const [diffDumpB, setDiffDumpB] = useState<{ name: string; dump: SubaruRegionConfigDump } | null>(null);
   const [diffRows, setDiffRows] = useState<SubaruDidDiffEntry[] | null>(null);
 
-  // Steering alignment (746 EPS / 622 SAS / 784 ABS) state
-  const [steeringRunning, setSteeringRunning] = useState(false);
-  const [steeringSource, setSteeringSource] = useState<"subaru-746" | "mitsu-622" | "mitsu-784">("subaru-746");
-  const [steeringData, setSteeringData] = useState<{
-    angleDeg: number;
-    rawHex: string;
-    torqueRaw: number | null;
-    loadRaw: number | null;
-    supplyVolts: number | null;
-    angularSpeedDegPerSec?: number | null;
-    calibrated?: boolean | null;
-    sourceLabel?: string;
-    ticks: number;
-  } | null>(null);
-  const [sasCalResult, setSasCalResult] = useState<SasCalibrationResult | null>(null);
-
   // Mitsubishi AT/CVT (7E1 -> 7E9) live & single-shot state
   const [mitsuTcmData, setMitsuTcmData] = useState<MitsubishiTcmTelemetry | null>(null);
   const [mitsuTcmLive, setMitsuTcmLive] = useState(false);
@@ -194,7 +177,6 @@ export default function CanUdsPanel({
 
   const stopScanRef = useRef(false);
   const stopLiveUdsRef = useRef(false);
-  const stopSteeringRef = useRef(false);
   const recordsRef = useRef<CsvRow[]>([]);
   const recordingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
@@ -894,157 +876,6 @@ export default function CanUdsPanel({
     stopLiveUdsRef.current = true;
   };
 
-  const startSteeringMonitor = async () => {
-    stopSteeringRef.current = false;
-    setSteeringRunning(true);
-    setBusy(true);
-    setLocalError(null);
-    if (steeringSource !== "subaru-746") {
-      const src = steeringSource === "mitsu-622" ? "sas-622" : "abs-784";
-      onLog(
-        `Старт мониторинга угла руля Mitsubishi (${
-          src === "sas-622" ? "SAS 622 → 484" : "ABS/ASC 784 → 785"
-        })`,
-      );
-      try {
-        let ticks = 0;
-        while (!stopSteeringRef.current) {
-          ticks += 1;
-          try {
-            const mitsu = await session.readMitsubishiSteeringAngle(src);
-            deferUi(() => {
-              setSteeringData({
-                angleDeg: mitsu.angleDeg,
-                rawHex: mitsu.rawHex,
-                torqueRaw: null,
-                loadRaw: null,
-                supplyVolts: null,
-                angularSpeedDegPerSec: mitsu.angularSpeedDegPerSec,
-                calibrated: mitsu.calibrated,
-                sourceLabel: `${mitsu.txHex} → ${mitsu.rxHex}`,
-                ticks,
-              });
-            });
-          } catch {
-            /* continue polling */
-          }
-        }
-      } finally {
-        setSteeringRunning(false);
-        setBusy(false);
-        onLog("Мониторинг угла руля Mitsubishi остановлен (сессия 10 81 закрыта)");
-      }
-      return;
-    }
-
-    onLog("Старт мониторинга угла поворота руля Subaru (746 → 74E · DID 1041)");
-    try {
-      try {
-        await session.sendUds(protocol, "746", "74E", "10 03", false);
-      } catch {
-        /* ignore */
-      }
-      let ticks = 0;
-      let supplyVolts: number | null = null;
-      let torqueRaw: number | null = null;
-      let loadRaw: number | null = null;
-      while (!stopSteeringRef.current) {
-        ticks += 1;
-        if (ticks % 8 === 0) {
-          try {
-            await session.sendUds(protocol, "746", "74E", "3E 00", false);
-          } catch {
-            /* ignore */
-          }
-        }
-        try {
-          const resAngle = await session.sendUds(protocol, "746", "74E", "22 1041", false);
-          if (resAngle.parsed.kind === "positive" && resAngle.parsed.payload.length >= 4) {
-            const b0 = resAngle.parsed.payload[2]!;
-            const b1 = resAngle.parsed.payload[3]!;
-            const u16 = (b0 << 8) | b1;
-            const s16 = u16 >= 0x8000 ? u16 - 0x10000 : u16;
-            const angleDeg = s16 / 10;
-            const rawHex = `${b0.toString(16).padStart(2, "0").toUpperCase()} ${b1.toString(16).padStart(2, "0").toUpperCase()}`;
-
-            if (ticks === 1 || ticks % 5 === 0) {
-              try {
-                const resTorque = await session.sendUds(protocol, "746", "74E", "22 1006", false);
-                if (resTorque.parsed.kind === "positive" && resTorque.parsed.payload.length >= 4) {
-                  const u = (resTorque.parsed.payload[2]! << 8) | resTorque.parsed.payload[3]!;
-                  torqueRaw = u >= 0x8000 ? u - 0x10000 : u;
-                }
-                const resLoad = await session.sendUds(protocol, "746", "74E", "22 1007", false);
-                if (resLoad.parsed.kind === "positive" && resLoad.parsed.payload.length >= 4) {
-                  const u = (resLoad.parsed.payload[2]! << 8) | resLoad.parsed.payload[3]!;
-                  loadRaw = u >= 0x8000 ? u - 0x10000 : u;
-                }
-                const resV = await session.sendUds(protocol, "746", "74E", "22 101B", false);
-                if (resV.parsed.kind === "positive" && resV.parsed.payload.length >= 4) {
-                  const mv = (resV.parsed.payload[2]! << 8) | resV.parsed.payload[3]!;
-                  supplyVolts = mv / 1000;
-                }
-              } catch {
-                /* ignore auxiliary DIDs */
-              }
-            }
-
-            deferUi(() => {
-              setSteeringData({
-                angleDeg,
-                rawHex,
-                torqueRaw,
-                loadRaw,
-                supplyVolts,
-                sourceLabel: "Subaru EPS (746 → 74E)",
-                ticks,
-              });
-            });
-          }
-        } catch {
-          /* continue polling */
-        }
-      }
-    } finally {
-      try {
-        await session.sendUds(protocol, "746", "74E", "10 01", false);
-      } catch {
-        /* ignore */
-      }
-      setSteeringRunning(false);
-      setBusy(false);
-      onLog("Мониторинг угла руля остановлен (EPS 746 возвращён в 10 01)");
-    }
-  };
-
-  const stopSteeringMonitor = () => {
-    stopSteeringRef.current = true;
-  };
-
-  const runSasZeroCalibration = async () => {
-    const confirmed = window.confirm(
-      "Калибровка нулевого положения датчика угла руля Mitsubishi (SAS 622 → 484 / ABS 784 → 785).\n\n" +
-        "Условия перед запуском:\n" +
-        "1. Автомобиль стоит на ровной горизонтальной площадке.\n" +
-        "2. Передние колёса и рулевое колесо выставлены строго прямо (0.0°).\n" +
-        "3. Селектор КПП в положении P или N, зажигание ON.\n\n" +
-        "Выполнить запись нулевой точки (31 02 → 31 01)?",
-    );
-    if (!confirmed) return;
-    setBusy(true);
-    setLocalError(null);
-    setSasCalResult(null);
-    try {
-      const res = await session.calibrateMitsubishiSasZero();
-      setSasCalResult(res);
-      onLog(res.success ? "Калибровка нуля руля SAS (622) завершена успешно" : "Ошибка калибровки SAS");
-    } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "Ошибка калибровки нуля руля SAS");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const readMitsuTcmOnce = async () => {
     setBusy(true);
     setLocalError(null);
@@ -1324,9 +1155,6 @@ export default function CanUdsPanel({
       if (monitoring && nextView !== "monitor") {
         await stopMonitor();
       }
-      if (steeringRunning && nextView !== "steering") {
-        stopSteeringRef.current = true;
-      }
       if (mitsuTcmLive && nextView !== "dashboard") {
         stopMitsuTcmRef.current = true;
       }
@@ -1340,7 +1168,7 @@ export default function CanUdsPanel({
   return (
     <section className="flex min-w-0 flex-col gap-3">
       {!enabled ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500">
           <span>
             Сначала подключите адаптер сверху, чтобы отправлять запросы в CAN. Навигация, настройка колёс TPMS и сравнение дампов доступны офлайн.
           </span>
@@ -1348,7 +1176,7 @@ export default function CanUdsPanel({
             <button
               type="button"
               onClick={() => void exportCapture()}
-              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200"
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800"
             >
               CSV ({recordCount})
             </button>
@@ -1356,14 +1184,11 @@ export default function CanUdsPanel({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-1.5">
+      <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-gray-200 bg-white p-1.5">
         <ProtocolButton active={view === "dashboard"} onClick={() => switchCanSubView("dashboard")}>
           Показатели UDS
         </ProtocolButton>
-        <ProtocolButton active={view === "steering"} onClick={() => switchCanSubView("steering")}>
-          Угол руля (0°)
-        </ProtocolButton>
-        <ProtocolButton active={view === "safety"} onClick={() => switchCanSubView("safety")}>
+<ProtocolButton active={view === "safety"} onClick={() => switchCanSubView("safety")}>
           Подушки / Тормоза
         </ProtocolButton>
         <ProtocolButton active={view === "dtcs"} onClick={() => switchCanSubView("dtcs")}>
@@ -1387,29 +1212,29 @@ export default function CanUdsPanel({
       </div>
 
       {volts != null && volts < 11.5 ? (
-        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+        <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           Напряжение борта {volts.toFixed(1)} В. Для заглушённого двигателя это мало: возможны обрывы связи с блоками.
         </p>
       ) : null}
 
       {localError ? (
-        <p className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">{localError}</p>
+        <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">{localError}</p>
       ) : null}
 
       {view === "dashboard" ? (
         <div className="flex flex-col gap-3">
           {/* Card 1: Mitsubishi AT / CVT Telemetry (7E1 -> 7E9) */}
-          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3.5">
+          <div className="rounded-xl border border-emerald-300 bg-white p-3.5">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <div className="text-xs font-semibold text-emerald-300">
+                <div className="text-xs font-semibold text-emerald-700">
                   Mitsubishi АКПП (8AT V8AWG / 5AT) и Вариатор CVT (`7E1 → 7E9` · KWP `21 02` / `21 04` / `21 03`)
                 </div>
-                <p className="mt-0.5 text-[11px] text-slate-400">
+                <p className="mt-0.5 text-[11px] text-gray-500">
                   Температура масла АКПП (`°C`), текущая включенная передача (`1..8`), явный статус <strong>«Передача выключена (P/N / Автонейтраль)»</strong>, обороты входного/выходного валов и скольжение блокировки гидротрансформатора.
                 </p>
               </div>
-              <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+              <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-700">
                 7E1 → 7E9
               </span>
             </div>
@@ -1419,7 +1244,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void readMitsuTcmOnce()}
-                className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                className="flex-1 rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
                 Прочитать АКПП / CVT (21 02 + 21 04)
               </button>
@@ -1428,7 +1253,7 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={hwBusy || monitoring}
                   onClick={() => void startMitsuTcmLive()}
-                  className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-3 py-2.5 text-xs font-semibold text-emerald-200 disabled:opacity-40"
+                  className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800 disabled:opacity-40"
                 >
                   Живой поток АКПП
                 </button>
@@ -1445,18 +1270,18 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void readMitsuMeterOnce()}
-                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs font-medium text-slate-200 disabled:opacity-40"
+                className="rounded-xl border border-gray-300 bg-gray-50 px-3 py-2.5 text-xs font-medium text-gray-800 disabled:opacity-40"
               >
                 Приборка 6A0 (Топливо в л / Пробег)
               </button>
             </div>
 
             {mitsuTcmData ? (
-              <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950 p-3">
+              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                   {/* ATF / CVT Temperature */}
-                  <div className="rounded-lg border border-slate-800/90 bg-slate-900/80 p-2.5">
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                  <div className="rounded-lg border border-gray-200/90 bg-white p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">
                       Температура ATF / CVT
                     </div>
                     <div
@@ -1464,13 +1289,13 @@ export default function CanUdsPanel({
                         mitsuTcmData.atfTempC != null && mitsuTcmData.atfTempC >= 100
                           ? "text-rose-400"
                           : mitsuTcmData.atfTempC != null && mitsuTcmData.atfTempC >= 55
-                            ? "text-emerald-400"
-                            : "text-sky-300"
+                            ? "text-emerald-600"
+                            : "text-blue-600"
                       }`}
                     >
                       {mitsuTcmData.atfTempC != null ? `${mitsuTcmData.atfTempC} °C` : "—"}
                     </div>
-                    <div className="mt-0.5 text-[10px] text-slate-400">
+                    <div className="mt-0.5 text-[10px] text-gray-500">
                       {mitsuTcmData.atfTempC == null
                         ? "Формула F - 40"
                         : mitsuTcmData.atfTempC > 110
@@ -1484,14 +1309,14 @@ export default function CanUdsPanel({
                   </div>
 
                   {/* Engaged Gear */}
-                  <div className="rounded-lg border border-slate-800/90 bg-slate-900/80 p-2.5">
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                  <div className="rounded-lg border border-gray-200/90 bg-white p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">
                       Включенная передача
                     </div>
-                    <div className="mt-1 font-mono text-xl font-bold text-slate-100">
+                    <div className="mt-1 font-mono text-xl font-bold text-gray-900">
                       {mitsuTcmData.currentGearText}
                     </div>
-                    <div className="mt-0.5 text-[10px] text-slate-400">
+                    <div className="mt-0.5 text-[10px] text-gray-500">
                       Селектор: <strong>{mitsuTcmData.selectorPosition}</strong>
                     </div>
                   </div>
@@ -1501,78 +1326,78 @@ export default function CanUdsPanel({
                     className={`col-span-2 rounded-lg border p-2.5 sm:col-span-1 ${
                       mitsuTcmData.isGearDisengaged
                         ? "border-amber-500/50 bg-amber-950/25"
-                        : "border-emerald-500/40 bg-emerald-950/20"
+                        : "border-emerald-300 bg-emerald-50"
                     }`}
                   >
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">
                       Состояние передачи в КПП
                     </div>
                     <div
                       className={`mt-1 text-xs font-bold ${
-                        mitsuTcmData.isGearDisengaged ? "text-amber-300" : "text-emerald-300"
+                        mitsuTcmData.isGearDisengaged ? "text-amber-800" : "text-emerald-700"
                       }`}
                     >
                       {mitsuTcmData.isGearDisengaged
                         ? "ПЕРЕДАЧА ВЫКЛЮЧЕНА (РАЗОМКНУТА)"
                         : "ПЕРЕДАЧА ВКЛЮЧЕНА (В ЗАЦЕПЛЕНИИ)"}
                     </div>
-                    <div className="mt-0.5 text-[11px] text-slate-300">
+                    <div className="mt-0.5 text-[11px] text-gray-700">
                       {mitsuTcmData.disengagedStateText}
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-2.5 grid grid-cols-2 gap-2 border-t border-slate-800/80 pt-2.5 font-mono text-xs sm:grid-cols-4">
+                <div className="mt-2.5 grid grid-cols-2 gap-2 border-t border-gray-200 pt-2.5 font-mono text-xs sm:grid-cols-4">
                   <div>
-                    <div className="font-sans text-[10px] text-slate-500">Первичный вал (Input)</div>
-                    <div className="text-slate-200">
+                    <div className="font-sans text-[10px] text-gray-500">Первичный вал (Input)</div>
+                    <div className="text-gray-800">
                       {mitsuTcmData.inputShaftRpm != null ? `${mitsuTcmData.inputShaftRpm} об/мин` : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="font-sans text-[10px] text-slate-500">Вторичный вал (Output)</div>
-                    <div className="text-slate-200">
+                    <div className="font-sans text-[10px] text-gray-500">Вторичный вал (Output)</div>
+                    <div className="text-gray-800">
                       {mitsuTcmData.outputShaftRpm != null ? `${mitsuTcmData.outputShaftRpm} об/мин` : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="font-sans text-[10px] text-slate-500">Скольжение ГДТ (Slip)</div>
-                    <div className="text-slate-200">
+                    <div className="font-sans text-[10px] text-gray-500">Скольжение ГДТ (Slip)</div>
+                    <div className="text-gray-800">
                       {mitsuTcmData.torqueConverterSlipRpm != null ? `${mitsuTcmData.torqueConverterSlipRpm} об/мин` : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="font-sans text-[10px] text-slate-500">Питание TCM / Скорость</div>
-                    <div className="text-slate-200">
+                    <div className="font-sans text-[10px] text-gray-500">Питание TCM / Скорость</div>
+                    <div className="text-gray-800">
                       {mitsuTcmData.controlVoltageV != null ? `${mitsuTcmData.controlVoltageV} В` : "—"} ·{" "}
                       {mitsuTcmData.vehicleSpeedKmh != null ? `${mitsuTcmData.vehicleSpeedKmh} км/ч` : "—"}
                     </div>
                   </div>
                 </div>
                 {mitsuTcmData.cvtDegradationCount != null ? (
-                  <div className="mt-2 border-t border-slate-800/80 pt-1.5 text-xs text-slate-300">
+                  <div className="mt-2 border-t border-gray-200 pt-1.5 text-xs text-gray-700">
                     Счётчик деградации жидкости CVT (`21 10`):{" "}
-                    <strong className="font-mono text-emerald-300">{mitsuTcmData.cvtDegradationCount}</strong> ед.
+                    <strong className="font-mono text-emerald-700">{mitsuTcmData.cvtDegradationCount}</strong> ед.
                   </div>
                 ) : null}
               </div>
             ) : null}
 
             {mitsuMeter ? (
-              <div className="mt-2.5 rounded-xl border border-slate-800 bg-slate-950/90 p-2.5 text-xs">
-                <div className="font-semibold text-emerald-300">
+              <div className="mt-2.5 rounded-xl border border-gray-200 bg-gray-50/90 p-2.5 text-xs">
+                <div className="font-semibold text-emerald-700">
                   Приборная панель Mitsubishi (`6A0 → 514` · KWP `21 A3` / `21 AD`)
                 </div>
                 <div className="mt-1.5 grid grid-cols-2 gap-2 font-mono">
-                  <div className="rounded bg-slate-900 p-2">
-                    <div className="font-sans text-[10px] text-slate-400">Остаток топлива в баке (`21 A3`)</div>
-                    <div className="text-base font-bold text-emerald-300">
+                  <div className="rounded bg-white p-2">
+                    <div className="font-sans text-[10px] text-gray-500">Остаток топлива в баке (`21 A3`)</div>
+                    <div className="text-base font-bold text-emerald-700">
                       {mitsuMeter.fuelLiters != null ? `${mitsuMeter.fuelLiters} л` : "нет ответа"}
                     </div>
                   </div>
-                  <div className="rounded bg-slate-900 p-2">
-                    <div className="font-sans text-[10px] text-slate-400">Одометр в приборке (`21 AD`)</div>
-                    <div className="text-base font-bold text-slate-100">
+                  <div className="rounded bg-white p-2">
+                    <div className="font-sans text-[10px] text-gray-500">Одометр в приборке (`21 AD`)</div>
+                    <div className="text-base font-bold text-gray-900">
                       {mitsuMeter.odometerKm != null ? `${mitsuMeter.odometerKm.toLocaleString("ru-RU")} км` : "нет ответа"}
                     </div>
                   </div>
@@ -1582,13 +1407,13 @@ export default function CanUdsPanel({
           </div>
 
           {/* Card 2: TPMS 4+1 Wheel Map (Mitsubishi 773/600 & Subaru 752) */}
-          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3.5">
+          <div className="rounded-xl border border-emerald-300 bg-white p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-xs font-semibold text-emerald-300">
+                <div className="text-xs font-semibold text-emerald-700">
                   Давление и температура в шинах (TPMS Карта 4+1 с запаской)
                 </div>
-                <p className="mt-0.5 text-[11px] text-slate-400">
+                <p className="mt-0.5 text-[11px] text-gray-500">
                   Mitsubishi Pajero Sport III (`773 → 774` OSS/TPMS), Outlander III / ASX (`600 → 500` KOS/TPMS) и Subaru SGP (`752 → 75A`). Поддерживается перестановка позиций колёс после шиномонтажа.
                 </p>
               </div>
@@ -1600,8 +1425,8 @@ export default function CanUdsPanel({
                     onClick={() => setTpmsUnit(u)}
                     className={`rounded px-2 py-0.5 font-mono text-[10px] font-semibold uppercase ${
                       tpmsUnit === u
-                        ? "bg-emerald-600 text-white"
-                        : "border border-slate-700 bg-slate-950 text-slate-400"
+                        ? "bg-gray-900 text-white"
+                        : "border border-gray-300 bg-gray-50 text-gray-500"
                     }`}
                   >
                     {u}
@@ -1617,8 +1442,8 @@ export default function CanUdsPanel({
                 onClick={() => void readTpmsOnce("mitsubishi-773")}
                 className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
                   tpmsTarget === "mitsubishi-773"
-                    ? "bg-emerald-600 text-white"
-                    : "border border-slate-700 bg-slate-950 text-slate-200"
+                    ? "bg-gray-900 text-white"
+                    : "border border-gray-300 bg-gray-50 text-gray-800"
                 }`}
               >
                 Pajero Sport III (773)
@@ -1629,8 +1454,8 @@ export default function CanUdsPanel({
                 onClick={() => void readTpmsOnce("mitsubishi-600")}
                 className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
                   tpmsTarget === "mitsubishi-600"
-                    ? "bg-emerald-600 text-white"
-                    : "border border-slate-700 bg-slate-950 text-slate-200"
+                    ? "bg-gray-900 text-white"
+                    : "border border-gray-300 bg-gray-50 text-gray-800"
                 }`}
               >
                 Outlander / ASX (600)
@@ -1641,8 +1466,8 @@ export default function CanUdsPanel({
                 onClick={() => void readTpmsOnce("subaru-752")}
                 className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
                   tpmsTarget === "subaru-752"
-                    ? "bg-emerald-600 text-white"
-                    : "border border-slate-700 bg-slate-950 text-slate-200"
+                    ? "bg-gray-900 text-white"
+                    : "border border-gray-300 bg-gray-50 text-gray-800"
                 }`}
               >
                 Subaru SGP (752)
@@ -1651,10 +1476,16 @@ export default function CanUdsPanel({
 
             {tpmsReport ? (
               <div className="mt-3 space-y-2">
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                {tpmsReport.wheels.every((w) => w.pressureBar == null) ? (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                    Давление не пришло — выберите блок (600 Outlander / 773 Pajero Sport), IG ON, при необходимости
+                    поездка &gt;30 км/ч. Raw: <span className="font-mono">{tpmsReport.rawHex || "—"}</span>
+                  </p>
+                ) : null}
+                <div className="flex items-center justify-between text-[11px] text-gray-500">
                   <span>Блок: <strong>{tpmsReport.moduleName}</strong></span>
                   {tpmsReport.activeSet ? (
-                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-300">
+                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-700">
                       Комплект шин #{tpmsReport.activeSet}
                     </span>
                   ) : null}
@@ -1692,15 +1523,15 @@ export default function CanUdsPanel({
                         } ${
                           lowPressure
                             ? "border-amber-500/60 bg-amber-950/25"
-                            : "border-slate-800 bg-slate-950/90"
+                            : "border-gray-200 bg-gray-50/90"
                         }`}
                       >
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-[11px] font-semibold text-slate-200">{posNames[pos]}</span>
+                          <span className="text-[11px] font-semibold text-gray-800">{posNames[pos]}</span>
                           <select
                             value={mappedIndex}
                             onChange={(e) => updateTpmsWheelMapping(pos, Number(e.target.value))}
-                            className="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] text-slate-300"
+                            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 font-mono text-[10px] text-gray-700"
                             title="Сопоставление канала датчика ЭБУ с колесом после ротации шин"
                           >
                             {[0, 1, 2, 3, 4].map((idx) => (
@@ -1713,18 +1544,18 @@ export default function CanUdsPanel({
                         <div className="mt-1 flex items-baseline justify-between">
                           <span
                             className={`font-mono text-lg font-bold ${
-                              lowPressure ? "text-amber-300" : "text-emerald-400"
+                              lowPressure ? "text-amber-800" : "text-emerald-600"
                             }`}
                           >
                             {pVal}
                           </span>
-                          <span className="font-mono text-xs text-slate-300">
+                          <span className="font-mono text-xs text-gray-700">
                             {wheel.temperatureC != null ? `${wheel.temperatureC} °C` : "темп. —"}
                           </span>
                         </div>
-                        <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-slate-400">
+                        <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-gray-500">
                           <span>ID: {wheel.sensorIdHex ?? "—"}</span>
-                          <span className="text-slate-300">{wheel.statusText}</span>
+                          <span className="text-gray-700">{wheel.statusText}</span>
                         </div>
                       </div>
                     );
@@ -1734,16 +1565,16 @@ export default function CanUdsPanel({
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
+          <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-semibold text-emerald-200">
+              <div className="text-xs font-semibold text-emerald-800">
                 Безопасные CAN / UDS показатели (только чтение Service 22 / A8 / 21)
               </div>
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+              <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-700">
                 READ-ONLY
               </span>
             </div>
-            <p className="mt-1 text-xs text-slate-300">
+            <p className="mt-1 text-xs text-gray-700">
               Сводка полезных рабочих параметров без затрагивания подушек (SRS) и тормозов (ABS): давление в 4 шинах TPMS (`752`), температуры ДВС/КПП и каналы силовой установки (`7A2` / `7E1`), напряжение бортсети и датчики обоих полубаков (`783`), а также параметры ДВС (`7E0`).
             </p>
             <div className="mt-2.5 grid grid-cols-3 gap-2">
@@ -1751,7 +1582,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru-tcm")}
-                className="rounded-xl bg-emerald-600 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
                 Subaru SGP + Шины
               </button>
@@ -1759,7 +1590,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru")}
-                className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-2.5 py-2.5 text-xs font-medium text-emerald-800 disabled:opacity-40"
               >
                 Subaru ДВС (7E0)
               </button>
@@ -1767,7 +1598,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("pajero")}
-                className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
+                className="rounded-xl border border-gray-300 px-2.5 py-2.5 text-xs disabled:opacity-40"
               >
                 Pajero 21 (7E0+7E1)
               </button>
@@ -1777,250 +1608,34 @@ export default function CanUdsPanel({
                 {catalog.map((row) => (
                   <li
                     key={`${row.name}-${row.unit}`}
-                    className="flex flex-col gap-0.5 rounded-lg border border-slate-800/80 bg-slate-950/90 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-0.5 rounded-lg border border-gray-200 bg-gray-50/90 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <span className="text-xs font-medium text-slate-300">{row.name}</span>
-                    <span className="font-mono text-xs text-emerald-300 sm:text-right">
+                    <span className="text-xs font-medium text-gray-700">{row.name}</span>
+                    <span className="font-mono text-xs text-emerald-700 sm:text-right">
                       {row.value} {row.unit}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="mt-2.5 text-xs text-slate-400">
+              <p className="mt-2.5 text-xs text-gray-500">
                 Нажмите <strong>«Subaru SGP + Шины»</strong> или <strong>«Pajero 21 (7E0+7E1)»</strong> для мгновенного чтения параметров.
               </p>
             )}
           </div>
         </div>
-      ) : view === "steering" ? (
-        <div className="flex flex-col gap-3">
-          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3.5">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-semibold text-emerald-300">
-                  Датчик угла поворота руля (SAS / EPS) и калибровка «нуля» (0.0°)
-                </div>
-                <p className="mt-0.5 text-[11px] text-slate-400">
-                  Точное выставление рулевого колеса в <strong>0.0°</strong> для Subaru (`746 → 74E` EPS) и Mitsubishi (`622 → 484` SAS / `784 → 785` ABS/ASC).
-                </p>
-              </div>
-              <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
-                0.1° SAS
-              </span>
-            </div>
-
-            <div className="mt-2.5 grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                disabled={steeringRunning || busy}
-                onClick={() => setSteeringSource("subaru-746")}
-                className={`rounded-lg px-2 py-2 text-xs font-medium disabled:opacity-40 ${
-                  steeringSource === "subaru-746"
-                    ? "bg-emerald-600 text-white"
-                    : "border border-slate-700 bg-slate-950 text-slate-300"
-                }`}
-              >
-                Subaru EPS (746)
-              </button>
-              <button
-                type="button"
-                disabled={steeringRunning || busy}
-                onClick={() => setSteeringSource("mitsu-622")}
-                className={`rounded-lg px-2 py-2 text-xs font-medium disabled:opacity-40 ${
-                  steeringSource === "mitsu-622"
-                    ? "bg-emerald-600 text-white"
-                    : "border border-slate-700 bg-slate-950 text-slate-300"
-                }`}
-              >
-                Mitsubishi SAS (622)
-              </button>
-              <button
-                type="button"
-                disabled={steeringRunning || busy}
-                onClick={() => setSteeringSource("mitsu-784")}
-                className={`rounded-lg px-2 py-2 text-xs font-medium disabled:opacity-40 ${
-                  steeringSource === "mitsu-784"
-                    ? "bg-emerald-600 text-white"
-                    : "border border-slate-700 bg-slate-950 text-slate-300"
-                }`}
-              >
-                Mitsubishi ABS (784)
-              </button>
-            </div>
-
-            <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950 p-4 text-center">
-              {steeringData ? (
-                <>
-                  <div className="text-[11px] uppercase tracking-wider text-slate-400">
-                    Текущее положение рулевого колеса {steeringData.sourceLabel ? `(${steeringData.sourceLabel})` : ""}
-                  </div>
-                  <div
-                    className={`mt-1 font-mono text-4xl font-bold tabular-nums ${
-                      Math.abs(steeringData.angleDeg) <= 0.5
-                        ? "text-emerald-400"
-                        : Math.abs(steeringData.angleDeg) <= 2.5
-                          ? "text-amber-300"
-                          : "text-rose-400"
-                    }`}
-                  >
-                    {steeringData.angleDeg > 0 ? `+${steeringData.angleDeg.toFixed(1)}` : steeringData.angleDeg.toFixed(1)}°
-                  </div>
-                  <div className="mt-1 text-xs font-medium">
-                    {Math.abs(steeringData.angleDeg) <= 0.3 ? (
-                      <span className="text-emerald-400">РУЛЬ СТОИТ РОВНО ПО ЦЕНТРУ (±0.3°)</span>
-                    ) : steeringData.angleDeg < 0 ? (
-                      <span className="text-amber-300">
-                        Повёрнут ВПРАВО на {Math.abs(steeringData.angleDeg).toFixed(1)}° — поверните чуть влево к 0.0°
-                      </span>
-                    ) : (
-                      <span className="text-amber-300">
-                        Повёрнут ВЛЕВО на {steeringData.angleDeg.toFixed(1)}° — поверните чуть вправо к 0.0°
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Visual alignment bar (-30° .. 0° .. +30°) */}
-                  <div className="mt-3">
-                    <div className="flex justify-between font-mono text-[10px] text-slate-500">
-                      <span>Влево +15°</span>
-                      <span className="text-emerald-400">0.0° Центр</span>
-                      <span>Вправо -15°</span>
-                    </div>
-                    <div className="relative mt-1 h-3 w-full overflow-hidden rounded-full bg-slate-800">
-                      <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-emerald-400/80" />
-                      <div
-                        className={`absolute top-0.5 h-2 w-3 -translate-x-1/2 rounded-full transition-all ${
-                          Math.abs(steeringData.angleDeg) <= 0.5 ? "bg-emerald-400" : "bg-amber-400"
-                        }`}
-                        style={{
-                          left: `${Math.max(4, Math.min(96, 50 - (steeringData.angleDeg / 15) * 45))}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-800/80 pt-2.5 text-left font-mono text-[11px]">
-                    <div>
-                      <div className="font-sans text-[10px] text-slate-500">Сырой код</div>
-                      <div className="text-slate-200">{steeringData.rawHex}</div>
-                    </div>
-                    <div>
-                      <div className="font-sans text-[10px] text-slate-500">
-                        {steeringSource === "subaru-746" ? "Момент на валу (1006)" : "Скорость руля"}
-                      </div>
-                      <div className="text-slate-200">
-                        {steeringSource === "subaru-746"
-                          ? steeringData.torqueRaw != null
-                            ? steeringData.torqueRaw
-                            : "—"
-                          : steeringData.angularSpeedDegPerSec != null
-                            ? `${steeringData.angularSpeedDegPerSec} °/с`
-                            : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="font-sans text-[10px] text-slate-500">
-                        {steeringSource === "subaru-746" ? "Питание EPS (101B)" : "Калибровка SAS"}
-                      </div>
-                      <div className="text-slate-200">
-                        {steeringSource === "subaru-746"
-                          ? steeringData.supplyVolts != null
-                            ? `${steeringData.supplyVolts.toFixed(2)} В`
-                            : "—"
-                          : steeringData.calibrated === true
-                            ? "Калиброван (OK)"
-                            : steeringData.calibrated === false
-                              ? "Требуется 0°"
-                              : "—"}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="py-4 text-xs text-slate-400">
-                  Выберите профиль выше (`Subaru 746`, `Mitsubishi SAS 622` или `ABS 784`) и нажмите кнопку запуска живого потока.
-                </div>
-              )}
-            </div>
-
-            <div className="mt-3 flex gap-2">
-              {!steeringRunning ? (
-                <button
-                  type="button"
-                  disabled={hwBusy || monitoring}
-                  onClick={() => void startSteeringMonitor()}
-                  className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
-                >
-                  Запустить живой уровень руля (0.0°)
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={stopSteeringMonitor}
-                  className="flex-1 rounded-xl bg-amber-600 px-4 py-3 text-xs font-semibold text-white"
-                >
-                  Остановить опрос руля
-                </button>
-              )}
-            </div>
-
-            {/* Mitsubishi SAS Zero-Point Calibration card */}
-            <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-950/15 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-amber-200">
-                  Калибровка нулевого положения руля Mitsubishi (SAS `622 → 484` + ABS `784 → 785`)
-                </span>
-                <span className="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-300">
-                  KWP 31 02 / 31 01
-                </span>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-300">
-                Выполняется после регулировки сход-развала или снятия руля/улитки на Pajero Sport III / Outlander / ASX: переводит датчик `622` в сессию `10 92`, стирает старую поправку (`31 02`), фиксирует новую нулевую точку (`31 01`) и перезапускает блок курсовой устойчивости `784` (`11 01`).
-              </p>
-              <button
-                type="button"
-                disabled={hwBusy || monitoring || steeringRunning}
-                onClick={() => void runSasZeroCalibration()}
-                className="mt-2.5 w-full rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                Выполнить калибровку нуля руля Mitsubishi (0.0°)
-              </button>
-              {sasCalResult ? (
-                <div
-                  className={`mt-2.5 rounded-lg border p-2.5 text-xs ${
-                    sasCalResult.success
-                      ? "border-emerald-500/50 bg-emerald-950/30 text-emerald-200"
-                      : "border-rose-500/50 bg-rose-950/30 text-rose-200"
-                  }`}
-                >
-                  <div className="font-semibold">
-                    {sasCalResult.success
-                      ? "Калибровка нуля датчика угла руля выполнена (0.0°)"
-                      : "Ошибка калибровки нуля руля"}
-                  </div>
-                  <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-slate-300">
-                    {sasCalResult.steps.map((s, idx) => (
-                      <li key={idx}>• {s}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
       ) : view === "safety" ? (
         <div className="flex flex-col gap-3">
-          <div className="rounded-xl border border-amber-500/40 bg-amber-950/15 p-3.5">
+          <div className="rounded-xl border border-amber-300 bg-amber-950/15 p-3.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-amber-200">
+              <span className="text-xs font-semibold text-amber-900">
                 Системы безопасности: Тормоза ABS / VDC / EPB (`7B0`) и Подушки SRS Airbag (`780`)
               </span>
-              <span className="shrink-0 rounded border border-amber-400/50 bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-200">
+              <span className="shrink-0 rounded border border-amber-400/50 bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-900">
                 STRICT READ-ONLY
               </span>
             </div>
-            <p className="mt-1 text-xs text-slate-300">
+            <p className="mt-1 text-xs text-gray-700">
               Эти блоки вынесены отдельно. Разрешено <strong>только чтение паспорта и состояния датчиков (`Service 22`)</strong> с обязательным возвратом в штатную сессию (`10 01`). Любые команды сброса, адаптации или записи для `7B0` и `780` аппаратно заблокированы.
             </p>
             <div className="mt-2.5 grid grid-cols-3 gap-2">
@@ -2036,7 +1651,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("abs")}
-                className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
+                className="rounded-xl border border-amber-500/50 bg-white px-2.5 py-2.5 text-xs font-medium text-amber-900 disabled:opacity-40"
               >
                 Тормоза ABS / EPB (7B0)
               </button>
@@ -2044,7 +1659,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void readSafetyModulesOnce("srs")}
-                className="rounded-xl border border-amber-500/50 bg-slate-900 px-2.5 py-2.5 text-xs font-medium text-amber-200 disabled:opacity-40"
+                className="rounded-xl border border-amber-500/50 bg-white px-2.5 py-2.5 text-xs font-medium text-amber-900 disabled:opacity-40"
               >
                 Подушки SRS (780)
               </button>
@@ -2056,8 +1671,8 @@ export default function CanUdsPanel({
                   const items = safetyRows.filter((r) => r.group === grp);
                   if (items.length === 0) return null;
                   return (
-                    <div key={grp} className="rounded-lg border border-slate-800 bg-slate-950/90 p-2.5">
-                      <div className="text-xs font-semibold text-amber-300">
+                    <div key={grp} className="rounded-lg border border-gray-200 bg-gray-50/90 p-2.5">
+                      <div className="text-xs font-semibold text-amber-800">
                         {grp === "abs"
                           ? "Тормозная система ABS / VDC / Электроручник EPB (7B0 → 7B8)"
                           : "Подушки безопасности и преднатяжители SRS Airbag (780 → 788)"}
@@ -2066,10 +1681,10 @@ export default function CanUdsPanel({
                         {items.map((item) => (
                           <li
                             key={`${grp}-${item.label}`}
-                            className="flex flex-col gap-0.5 border-t border-slate-800/80 pt-1.5 sm:flex-row sm:justify-between"
+                            className="flex flex-col gap-0.5 border-t border-gray-200 pt-1.5 sm:flex-row sm:justify-between"
                           >
-                            <span className="text-slate-400">{item.label}</span>
-                            <span className="font-mono text-slate-100 sm:text-right">{item.value}</span>
+                            <span className="text-gray-500">{item.label}</span>
+                            <span className="font-mono text-gray-900 sm:text-right">{item.value}</span>
                           </li>
                         ))}
                       </ul>
@@ -2082,9 +1697,9 @@ export default function CanUdsPanel({
         </div>
       ) : view === "dtcs" ? (
         <div className="flex flex-col gap-3">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3.5">
+          <div className="rounded-xl border border-gray-200 bg-white p-3.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-emerald-300">
+              <span className="text-xs font-semibold text-emerald-700">
                 Диагностика кодов ошибок (DTC) по всем блокам автомобиля
               </span>
               {busy && dtcProgress ? (
@@ -2093,13 +1708,13 @@ export default function CanUdsPanel({
                   onClick={() => {
                     stopScanRef.current = true;
                   }}
-                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-900"
                 >
                   Стоп
                 </button>
               ) : null}
             </div>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-gray-500">
               Опрашивает все блоки Subaru и Mitsubishi (`UDS 19 02 FF`, `KWP2000 18 00 FF 00` и `OBD Mode 03`). Для <strong>обычных блоков</strong> (ДВС `7E0`, АКПП/CVT `7E1`, Силовая `7A2`, ETACS `620`/`7A1`, Приборка `783`/`6A0`, TPMS/KOS `752`/`773`/`600`, Климат `7C4`/`688`, 4WD `7B6`, Сонары `786`/`763`) доступен безопасный сброс ошибок (`14 FF FF FF` / `14 FF 00`). Для <strong>блоков безопасности</strong> (Подушки SRS `780`/`7B2`, Тормоза ABS/ASC `7B0`/`784`, Руль EPS/SAS `746`/`622`, EyeSight `787`) разрешено <strong>только чтение</strong> без риска сбить калибровки.
             </p>
 
@@ -2107,14 +1722,14 @@ export default function CanUdsPanel({
               type="button"
               disabled={hwBusy || monitoring}
               onClick={() => void runAllModuleDtcScan()}
-              className="mt-2.5 w-full rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
+              className="mt-2.5 w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
             >
               Проверить ошибки во всех блоках ({KNOWN_MODULE_TARGETS.filter((t) => t.rx != null).length} ЭБУ)
             </button>
 
-            {dtcProgress ? <p className="mt-2 text-xs text-emerald-300">{dtcProgress}</p> : null}
+            {dtcProgress ? <p className="mt-2 text-xs text-emerald-700">{dtcProgress}</p> : null}
             {dtcBanner ? (
-              <p className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-2.5 text-xs text-emerald-200">
+              <p className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-800">
                 {dtcBanner}
               </p>
             ) : null}
@@ -2126,28 +1741,28 @@ export default function CanUdsPanel({
                     key={mod.txHex}
                     className={`rounded-lg border p-2.5 ${
                       !mod.responded
-                        ? "border-slate-800 bg-slate-950/40 text-slate-500"
+                        ? "border-gray-200 bg-gray-50 text-gray-500"
                         : mod.dtcs.length > 0
-                          ? "border-amber-500/60 bg-amber-950/20 text-slate-100"
-                          : "border-emerald-500/30 bg-slate-950/80 text-slate-100"
+                          ? "border-amber-500/60 bg-amber-950/20 text-gray-900"
+                          : "border-emerald-500/30 bg-gray-100 text-gray-900"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-mono font-semibold text-emerald-300">{mod.title}</span>
+                          <span className="font-mono font-semibold text-emerald-700">{mod.title}</span>
                           {mod.safetyCritical ? (
-                            <span className="rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200">
+                            <span className="rounded border border-amber-300 bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-900">
                               Безопасность · Только чтение
                             </span>
                           ) : (
-                            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                            <span className="rounded border border-emerald-500/30 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
                               Сброс разрешён
                             </span>
                           )}
                         </div>
                         {mod.systemName || mod.partNumber ? (
-                          <div className="mt-0.5 text-[11px] text-slate-400">
+                          <div className="mt-0.5 text-[11px] text-gray-500">
                             {[mod.systemName, mod.partNumber ? `OEM ${mod.partNumber}` : null]
                               .filter(Boolean)
                               .join(" · ")}
@@ -2157,10 +1772,10 @@ export default function CanUdsPanel({
                       <span
                         className={`shrink-0 font-mono text-[11px] font-semibold ${
                           !mod.responded
-                            ? "text-slate-500"
+                            ? "text-gray-500"
                             : mod.dtcs.length === 0
-                              ? "text-emerald-400"
-                              : "text-amber-300"
+                              ? "text-emerald-600"
+                              : "text-amber-800"
                         }`}
                       >
                         {mod.rawStatus}
@@ -2168,16 +1783,22 @@ export default function CanUdsPanel({
                     </div>
 
                     {mod.dtcs.length > 0 ? (
-                      <ul className="mt-2 space-y-1 border-t border-slate-800 pt-2">
+                      <ul className="mt-2 space-y-1 border-t border-gray-200 pt-2">
                         {mod.dtcs.map((d) => (
-                          <li key={`${mod.txHex}-${d.code}`} className="rounded bg-slate-900/90 px-2.5 py-1.5">
+                          <li key={`${mod.txHex}-${d.code}`} className="rounded bg-white/90 px-2.5 py-1.5">
                             <div className="flex items-center justify-between">
-                              <span className="font-mono font-semibold text-amber-300">{d.code}</span>
-                              <span className="text-[10px] text-slate-400">
+                              <span className="font-mono font-semibold text-amber-800">{d.code}</span>
+                              <span className="text-[10px] text-gray-500">
                                 {d.active ? "Активна / подтверждена" : "В памяти (история)"}
                               </span>
                             </div>
-                            <div className="mt-0.5 text-[11px] text-slate-200">{d.description}</div>
+                            <div className="mt-0.5 text-[11px] text-gray-800">{d.description}</div>
+                            {d.remedy ? (
+                              <div className="mt-1 text-[10px] leading-snug text-gray-500">
+                                <span className="font-semibold text-gray-500">Устранение: </span>
+                                {d.remedy}
+                              </div>
+                            ) : null}
                           </li>
                         ))}
                       </ul>
@@ -2189,7 +1810,7 @@ export default function CanUdsPanel({
                           type="button"
                           disabled={busy}
                           onClick={() => void handleSafeClearModuleDtc(mod)}
-                          className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-[11px] text-slate-200 hover:border-amber-500/50 hover:text-amber-200 disabled:opacity-40"
+                          className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] text-gray-800 hover:border-amber-500/50 hover:text-amber-900 disabled:opacity-40"
                         >
                           Стереть ошибки в блоке {mod.txHex}
                         </button>
@@ -2203,10 +1824,10 @@ export default function CanUdsPanel({
         </div>
       ) : view === "monitor" ? (
         <>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-gray-500">
             Пассивная прослушка шины (`ATMA` / `ATCRA`). Включает автоматический декодер широковещательных CAN-фреймов Mitsubishi & Subaru (`0x236` угол руля, `0x318` передача АКПП, `0x32F` ручник EPB, `0x214`/`0x215` скорости 4 колёс, `0x208` тормоз, `0x210` педаль газа, `0x154` топливо/пробег, `0x608` темп. ОЖ/улицы) и интерактивный Diff-охотник за кнопками.
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-gray-500">
             Потери адаптера: {losses}. Фильтр и протокол меняются только когда монитор остановлен.
           </p>
           <div className="grid grid-cols-2 gap-2">
@@ -2231,7 +1852,7 @@ export default function CanUdsPanel({
                   setFilterId(preset.id);
                   setFilterMask(preset.id ? "7FF" : "");
                 }}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-[11px] text-slate-300 disabled:opacity-40"
+                className="rounded-lg border border-gray-300 bg-white px-2 py-1 font-mono text-[11px] text-gray-700 disabled:opacity-40"
               >
                 {preset.label}
               </button>
@@ -2241,7 +1862,7 @@ export default function CanUdsPanel({
             type="button"
             disabled={monitoring || hwBusy}
             onClick={() => void applyFilter()}
-            className="rounded-xl border border-slate-600 px-4 py-3 text-sm disabled:opacity-40"
+            className="rounded-xl border border-gray-300 px-4 py-3 text-sm disabled:opacity-40"
           >
             Применить фильтр
           </button>
@@ -2249,24 +1870,24 @@ export default function CanUdsPanel({
             type="button"
             disabled={hwBusy}
             onClick={() => void (monitoring ? stopMonitor() : startMonitor())}
-            className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
+            className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-3 text-sm font-medium text-white disabled:bg-gray-400 disabled:border-gray-400"
           >
             {monitoring ? "Остановить монитор" : "Слушать шину"}
           </button>
 
           {/* Interactive CAN Diff-Sniffer (Button & Event Hunter) */}
-          <div className="rounded-xl border border-emerald-500/40 bg-slate-900/80 p-3">
+          <div className="rounded-xl border border-emerald-300 bg-white p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-emerald-300">
+              <span className="text-xs font-semibold text-emerald-700">
                 Интерактивный CAN Diff-Sniffer («Охотник за кнопками и событиями»)
               </span>
               {canBaseline ? (
-                <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-300">
+                <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-700">
                   Фон: {canBaseline.length} ID
                 </span>
               ) : null}
             </div>
-            <p className="mt-0.5 text-[11px] text-slate-400">
+            <p className="mt-0.5 text-[11px] text-gray-500">
               1. Нажмите <strong>«Запомнить фон»</strong> в покое. 2. Нажмите кнопку в салоне или переключите рычаг. 3. Нажмите <strong>«Найти изменения»</strong> — отобразятся только изменившиеся байты и биты.
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -2274,7 +1895,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={rows.length === 0}
                 onClick={captureCanBaseline}
-                className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-3 py-2 text-xs font-semibold text-emerald-200 disabled:opacity-40"
+                className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 disabled:opacity-40"
               >
                 1. Запомнить фон ({rows.length} ID)
               </button>
@@ -2288,8 +1909,8 @@ export default function CanUdsPanel({
               </button>
             </div>
             {canDiffResult ? (
-              <div className="mt-2.5 border-t border-slate-800 pt-2 text-xs">
-                <div className="text-[11px] text-slate-300">
+              <div className="mt-2.5 border-t border-gray-200 pt-2 text-xs">
+                <div className="text-[11px] text-gray-700">
                   Изменилось CAN ID: <strong>{canDiffResult.length}</strong>
                 </div>
                 {canDiffResult.length > 0 ? (
@@ -2297,22 +1918,22 @@ export default function CanUdsPanel({
                     {canDiffResult.map((diff) => (
                       <li
                         key={diff.idHex}
-                        className="rounded border border-amber-500/40 bg-amber-950/20 p-2 text-slate-200"
+                        className="rounded border border-amber-300 bg-amber-950/20 p-2 text-gray-800"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-semibold text-amber-300">0x{diff.idHex}</span>
-                          <span className="text-[10px] text-slate-400">
+                          <span className="font-semibold text-amber-800">0x{diff.idHex}</span>
+                          <span className="text-[10px] text-gray-500">
                             байты [{diff.changedByteIndices.join(", ")}]
                             {diff.decodedHint ? ` · ${diff.decodedHint}` : ""}
                           </span>
                         </div>
-                        <div className="mt-0.5 text-slate-400">Было: {diff.beforeHex}</div>
-                        <div className="text-emerald-300">Стало: {diff.afterHex}</div>
+                        <div className="mt-0.5 text-gray-500">Было: {diff.beforeHex}</div>
+                        <div className="text-emerald-700">Стало: {diff.afterHex}</div>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-1 text-[11px] text-slate-400">Изменений относительно фона не обнаружено.</p>
+                  <p className="mt-1 text-[11px] text-gray-500">Изменений относительно фона не обнаружено.</p>
                 )}
               </div>
             ) : null}
@@ -2320,8 +1941,8 @@ export default function CanUdsPanel({
 
           {/* Live Decoded Broadcast Signals */}
           {rows.some((r) => decodeCanBroadcastFrame(r.id, r.data)) ? (
-            <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/15 p-3">
-              <div className="text-xs font-semibold text-emerald-300">
+            <div className="rounded-xl border border-emerald-300 bg-emerald-950/15 p-3">
+              <div className="text-xs font-semibold text-emerald-700">
                 Живая расшифровка широковещательных CAN-фреймов (DBC Live Decoder)
               </div>
               <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
@@ -2331,12 +1952,12 @@ export default function CanUdsPanel({
                   .map((sig) => (
                     <div
                       key={sig.idHex}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/90 px-2.5 py-1.5 text-xs"
+                      className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/90 px-2.5 py-1.5 text-xs"
                     >
-                      <span className="font-mono text-[11px] text-slate-400">
-                        <strong className="text-emerald-400">0x{sig.idHex}</strong> · {sig.title}
+                      <span className="font-mono text-[11px] text-gray-500">
+                        <strong className="text-emerald-600">0x{sig.idHex}</strong> · {sig.title}
                       </span>
-                      <span className="font-mono font-semibold text-slate-100">{sig.summary}</span>
+                      <span className="font-mono font-semibold text-gray-900">{sig.summary}</span>
                     </div>
                   ))}
               </div>
@@ -2356,7 +1977,7 @@ export default function CanUdsPanel({
                   setIncomplete(false);
                 }
               }}
-              className="flex-1 rounded-xl border border-slate-600 px-4 py-3 text-sm disabled:opacity-40"
+              className="flex-1 rounded-xl border border-gray-300 px-4 py-3 text-sm disabled:opacity-40"
             >
               {recording ? "Стоп записи" : "Запись"}
             </button>
@@ -2364,32 +1985,32 @@ export default function CanUdsPanel({
               type="button"
               disabled={recordCount === 0}
               onClick={() => void exportCapture()}
-              className="flex-1 rounded-xl border border-slate-600 px-4 py-3 text-sm disabled:opacity-40"
+              className="flex-1 rounded-xl border border-gray-300 px-4 py-3 text-sm disabled:opacity-40"
             >
               CSV ({recordCount})
             </button>
           </div>
           {recordCount >= RECORD_LIMIT ? (
-            <p className="text-xs text-amber-200">Достигнут лимит {RECORD_LIMIT} кадров.</p>
+            <p className="text-xs text-amber-900">Достигнут лимит {RECORD_LIMIT} кадров.</p>
           ) : null}
           <div className="flex gap-2">
             <input
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
             />
             <button
               type="button"
               disabled={!recording}
               onClick={addNote}
-              className="rounded-lg border border-slate-600 px-3 text-sm disabled:opacity-40"
+              className="rounded-lg border border-gray-300 px-3 text-sm disabled:opacity-40"
             >
               Метка
             </button>
           </div>
-          <div className="max-w-full overflow-x-clip rounded-lg border border-slate-800">
+          <div className="max-w-full overflow-x-clip rounded-lg border border-gray-200">
             <table className="w-full table-fixed text-left text-xs">
-              <thead className="text-slate-500">
+              <thead className="text-gray-500">
                 <tr>
                   <th className="px-2 py-2">ID</th>
                   <th className="px-2 py-2">Кадр</th>
@@ -2399,11 +2020,11 @@ export default function CanUdsPanel({
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} className="border-t border-slate-800">
+                  <tr key={row.id} className="border-t border-gray-200">
                     <td className="px-2 py-2 font-mono">{row.id}</td>
                     <td className="break-all px-2 py-2 font-mono text-[10px] leading-snug">
                       {row.data.map((byte, index) => (
-                        <span key={`${row.id}-${index}`} className={row.changed[index] ? "text-amber-300" : ""}>
+                        <span key={`${row.id}-${index}`} className={row.changed[index] ? "text-amber-800" : ""}>
                           {byte.toString(16).padStart(2, "0").toUpperCase()}{" "}
                         </span>
                       ))}
@@ -2415,15 +2036,15 @@ export default function CanUdsPanel({
               </tbody>
             </table>
           </div>
-          <pre className="max-h-48 overflow-x-clip break-all rounded-md bg-black/40 p-2 text-xs text-slate-400">
+          <pre className="max-h-48 overflow-x-clip break-all rounded-md bg-gray-100 p-2 text-xs text-gray-500">
             {tape.join("\n")}
           </pre>
         </>
       ) : (
         <>
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-            <div className="text-xs font-medium text-slate-300">Заводские таблицы (1 нажатие)</div>
-            <p className="mt-1 text-xs text-slate-500">
+          <div className="rounded-xl border border-gray-200 bg-white p-3">
+            <div className="text-xs font-medium text-gray-700">Заводские таблицы (1 нажатие)</div>
+            <p className="mt-1 text-xs text-gray-500">
               Subaru ДВС (`7E0` SSM `A8`), Subaru SGP (`7E1` КПП + `7A2` 2.4 TURBO + `752` Шины TPMS + `783` Приборка), Pajero Sport (`7E0` `21 01–04`).
             </p>
             <div className="mt-2 grid grid-cols-3 gap-2">
@@ -2431,7 +2052,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru")}
-                className="rounded-xl bg-emerald-600/90 px-2.5 py-2.5 text-xs font-medium text-white disabled:opacity-40"
+                className="rounded-xl border border-gray-900 bg-gray-900 px-2.5 py-2.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-40"
               >
                 Subaru ДВС (7E0)
               </button>
@@ -2439,7 +2060,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("subaru-tcm")}
-                className="rounded-xl border border-emerald-500/60 bg-emerald-950/40 px-2.5 py-2.5 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-2.5 py-2.5 text-xs font-medium text-emerald-800 disabled:opacity-40"
               >
                 Subaru SGP + Шины
               </button>
@@ -2447,7 +2068,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void runCatalog("pajero")}
-                className="rounded-xl border border-slate-600 px-2.5 py-2.5 text-xs disabled:opacity-40"
+                className="rounded-xl border border-gray-300 px-2.5 py-2.5 text-xs disabled:opacity-40"
               >
                 Pajero 21 (7E0)
               </button>
@@ -2457,10 +2078,10 @@ export default function CanUdsPanel({
                 {catalog.map((row) => (
                   <li
                     key={`${row.name}-${row.unit}`}
-                    className="flex justify-between gap-2 rounded-md bg-slate-950/80 px-3 py-2"
+                    className="flex justify-between gap-2 rounded-md bg-gray-100 px-3 py-2"
                   >
                     <span>{row.name}</span>
-                    <span className="font-mono text-slate-200">
+                    <span className="font-mono text-gray-800">
                       {row.value} {row.unit}
                     </span>
                   </li>
@@ -2469,9 +2090,9 @@ export default function CanUdsPanel({
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
+          <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-emerald-200">
+              <span className="text-xs font-semibold text-emerald-800">
                 Subaru SGP: Полное чтение КПП (7E1) + Приборки (783) + EyeSight (787) + Климата (7C4)
               </span>
               {busy && subaruProgress ? (
@@ -2480,13 +2101,13 @@ export default function CanUdsPanel({
                   onClick={() => {
                     stopScanRef.current = true;
                   }}
-                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-900"
                 >
                   Стоп
                 </button>
               ) : null}
             </div>
-            <p className="mt-1 text-[11px] text-slate-300">
+            <p className="mt-1 text-[11px] text-gray-700">
               Строго <strong>только чтение (`Service 22 ReadDataByIdentifier`)</strong> — автоматически читает битовые маски (`1000`, `1020`, `1100`, `2100`, `3000`) и выгружает все открытые DID Коробки CVT (`7E1`), Приборки (`783`), EyeSight (`787`), Климата (`7C4`), Сонаров (`786`) и Шлюза (`750`). Без единой команды записи (`2E`) или сброса (`11`).
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -2494,7 +2115,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void runSubaruRegionDump()}
-                className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                className="flex-1 rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
                 Полное чтение по битовым картам (7E1 / 783 / 787 / 7C4 / 786)
               </button>
@@ -2502,14 +2123,14 @@ export default function CanUdsPanel({
                 <button
                   type="button"
                   onClick={() => void exportSubaruDump()}
-                  className="rounded-xl border border-emerald-400/60 bg-slate-900 px-3 py-2.5 text-xs font-semibold text-emerald-200"
+                  className="rounded-xl border border-emerald-400/60 bg-white px-3 py-2.5 text-xs font-semibold text-emerald-800"
                 >
                   Скачать дамп (.json)
                 </button>
               ) : null}
             </div>
             {subaruProgress ? (
-              <p className="mt-1.5 text-xs text-emerald-300">{subaruProgress}</p>
+              <p className="mt-1.5 text-xs text-emerald-700">{subaruProgress}</p>
             ) : null}
             {(subaruDump?.modules ?? subaruPartial).length > 0 ? (
               <div className="mt-2.5 space-y-2 text-xs">
@@ -2518,12 +2139,12 @@ export default function CanUdsPanel({
                     key={mod.txHex}
                     className={`rounded-lg border p-2.5 ${
                       mod.responded
-                        ? "border-emerald-500/40 bg-slate-950/90 text-slate-100"
-                        : "border-slate-800 bg-slate-950/50 text-slate-500"
+                        ? "border-emerald-300 bg-gray-50/90 text-gray-900"
+                        : "border-gray-200 bg-gray-50 text-gray-500"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono font-semibold text-emerald-300">
+                      <span className="font-mono font-semibold text-emerald-700">
                         {mod.title}
                       </span>
                       <span className="text-[11px]">
@@ -2532,17 +2153,17 @@ export default function CanUdsPanel({
                     </div>
                     {mod.responded ? (
                       <>
-                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-300">
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-700">
                           {mod.systemName ? <span>Система: <strong>{mod.systemName}</strong></span> : null}
                           {mod.partNumber ? <span>Деталь OEM: <strong>{mod.partNumber}</strong></span> : null}
                           {mod.softwareVersion ? <span>Софт: <strong>{mod.softwareVersion}</strong></span> : null}
                           {mod.calId ? <span>CalID: <strong>{mod.calId}</strong></span> : null}
                         </div>
                         {mod.dids.length > 0 ? (
-                          <ul className="mt-1.5 space-y-1 border-t border-slate-800 pt-1.5 font-mono text-[11px]">
+                          <ul className="mt-1.5 space-y-1 border-t border-gray-200 pt-1.5 font-mono text-[11px]">
                             {mod.dids.map((item) => (
-                              <li key={`${mod.txHex}-${item.did}`} className="text-slate-300">
-                                <span className="text-emerald-400">22 {item.did}</span> · {item.decoded}
+                              <li key={`${mod.txHex}-${item.did}`} className="text-gray-700">
+                                <span className="text-emerald-600">22 {item.did}</span> · {item.decoded}
                               </li>
                             ))}
                           </ul>
@@ -2554,30 +2175,30 @@ export default function CanUdsPanel({
               </div>
             ) : null}
 
-            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/80 p-2.5 text-xs">
-              <div className="font-semibold text-emerald-200">
+            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-100 p-2.5 text-xs">
+              <div className="font-semibold text-emerald-800">
                 Сравнение двух дампов (.json Diff: Было → Стало)
               </div>
-              <p className="mt-0.5 text-[11px] text-slate-400">
+              <p className="mt-0.5 text-[11px] text-gray-500">
                 Загрузите два сохранённых `.json` файла (например, на `P` и на `D`, или с холодным/прогретым КПП), чтобы увидеть только изменившиеся DID по всем блокам.
               </p>
               <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <label className="flex flex-col gap-1 rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-[11px] text-slate-300">
+                <label className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-2 text-[11px] text-gray-700">
                   <span>Дамп 1 (Было): {diffDumpA ? <strong>{diffDumpA.name}</strong> : "не выбран"}</span>
                   <input
                     type="file"
                     accept=".json,application/json"
                     onChange={(e) => void loadSubaruDumpFile("A", e.target.files?.[0] ?? null)}
-                    className="text-[11px] text-slate-400"
+                    className="text-[11px] text-gray-500"
                   />
                 </label>
-                <label className="flex flex-col gap-1 rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-[11px] text-slate-300">
+                <label className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-2 text-[11px] text-gray-700">
                   <span>Дамп 2 (Стало): {diffDumpB ? <strong>{diffDumpB.name}</strong> : "не выбран"}</span>
                   <input
                     type="file"
                     accept=".json,application/json"
                     onChange={(e) => void loadSubaruDumpFile("B", e.target.files?.[0] ?? null)}
-                    className="text-[11px] text-slate-400"
+                    className="text-[11px] text-gray-500"
                   />
                 </label>
               </div>
@@ -2590,7 +2211,7 @@ export default function CanUdsPanel({
                       setDiffDumpA(nextA);
                       if (diffDumpB) setDiffRows(diffSubaruDumps(nextA.dump, diffDumpB.dump));
                     }}
-                    className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300"
+                    className="rounded-lg border border-gray-300 px-2.5 py-1 text-[11px] text-gray-700"
                   >
                     Взять текущий скан как «Было»
                   </button>
@@ -2601,15 +2222,15 @@ export default function CanUdsPanel({
                       setDiffDumpB(nextB);
                       if (diffDumpA) setDiffRows(diffSubaruDumps(diffDumpA.dump, nextB.dump));
                     }}
-                    className="rounded-lg border border-emerald-500/50 px-2.5 py-1 text-[11px] text-emerald-200"
+                    className="rounded-lg border border-emerald-500/50 px-2.5 py-1 text-[11px] text-emerald-800"
                   >
                     Взять текущий скан как «Стало»
                   </button>
                 </div>
               ) : null}
               {diffRows != null ? (
-                <div className="mt-2 border-t border-slate-800 pt-2">
-                  <div className="text-[11px] text-slate-300">
+                <div className="mt-2 border-t border-gray-200 pt-2">
+                  <div className="text-[11px] text-gray-700">
                     Найдено изменившихся параметров: <strong>{diffRows.length}</strong>
                   </div>
                   {diffRows.length > 0 ? (
@@ -2617,10 +2238,10 @@ export default function CanUdsPanel({
                       {diffRows.map((d) => (
                         <li
                           key={`${d.txHex}-${d.did}`}
-                          className="rounded border border-amber-500/40 bg-amber-950/20 p-2 text-slate-200"
+                          className="rounded border border-amber-300 bg-amber-950/20 p-2 text-gray-800"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold text-amber-300">
+                            <span className="font-semibold text-amber-800">
                               [{d.txHex}] 22 {d.did} · {d.moduleTitle}
                             </span>
                             <button
@@ -2629,13 +2250,13 @@ export default function CanUdsPanel({
                                 setTx(d.txHex);
                                 toggleWatchedDid(d.did);
                               }}
-                              className="rounded border border-emerald-500/60 bg-emerald-900/40 px-2 py-0.5 font-sans text-[10px] text-emerald-200"
+                              className="rounded border border-emerald-500/60 bg-emerald-900/40 px-2 py-0.5 font-sans text-[10px] text-emerald-800"
                             >
                               + В Live ({d.txHex})
                             </button>
                           </div>
-                          <div className="mt-0.5 text-slate-400">Было: {d.beforeDecoded}</div>
-                          <div className="text-emerald-300">Стало: {d.afterDecoded}</div>
+                          <div className="mt-0.5 text-gray-500">Было: {d.beforeDecoded}</div>
+                          <div className="text-emerald-700">Стало: {d.afterDecoded}</div>
                         </li>
                       ))}
                     </ul>
@@ -2645,22 +2266,22 @@ export default function CanUdsPanel({
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+          <div className="rounded-xl border border-gray-200 bg-white p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-slate-300">Поиск блоков на шине CAN</span>
+              <span className="text-xs font-medium text-gray-700">Поиск блоков на шине CAN</span>
               {busy ? (
                 <button
                   type="button"
                   onClick={() => {
                     stopScanRef.current = true;
                   }}
-                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                  className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-900"
                 >
                   Стоп
                 </button>
               ) : null}
             </div>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-gray-500">
               Будит все блоки (`3E 00` → `10 03` → `09 04`), автоматически читает их заводской номер (`F18E`) и имя системы (`F197`), а после опроса закрывает сессию (`10 01`), чтобы на приборке сразу гасли лампы ABS/VDC.
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -2668,7 +2289,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "extended")}
-                className="col-span-2 rounded-xl bg-emerald-600 px-3 py-3 text-xs font-semibold text-white disabled:opacity-40"
+                className="col-span-2 rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-3 text-xs font-semibold text-white disabled:opacity-40"
               >
                 Полный опрос всех блоков (как в Launch: ДВС, CVT, ABS, SRS, Климат, Кузов)
               </button>
@@ -2676,7 +2297,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "standard")}
-                className="rounded-xl border border-slate-600 px-3 py-2 text-xs font-medium disabled:opacity-40"
+                className="rounded-xl border border-gray-300 px-3 py-2 text-xs font-medium disabled:opacity-40"
               >
                 Быстрый 7E0–7DF
               </button>
@@ -2684,7 +2305,7 @@ export default function CanUdsPanel({
                 type="button"
                 disabled={hwBusy || monitoring}
                 onClick={() => void scan("3E 00", "wide")}
-                className="rounded-xl border border-amber-500/50 bg-amber-950/20 px-3 py-2 text-xs font-medium text-amber-200 disabled:opacity-40"
+                className="rounded-xl border border-amber-500/50 bg-amber-950/20 px-3 py-2 text-xs font-medium text-amber-900 disabled:opacity-40"
               >
                 Полный перебор 700–7E7
               </button>
@@ -2696,15 +2317,15 @@ export default function CanUdsPanel({
                     key={row.address}
                     className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2 ${
                       row.responded
-                        ? "border border-emerald-500/40 bg-emerald-950/30 text-slate-100"
-                        : "bg-slate-950/60 text-slate-400"
+                        ? "border border-emerald-300 bg-emerald-50 text-gray-900"
+                        : "bg-gray-50 text-gray-500"
                     }`}
                   >
                     <div className="min-w-0">
                       <div className="font-mono font-medium">
-                        {row.address} · <span className="font-sans text-slate-300">{row.name}</span>
+                        {row.address} · <span className="font-sans text-gray-700">{row.name}</span>
                       </div>
-                      <div className="truncate text-slate-400">{row.detail}</div>
+                      <div className="truncate text-gray-500">{row.detail}</div>
                     </div>
                     {row.responded ? (
                       <button
@@ -2713,7 +2334,7 @@ export default function CanUdsPanel({
                           setTx(row.txHex);
                           setRx(row.rxHex);
                         }}
-                        className="shrink-0 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white"
+                        className="shrink-0 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-1.5 text-xs font-medium text-white"
                       >
                         Выбрать {row.txHex}
                       </button>
@@ -2724,8 +2345,8 @@ export default function CanUdsPanel({
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-            <div className="text-xs font-medium text-slate-300">Ручной запрос к блоку</div>
+          <div className="rounded-xl border border-gray-200 bg-white p-3">
+            <div className="text-xs font-medium text-gray-700">Ручной запрос к блоку</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {KNOWN_MODULE_TARGETS.filter((t) => t.rx != null).map((target) => {
                 const txHex = target.tx.toString(16).toUpperCase();
@@ -2742,8 +2363,8 @@ export default function CanUdsPanel({
                     }}
                     className={`rounded-lg border px-2.5 py-1 text-xs ${
                       active
-                        ? "border-emerald-500 bg-emerald-600/20 text-emerald-200"
-                        : "border-slate-700 text-slate-400"
+                        ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+                        : "border-gray-300 text-gray-500"
                     }`}
                   >
                     {txHex} {target.name.split(" ")[0]}
@@ -2763,17 +2384,17 @@ export default function CanUdsPanel({
               type="button"
               disabled={hwBusy}
               onClick={() => void sendRequest(request)}
-              className="mt-2 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-700"
+              className="mt-2 w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-3 text-sm font-medium text-white disabled:bg-gray-400 disabled:border-gray-400"
             >
               Отправить
             </button>
 
             {udsText ? (
-              <div className="mt-2 rounded-lg bg-slate-950 p-2.5 text-xs">
-                <div className="text-slate-400">Ответ блока:</div>
-                <p className="mt-0.5 break-all font-mono text-sm text-emerald-300">{udsText}</p>
+              <div className="mt-2 rounded-lg bg-gray-50 p-2.5 text-xs">
+                <div className="text-gray-500">Ответ блока:</div>
+                <p className="mt-0.5 break-all font-mono text-sm text-emerald-700">{udsText}</p>
                 {udsRaw && udsRaw !== udsText ? (
-                  <p className="mt-1 break-all font-mono text-[11px] text-slate-500">Сырой ответ: {udsRaw}</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-gray-500">Сырой ответ: {udsRaw}</p>
                 ) : null}
               </div>
             ) : null}
@@ -2788,7 +2409,7 @@ export default function CanUdsPanel({
                     setRequest(item.hex);
                     void sendRequest(item.hex);
                   }}
-                  className="rounded-lg border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-xs text-slate-200 disabled:opacity-40"
+                  className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-800 disabled:opacity-40"
                 >
                   {item.label} ({item.hex})
                 </button>
@@ -2802,7 +2423,7 @@ export default function CanUdsPanel({
                     setRequest(item.hex);
                     void sendRequest(item.hex);
                   }}
-                  className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-2.5 py-1.5 text-xs text-emerald-200 disabled:opacity-40"
+                  className="rounded-lg border border-emerald-700/60 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-800 disabled:opacity-40"
                 >
                   {item.label}
                 </button>
@@ -2814,20 +2435,20 @@ export default function CanUdsPanel({
                 value={didLabel}
                 placeholder="Сохранить текущую команду как кнопку…"
                 onChange={(event) => setDidLabel(event.target.value)}
-                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs"
+                className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs"
               />
               <button
                 type="button"
                 onClick={saveDid}
-                className="rounded-lg border border-slate-600 px-3 py-2 text-xs"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-xs"
               >
                 Сохранить
               </button>
             </div>
 
-            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+            <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-emerald-300">
+                <span className="text-xs font-semibold text-emerald-700">
                   Поиск датчиков и паспорта выбранного блока ({tx})
                 </span>
                 {busy && !liveUdsRunning ? (
@@ -2836,13 +2457,13 @@ export default function CanUdsPanel({
                     onClick={() => {
                       stopScanRef.current = true;
                     }}
-                    className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-200"
+                    className="rounded-lg border border-amber-500/50 px-2.5 py-1 text-xs text-amber-900"
                   >
                     Стоп
                   </button>
                 ) : null}
               </div>
-              <p className="mt-1 text-[11px] text-slate-400">
+              <p className="mt-1 text-[11px] text-gray-500">
                 Открывает сессию `10 03`, удерживает её через `3E 00`, находит рабочие DID на блоке (например CVT `7E1` или ABS `7B0`) и в конце отправляет `10 01`, чтобы погасить лампы на панели.
               </p>
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
@@ -2850,7 +2471,7 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0xf180, to: 0xf1ff, label: "F180–F1FF", stopOnSilence: true })}
-                  className="rounded-lg border border-slate-600 px-2.5 py-2 text-xs font-medium disabled:opacity-40"
+                  className="rounded-lg border border-gray-300 px-2.5 py-2 text-xs font-medium disabled:opacity-40"
                 >
                   Паспорт (F180–F1FF)
                 </button>
@@ -2858,7 +2479,7 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x1000, to: 0x107f, label: "1000–107F", stopOnSilence: false })}
-                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-800 disabled:opacity-40"
                 >
                   Датчики 1000–107F
                 </button>
@@ -2866,7 +2487,7 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x1100, to: 0x117f, label: "1100–117F", stopOnSilence: false })}
-                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-800 disabled:opacity-40"
                 >
                   Датчики 1100–117F
                 </button>
@@ -2874,7 +2495,7 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x2000, to: 0x207f, label: "2000–207F", stopOnSilence: false })}
-                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-800 disabled:opacity-40"
                 >
                   Датчики 2000–207F
                 </button>
@@ -2882,7 +2503,7 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0x2100, to: 0x217f, label: "2100–217F", stopOnSilence: false })}
-                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-800 disabled:opacity-40"
                 >
                   Датчики 2100–217F
                 </button>
@@ -2890,13 +2511,13 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={hwBusy || monitoring}
                   onClick={() => void scanDids({ from: 0xd000, to: 0xd07f, label: "D000–D07F", stopOnSilence: false })}
-                  className="rounded-lg border border-emerald-600/60 bg-emerald-950/30 px-2.5 py-2 text-xs font-medium text-emerald-200 disabled:opacity-40"
+                  className="rounded-lg border border-emerald-600/60 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-800 disabled:opacity-40"
                 >
                   Датчики D000–D07F
                 </button>
               </div>
               {didProgress ? (
-                <p className="mt-1.5 text-xs text-slate-400">
+                <p className="mt-1.5 text-xs text-gray-500">
                   Проверено DID: {didProgress} · найдено ответов: {didHits.length}
                 </p>
               ) : null}
@@ -2907,19 +2528,19 @@ export default function CanUdsPanel({
                     return (
                       <li
                         key={row.did}
-                        className="flex items-start justify-between gap-2 rounded-md bg-slate-900 px-3 py-2"
+                        className="flex items-start justify-between gap-2 rounded-md bg-white px-3 py-2"
                       >
                         <div className="min-w-0">
-                          <span className="font-mono font-semibold text-emerald-400">22 {row.did}</span>
-                          <div className="break-all font-mono text-slate-200">{row.text}</div>
+                          <span className="font-mono font-semibold text-emerald-600">22 {row.did}</span>
+                          <div className="break-all font-mono text-gray-800">{row.text}</div>
                         </div>
                         <button
                           type="button"
                           onClick={() => toggleWatchedDid(row.did)}
                           className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-medium ${
                             inWatch
-                              ? "bg-emerald-600 text-white"
-                              : "border border-slate-600 text-slate-300"
+                              ? "bg-gray-900 text-white"
+                              : "border border-gray-300 text-gray-700"
                           }`}
                         >
                           {inWatch ? "В Live ✓" : "+ В Live"}
@@ -2931,21 +2552,21 @@ export default function CanUdsPanel({
               ) : null}
             </div>
 
-            <div className="mt-3 rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3">
+            <div className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-emerald-200">
+                <span className="text-xs font-semibold text-emerald-800">
                   Live-монитор UDS (поток данных блока {tx} как в Launch)
                 </span>
                 <button
                   type="button"
                   disabled={hwBusy && !liveUdsRunning}
                   onClick={() => void sendRequest("10 01")}
-                  className="rounded-lg border border-slate-600 bg-slate-900 px-2.5 py-1 text-[11px] text-slate-200 disabled:opacity-40"
+                  className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] text-gray-800 disabled:opacity-40"
                 >
                   Погасить лампы (10 01)
                 </button>
               </div>
-              <p className="mt-1 text-[11px] text-slate-400">
+              <p className="mt-1 text-[11px] text-gray-500">
                 Непрерывно опрашивает выбранные DID (`22 XXXX`) с удержанием сессии `10 03` / `3E 00`. Переключайте селектор КПП (`P-R-N-D`), нажимайте тормоз или газ — изменившиеся параметры подсветятся жёлтым.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -2964,7 +2585,7 @@ export default function CanUdsPanel({
                   type="button"
                   disabled={liveUdsRunning}
                   onClick={() => toggleWatchedDid(request)}
-                  className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-300 disabled:opacity-40"
+                  className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 disabled:opacity-40"
                 >
                   + Добавить текущую команду ({request})
                 </button>
@@ -2975,7 +2596,7 @@ export default function CanUdsPanel({
                     type="button"
                     disabled={hwBusy || monitoring || watchedDids.length === 0}
                     onClick={() => void startLiveUds()}
-                    className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                    className="flex-1 rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
                   >
                     Запустить Live-поток ({watchedDids.length} DID)
                   </button>
@@ -2996,29 +2617,29 @@ export default function CanUdsPanel({
                       key={row.did}
                       className={`rounded-lg border px-3 py-2 ${
                         row.changed
-                          ? "border-amber-400/60 bg-amber-950/30"
-                          : "border-slate-800 bg-slate-950/90"
+                          ? "border-amber-400/60 bg-amber-50"
+                          : "border-gray-200 bg-gray-50/90"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono font-semibold text-emerald-300">22 {row.did}</span>
+                        <span className="font-mono font-semibold text-emerald-700">22 {row.did}</span>
                         <div className="flex items-center gap-1.5">
                           {row.changed ? (
-                            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+                            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                               ИЗМЕНИЛСЯ
                             </span>
                           ) : null}
-                          <span className="font-mono text-[11px] text-slate-500">#{row.count}</span>
+                          <span className="font-mono text-[11px] text-gray-500">#{row.count}</span>
                         </div>
                       </div>
-                      <div className="mt-0.5 break-all font-mono text-slate-100">{row.text}</div>
+                      <div className="mt-0.5 break-all font-mono text-gray-900">{row.text}</div>
                     </li>
                   ))}
                 </ul>
               ) : null}
             </div>
 
-            <label className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+            <label className="mt-3 flex items-center gap-2 text-xs text-gray-500">
               <input
                 type="checkbox"
                 checked={developer}
@@ -3046,7 +2667,7 @@ export default function CanUdsPanel({
                 "uds-log.csv",
               )
             }
-            className="rounded-xl border border-slate-600 px-4 py-3 text-sm disabled:opacity-40"
+            className="rounded-xl border border-gray-300 px-4 py-3 text-sm disabled:opacity-40"
           >
             Экспорт журнала UDS ({udsLog.length})
           </button>
@@ -3068,13 +2689,13 @@ function Field({
   disabled?: boolean;
 }) {
   return (
-    <label className="block text-xs text-slate-400">
+    <label className="block text-xs text-gray-500">
       {label}
       <input
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 disabled:opacity-40"
+        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-900 disabled:opacity-40"
       />
     </label>
   );
@@ -3097,7 +2718,7 @@ function ProtocolButton({
       disabled={disabled}
       onClick={onClick}
       className={`flex-1 rounded-lg px-2 py-2 text-xs font-medium ${
-        active ? "bg-emerald-600 text-white" : "text-slate-400"
+        active ? "bg-gray-900 text-white" : "text-gray-500"
       } disabled:opacity-40`}
     >
       {children}

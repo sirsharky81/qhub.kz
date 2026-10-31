@@ -1,3 +1,4 @@
+import { decodeSubaruTemperatureBytes, decodeSubaruTpmsBytes } from "./subaru-decode";
 import { decodeUdsDidSupportBitmap, formatUdsPayload, isUdsBitmapDid } from "./uds";
 
 export type Ssm4Group = "Powertrain" | "Chassis" | "Body";
@@ -46,6 +47,7 @@ export interface Ssm4SignalDef {
   min: number;
   max: number;
   enums?: Record<number, string>;
+  decodeKind?: "temp-c" | "tpms-kpa";
 }
 
 export interface Ssm4CustomizeItem {
@@ -99,7 +101,7 @@ export const SSM4_VEHICLES: readonly Ssm4VehicleModel[] = [
     nameRu: "Subaru Forester V (SK · SGP)",
     years: "2018–2024",
     engines: ["FB20D (2.0L DI)", "FB25D (2.5L DI)", "CB18 (1.8L DIT)"],
-    vinPrefixes: ["JF1SK", "JF2SK", "4S4WM"],
+    vinPrefixes: ["JF1SK", "JF2SK"],
     chassisCodes: ["SK5", "SK7", "SK9", "SKE"],
     platform: "SGP",
   },
@@ -331,7 +333,118 @@ export const SSM4_ECUS: readonly Ssm4EcuDef[] = [
 ];
 
 export const SSM4_SIGNALS: readonly Ssm4SignalDef[] = [
-  // Engine 234 (7E0 -> 7E8) — SSM 0xA8 and SAE Mode 01
+  // Engine 234 (7E0 -> 7E8) — SAE J1979 Mode 01 (works on SGP when classic SSM A8 is silent)
+  {
+    id: "eng-coolant-obd",
+    ecuId: 234,
+    customList: "Diagnosis",
+    nameEn: "Coolant Temp. (Mode 01)",
+    nameRu: "Температура ОЖ (OBD PID 05)",
+    shortName: "ECT",
+    unit: "°C",
+    protocol: "obd-01",
+    addressOrDid: "05",
+    byteLen: 1,
+    mul: 1,
+    div: 1,
+    offset: -40,
+    decimals: 0,
+    min: -40,
+    max: 215,
+    decodeKind: "temp-c",
+  },
+  {
+    id: "eng-rpm-obd",
+    ecuId: 234,
+    customList: "Diagnosis",
+    nameEn: "Engine Speed (Mode 01)",
+    nameRu: "Обороты двигателя (OBD PID 0C)",
+    shortName: "RPM",
+    unit: "об/мин",
+    protocol: "obd-01",
+    addressOrDid: "0C",
+    byteLen: 2,
+    mul: 1,
+    div: 4,
+    offset: 0,
+    decimals: 0,
+    min: 0,
+    max: 8000,
+  },
+  {
+    id: "eng-speed-obd",
+    ecuId: 234,
+    customList: "Diagnosis",
+    nameEn: "Vehicle Speed (Mode 01)",
+    nameRu: "Скорость автомобиля (OBD PID 0D)",
+    shortName: "VSS",
+    unit: "км/ч",
+    protocol: "obd-01",
+    addressOrDid: "0D",
+    byteLen: 1,
+    mul: 1,
+    div: 1,
+    offset: 0,
+    decimals: 0,
+    min: 0,
+    max: 255,
+  },
+  {
+    id: "eng-load-obd",
+    ecuId: 234,
+    customList: "Diagnosis",
+    nameEn: "Calculated Load (Mode 01)",
+    nameRu: "Расчётная нагрузка (OBD PID 04)",
+    shortName: "LOAD",
+    unit: "%",
+    protocol: "obd-01",
+    addressOrDid: "04",
+    byteLen: 1,
+    mul: 100,
+    div: 255,
+    offset: 0,
+    decimals: 1,
+    min: 0,
+    max: 100,
+  },
+  {
+    id: "eng-tps-obd",
+    ecuId: 234,
+    customList: "Diagnosis",
+    nameEn: "Throttle Position (Mode 01)",
+    nameRu: "Положение дросселя (OBD PID 11)",
+    shortName: "TPS",
+    unit: "%",
+    protocol: "obd-01",
+    addressOrDid: "11",
+    byteLen: 1,
+    mul: 100,
+    div: 255,
+    offset: 0,
+    decimals: 1,
+    min: 0,
+    max: 100,
+  },
+  {
+    id: "eng-iat-obd",
+    ecuId: 234,
+    customList: "Diagnosis",
+    nameEn: "Intake Air Temp. (Mode 01)",
+    nameRu: "Температура воздуха на впуске (OBD PID 0F)",
+    shortName: "IAT",
+    unit: "°C",
+    protocol: "obd-01",
+    addressOrDid: "0F",
+    byteLen: 1,
+    mul: 1,
+    div: 1,
+    offset: -40,
+    decimals: 0,
+    min: -40,
+    max: 215,
+    decodeKind: "temp-c",
+  },
+  // Engine 234 (7E0 -> 7E8) — classic SSM 0xA8 (Gen4 / some SGP ECM)
   {
     id: "eng-coolant-ssm",
     ecuId: 234,
@@ -898,6 +1011,7 @@ export const SSM4_SIGNALS: readonly Ssm4SignalDef[] = [
     decimals: 0,
     min: -40,
     max: 215,
+    decodeKind: "temp-c",
   },
   {
     id: "ptm-circuit-a-temp",
@@ -976,6 +1090,7 @@ export const SSM4_SIGNALS: readonly Ssm4SignalDef[] = [
     decimals: 0,
     min: -40,
     max: 200,
+    decodeKind: "temp-c",
   },
   {
     id: "tcm-supply-volts",
@@ -1175,6 +1290,7 @@ export const SSM4_SIGNALS: readonly Ssm4SignalDef[] = [
     decimals: 0,
     min: 0,
     max: 350,
+    decodeKind: "tpms-kpa",
   },
   {
     id: "biu-tpms-2",
@@ -1194,6 +1310,7 @@ export const SSM4_SIGNALS: readonly Ssm4SignalDef[] = [
     decimals: 0,
     min: 0,
     max: 350,
+    decodeKind: "tpms-kpa",
   },
   {
     id: "biu-tpms-3",
@@ -1213,6 +1330,7 @@ export const SSM4_SIGNALS: readonly Ssm4SignalDef[] = [
     decimals: 0,
     min: 0,
     max: 350,
+    decodeKind: "tpms-kpa",
   },
   {
     id: "biu-tpms-4",
@@ -1232,6 +1350,7 @@ export const SSM4_SIGNALS: readonly Ssm4SignalDef[] = [
     decimals: 0,
     min: 0,
     max: 350,
+    decodeKind: "tpms-kpa",
   },
   {
     id: "biu-supply-volts",
@@ -1452,16 +1571,16 @@ export const SSM4_UTILITIES: readonly Ssm4UtilitySpec[] = [
       { did: "101B", labelRu: "Напряжение питания EPS (В)" },
     ],
     safetyNoteRu:
-      "В QHub режим работает без отправки разрушающих RoutineControl (0x31): вы контролируете точный угол 0.0° и момент в реальном времени.",
+      "Live-контроль угла на EPS 746. Запись нуля — отдельная кнопка на вкладке «Угол руля» (VDC 7B0, RoutineControl 0x31) только после подтверждения в модальном окне.",
   },
   {
     id: "util-cvt-at-inspection",
     ecuId: 118,
-    txHex: "7A2",
-    rxHex: "7AA",
+    txHex: "7E1",
+    rxHex: "7E9",
     titleRu: "Температурный контроль CVTF и инспекция Lineartronic CVT",
     titleEn: "Lineartronic CVT Fluid Temperature & Learning Inspection",
-    ssmFunctionCode: "FunctionId = 902 (Utility · TCM 7E1 / PTM 7A2)",
+    ssmFunctionCode: "FunctionId = 902 (Utility · TCM 7E1)",
     purposeRu:
       "Контроль рабочей температуры жидкости вариатора (35–45 °C для выставления уровня CVTF; 65–85 °C для условий адаптации муфты переднего хода и гидроблока).",
     conditionsRu: [
@@ -1470,10 +1589,8 @@ export const SSM4_UTILITIES: readonly Ssm4UtilitySpec[] = [
       "Отсутствуют активные коды неисправностей в блоках 7E1 и 7A2.",
     ],
     liveDids: [
-      { did: "103D", labelRu: "Температура жидкости КПП / вариатора (103D)" },
-      { did: "1297", labelRu: "Температура масла ДВС (1297)" },
-      { did: "10CB", labelRu: "Термоконтур охлаждения A (10CB)" },
-      { did: "10CC", labelRu: "Термоконтур охлаждения B (10CC)" },
+      { did: "103D", labelRu: "Температура жидкости вариатора CVTF (103D)" },
+      { did: "101B", labelRu: "Напряжение питания TCM (101B)" },
     ],
     safetyNoteRu:
       "Принудительный сброс таблиц обучения вариатора (AT Learning Clear) отключён в браузере, чтобы исключить рывки при незавершённом цикле адаптации.",
@@ -1501,7 +1618,7 @@ export const SSM4_UTILITIES: readonly Ssm4UtilitySpec[] = [
       { did: "200A", labelRu: "Счётчик циклов EPB (200A)" },
     ],
     safetyNoteRu:
-      "Команды разведения колодок и сброса нуля VDC (0x2F / 0x31) заблокированы для защиты тормозной системы.",
+      "Разведение колодок EPB (0x2F) в QHub не выполняется. Сброс нуля VDC (0x31) доступен только на вкладке «Угол руля» после явного подтверждения.",
   },
   {
     id: "util-eyesight-camera-check",
@@ -1691,6 +1808,18 @@ export function decodeSsm4SignalPayload(
 
   if (signal.enums && signal.enums[raw] != null) {
     return { text: signal.enums[raw]!, numeric: raw };
+  }
+
+  if (signal.decodeKind === "temp-c") {
+    const temp = decodeSubaruTemperatureBytes(data.slice(start));
+    if (!temp) return null;
+    const text = Number.isInteger(temp.celsius) ? String(temp.celsius) : temp.celsius.toFixed(1);
+    return { text, numeric: temp.celsius };
+  }
+  if (signal.decodeKind === "tpms-kpa") {
+    const tpms = decodeSubaruTpmsBytes(data.slice(start));
+    if (!tpms) return null;
+    return { text: String(Math.round(tpms.kpa)), numeric: tpms.kpa };
   }
 
   const scaled = (raw * signal.mul) / signal.div + signal.offset;

@@ -23,6 +23,8 @@ import {
   type SasCalibrationResult,
   type TpmsModuleReport,
 } from "./mitsubishi-modules";
+import { calibrateSubaruSteeringZero } from "./subaru-steering-calibration";
+import { remedyForDtcCode } from "./dtc-remedies";
 import {
   DID_SCAN_FROM,
   DID_SCAN_SILENCE,
@@ -120,6 +122,8 @@ export interface ModuleDtcItem {
   code: string;
   active: boolean;
   description: string;
+  /** Что проверить / типовые шаги устранения */
+  remedy?: string;
   statusByte?: number;
 }
 
@@ -348,6 +352,17 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
     await this.ensureUdsProfile("6");
     return calibrateMitsubishiSasZero(this.elm!);
+  }
+
+  /**
+   * Subaru VDC sensor midpoint / steering-angle zero (7B0 → 7B8 RoutineControl after user confirm).
+   */
+  async calibrateSubaruSteeringZero(): Promise<SasCalibrationResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return calibrateSubaruSteeringZero(this.elm!);
   }
 
   /**
@@ -1092,6 +1107,7 @@ export class ObdBleSession {
                   code: d.code,
                   active: d.active,
                   description: d.description,
+                  remedy: d.remedy,
                   statusByte: d.statusByte,
                 });
               }
@@ -1122,6 +1138,7 @@ export class ObdBleSession {
                     code: d.code,
                     active: d.active,
                     description: d.description,
+                    remedy: d.remedy,
                     statusByte: d.statusByte,
                   });
                 }
@@ -1150,6 +1167,7 @@ export class ObdBleSession {
                     code: d.code,
                     active: true,
                     description: d.description,
+                    remedy: remedyForDtcCode(d.code),
                   });
                 }
               }

@@ -32,6 +32,7 @@ describe("subaru-ssm4-catalog", () => {
     expect(matchSsm4VehicleByVin("4S4BTANC1N3123456")?.id).toBe("bt-outback-sgp");
     expect(matchSsm4VehicleByVin("JF1GTELL5JG001122")?.id).toBe("gt-gk-xv-impreza-sgp");
     expect(matchSsm4VehicleByVin("JF1VAB12345678901")?.id).toBe("va-vm-vb-wrx-levorg");
+    expect(matchSsm4VehicleByVin("4S4WMAA1234567890")?.id).toBe("wm-ascent-sgp");
     expect(SSM4_VEHICLES.length).toBeGreaterThanOrEqual(6);
   });
 
@@ -53,6 +54,17 @@ describe("subaru-ssm4-catalog", () => {
     // -12.5 deg -> raw = -125 = 0xFF83 after DID echo 10 41
     const decodedAngle = decodeSsm4SignalPayload(steeringAngleSig, [0x10, 0x41, 0xff, 0x83]);
     expect(decodedAngle).toEqual({ text: "-12.5", numeric: -12.5 });
+
+    const coolantObd = SSM4_SIGNALS.find((s) => s.id === "eng-coolant-obd")!;
+    expect(buildSsm4RequestHex(coolantObd)).toEqual({ serviceSid: 0x01, requestHex: "01 05" });
+    expect(decodeSsm4SignalPayload(coolantObd, [0x05, 0x5a])).toEqual({ text: "50", numeric: 50 });
+
+    const cvtSig = SSM4_SIGNALS.find((s) => s.id === "tcm-atf-temp-uds")!;
+    expect(decodeSsm4SignalPayload(cvtSig, [0x10, 0x3d, 0x01, 0x72])?.numeric).toBe(37);
+
+    const tpmsSig = SSM4_SIGNALS.find((s) => s.id === "biu-tpms-1")!;
+    expect(decodeSsm4SignalPayload(tpmsSig, [0x10, 0x21, 0xe6])?.numeric).toBe(230);
+    expect(decodeSsm4SignalPayload(tpmsSig, [0x10, 0x21, 0x08, 0xfc])?.numeric).toBe(230);
   });
 
   it("defines read-only calibration inspection utilities for EPS, CVT, EPB, EyeSight, and TPMS", () => {

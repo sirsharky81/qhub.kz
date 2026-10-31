@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 
 export default function ObdDiagPage() {
   return (
-    <Suspense fallback={<div className="min-h-dvh bg-slate-950" />}>
+    <Suspense fallback={<div className="min-h-dvh bg-gray-50" />}>
       <ObdDiagClient />
     </Suspense>
   );

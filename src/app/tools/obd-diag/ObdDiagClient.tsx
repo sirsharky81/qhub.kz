@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import MutDiagPanel from "./MutDiagPanel";
 import { formatBleFailure } from "@/lib/obd/ble-error";
 import { bytesToHex } from "@/lib/obd/hex";
 import {
@@ -32,12 +31,18 @@ import {
   type EtacsCodingDump,
   type EtacsWriteBlockResult,
 } from "@/lib/obd/mitsubishi-etacs";
+import { remedyForDtcCode } from "@/lib/obd/dtc-remedies";
 import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { useObdScroll } from "./ObdScrollContext";
 import CanUdsPanel from "./CanUdsPanel";
-import { SubaruSsmPanel } from "./SubaruSsmPanel";
+import {
+  BrandDiagPanel,
+  type BrandDiagBrand,
+  type MitsubishiDiagView,
+} from "./BrandDiagPanel";
+import { LiveMetricCards } from "./LiveMetricCards";
 
-type ToolTab = "obd" | "subaru" | "mitsubishi" | "can" | "diag";
+type ToolTab = "obd" | "brand-diag" | "mitsubishi" | "can";
 type ObdSubTab = "live" | "dtc" | "info";
 
 interface LiveTile {
@@ -61,11 +66,32 @@ export default function ObdDiagClient() {
   const sessionRef = useRef(session);
   const [tab, setTab] = useState<ToolTab>(() => {
     const param = searchParams.get("tab");
-    if (param === "subaru") return "subaru";
-    if (param === "mitsubishi") return "mitsubishi";
     if (param === "can") return "can";
-    if (param === "diag") return "diag";
+    if (param === "mitsubishi" || param === "etacs") return "mitsubishi";
+    if (
+      param === "subaru" ||
+      param === "diag" ||
+      param === "mitsu-sas" ||
+      param === "steering-mitsu" ||
+      param === "brand-diag"
+    ) {
+      return "brand-diag";
+    }
     return "obd";
+  });
+  const [brandDiagBrand, setBrandDiagBrand] = useState<BrandDiagBrand>(() => {
+    const param = searchParams.get("tab");
+    if (param === "subaru") return "subaru";
+    if (param === "diag" || param === "mitsu-sas" || param === "steering-mitsu") return "mitsubishi";
+    const brand = searchParams.get("brand");
+    if (brand === "mitsubishi") return "mitsubishi";
+    return "subaru";
+  });
+  const [mitsuDiagView, setMitsuDiagView] = useState<MitsubishiDiagView>(() => {
+    const param = searchParams.get("tab");
+    if (param === "mitsu-sas" || param === "steering-mitsu") return "steering";
+    if (searchParams.get("view") === "steering") return "steering";
+    return "ecu";
   });
   const [obdSubTab, setObdSubTab] = useState<ObdSubTab>("live");
   const [phase, setPhase] = useState<ObdConnectionPhase>("idle");
@@ -500,11 +526,11 @@ export default function ObdDiagClient() {
     <>
         <header className="mb-3 flex items-baseline justify-between gap-2">
           <div>
-            <p className="text-[11px] uppercase tracking-wider text-emerald-400/90">QHub · Диагностика</p>
+            <p className="text-[11px] uppercase tracking-wider text-gray-500">QHub · Диагностика</p>
             <h1 className="text-xl font-semibold">OBD / CAN / ETACS Scanner</h1>
           </div>
           {supplyVolts != null ? (
-            <span className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1 font-mono text-xs text-emerald-300">
+            <span className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 font-mono text-xs text-emerald-700">
               {supplyVolts.toFixed(1)} В
             </span>
           ) : null}
@@ -524,46 +550,46 @@ export default function ObdDiagClient() {
 
         <div className="mb-3 space-y-2">
           {!transportReady ? (
-            <p className="min-h-[2.5rem] text-xs leading-relaxed text-slate-500">Проверка Bluetooth…</p>
+            <p className="min-h-[2.5rem] text-xs leading-relaxed text-gray-500">Проверка Bluetooth…</p>
           ) : null}
 
           {transportReady && transport === "none" ? (
-            <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+            <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
               <p>{obdTransportHint("none")}</p>
               <button
                 type="button"
-                className="text-xs underline text-amber-200/90"
+                className="text-xs underline text-amber-900/90"
                 onClick={() => setEnvLines(formatObdEnvironmentLines(probeObdEnvironment()))}
               >
                 Показать диагностику Bluetooth
               </button>
               {envLines ? (
-                <pre className="whitespace-pre-wrap text-xs text-amber-100/90">{envLines.join("\n")}</pre>
+                <pre className="whitespace-pre-wrap text-xs text-amber-900/90">{envLines.join("\n")}</pre>
               ) : null}
             </div>
           ) : null}
 
           {transportReady && transport !== "none" && phase === "idle" && obdTransportHint(transport) ? (
-            <p className="text-xs text-slate-500">{obdTransportHint(transport)}</p>
+            <p className="text-xs text-gray-500">{obdTransportHint(transport)}</p>
           ) : null}
         </div>
 
         {error ? (
-          <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">{error}</p>
+          <p className="mb-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</p>
         ) : null}
 
-        <div className="mb-3 flex flex-wrap rounded-xl border border-slate-800 bg-slate-900/50 p-1">
+        <div className="mb-3 flex min-w-0 flex-wrap rounded-xl border border-gray-200 bg-gray-50 p-1">
           <TabButton active={tab === "obd"} onClick={() => setTab("obd")}>
             OBD-II
           </TabButton>
           <TabButton
-            active={tab === "subaru"}
+            active={tab === "brand-diag"}
             onClick={() => {
               setPoll(false);
-              setTab("subaru");
+              setTab("brand-diag");
             }}
           >
-            Subaru SSM4
+            Диагностика
           </TabButton>
           <TabButton
             active={tab === "can"}
@@ -575,28 +601,24 @@ export default function ObdDiagClient() {
             CAN / UDS
           </TabButton>
           <TabButton
-            active={tab === "diag"}
-            onClick={() => {
-              setPoll(false);
-              setTab("diag");
-            }}
-          >
-            Диагностика
-          </TabButton>
-          <TabButton
             active={tab === "mitsubishi"}
             onClick={() => {
               setPoll(false);
               setTab("mitsubishi");
             }}
           >
-            Mitsubishi ETACS
+            ETACS Mitsubishi
           </TabButton>
         </div>
 
-        {tab === "subaru" ? (
-          <SubaruSsmPanel
+        {tab === "brand-diag" ? (
+          <BrandDiagPanel
+            brand={brandDiagBrand}
+            onBrandChange={setBrandDiagBrand}
+            mitsuView={mitsuDiagView}
+            onMitsuViewChange={setMitsuDiagView}
             session={session}
+            phase={phase}
             ready={phase !== "idle"}
             busy={busy}
             setBusy={setBusy}
@@ -605,7 +627,7 @@ export default function ObdDiagClient() {
           />
         ) : tab === "obd" ? (
           <section className="flex flex-col gap-3">
-            <div className="flex rounded-xl border border-slate-800 bg-slate-900/40 p-1">
+            <div className="flex rounded-xl border border-gray-200 bg-gray-50 p-1">
               <TabButton active={obdSubTab === "live"} onClick={() => setObdSubTab("live")}>
                 Параметры (Live)
               </TabButton>
@@ -636,7 +658,7 @@ export default function ObdDiagClient() {
                 </ActionButton>
 
                 {pids.length > 0 ? (
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                  <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
                     <span>
                       Нажмите на карточку, чтобы отметить ★ ({pinnedPids.length})
                     </span>
@@ -646,8 +668,8 @@ export default function ObdDiagClient() {
                         onClick={() => setOnlyPinned((v) => !v)}
                         className={`rounded-lg border px-2.5 py-1 font-medium ${
                           onlyPinned
-                            ? "border-emerald-500 bg-emerald-600/20 text-emerald-200"
-                            : "border-slate-700 text-slate-300"
+                            ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+                            : "border-gray-300 text-gray-700"
                         }`}
                       >
                         {onlyPinned ? "Показать все" : "Опрашивать только ★ (быстро)"}
@@ -655,13 +677,13 @@ export default function ObdDiagClient() {
                     ) : null}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-gray-500">
                     Стандарт SAE J1979 (Subaru, Mitsubishi, Toyota и др.). Выберите нужные датчики звездой ★ для быстрого опроса 3–4 раза в секунду.
                   </p>
                 )}
 
                 {pidNote ? (
-                  <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                     {pidNote}
                   </p>
                 ) : null}
@@ -708,15 +730,13 @@ export default function ObdDiagClient() {
               </div>
             )}
           </section>
-        ) : tab === "diag" ? (
-          <MutDiagPanel session={session} phase={phase} />
         ) : tab === "mitsubishi" ? (
           <section className="flex flex-col gap-3">
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-              <div className="text-xs font-medium text-slate-200">
+            <div className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-xs font-medium text-gray-800">
                 Выгрузка кодировки Mitsubishi ETACS и ДВС (`.kon` и `.cuf`)
               </div>
-              <p className="mt-1 text-xs text-slate-400">
+              <p className="mt-1 text-xs text-gray-500">
                 Совместимо с MMCodingWriter и MUT Coding. Читает Variant Coding (`LID 30 / 32 / 42` → `.kon`) из кузовного блока ETACS (`8637xxxx`) и ЭБУ двигателя (`1860xxxx`, `7E0 → 7E8`), а также Custom Coding (`LID 31` → `.cuf`). Зажигание должно быть в положении ON (двигатель заглушен).
               </p>
 
@@ -725,7 +745,7 @@ export default function ObdDiagClient() {
                   type="button"
                   disabled={busy || phase === "idle"}
                   onClick={() => readEtacs("auto")}
-                  className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                  className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
                 >
                   Считать ETACS (.kon + .cuf)
                 </button>
@@ -733,16 +753,16 @@ export default function ObdDiagClient() {
                   type="button"
                   disabled={busy || phase === "idle"}
                   onClick={() => readEtacs("engine-auto")}
-                  className="rounded-xl bg-sky-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                  className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
                 >
                   Считать ДВС 7E0 (.kon)
                 </button>
               </div>
 
-              <label className="mt-3 block text-xs text-slate-400">
+              <label className="mt-3 block text-xs text-gray-500">
                 Ручной выбор профиля CAN (ETACS / Двигатель)
                 <select
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
                   value={profileId}
                   onChange={(e) => setProfileId(e.target.value)}
                   disabled={busy || phase === "idle"}
@@ -763,55 +783,55 @@ export default function ObdDiagClient() {
             </div>
 
             {etacsDump ? (
-              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3.5 text-sm">
+              <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3.5 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-emerald-200">Кодировка успешно считана</span>
-                  <span className="font-mono text-xs text-slate-400">
+                  <span className="font-medium text-emerald-800">Кодировка успешно считана</span>
+                  <span className="font-mono text-xs text-gray-500">
                     {etacsDump.txHex} → {etacsDump.rxHex}
                   </span>
                 </div>
                 {etacsDump.partNumber ? (
-                  <p className="mt-1 text-xs text-slate-300">
-                    Номер блока / SW: <span className="font-mono text-emerald-300">{etacsDump.partNumber}</span>
+                  <p className="mt-1 text-xs text-gray-700">
+                    Номер блока / SW: <span className="font-mono text-emerald-700">{etacsDump.partNumber}</span>
                     {etacsDump.swVersion ? (
-                      <span className="ml-2 font-mono text-slate-400">({etacsDump.swVersion})</span>
+                      <span className="ml-2 font-mono text-gray-500">({etacsDump.swVersion})</span>
                     ) : null}
                   </p>
                 ) : null}
                 {etacsDump.vin ? (
-                  <p className="mt-0.5 text-xs text-slate-300">
-                    VIN в блоке: <span className="font-mono text-cyan-300">{etacsDump.vin}</span>
+                  <p className="mt-0.5 text-xs text-gray-700">
+                    VIN в блоке: <span className="font-mono text-cyan-700">{etacsDump.vin}</span>
                   </p>
                 ) : null}
                 {etacsDump.customStatusNote ? (
-                  <p className="mt-1.5 rounded-lg border border-amber-500/30 bg-amber-950/30 px-2.5 py-1.5 text-[11px] text-amber-200">
+                  <p className="mt-1.5 rounded-lg border border-amber-500/30 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
                     {etacsDump.customStatusNote}
                   </p>
                 ) : null}
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg bg-slate-950/80 p-2">
-                    <div className="text-slate-400">
+                  <div className="rounded-lg bg-gray-100 p-2">
+                    <div className="text-gray-500">
                       Variant (`.kon`){etacsDump.variantUsedId ? ` · ${etacsDump.variantUsedId}` : ""}
                     </div>
-                    <div className="font-mono text-sm font-medium text-slate-100">
+                    <div className="font-mono text-sm font-medium text-gray-900">
                       {etacsDump.variant.length} байт
                     </div>
-                    <div className="mt-1 truncate font-mono text-[11px] text-slate-500">
+                    <div className="mt-1 truncate font-mono text-[11px] text-gray-500">
                       {bytesToHex(etacsDump.variant.slice(0, 12))}…
                     </div>
                   </div>
-                  <div className="rounded-lg bg-slate-950/80 p-2">
-                    <div className="text-slate-400">
+                  <div className="rounded-lg bg-gray-100 p-2">
+                    <div className="text-gray-500">
                       Custom (`.cuf`){etacsDump.customUsedId ? ` · ${etacsDump.customUsedId}` : ""}
                     </div>
-                    <div className="font-mono text-sm font-medium text-slate-100">
+                    <div className="font-mono text-sm font-medium text-gray-900">
                       {etacsDump.custom.length > 0
                         ? `${etacsDump.custom.length} байт`
                         : etacsDump.moduleKind === "engine"
                           ? "не используется (только .kon)"
                           : "не отдан (7F 21 12)"}
                     </div>
-                    <div className="mt-1 truncate font-mono text-[11px] text-slate-500">
+                    <div className="mt-1 truncate font-mono text-[11px] text-gray-500">
                       {etacsDump.custom.length > 0
                         ? `${bytesToHex(etacsDump.custom.slice(0, 12))}…`
                         : etacsDump.moduleKind === "engine"
@@ -824,7 +844,7 @@ export default function ObdDiagClient() {
                   <button
                     type="button"
                     onClick={() => void saveEtacsFile("kon")}
-                    className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-medium text-white"
+                    className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-medium text-white"
                   >
                     Скачать .kon ({etacsDump.variant.length} Б)
                   </button>
@@ -832,7 +852,7 @@ export default function ObdDiagClient() {
                     type="button"
                     disabled={etacsDump.custom.length === 0}
                     onClick={() => void saveEtacsFile("cuf")}
-                    className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-medium text-white disabled:opacity-40"
+                    className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-medium text-white disabled:opacity-40"
                   >
                     {etacsDump.custom.length > 0
                       ? `Скачать .cuf (${etacsDump.custom.length} Б)`
@@ -841,35 +861,35 @@ export default function ObdDiagClient() {
                   <button
                     type="button"
                     onClick={() => void saveEtacsFile("json")}
-                    className="col-span-2 rounded-xl border border-slate-600 px-3 py-2 text-xs text-slate-200"
+                    className="col-span-2 rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-800"
                   >
                     Сохранить резервную копию (.json с дампом)
                   </button>
                   <Link
                     href="/tools/etacs-coding"
-                    className="col-span-2 rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2.5 text-center text-xs font-medium text-amber-100"
+                    className="col-span-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-center text-xs font-medium text-amber-900"
                   >
                     Открыть в редакторе ETACS Coding (.kon / .cuf)
                   </Link>
                 </div>
 
                 {etacsDump.extraLids && etacsDump.extraLids.length > 0 ? (
-                  <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5 text-xs">
-                    <div className="font-medium text-slate-300">
+                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5 text-xs">
+                    <div className="font-medium text-gray-700">
                       Дополнительные регистры блока ({etacsDump.extraLids.length} LID) — нажмите «В .kon» или «В .cuf» для выбора:
                     </div>
                     <div className="mt-1.5 flex flex-col gap-1.5">
                       {etacsDump.extraLids.map((extra) => (
                         <div
                           key={extra.lidHex}
-                          className="flex items-center justify-between gap-2 rounded bg-slate-900/80 px-2 py-1.5"
+                          className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="font-medium text-slate-200">
-                              <span className="font-mono text-emerald-300">{extra.lidHex}</span> · {extra.label} (
+                            <div className="font-medium text-gray-800">
+                              <span className="font-mono text-emerald-700">{extra.lidHex}</span> · {extra.label} (
                               {extra.payload.length} Б)
                             </div>
-                            <div className="truncate font-mono text-[10px] text-slate-400">
+                            <div className="truncate font-mono text-[10px] text-gray-500">
                               {extra.ascii ? `${extra.ascii} · ` : ""}
                               {bytesToHex(extra.payload.slice(0, 16))}
                               {extra.payload.length > 16 ? "…" : ""}
@@ -890,7 +910,7 @@ export default function ObdDiagClient() {
                                     : prev,
                                 )
                               }
-                              className="rounded-lg border border-sky-500/40 bg-sky-950/40 px-2 py-1 text-[11px] font-medium text-sky-200"
+                              className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800"
                             >
                               В .kon
                             </button>
@@ -908,7 +928,7 @@ export default function ObdDiagClient() {
                                     : prev,
                                 )
                               }
-                              className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200"
+                              className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800"
                             >
                               В .cuf
                             </button>
@@ -922,27 +942,27 @@ export default function ObdDiagClient() {
             ) : null}
 
             {/* Sequential, separate writing of .kon (Step 1) and .cuf (Step 2) */}
-            <div className="rounded-xl border border-amber-500/40 bg-slate-900/70 p-3.5 text-xs">
+            <div className="rounded-xl border border-amber-300 bg-white p-3.5 text-xs">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-amber-200">
+                <span className="text-sm font-semibold text-amber-900">
                   Последовательная запись в блок (`.kon` → затем `.cuf`)
                 </span>
-                <span className="rounded bg-amber-950/60 px-2 py-0.5 font-mono text-[10px] text-amber-300">
+                <span className="rounded bg-amber-950/60 px-2 py-0.5 font-mono text-[10px] text-amber-800">
                   KWP 3B / UDS 2E
                 </span>
               </div>
-              <p className="mt-1.5 text-slate-300">
+              <p className="mt-1.5 text-gray-700">
                 Запись выполняется <strong>строго раздельно в 2 шага</strong>: когда вы заливаете{" "}
-                <span className="font-mono text-amber-200">.kon</span> (Variant Coding), блок ETACS автоматически сбрасывает настройки{" "}
-                <span className="font-mono text-amber-200">.cuf</span> (Custom Coding) на заводские базовые. Поэтому сначала запишите{" "}
-                <span className="font-mono text-amber-200">.kon</span>, дождитесь ответа блока и <strong>отдельно вторым шагом</strong> залейте ваш сохранённый{" "}
-                <span className="font-mono text-amber-200">.cuf</span>.
+                <span className="font-mono text-amber-900">.kon</span> (Variant Coding), блок ETACS автоматически сбрасывает настройки{" "}
+                <span className="font-mono text-amber-900">.cuf</span> (Custom Coding) на заводские базовые. Поэтому сначала запишите{" "}
+                <span className="font-mono text-amber-900">.kon</span>, дождитесь ответа блока и <strong>отдельно вторым шагом</strong> залейте ваш сохранённый{" "}
+                <span className="font-mono text-amber-900">.cuf</span>.
               </p>
 
               {/* Step 1: Write .kon */}
-              <div className="mt-3 rounded-xl border border-slate-700/80 bg-slate-950/70 p-3">
+              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-100">
+                  <span className="font-semibold text-gray-900">
                     Шаг 1. Запись Variant Coding (`.kon`)
                   </span>
                   {etacsDump && etacsDump.variant.length > 0 ? (
@@ -958,13 +978,13 @@ export default function ObdDiagClient() {
                         });
                         setKonWriteResult(null);
                       }}
-                      className="rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                      className="rounded-lg border border-gray-300 bg-gray-100 px-2 py-1 text-[11px] text-gray-800"
                     >
                       Взять считанный ({etacsDump.variant.length} Б)
                     </button>
                   ) : null}
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">
+                <p className="mt-1 text-[11px] text-gray-500">
                   Выберите модифицированный файл `.kon` (или резервный `.json`) с телефона. Подходит как для ETACS (`8637xxxx`), так и для ЭБУ двигателя (`1860xxxx`).
                 </p>
 
@@ -975,17 +995,17 @@ export default function ObdDiagClient() {
                     accept=".kon,.json,.bin,.txt,application/octet-stream,application/json"
                     disabled={busy}
                     onChange={(e) => void handleLoadMitsubishiFile("kon", e.target.files?.[0] ?? null)}
-                    className="block w-full text-xs text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-100"
+                    className="block w-full text-xs text-gray-700 file:mr-2.5 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-900"
                   />
                 </label>
 
                 {loadedKon ? (
-                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/90 p-2 font-mono text-[11px] text-slate-200">
+                  <div className="mt-2 rounded-lg border border-gray-200 bg-white/90 p-2 font-mono text-[11px] text-gray-800">
                     <div>
-                      Файл: <span className="text-emerald-300">{loadedKon.fileName}</span> ({loadedKon.payload.length} байт)
+                      Файл: <span className="text-emerald-700">{loadedKon.fileName}</span> ({loadedKon.payload.length} байт)
                       {loadedKon.partNumber ? ` · Блок ${loadedKon.partNumber}` : ""}
                     </div>
-                    <div className="mt-0.5 truncate text-slate-400">
+                    <div className="mt-0.5 truncate text-gray-500">
                       HEX: {bytesToHex(loadedKon.payload.slice(0, 16))}
                       {loadedKon.payload.length > 16 ? "…" : ""}
                     </div>
@@ -1004,20 +1024,20 @@ export default function ObdDiagClient() {
                 </button>
 
                 {konWriteResult ? (
-                  <div className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-2 text-[11px] text-emerald-200">
+                  <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2 text-[11px] text-emerald-800">
                     <div className="font-semibold">
                       {konWriteResult.txHex} → {konWriteResult.rxHex} ({konWriteResult.writeCommandHex}):{" "}
                       {konWriteResult.verified ? "Записано и сверено по чтению OK" : "Принято блоком OK"}
                     </div>
-                    <div className="mt-0.5 text-amber-200">{konWriteResult.note}</div>
+                    <div className="mt-0.5 text-amber-900">{konWriteResult.note}</div>
                   </div>
                 ) : null}
               </div>
 
               {/* Step 2: Write .cuf */}
-              <div className="mt-3 rounded-xl border border-slate-700/80 bg-slate-950/70 p-3">
+              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-100">
+                  <span className="font-semibold text-gray-900">
                     Шаг 2. Запись Custom Coding (`.cuf`) — после `.kon`
                   </span>
                   {etacsDump && etacsDump.custom.length > 0 ? (
@@ -1033,13 +1053,13 @@ export default function ObdDiagClient() {
                         });
                         setCufWriteResult(null);
                       }}
-                      className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200"
+                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800"
                     >
                       Взять сохранённый .cuf ({etacsDump.custom.length} Б)
                     </button>
                   ) : null}
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">
+                <p className="mt-1 text-[11px] text-gray-500">
                   Загрузите ваш ранее сохранённый `.cuf` (или нажмите «Взять сохранённый .cuf»), чтобы восстановить кастомные настройки ETACS после заливки `.kon`.
                 </p>
 
@@ -1050,17 +1070,17 @@ export default function ObdDiagClient() {
                     accept=".cuf,.json,.bin,.txt,application/octet-stream,application/json"
                     disabled={busy}
                     onChange={(e) => void handleLoadMitsubishiFile("cuf", e.target.files?.[0] ?? null)}
-                    className="block w-full text-xs text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-100"
+                    className="block w-full text-xs text-gray-700 file:mr-2.5 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-900"
                   />
                 </label>
 
                 {loadedCuf ? (
-                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/90 p-2 font-mono text-[11px] text-slate-200">
+                  <div className="mt-2 rounded-lg border border-gray-200 bg-white/90 p-2 font-mono text-[11px] text-gray-800">
                     <div>
-                      Файл: <span className="text-emerald-300">{loadedCuf.fileName}</span> ({loadedCuf.payload.length} байт)
+                      Файл: <span className="text-emerald-700">{loadedCuf.fileName}</span> ({loadedCuf.payload.length} байт)
                       {loadedCuf.lidHex ? ` · ${loadedCuf.lidHex}` : ""}
                     </div>
-                    <div className="mt-0.5 truncate text-slate-400">
+                    <div className="mt-0.5 truncate text-gray-500">
                       HEX: {bytesToHex(loadedCuf.payload.slice(0, 16))}
                       {loadedCuf.payload.length > 16 ? "…" : ""}
                     </div>
@@ -1071,7 +1091,7 @@ export default function ObdDiagClient() {
                   type="button"
                   disabled={busy || phase === "idle" || !loadedCuf}
                   onClick={() => void writeCufSeparately()}
-                  className="mt-2.5 w-full rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                  className="mt-2.5 w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
                 >
                   {loadedCuf
                     ? `2. Записать ТОЛЬКО .cuf в ETACS (${loadedCuf.payload.length} Б)`
@@ -1079,7 +1099,7 @@ export default function ObdDiagClient() {
                 </button>
 
                 {cufWriteResult ? (
-                  <div className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-2 text-[11px] text-emerald-200">
+                  <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2 text-[11px] text-emerald-800">
                     <div className="font-semibold">
                       {cufWriteResult.txHex} → {cufWriteResult.rxHex} ({cufWriteResult.writeCommandHex}):{" "}
                       {cufWriteResult.verified ? "Записано и сверено по чтению OK" : "Принято блоком OK"}
@@ -1101,8 +1121,8 @@ export default function ObdDiagClient() {
 
         {log.length > 0 ? (
           <section className="mt-5">
-            <h2 className="text-xs font-medium text-slate-400">Журнал обмена</h2>
-            <pre className="mt-1.5 max-h-48 overflow-x-clip break-all rounded-md bg-black/40 p-2 text-xs text-slate-400">
+            <h2 className="text-xs font-medium text-gray-500">Журнал обмена</h2>
+            <pre className="mt-1.5 max-h-48 overflow-x-clip break-all rounded-md bg-gray-100 p-2 text-xs text-gray-500">
               {log.join("\n")}
             </pre>
           </section>
@@ -1134,19 +1154,19 @@ function ConnectionPanel({
 }) {
   if (phase === "vehicle") {
     return (
-      <section className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-emerald-500/40 bg-emerald-950/20 px-3.5 py-2.5 text-xs">
+      <section className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-xs">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 font-medium text-emerald-300">
+          <div className="flex items-center gap-1.5 font-medium text-emerald-700">
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
             <span>{adapterLabel ?? "vLinker"} · ЭБУ на связи</span>
           </div>
-          {elmVersion ? <div className="truncate text-[11px] text-slate-400">{elmVersion}</div> : null}
+          {elmVersion ? <div className="truncate text-[11px] text-gray-500">{elmVersion}</div> : null}
         </div>
         <button
           type="button"
           disabled={busy}
           onClick={onDisconnect}
-          className="shrink-0 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-40"
+          className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 disabled:opacity-40"
         >
           Отключить
         </button>
@@ -1155,16 +1175,16 @@ function ConnectionPanel({
   }
 
   return (
-    <section className="mb-3 rounded-xl border border-slate-800 bg-slate-900/80 p-3.5 text-sm">
+    <section className="mb-3 rounded-xl border border-gray-200 bg-white p-3.5 text-sm">
       <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="text-slate-400">
-          Транспорт: <span className="text-slate-200">{transport}</span>
+        <span className="text-gray-500">
+          Транспорт: <span className="text-gray-800">{transport}</span>
         </span>
-        <span className="font-medium text-emerald-400">{phaseLabels[phase]}</span>
+        <span className="font-medium text-emerald-600">{phaseLabels[phase]}</span>
       </div>
       {adapterLabel ? (
-        <div className="mt-1 text-xs text-slate-400">
-          Адаптер: <span className="text-slate-200">{adapterLabel}</span>
+        <div className="mt-1 text-xs text-gray-500">
+          Адаптер: <span className="text-gray-800">{adapterLabel}</span>
           {elmVersion ? ` (${elmVersion})` : ""}
         </div>
       ) : null}
@@ -1178,7 +1198,7 @@ function ConnectionPanel({
               type="button"
               disabled={busy}
               onClick={onConnectVehicle}
-              className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-medium text-white disabled:opacity-40"
+              className="flex-1 rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-medium text-white disabled:opacity-40"
             >
               Повторить связь с ЭБУ (0100)
             </button>
@@ -1186,7 +1206,7 @@ function ConnectionPanel({
               type="button"
               disabled={busy}
               onClick={onDisconnect}
-              className="rounded-xl border border-slate-600 px-3 py-2.5 text-xs text-slate-300 disabled:opacity-40"
+              className="rounded-xl border border-gray-300 px-3 py-2.5 text-xs text-gray-700 disabled:opacity-40"
             >
               Отключить
             </button>
@@ -1214,7 +1234,7 @@ function TabButton({
       disabled={disabled}
       onClick={onClick}
       className={`flex-1 rounded-lg px-1 py-2 text-xs font-medium transition sm:text-sm ${
-        active ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-slate-200"
+        active ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-800"
       } disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {children}
@@ -1224,16 +1244,17 @@ function TabButton({
 
 function DtcList({ title, dtcs }: { title: string; dtcs: ObdDtc[] }) {
   return (
-    <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-      <h2 className="text-xs font-medium text-slate-400">{title}</h2>
+    <div className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
+      <h2 className="text-xs font-medium text-gray-500">{title}</h2>
       {dtcs.length === 0 ? (
-        <p className="mt-1.5 text-sm font-medium text-emerald-400">Кодов ошибок не обнаружено</p>
+        <p className="mt-1.5 text-sm font-medium text-emerald-600">Кодов ошибок не обнаружено</p>
       ) : (
         <ul className="mt-2 space-y-1.5 text-sm">
           {dtcs.map((d) => (
-            <li key={d.code} className="rounded-lg bg-slate-950 px-3 py-2">
-              <div className="font-mono font-semibold text-amber-300">{d.code}</div>
-              <div className="mt-0.5 text-xs text-slate-300">{d.description}</div>
+            <li key={d.code} className="rounded-lg bg-gray-50 px-3 py-2">
+              <div className="font-mono font-semibold text-amber-800">{d.code}</div>
+              <div className="mt-0.5 text-xs text-gray-700">{d.description}</div>
+              <div className="mt-1 text-[11px] leading-snug text-gray-500">{remedyForDtcCode(d.code)}</div>
             </li>
           ))}
         </ul>
@@ -1244,19 +1265,19 @@ function DtcList({ title, dtcs }: { title: string; dtcs: ObdDtc[] }) {
 
 function ReadinessList({ report }: { report: ReadinessReport }) {
   return (
-    <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm">
+    <div className="mt-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm">
       <div className="font-medium">
         {report.mil ? "Лампа Check Engine включена" : "Лампа Check Engine выключена"} · кодов: {report.dtcCount}
       </div>
-      <p className="mt-1 text-xs text-slate-500">Тип двигателя: {report.ignition}</p>
-      <p className="mt-2 text-xs text-slate-400">
+      <p className="mt-1 text-xs text-gray-500">Тип двигателя: {report.ignition}</p>
+      <p className="mt-2 text-xs text-gray-500">
         «Готово» — блок закончил самопроверку этой системы. «Не готово» — проверка ещё не завершена, обычно нужна поездка. Это не показания датчиков.
       </p>
-      <ul className="mt-2 space-y-1 text-xs text-slate-300">
+      <ul className="mt-2 space-y-1 text-xs text-gray-700">
         {report.lines.map((line) => (
-          <li key={line} className="flex justify-between rounded bg-slate-950/60 px-2.5 py-1.5">
+          <li key={line} className="flex justify-between rounded bg-gray-50 px-2.5 py-1.5">
             <span>{line.split(":")[0]}</span>
-            <span className={line.includes("не готово") ? "text-amber-300" : "text-emerald-400"}>
+            <span className={line.includes("не готово") ? "text-amber-800" : "text-emerald-600"}>
               {line.split(":")[1]?.trim()}
             </span>
           </li>
@@ -1268,15 +1289,15 @@ function ReadinessList({ report }: { report: ReadinessReport }) {
 
 function FreezeList({ report }: { report: FreezeFrameReport }) {
   return (
-    <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-      <h2 className="text-xs font-medium text-slate-400">Стоп-кадр (Mode 02)</h2>
+    <div className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
+      <h2 className="text-xs font-medium text-gray-500">Стоп-кадр (Mode 02)</h2>
       <p className="mt-1 text-sm font-medium">
         {report.dtc ? `Записан при ошибке ${report.dtc}` : "Сохраненного стоп-кадра ошибки нет"}
       </p>
       <ul className="mt-2 grid grid-cols-2 gap-2 text-sm">
         {report.readings.map((row) => (
-          <li key={row.label} className="rounded-md bg-slate-950 px-3 py-2">
-            <div className="text-xs text-slate-500">{row.label}</div>
+          <li key={row.label} className="rounded-md bg-gray-50 px-3 py-2">
+            <div className="text-xs text-gray-500">{row.label}</div>
             <div className="font-medium tabular-nums">
               {row.value} {row.unit}
             </div>
@@ -1296,9 +1317,9 @@ function IdentityList({ report }: { report: VehicleIdentity }) {
   return (
     <ul className="mt-2 space-y-1.5 text-sm">
       {rows.map(([label, value]) => (
-        <li key={label} className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
-          <span className="text-xs text-slate-400">{label}</span>
-          <div className="mt-0.5 break-all font-mono text-slate-100">{value ?? "—"}</div>
+        <li key={label} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+          <span className="text-xs text-gray-500">{label}</span>
+          <div className="mt-0.5 break-all font-mono text-gray-900">{value ?? "—"}</div>
         </li>
       ))}
     </ul>
@@ -1315,35 +1336,20 @@ function PidGrid({
   onTogglePin: (pid: string) => void;
 }) {
   return (
-    <ul className="grid grid-cols-2 gap-2 text-sm">
-      {pids.map((p) => {
-        const isPinned = pinned.includes(p.pid);
-        return (
-          <li
-            key={p.pid}
-            onClick={() => onTogglePin(p.pid)}
-            className={`min-h-[4.5rem] cursor-pointer rounded-lg border px-3 py-2 transition ${
-              isPinned
-                ? "border-emerald-500/50 bg-emerald-950/20"
-                : "border-slate-800/80 bg-slate-900"
-            }`}
-          >
-            <div className="flex items-start justify-between gap-1 text-xs text-slate-400">
-              <span className="truncate">{p.label}</span>
-              <span className={isPinned ? "text-emerald-400" : "text-slate-600"}>★</span>
-            </div>
-            <div className="mt-0.5 text-base font-semibold tabular-nums text-slate-100">
-              {p.value} <span className="text-xs font-normal text-slate-400">{p.unit}</span>
-            </div>
-            {p.minText && p.maxText && p.minText !== p.maxText ? (
-              <div className="mt-0.5 font-mono text-[10px] tabular-nums text-slate-500">
-                мин {p.minText} · макс {p.maxText}
-              </div>
-            ) : null}
-          </li>
-        );
-      })}
-    </ul>
+    <LiveMetricCards
+      selectable
+      items={pids.map((p) => ({
+        id: p.pid,
+        label: p.label,
+        value: p.value,
+        unit: p.unit,
+        minText: p.minText,
+        maxText: p.maxText,
+        selected: pinned.includes(p.pid),
+        highlight: pinned.includes(p.pid),
+        onToggleSelect: () => onTogglePin(p.pid),
+      }))}
+    />
   );
 }
 
@@ -1360,8 +1366,8 @@ function ActionButton({
 }) {
   const base =
     variant === "primary"
-      ? "bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-slate-700"
-      : "border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-40";
+      ? "border border-gray-900 bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-400 disabled:border-gray-400"
+      : "border border-gray-300 text-gray-800 hover:bg-gray-100 disabled:opacity-40";
   return (
     <button
       type="button"

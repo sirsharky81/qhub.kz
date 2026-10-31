@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ObdBleSession, ModuleDtcReport, SubaruRegionConfigDump } from "@/lib/obd/obd-session";
-import type { TpmsWheelReading } from "@/lib/obd/mitsubishi-modules";
+import type { SasCalibrationResult, TpmsWheelReading } from "@/lib/obd/mitsubishi-modules";
+import { decodeSubaruEpsSteeringAngleDeg } from "@/lib/obd/subaru-steering-calibration";
+import { SteeringCalConfirmDialog } from "./SteeringCalConfirmDialog";
+import { LiveMetricCards } from "./LiveMetricCards";
 import {
   diffSubaruDumps,
   formatUdsPayload,
@@ -41,6 +44,11 @@ async function sendUdsRaw(
   return result.raw;
 }
 import {
+  cvtTempBand,
+  decodeSubaruTemperatureBytes,
+  formatSubaruTempText,
+} from "@/lib/obd/subaru-decode";
+import {
   SSM4_CUSTOMIZE_ITEMS,
   SSM4_ECUS,
   SSM4_SIGNALS,
@@ -69,10 +77,16 @@ interface Props {
 
 type Ssm4TopView =
   | "all-dtc"
-  | "ecu-diag"
   | "data-monitor"
-  | "customize"
-  | "utilities";
+  | "steering"
+  | "cvt"
+  | "tpms"
+  | "utilities"
+  | "customize";
+
+const SERVICE_UTILITIES = SSM4_UTILITIES.filter(
+  (item) => item.id !== "util-cvt-at-inspection" && item.id !== "util-tpms-inspection",
+);
 
 interface LiveValueEntry {
   text: string;
@@ -135,12 +149,12 @@ export function SubaruSsmPanel({
 
   // Data Monitor state
   const [selectedSignalIds, setSelectedSignalIds] = useState<string[]>([
-    "eng-coolant-ssm",
-    "eng-rpm-ssm",
-    "eng-speed-ssm",
-    "eng-ign-timing-ssm",
-    "eng-af-corr-1-ssm",
-    "eng-af-learn-1-ssm",
+    "eng-coolant-obd",
+    "eng-rpm-obd",
+    "eng-speed-obd",
+    "eng-load-obd",
+    "eng-tps-obd",
+    "eng-iat-obd",
   ]);
   const [liveValues, setLiveValues] = useState<Record<string, LiveValueEntry>>({});
   const [samples, setSamples] = useState<SamplePoint[]>([]);
@@ -174,12 +188,29 @@ export function SubaruSsmPanel({
 
   // Utility / Calibration Inspection state
   const [selectedUtilityId, setSelectedUtilityId] = useState<string>(
-    SSM4_UTILITIES[0]!.id,
+    SERVICE_UTILITIES[0]?.id ?? SSM4_UTILITIES[0]!.id,
   );
+  const [cvtReading, setCvtReading] = useState<{
+    tempC: number | null;
+    source: string;
+    rawHex: string;
+    decoded: string;
+    volts: string | null;
+  } | null>(null);
   const [utilityLiveDids, setUtilityLiveDids] = useState<
     Record<string, { rawHex: string; decoded: string }>
   >({});
   const [tpmsSensors, setTpmsSensors] = useState<TpmsWheelReading[]>([]);
+  const [steeringLive, setSteeringLive] = useState<{
+    angleDeg: number | null;
+    angleText: string;
+    rawHex: string;
+    volts: string | null;
+  } | null>(null);
+  const [steeringPolling, setSteeringPolling] = useState(false);
+  const [steeringCalConfirmOpen, setSteeringCalConfirmOpen] = useState(false);
+  const [steeringCalResult, setSteeringCalResult] = useState<SasCalibrationResult | null>(null);
+  const steeringPollRef = useRef(false);
 
   useEffect(() => {
     if (vinHint) {
@@ -195,6 +226,13 @@ export function SubaruSsmPanel({
       stopScanRef.current = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (topView !== "data-monitor") return;
+    requestAnimationFrame(() => {
+      document.getElementById("subaru-live-workspace")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, [topView]);
 
   const selectedVehicle = useMemo(
     () => SSM4_VEHICLES.find((v) => v.id === selectedVehicleId) ?? SSM4_VEHICLES[0]!,
@@ -230,16 +268,30 @@ export function SubaruSsmPanel({
     [selectedUtilityId],
   );
 
-  // Switch ECU helper: update default Custom List and selected signals
+  const defaultSignalsForEcu = useCallback((ecu: Ssm4EcuDef) => {
+    const ecuSigs = SSM4_SIGNALS.filter((s) => s.ecuId === ecu.ecuId);
+    if (ecu.ecuId === 118) return ["tcm-atf-temp-uds", "tcm-supply-volts"];
+    if (ecu.ecuId === 170) return ["biu-tpms-1", "biu-tpms-2", "biu-tpms-3", "biu-tpms-4"];
+    if (ecu.ecuId === 234 && selectedVehicle.platform === "SGP") {
+      const obd = ecuSigs.filter((s) => s.protocol === "obd-01");
+      if (obd.length > 0) return obd.slice(0, 6).map((s) => s.id);
+    }
+    return ecuSigs.slice(0, 6).map((s) => s.id);
+  }, [selectedVehicle.platform]);
+
   const handleSelectEcu = useCallback((ecu: Ssm4EcuDef) => {
     pollingRef.current = false;
     setPolling(false);
     setSelectedEcuId(ecu.ecuId);
     const defaultList = ecu.customLists[1] ?? ecu.customLists[0] ?? "All Data";
     setSelectedCustomList(defaultList);
-    const ecuSigs = SSM4_SIGNALS.filter((s) => s.ecuId === ecu.ecuId);
-    setSelectedSignalIds(ecuSigs.slice(0, 6).map((s) => s.id));
-  }, []);
+    setSelectedSignalIds(defaultSignalsForEcu(ecu));
+  }, [defaultSignalsForEcu]);
+
+  useEffect(() => {
+    const ecu = SSM4_ECUS.find((item) => item.ecuId === selectedEcuId) ?? SSM4_ECUS[0]!;
+    setSelectedSignalIds(defaultSignalsForEcu(ecu));
+  }, [selectedVehicleId, defaultSignalsForEcu, selectedEcuId]);
 
   // Auto-detect vehicle by VIN (Mode 09 02 or UDS 22 F190)
   const handleAutoDetectVin = useCallback(async () => {
@@ -530,6 +582,7 @@ export function SubaruSsmPanel({
     setPolling(true);
     setBusy(true);
     setError(null);
+    setLiveValues({});
     monitorStartRef.current = Date.now();
     try {
       while (pollingRef.current) {
@@ -745,6 +798,181 @@ export function SubaruSsmPanel({
     }
   }, [ready, busy, selectedUtility, session, setBusy, setError]);
 
+  const readModuleDid = useCallback(
+    async (txHex: string, rxHex: string, did: string) => {
+      try {
+        await sendUdsRaw(session, "can11-500", txHex, rxHex, "10 03", 800);
+      } catch {
+        /* session may already be open */
+      }
+      const raw = await sendUdsRaw(session, "can11-500", txHex, rxHex, `22 ${did}`, 1200);
+      const parsed = parseUdsResponse(raw, 0x22);
+      try {
+        await sendUdsRaw(session, "can11-500", txHex, rxHex, "10 01", 600);
+      } catch {
+        /* ignore */
+      }
+      return parsed;
+    },
+    [session],
+  );
+
+  const handleReadCvt = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const sources: { tx: string; rx: string; title: string }[] = [
+        { tx: "7E1", rx: "7E9", title: "TCM / вариатор (7E1)" },
+        { tx: "7A2", rx: "7AA", title: "Силовая установка (7A2)" },
+      ];
+      let found: {
+        tempC: number | null;
+        source: string;
+        rawHex: string;
+        decoded: string;
+        volts: string | null;
+      } | null = null;
+      for (const src of sources) {
+        try {
+          const parsed = await readModuleDid(src.tx, src.rx, "103D");
+          if (parsed.kind !== "positive" || parsed.payload.length < 3) continue;
+          const data = parsed.payload.slice(2);
+          const temp = decodeSubaruTemperatureBytes(data);
+          const rawHex = data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          found = {
+            tempC: temp?.celsius ?? null,
+            source: src.title,
+            rawHex,
+            decoded: temp ? formatSubaruTempText(temp) : formatUdsPayload(parsed.payload, 0x22, src.tx),
+            volts: null,
+          };
+          break;
+        } catch {
+          /* try next module */
+        }
+      }
+      if (!found) {
+        setCvtReading(null);
+        setError("Блок вариатора не ответил по DID 103D (7E1 / 7A2). Проверьте зажигание и связь.");
+        return;
+      }
+      try {
+        const voltParsed = await readModuleDid("7E1", "7E9", "101B");
+        if (voltParsed.kind === "positive" && voltParsed.payload.length >= 4) {
+          found.volts = formatUdsPayload(voltParsed.payload, 0x22, "7E1");
+        }
+      } catch {
+        /* optional */
+      }
+      setCvtReading(found);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка чтения температуры CVT");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, readModuleDid, setBusy, setError]);
+
+  const handleReadTpms = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const tpms = await session.readTpmsSensors("subaru-752");
+      setTpmsSensors(tpms.wheels);
+      if (tpms.wheels.every((w) => w.pressureBar == null)) {
+        setError("BIU 752 не вернул давление шин. Нужны IG ON и короткая поездка, если датчики спят.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка чтения TPMS");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, session, setBusy, setError]);
+
+  const readSteeringOnce = useCallback(async () => {
+    const parsed = await readModuleDid("746", "74E", "1041");
+    if (parsed.kind !== "positive" || parsed.payload.length < 4) {
+      throw new Error("EPS 746 не вернул DID 1041 (угол руля)");
+    }
+    const data = parsed.payload.slice(2);
+    const rawHex = data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+    const angleDeg = decodeSubaruEpsSteeringAngleDeg(data);
+    const angleText = formatUdsPayload(parsed.payload, 0x22, "746");
+    let volts: string | null = null;
+    try {
+      const v = await readModuleDid("746", "74E", "101B");
+      if (v.kind === "positive") volts = formatUdsPayload(v.payload, 0x22, "746");
+    } catch {
+      /* optional */
+    }
+    return { angleDeg, angleText, rawHex, volts };
+  }, [readModuleDid]);
+
+  const executeSubaruSteeringCal = useCallback(async () => {
+    setSteeringCalConfirmOpen(false);
+    setBusy(true);
+    setError(null);
+    setSteeringCalResult(null);
+    try {
+      const res = await session.calibrateSubaruSteeringZero();
+      setSteeringCalResult(res);
+      if (!res.success) {
+        setError("Калибровка VDC завершилась с ошибкой — см. шаги ниже");
+      } else {
+        try {
+          setSteeringLive(await readSteeringOnce());
+        } catch {
+          /* optional refresh */
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка калибровки нуля руля (VDC)");
+    } finally {
+      setBusy(false);
+    }
+  }, [session, readSteeringOnce, setBusy, setError]);
+
+  const requestSubaruSteeringCal = useCallback(() => {
+    if (!ready || busy || steeringPolling) return;
+    setSteeringCalConfirmOpen(true);
+  }, [ready, busy, steeringPolling]);
+
+  const handleReadSteering = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setSteeringLive(await readSteeringOnce());
+    } catch (e) {
+      setSteeringLive(null);
+      setError(e instanceof Error ? e.message : "Ошибка чтения угла руля");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, readSteeringOnce, setBusy, setError]);
+
+  const handleToggleSteeringPoll = useCallback(async () => {
+    if (steeringPollRef.current) {
+      steeringPollRef.current = false;
+      setSteeringPolling(false);
+      return;
+    }
+    if (!ready || busy) return;
+    steeringPollRef.current = true;
+    setSteeringPolling(true);
+    setError(null);
+    while (steeringPollRef.current) {
+      try {
+        setSteeringLive(await readSteeringOnce());
+      } catch {
+        /* keep last */
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    setSteeringPolling(false);
+  }, [ready, busy, readSteeringOnce, setError]);
+
   const dumpDiffs = useMemo<SubaruDidDiffEntry[]>(() => {
     if (!configDumpA || !configDumpB) return [];
     return diffSubaruDumps(configDumpA, configDumpB);
@@ -754,38 +982,40 @@ export function SubaruSsmPanel({
   const sampleB = samples[cursorBIdx] ?? null;
 
   return (
-    <div className="space-y-4">
-      {/* SSM4 Header: Vehicle Selector & Safety Mode Banner */}
-      <div className="rounded-xl border border-blue-200 dark:border-blue-900/60 bg-gradient-to-r from-blue-50/90 via-indigo-50/60 to-sky-50/80 dark:from-blue-950/35 dark:via-indigo-950/25 dark:to-slate-900/50 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
+    <div className="min-w-0 space-y-3 overflow-x-hidden">
+      {topView === "data-monitor" ? (
+        <p className="truncate text-[11px] text-gray-500">
+          {selectedVehicle.nameRu} · блок {selectedEcu.code} ({selectedEcu.txHex})
+        </p>
+      ) : (
+      <div className="rounded-xl border border-gray-200 bg-white p-3.5">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
                 <Cpu className="h-3.5 w-3.5" />
-                Subaru Select Monitor 4 (SSM4)
+                Subaru · SSM4
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Безопасный режим чтения (Read-Only Gate)
+              <span className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-100 px-2.5 py-0.5 text-[11px] font-semibold text-gray-700">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                Read-Only Gate
               </span>
-              {detectedVin && (
-                <span className="rounded-full bg-white/80 dark:bg-zinc-900 px-2.5 py-0.5 font-mono text-xs font-semibold text-zinc-800 dark:text-zinc-200 border border-blue-200/70 dark:border-zinc-700">
-                  VIN: {detectedVin}
+              {detectedVin ? (
+                <span className="max-w-full truncate rounded-full border border-gray-300 bg-gray-50 px-2.5 py-0.5 font-mono text-[11px] text-gray-800">
+                  VIN {detectedVin}
                 </span>
-              )}
+              ) : null}
             </div>
-            <p className="text-xs text-zinc-600 dark:text-zinc-300">
-              Структура систем <strong>Powertrain · Chassis · Body</strong>, групповые списки{" "}
-              <code className="font-mono">.CT</code> Data Monitor, курсоры A/B и инспекция калибровок по архитектуре дилерского комплекса{" "}
-              <code className="font-mono">Subaru SSM4</code>.
+            <p className="text-xs text-gray-500">
+              Ошибки, live, CVT, TPMS, угол руля и калибровки — вкладки ниже.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:max-w-sm">
             <select
               value={selectedVehicleId}
               onChange={(e) => setSelectedVehicleId(e.target.value)}
-              className="rounded-lg border border-blue-300 dark:border-blue-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-900 dark:text-zinc-100"
+              className="w-full min-w-0 max-w-full truncate rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-900"
             >
               {SSM4_VEHICLES.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -797,7 +1027,7 @@ export function SubaruSsmPanel({
               type="button"
               onClick={() => void handleAutoDetectVin()}
               disabled={!ready || busy}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
             >
               <Sparkles className="h-3.5 w-3.5" />
               Определить по VIN
@@ -805,53 +1035,33 @@ export function SubaruSsmPanel({
           </div>
         </div>
 
-        <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
+        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-gray-500">
           <span>
-            Платформа: <strong>{selectedVehicle.platform}</strong>
+            Платформа: <strong className="text-gray-700">{selectedVehicle.platform}</strong>
           </span>
-          <span>•</span>
-          <span>
-            Кузова: <code className="font-mono">{selectedVehicle.chassisCodes.join(", ")}</code>
+          <span className="hidden sm:inline">·</span>
+          <span className="min-w-0 break-words">
+            Кузова:{" "}
+            <code className="font-mono text-gray-500">{selectedVehicle.chassisCodes.join(", ")}</code>
           </span>
-          <span>•</span>
-          <span>Двигатели: {selectedVehicle.engines.join(" / ")}</span>
         </div>
       </div>
+      )}
 
-      {/* SSM4 Top-Level Function Navigation (mirrors GetEcuFuncList.ini) */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <div
+        className="flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        role="tablist"
+        aria-label="Разделы Subaru"
+      >
         {(
           [
-            {
-              id: "all-dtc",
-              title: "1. Все системы (All DTC)",
-              sub: "Function 918 · Опрос 12 ЭБУ",
-              icon: Layers,
-            },
-            {
-              id: "ecu-diag",
-              title: "2. Паспорт и Freeze Frame",
-              sub: "Function 1 & 909 · Коды и стоп-кадр",
-              icon: FileSearch,
-            },
-            {
-              id: "data-monitor",
-              title: "3. Data Monitor (.CT)",
-              sub: "Function 2 · Графики и курсоры A/B",
-              icon: Activity,
-            },
-            {
-              id: "utilities",
-              title: "4. Инспекция и калибровки",
-              sub: "Function 902 · Руль, CVT, EPB, TPMS",
-              icon: Wrench,
-            },
-            {
-              id: "customize",
-              title: "5. Персонализация и дампы",
-              sub: "Function 20 · Чтение и сравнение A/B",
-              icon: Sliders,
-            },
+            { id: "all-dtc", title: "Ошибки", icon: Layers },
+            { id: "data-monitor", title: "Live", icon: Activity },
+            { id: "steering", title: "Угол руля", icon: Gauge },
+            { id: "cvt", title: "CVT", icon: Gauge },
+            { id: "tpms", title: "TPMS", icon: AlertTriangle },
+            { id: "utilities", title: "Калибровки", icon: Wrench },
+            { id: "customize", title: "Вариант", icon: Sliders },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
@@ -860,36 +1070,27 @@ export function SubaruSsmPanel({
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-selected={active}
               onClick={() => setTopView(tab.id)}
-              className={`flex flex-col items-start rounded-xl border p-3 text-left transition ${
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
                 active
-                  ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                  : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-zinc-800 dark:text-zinc-200 hover:border-blue-400"
+                  ? "border-gray-900 bg-gray-900 text-white"
+                  : "border-gray-200 bg-gray-100 text-gray-700 hover:border-emerald-400"
               }`}
             >
-              <div className="flex items-center gap-1.5 text-xs font-bold">
-                <Icon className="h-4 w-4 shrink-0" />
-                <span>{tab.title}</span>
-              </div>
-              <span
-                className={`mt-1 text-[11px] ${
-                  active ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"
-                }`}
-              >
-                {tab.sub}
-              </span>
+              <Icon className="h-3.5 w-3.5 shrink-0 opacity-90" />
+              {tab.title}
             </button>
           );
         })}
       </div>
 
-      {/* System Group Filter & ECU Selector Bar (Powertrain / Chassis / Body from GetEcuGroupList.ini) */}
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-3 space-y-2.5">
+      {topView === "all-dtc" && (
+      <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-3 space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1">
-              Группа систем SSM4:
-            </span>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-xs font-semibold text-gray-500">Группа блоков:</span>
             {(["ALL", "Powertrain", "Chassis", "Body"] as const).map((grp) => (
               <button
                 key={grp}
@@ -897,8 +1098,8 @@ export function SubaruSsmPanel({
                 onClick={() => setSelectedGroup(grp)}
                 className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                   selectedGroup === grp
-                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200"
+                    ? "bg-gray-900 text-white"
+                    : "border border-gray-300 bg-gray-50 text-gray-700 hover:border-emerald-400"
                 }`}
               >
                 {grp === "ALL"
@@ -911,7 +1112,7 @@ export function SubaruSsmPanel({
               </button>
             ))}
           </div>
-          <span className="text-[11px] font-mono text-zinc-500">
+          <span className="text-[11px] font-mono text-gray-500">
             Выбран ЭБУ: {selectedEcu.code} ({selectedEcu.txHex} → {selectedEcu.rxHex})
           </span>
         </div>
@@ -929,24 +1130,24 @@ export function SubaruSsmPanel({
                 onClick={() => handleSelectEcu(ecu)}
                 className={`flex flex-col justify-between rounded-lg border p-2 text-left transition ${
                   active
-                    ? "border-blue-600 bg-blue-50/90 dark:bg-blue-950/40 ring-1 ring-blue-500"
-                    : "border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 hover:border-blue-300"
+                    ? "border-emerald-600 bg-emerald-50 ring-1 ring-emerald-500"
+                    : "border-gray-200 bg-gray-50 hover:border-emerald-400"
                 }`}
               >
                 <div className="flex items-center justify-between gap-1">
-                  <span className="font-mono text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                  <span className="font-mono text-[11px] font-bold text-emerald-700">
                     {ecu.code} · {ecu.txHex}
                   </span>
                   {ecu.safetyCritical && (
                     <span
                       title="Блок безопасности (только чтение)"
-                      className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300"
+                      className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-bold text-amber-800"
                     >
                       <Lock className="h-2.5 w-2.5" />
                     </span>
                   )}
                 </div>
-                <div className="mt-1 text-[11px] font-medium text-zinc-800 dark:text-zinc-200 line-clamp-1">
+                <div className="mt-1 text-[11px] font-medium text-gray-800 line-clamp-1">
                   {ecu.nameRu}
                 </div>
                 {report && (
@@ -954,10 +1155,10 @@ export function SubaruSsmPanel({
                     <span
                       className={
                         !report.responded
-                          ? "text-zinc-400"
+                          ? "text-gray-500"
                           : report.dtcs.length > 0
-                            ? "font-bold text-red-600 dark:text-red-400"
-                            : "font-semibold text-emerald-600 dark:text-emerald-400"
+                            ? "font-bold text-red-400"
+                            : "font-semibold text-emerald-600"
                       }
                     >
                       {!report.responded
@@ -973,18 +1174,17 @@ export function SubaruSsmPanel({
           })}
         </div>
       </div>
+      )}
 
-      {/* VIEW 1: ALL-SYSTEM DTC CHECK (SSM4 Function 918) */}
       {topView === "all-dtc" && (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 p-4 space-y-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                All-System Diagnostic Code Check (Опрос всех систем Subaru по схеме SSM4)
+              <h3 className="text-sm font-bold text-gray-900">
+                Ошибки всех систем
               </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Последовательное открытие диагностической сессии UDS <code className="font-mono">10 03</code>, чтение текущих и сохранённых кодов{" "}
-                <code className="font-mono">19 02 FF</code> / <code className="font-mono">Mode 03</code>, чтение каталожного номера <code className="font-mono">F18E</code> и безопасный возврат в <code className="font-mono">10 01</code>.
+              <p className="text-xs text-gray-500">
+                Опрос двигателя, вариатора, ABS, BIU, приборки и остальных блоков Subaru. Сброс ошибок доступен только на незащищённых модулях.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1004,7 +1204,7 @@ export function SubaruSsmPanel({
                   type="button"
                   onClick={() => void handleRunAllDtcScan()}
                   disabled={!ready || busy}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   Опросить все блоки Subaru
@@ -1014,13 +1214,13 @@ export function SubaruSsmPanel({
           </div>
 
           {scanProgress && (
-            <div className="rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
               {scanProgress}
             </div>
           )}
 
           {scanStatusMsg && (
-            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
               {scanStatusMsg}
             </div>
           )}
@@ -1033,21 +1233,21 @@ export function SubaruSsmPanel({
               return (
                 <div
                   key={ecu.ecuId}
-                  className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col gap-2"
+                  className="rounded-lg border border-gray-200 p-3 flex flex-col gap-2"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 font-mono text-xs font-bold">
+                      <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs font-bold">
                         {ecu.code} · {ecu.txHex} → {ecu.rxHex}
                       </span>
-                      <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                      <span className="text-xs font-semibold text-gray-900">
                         {ecu.nameRu}
                       </span>
-                      <span className="text-[11px] text-zinc-500">
+                      <span className="text-[11px] text-gray-500">
                         ({ecu.group})
                       </span>
                       {rep?.partNumber && (
-                        <span className="rounded bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 font-mono text-[11px] text-blue-700 dark:text-blue-300">
+                        <span className="rounded bg-emerald-50 px-2 py-0.5 font-mono text-[11px] text-emerald-700">
                           P/N: {rep.partNumber}
                         </span>
                       )}
@@ -1057,21 +1257,21 @@ export function SubaruSsmPanel({
                       {rep ? (
                         rep.responded ? (
                           rep.dtcs.length === 0 ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
                               <CheckCircle2 className="h-3.5 w-3.5" />
                               Норма (0 ошибок)
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-xs font-bold text-red-600 dark:text-red-400">
+                            <span className="inline-flex items-center gap-1 text-xs font-bold text-red-400">
                               <AlertTriangle className="h-3.5 w-3.5" />
                               Найдено кодов: {rep.dtcs.length}
                             </span>
                           )
                         ) : (
-                          <span className="text-xs text-zinc-400">Нет ответа</span>
+                          <span className="text-xs text-gray-500">Нет ответа</span>
                         )
                       ) : (
-                        <span className="text-xs text-zinc-400">Не опрошен</span>
+                        <span className="text-xs text-gray-500">Не опрошен</span>
                       )}
 
                       {ecu.canSafeClear ? (
@@ -1085,13 +1285,13 @@ export function SubaruSsmPanel({
                             )
                           }
                           disabled={!ready || busy || !rep?.responded}
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40"
+                          className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40"
                         >
                           <Trash2 className="h-3 w-3" />
                           Сброс DTC
                         </button>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800">
                           <Lock className="h-3 w-3" />
                           Защита калибровок (Read-Only)
                         </span>
@@ -1100,21 +1300,27 @@ export function SubaruSsmPanel({
                   </div>
 
                   {rep && rep.dtcs.length > 0 && (
-                    <div className="mt-1 space-y-1 border-t border-zinc-100 dark:border-zinc-800 pt-2">
+                    <div className="mt-1 space-y-1 border-t border-gray-200 pt-2">
                       {rep.dtcs.map((d) => (
                         <div
                           key={d.code}
-                          className="flex flex-wrap items-center justify-between gap-2 rounded bg-red-50/70 dark:bg-red-950/25 px-2.5 py-1.5 text-xs"
+                          className="flex flex-wrap items-center justify-between gap-2 rounded bg-red-50 px-2.5 py-1.5 text-xs"
                         >
                           <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-red-700 dark:text-red-300">
+                            <span className="font-mono font-bold text-red-300">
                               {d.code}
                             </span>
-                            <span className="text-zinc-800 dark:text-zinc-200">
-                              {d.description}
-                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-gray-800">{d.description}</div>
+                              {d.remedy ? (
+                                <div className="mt-1 text-[11px] leading-snug text-gray-500">
+                                  <span className="font-semibold text-gray-500">Устранение: </span>
+                                  {d.remedy}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
-                          <span className="rounded bg-white/80 dark:bg-zinc-900 px-2 py-0.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-400">
+                          <span className="rounded bg-white px-2 py-0.5 font-mono text-[10px] text-gray-500">
                             {d.active
                               ? "Current (Активный)"
                               : "History / Memorized (Сохранённый)"}
@@ -1133,230 +1339,149 @@ export function SubaruSsmPanel({
         </div>
       )}
 
-      {/* VIEW 2: ECU UNIT INFO & FREEZE FRAME (SSM4 Function 1 & Function 909) */}
-      {topView === "ecu-diag" && (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 p-4 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                Паспорт блока (Unit Info · Function 909) и стоп-кадр (Freeze Frame · Function 1) —{" "}
-                {selectedEcu.nameRu}
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Чтение каталожного номера Subaru (<code className="font-mono">F18E</code>), версии прошивки (<code className="font-mono">F189</code>), калибровки (<code className="font-mono">F182</code>), счётчика запусков (<code className="font-mono">101E</code>) и стоп-кадра.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleReadEcuPassportAndFreeze()}
-              disabled={!ready || busy}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
-            >
-              <FileSearch className="h-3.5 w-3.5" />
-              Прочитать паспорт и стоп-кадр ({selectedEcu.txHex})
-            </button>
-          </div>
-
-          {unitPassport ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
-                <div className="text-[11px] text-zinc-500">Каталожный номер (Part No. F18E)</div>
-                <div className="mt-1 font-mono text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                  {unitPassport.partNumber ?? "—"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
-                <div className="text-[11px] text-zinc-500">ID калибровки (Calibration ID F182)</div>
-                <div className="mt-1 font-mono text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                  {unitPassport.calibrationId ?? "—"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
-                <div className="text-[11px] text-zinc-500">Версия ПО / Система (F189 / F197)</div>
-                <div className="mt-1 font-mono text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                  {unitPassport.softwareVersion ?? unitPassport.systemName ?? "—"}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-800 p-6 text-center text-xs text-zinc-500">
-              Нажмите «Прочитать паспорт и стоп-кадр», чтобы опросить блок {selectedEcu.nameRu} ({selectedEcu.txHex} → {selectedEcu.rxHex}).
-            </div>
-          )}
-
-          {freezeFrameSummary.length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">
-                Данные стоп-кадра (Freeze Frame Data) и счётчики IG-ON
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {freezeFrameSummary.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-zinc-800 px-3 py-2 text-xs"
-                  >
-                    <span className="text-zinc-600 dark:text-zinc-400">{item.label}</span>
-                    <span className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                      {item.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* VIEW 3: SSM4 DATA MONITOR WITH .CT CUSTOM LISTS, TRIGGERS & CURSORS A/B */}
       {topView === "data-monitor" && (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 p-4 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                SSM4 Data Monitor — {selectedEcu.nameRu} ({selectedEcu.txHex} → {selectedEcu.rxHex})
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Тематические списки сигналов <code className="font-mono">.CT</code> (из <code className="font-mono">GetCustomListInfo.ini</code>), запись графика, триггер события и измерительные курсоры A / B.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
+        <div
+          id="subaru-live-workspace"
+          className="min-w-0 scroll-mt-3 space-y-2 rounded-xl border border-gray-200 bg-white p-3"
+        >
+          <div className="sticky top-0 z-20 -mx-3 space-y-2 border-b border-gray-200 bg-white/95 px-3 pb-3 pt-0.5 backdrop-blur-sm">
+            <label className="flex min-w-0 flex-col gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                Блок для live
+              </span>
+              <select
+                value={selectedEcuId}
+                onChange={(e) => {
+                  const ecu = SSM4_ECUS.find((item) => item.ecuId === Number(e.target.value));
+                  if (ecu) handleSelectEcu(ecu);
+                }}
+                className="w-full min-w-0 rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs font-medium text-gray-900"
+              >
+                {SSM4_ECUS.map((ecu) => (
+                  <option key={ecu.ecuId} value={ecu.ecuId}>
+                    {ecu.code} · {ecu.txHex} — {ecu.nameRu}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => void handleToggleMonitor()}
-                disabled={!ready || (!polling && busy)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold text-white transition ${
-                  polling
-                    ? "bg-red-600 hover:bg-red-700"
-                    : "bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+                disabled={!ready || (!polling && busy) || selectedSignalIds.length === 0}
+                className={`flex-1 rounded-xl px-3 py-2.5 text-xs font-semibold text-white ${
+                  polling ? "bg-amber-600 hover:bg-amber-500" : "border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-40"
                 }`}
               >
-                {polling ? (
-                  <>
-                    <Square className="h-3.5 w-3.5" />
-                    Стоп монитор
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-3.5 w-3.5" />
-                    Старт монитор ({selectedSignalIds.length})
-                  </>
-                )}
+                {polling ? "Стоп" : `Старт (${selectedSignalIds.length})`}
               </button>
               <button
                 type="button"
                 onClick={handleExportMonitorCsv}
                 disabled={samples.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40"
+                className="shrink-0 rounded-xl border border-gray-300 px-3 py-2.5 text-xs text-gray-700 disabled:opacity-40"
+                title="Экспорт CSV"
               >
-                <Download className="h-3.5 w-3.5" />
-                Экспорт CSV ({samples.length})
+                CSV
               </button>
             </div>
           </div>
 
-          {/* .CT Custom List Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-zinc-200 dark:border-zinc-800 pb-2.5">
-            <span className="text-xs font-semibold text-zinc-500 mr-1">
-              Список .CT:
-            </span>
-            {selectedEcu.customLists.map((listName) => (
-              <button
-                key={listName}
-                type="button"
-                onClick={() => setSelectedCustomList(listName)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                  selectedCustomList === listName
-                    ? "bg-blue-600 text-white"
-                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200"
-                }`}
-              >
-                {listName === "All Data" ? "All Data (Все)" : `${listName}.CT`}
-              </button>
-            ))}
-          </div>
+          {selectedSignalIds.length > 0 ? (
+            <LiveMetricCards
+              items={SSM4_SIGNALS.filter((s) => selectedSignalIds.includes(s.id)).map((sig) => {
+                const live = liveValues[sig.id];
+                const minStr =
+                  live?.min != null ? String(Number(live.min.toFixed(sig.decimals))) : null;
+                const maxStr =
+                  live?.max != null ? String(Number(live.max.toFixed(sig.decimals))) : null;
+                return {
+                  id: sig.id,
+                  label: `${sig.shortName} · ${sig.nameRu}`,
+                  value: live?.text ?? "—",
+                  unit: sig.unit,
+                  minText: minStr,
+                  maxText: maxStr,
+                  highlight: polling,
+                };
+              })}
+            />
+          ) : (
+            <p className="text-xs text-gray-500">Отметьте хотя бы один параметр в списке ниже.</p>
+          )}
 
-          {/* Signal Table with Checkboxes + Live Value + Min/Max */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[11px] text-zinc-500">
-                  <th className="py-2 pr-2">Опрос</th>
-                  <th className="py-2 px-2">Код SSM4</th>
-                  <th className="py-2 px-2">Параметр</th>
-                  <th className="py-2 px-2">Адрес / DID</th>
-                  <th className="py-2 px-2 text-right">Текущее</th>
-                  <th className="py-2 px-2 text-right">Ед.</th>
-                  <th className="py-2 px-2 text-right">Min / Max</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
-                {signalsForEcu.map((sig) => {
-                  const checked = selectedSignalIds.includes(sig.id);
-                  const live = liveValues[sig.id];
-                  return (
-                    <tr
-                      key={sig.id}
-                      className={
-                        checked
-                          ? "bg-blue-50/40 dark:bg-blue-950/20"
-                          : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30"
-                      }
-                    >
-                      <td className="py-2 pr-2">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedSignalIds((p) => [...p, sig.id]);
-                            } else {
-                              setSelectedSignalIds((p) =>
-                                p.filter((id) => id !== sig.id),
-                              );
-                            }
-                          }}
-                          className="h-3.5 w-3.5 rounded border-zinc-300"
-                        />
-                      </td>
-                      <td className="py-2 px-2 font-mono font-bold text-blue-700 dark:text-blue-300">
-                        {sig.shortName}
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="font-medium text-zinc-900 dark:text-zinc-100">
-                          {sig.nameRu}
-                        </div>
-                        <div className="text-[10px] text-zinc-400">{sig.nameEn}</div>
-                      </td>
-                      <td className="py-2 px-2 font-mono text-[11px] text-zinc-500">
-                        {sig.protocol === "ssm-a8"
-                          ? `A8 ${sig.addressOrDid}`
-                          : `22 ${sig.addressOrDid}`}
-                      </td>
-                      <td className="py-2 px-2 text-right font-mono text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                        {live ? live.text : "—"}
-                      </td>
-                      <td className="py-2 px-2 text-right text-zinc-500">
-                        {sig.unit}
-                      </td>
-                      <td className="py-2 px-2 text-right font-mono text-[11px] text-zinc-500">
-                        {live && live.min != null && live.max != null
-                          ? `${live.min} / ${live.max}`
-                          : `${sig.min}..${sig.max}`}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <details className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+            <summary className="cursor-pointer text-xs font-semibold text-gray-700">
+              Настройка: параметры и паспорт ({selectedSignalIds.length})
+            </summary>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {selectedEcu.customLists.map((listName) => (
+                <button
+                  key={listName}
+                  type="button"
+                  onClick={() => setSelectedCustomList(listName)}
+                  className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
+                    selectedCustomList === listName
+                      ? "bg-gray-900 text-white"
+                      : "border border-gray-300 text-gray-500"
+                  }`}
+                >
+                  {listName === "All Data" ? "Все" : listName}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleReadEcuPassportAndFreeze()}
+              disabled={!ready || busy}
+              className="mt-2 inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-[11px] text-gray-700 disabled:opacity-40"
+            >
+              <FileSearch className="h-3 w-3" />
+              Паспорт блока
+            </button>
+            {unitPassport ? (
+              <p className="mt-1 font-mono text-[10px] text-gray-500">
+                P/N {unitPassport.partNumber ?? "—"} · Cal {unitPassport.calibrationId ?? "—"}
+              </p>
+            ) : null}
+            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto overflow-x-hidden">
+              {signalsForEcu.map((sig) => {
+                const checked = selectedSignalIds.includes(sig.id);
+                return (
+                  <li key={sig.id}>
+                    <label className="flex min-w-0 items-start gap-2 text-xs text-gray-800">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedSignalIds((p) => [...p, sig.id]);
+                          } else {
+                            setSelectedSignalIds((p) => p.filter((id) => id !== sig.id));
+                          }
+                        }}
+                        className="mt-0.5 shrink-0"
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        <span className="font-mono text-emerald-600/90">{sig.shortName}</span>{" "}
+                        {sig.nameRu}
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
 
-          {/* SSM4 Trigger Condition & Cursor A/B Inspector */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-2 border-t border-zinc-200 dark:border-zinc-800">
-            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 space-y-2">
+          <details className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+            <summary className="cursor-pointer text-xs font-semibold text-gray-500">
+              Триггер и курсоры (расширенно)
+            </summary>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-2">
+            <div className="rounded-lg border border-gray-200 p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                  Условие триггера записи (GetTriggerItem.ini)
+                <span className="text-xs font-bold text-gray-800">
+                  Триггер записи
                 </span>
                 <label className="inline-flex items-center gap-1.5 text-xs">
                   <input
@@ -1379,7 +1504,7 @@ export function SubaruSsmPanel({
                   onChange={(e) =>
                     setTrigger((t) => ({ ...t, signalId: e.target.value }))
                   }
-                  className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
+                  className="rounded border border-gray-300 bg-gray-50 px-2 py-1"
                 >
                   {SSM4_SIGNALS.filter((s) => s.ecuId === selectedEcu.ecuId).map(
                     (s) => (
@@ -1397,7 +1522,7 @@ export function SubaruSsmPanel({
                       slope: e.target.value as TriggerConfig["slope"],
                     }))
                   }
-                  className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
+                  className="rounded border border-gray-300 bg-gray-50 px-2 py-1"
                 >
                   <option value="above">≥ (Above / Выше)</option>
                   <option value="below">≤ (Below / Ниже)</option>
@@ -1412,22 +1537,22 @@ export function SubaruSsmPanel({
                       threshold: Number(e.target.value),
                     }))
                   }
-                  className="w-24 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 font-mono"
+                  className="w-24 rounded border border-gray-300 bg-gray-50 px-2 py-1 font-mono"
                 />
               </div>
               {trigger.triggeredAtMs != null && (
-                <div className="rounded bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                <div className="rounded bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800">
                   Триггер сработал на отметке {(trigger.triggeredAtMs / 1000).toFixed(1)} с!
                 </div>
               )}
             </div>
 
             {/* Cursor A / Cursor B Delta Inspector (GraphSetting.ini) */}
-            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 space-y-2">
-              <div className="flex items-center justify-between text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                <span>Измерительные курсоры графика A / B (GraphSetting.ini)</span>
+            <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-gray-800">
+                <span>Курсоры графика A / B</span>
                 {sampleA && sampleB && (
-                  <span className="font-mono text-blue-600 dark:text-blue-400">
+                  <span className="font-mono text-emerald-600">
                     Δt = {((sampleB.t - sampleA.t) / 1000).toFixed(2)} с
                   </span>
                 )}
@@ -1480,9 +1605,9 @@ export function SubaruSsmPanel({
                         return (
                           <div
                             key={id}
-                            className="rounded bg-zinc-100 dark:bg-zinc-800/70 px-2 py-1 font-mono text-[10px]"
+                            className="rounded bg-gray-100/70 px-2 py-1 font-mono text-[10px]"
                           >
-                            <div className="font-bold text-zinc-700 dark:text-zinc-300">
+                            <div className="font-bold text-gray-700">
                               {sig.shortName}
                             </div>
                             <div>
@@ -1495,31 +1620,282 @@ export function SubaruSsmPanel({
                   )}
                 </div>
               ) : (
-                <div className="text-xs text-zinc-400">
+                <div className="text-xs text-gray-500">
                   Запустите монитор, чтобы накопить точки для курсоров A и B.
                 </div>
               )}
             </div>
           </div>
+          </details>
         </div>
       )}
 
-      {/* VIEW 4: SSM4 UTILITIES & CALIBRATION INSPECTION (Function 902) */}
+      {topView === "steering" && (
+        <div className="relative space-y-3">
+          <SteeringCalConfirmDialog
+            brand="subaru"
+            open={steeringCalConfirmOpen}
+            onCancel={() => setSteeringCalConfirmOpen(false)}
+            onConfirm={() => void executeSubaruSteeringCal()}
+          />
+          <div className="rounded-xl border border-emerald-300 bg-white p-3.5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold text-emerald-700">
+                  Угол поворота руля Subaru (EPS 746 · DID 1041)
+                </div>
+                <p className="mt-0.5 text-[11px] text-gray-500">
+                  Live UDS <strong>22 1041</strong> на <strong>746 → 74E</strong>. После сход-развала — калибровка
+                  нуля на <strong>7B0 → 7B8</strong> (VDC Sensor Midpoint, как в SSM).
+                </p>
+              </div>
+              <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-700">
+                0.1°
+              </span>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+              {steeringLive ? (
+                <>
+                  <div className="text-[11px] uppercase tracking-wider text-gray-500">Текущий угол EPS</div>
+                  {steeringLive.angleDeg != null ? (
+                    <>
+                      <div
+                        className={`mt-1 font-mono text-4xl font-bold tabular-nums ${
+                          Math.abs(steeringLive.angleDeg) <= 0.5
+                            ? "text-emerald-600"
+                            : Math.abs(steeringLive.angleDeg) <= 2.5
+                              ? "text-amber-800"
+                              : "text-rose-400"
+                        }`}
+                      >
+                        {steeringLive.angleDeg > 0 ? "+" : ""}
+                        {steeringLive.angleDeg.toFixed(1)}°
+                      </div>
+                      <div className="relative mt-3 h-3 w-full overflow-hidden rounded-full bg-gray-100">
+                        <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-emerald-400/80" />
+                        <div
+                          className={`absolute top-0.5 h-2 w-3 -translate-x-1/2 rounded-full transition-all ${
+                            Math.abs(steeringLive.angleDeg) <= 0.5 ? "bg-emerald-400" : "bg-amber-400"
+                          }`}
+                          style={{
+                            left: `${Math.max(4, Math.min(96, 50 - (steeringLive.angleDeg / 15) * 45))}%`,
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-2 font-mono text-lg text-gray-800">{steeringLive.angleText}</div>
+                  )}
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gray-200 pt-2.5 text-left font-mono text-[11px]">
+                    <div>
+                      <div className="font-sans text-[10px] text-gray-500">Raw</div>
+                      <div className="text-gray-800">{steeringLive.rawHex}</div>
+                    </div>
+                    <div>
+                      <div className="font-sans text-[10px] text-gray-500">Питание EPS</div>
+                      <div className="text-gray-800">{steeringLive.volts ?? "—"}</div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="py-4 text-xs text-gray-500">
+                  Запустите live-опрос или однократное чтение угла.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void handleToggleSteeringPoll()}
+                disabled={!ready || busy}
+                className={`flex-1 min-w-[140px] rounded-xl px-4 py-3 text-xs font-semibold text-white disabled:opacity-40 ${
+                  steeringPolling ? "bg-amber-600 hover:bg-amber-500" : "border border-gray-900 bg-gray-900 hover:bg-gray-800"
+                }`}
+              >
+                {steeringPolling ? "Остановить live" : "Live опрос (0.0°)"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleReadSteering()}
+                disabled={!ready || busy || steeringPolling}
+                className="rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-800 disabled:opacity-40"
+              >
+                Считать разово
+              </button>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-950/15 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-amber-900">
+                  Калибровка нуля (VDC 7B0 → 7B8)
+                </span>
+                <span className="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] text-amber-800">
+                  UDS 31 01
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-gray-700">
+                Режим «VDC Sensor Midpoint»: фиксация нуля датчика угла и G-сенсора. Только при руле и колёсах строго
+                по центру.
+              </p>
+              <button
+                type="button"
+                disabled={!ready || busy || steeringPolling}
+                onClick={requestSubaruSteeringCal}
+                className="mt-2.5 w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-2.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
+              >
+                Калибровка нуля (0.0°)
+              </button>
+              {steeringCalResult ? (
+                <div
+                  className={`mt-2.5 rounded-lg border p-2.5 text-xs ${
+                    steeringCalResult.success
+                      ? "border-emerald-500/50 bg-emerald-50 text-emerald-800"
+                      : "border-rose-500/50 bg-rose-950/30 text-rose-200"
+                  }`}
+                >
+                  <div className="font-semibold">
+                    {steeringCalResult.success ? "Калибровка выполнена" : "Ошибка калибровки"}
+                  </div>
+                  <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-gray-700">
+                    {steeringCalResult.steps.map((s, idx) => (
+                      <li key={idx}>• {s}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {topView === "cvt" && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">
+                Температура жидкости вариатора Lineartronic
+              </h3>
+              <p className="text-xs text-gray-500">
+                Чтение CVTF с блока коробки TCM 7E1 (DID 103D). Если TCM молчит — запасной опрос силовой установки 7A2.
+                35–45 °C — проверка уровня масла, 65–85 °C — окно адаптации.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleReadCvt()}
+              disabled={!ready || busy}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
+            >
+              <Gauge className="h-3.5 w-3.5" />
+              Считать температуру CVT
+            </button>
+          </div>
+
+          {cvtReading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 sm:col-span-2">
+                <div className="text-xs text-gray-500">CVTF · {cvtReading.source}</div>
+                <div className="mt-1 font-mono text-4xl font-bold text-emerald-700">
+                  {cvtReading.tempC != null ? `${cvtReading.tempC} °C` : "—"}
+                </div>
+                {cvtReading.tempC != null && (
+                  <div className="mt-2 text-sm font-semibold text-gray-800">
+                    {cvtTempBand(cvtReading.tempC).labelRu}
+                  </div>
+                )}
+                <div className="mt-2 font-mono text-[11px] text-gray-500">
+                  Raw {cvtReading.rawHex} · {cvtReading.decoded}
+                </div>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-4">
+                <div className="text-xs text-gray-500">Питание TCM</div>
+                <div className="mt-2 text-sm font-medium text-gray-800">
+                  {cvtReading.volts ?? "не прочитано"}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-xs text-gray-500">
+              Зажигание IG ON, селектор в P, двигатель желательно на холостом ходу. Нажмите «Считать температуру CVT».
+            </div>
+          )}
+        </div>
+      )}
+
+      {topView === "tpms" && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">
+                Давление в шинах (BIU / TPMS)
+              </h3>
+              <p className="text-xs text-gray-500">
+                Прямое чтение четырёх колёс из боди-модуля 752. Показания в барах, кПа и PSI. Если датчики спят — нужна короткая поездка выше 30 км/ч.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleReadTpms()}
+              disabled={!ready || busy}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
+            >
+              <Gauge className="h-3.5 w-3.5" />
+              Считать давление шин
+            </button>
+          </div>
+
+          {tpmsSensors.length > 0 ? (
+            <div className="grid grid-cols-2 gap-3">
+              {tpmsSensors.slice(0, 4).map((w) => (
+                <div
+                  key={w.wheelIndex}
+                  className="rounded-xl border border-gray-200 bg-white p-4"
+                >
+                  <div className="text-xs font-bold text-gray-800">
+                    {w.defaultLabel}
+                  </div>
+                  <div className="mt-2 font-mono text-2xl font-bold text-emerald-700">
+                    {w.pressureBar != null ? `${w.pressureBar.toFixed(2)} бар` : "—"}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {w.pressureKpa != null ? `${w.pressureKpa} кПа` : "нет данных"}
+                    {w.pressurePsi != null ? ` · ${w.pressurePsi} PSI` : ""}
+                    {w.temperatureC != null ? ` · ${w.temperatureC} °C` : ""}
+                  </div>
+                  <div className="mt-1 font-mono text-[10px] text-gray-500">{w.statusText}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-xs text-gray-500">
+              Нажмите «Считать давление шин», чтобы опросить BIU 752.
+            </div>
+          )}
+          {tpmsSensors.length > 0 && tpmsSensors.every((w) => w.pressureBar == null) ? (
+            <p className="text-[11px] text-amber-800">
+              Давление не декодировалось — проверьте IG ON и поездку для пробуждения датчиков; статусы колёс см. выше.
+            </p>
+          ) : null}
+        </div>
+      )}
+
       {topView === "utilities" && (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 p-4 space-y-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                Инспекция калибровок и сервисных режимов (SSM4 Utility · FunctionId = 902)
+              <h3 className="text-sm font-bold text-gray-900">
+                Сервисные проверки
               </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Контроль условий и живых параметров калибровки датчика угла руля EPS, температуры обучения вариатора Lineartronic CVT, электроручника EPB, камеры EyeSight и датчиков шин TPMS.
+              <p className="text-xs text-gray-500">
+                Угол руля EPS, электроручник EPB и камера EyeSight. Температура CVT и давление шин вынесены в отдельные вкладки.
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
-            {SSM4_UTILITIES.map((u) => {
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {SERVICE_UTILITIES.map((u) => {
               const active = u.id === selectedUtility.id;
               return (
                 <button
@@ -1531,14 +1907,14 @@ export function SubaruSsmPanel({
                   }}
                   className={`rounded-lg border p-2.5 text-left transition ${
                     active
-                      ? "border-blue-600 bg-blue-50/90 dark:bg-blue-950/40"
-                      : "border-zinc-200 dark:border-zinc-800 hover:border-blue-300"
+                      ? "border-emerald-600 bg-emerald-50"
+                      : "border-gray-200 hover:border-emerald-400"
                   }`}
                 >
-                  <div className="font-mono text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                  <div className="font-mono text-[10px] font-bold text-emerald-600">
                     ECU {u.txHex} → {u.rxHex}
                   </div>
-                  <div className="mt-1 text-xs font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-2">
+                  <div className="mt-1 text-xs font-semibold text-gray-900 line-clamp-2">
                     {u.titleRu}
                   </div>
                 </button>
@@ -1546,16 +1922,16 @@ export function SubaruSsmPanel({
             })}
           </div>
 
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-3">
+          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <span className="rounded bg-blue-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                <span className="rounded bg-emerald-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-700">
                   {selectedUtility.ssmFunctionCode}
                 </span>
-                <h4 className="mt-1 text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                <h4 className="mt-1 text-sm font-bold text-gray-900">
                   {selectedUtility.titleRu}
                 </h4>
-                <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
+                <p className="mt-0.5 text-xs text-gray-500">
                   {selectedUtility.purposeRu}
                 </p>
               </div>
@@ -1563,18 +1939,18 @@ export function SubaruSsmPanel({
                 type="button"
                 onClick={() => void handleReadUtilityLive()}
                 disabled={!ready || busy}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
               >
                 <Gauge className="h-3.5 w-3.5" />
                 Опросить калибровочные регистры ({selectedUtility.txHex})
               </button>
             </div>
 
-            <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/50 p-3 space-y-1.5">
-              <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-1.5">
+              <div className="text-xs font-bold text-gray-800">
                 Заводские условия выполнения в SSM4:
               </div>
-              <ul className="list-disc pl-5 text-xs text-zinc-600 dark:text-zinc-300 space-y-1">
+              <ul className="list-disc pl-5 text-xs text-gray-700 space-y-1">
                 {selectedUtility.conditionsRu.map((c, idx) => (
                   <li key={idx}>{c}</li>
                 ))}
@@ -1587,17 +1963,17 @@ export function SubaruSsmPanel({
                 return (
                   <div
                     key={item.did}
-                    className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-zinc-800 p-3"
+                    className="flex items-center justify-between rounded-lg border border-gray-200 p-3"
                   >
                     <div>
-                      <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                      <div className="text-xs font-medium text-gray-800">
                         {item.labelRu}
                       </div>
-                      <div className="font-mono text-[10px] text-zinc-400">
+                      <div className="font-mono text-[10px] text-gray-500">
                         UDS 22 {item.did} {val ? `· Raw: ${val.rawHex}` : ""}
                       </div>
                     </div>
-                    <div className="font-mono text-sm font-bold text-blue-700 dark:text-blue-300">
+                    <div className="font-mono text-sm font-bold text-emerald-700">
                       {val ? val.decoded : "—"}
                     </div>
                   </div>
@@ -1611,17 +1987,17 @@ export function SubaruSsmPanel({
                   {tpmsSensors.map((w) => (
                     <div
                       key={w.wheelIndex}
-                      className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/20 p-3"
+                      className="rounded-lg border border-gray-200 bg-white p-3"
                     >
-                      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                      <div className="text-xs font-bold text-gray-800">
                         {w.defaultLabel}
                       </div>
-                      <div className="mt-1 font-mono text-base font-bold text-blue-700 dark:text-blue-300">
+                      <div className="mt-1 font-mono text-base font-bold text-emerald-700">
                         {w.pressureBar != null
                           ? `${w.pressureBar} бар (${w.pressureKpa} кПа)`
                           : "Нет данных"}
                       </div>
-                      <div className="font-mono text-[10px] text-zinc-500">
+                      <div className="font-mono text-[10px] text-gray-500">
                         {w.pressurePsi != null ? `${w.pressurePsi} PSI` : ""} · ID:{" "}
                         {w.sensorIdHex ?? "—"}
                       </div>
@@ -1630,7 +2006,7 @@ export function SubaruSsmPanel({
                 </div>
               )}
 
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            <div className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {selectedUtility.safetyNoteRu}
             </div>
           </div>
@@ -1639,21 +2015,21 @@ export function SubaruSsmPanel({
 
       {/* VIEW 5: SSM4 CUSTOMIZE / PERSONALIZE & FULL CONFIG DIFF (Function 20) */}
       {topView === "customize" && (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 p-4 space-y-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                Параметры персонализации (Customize · Function 20) и сравнение дампов A / B
+              <h3 className="text-sm font-bold text-gray-900">
+                Конфигурация блоков и сравнение дампов
               </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Безопасное чтение пользовательских регистров BIU (<code className="font-mono">752</code>), приборной панели (<code className="font-mono">783</code>) и камеры EyeSight (<code className="font-mono">787</code>) + полный дамп DID-битмапов.
+              <p className="text-xs text-gray-500">
+                Чтение регистров BIU, приборки и EyeSight. Слепки A/B нужны, чтобы увидеть, какие байты меняются после работ в салоне.
               </p>
             </div>
             <button
               type="button"
               onClick={() => void handleReadCustomizeItems()}
               disabled={!ready || busy}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
             >
               <Sliders className="h-3.5 w-3.5" />
               Считать параметры Customize
@@ -1664,25 +2040,25 @@ export function SubaruSsmPanel({
             {SSM4_CUSTOMIZE_ITEMS.map((item) => (
               <div
                 key={item.id}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col justify-between gap-2"
+                className="rounded-lg border border-gray-200 p-3 flex flex-col justify-between gap-2"
               >
                 <div>
-                  <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                  <div className="flex items-center justify-between text-[11px] text-gray-500">
                     <span>{item.categoryRu}</span>
                     <span className="font-mono">
                       {item.txHex} · DID {item.didHex}
                     </span>
                   </div>
-                  <div className="mt-1 text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                  <div className="mt-1 text-xs font-bold text-gray-900">
                     {item.nameRu}
                   </div>
-                  <div className="text-[11px] text-zinc-400">{item.nameEn}</div>
+                  <div className="text-[11px] text-gray-500">{item.nameEn}</div>
                 </div>
-                <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800 pt-2 text-xs">
-                  <span className="text-zinc-500">
+                <div className="flex items-center justify-between border-t border-gray-200 pt-2 text-xs">
+                  <span className="text-gray-500">
                     По умолчанию: {item.defaultText}
                   </span>
-                  <span className="font-mono font-bold text-blue-700 dark:text-blue-300">
+                  <span className="font-mono font-bold text-emerald-700">
                     {customizeValues[item.id] ?? "Не прочитано"}
                   </span>
                 </div>
@@ -1691,13 +2067,13 @@ export function SubaruSsmPanel({
           </div>
 
           {/* Full Subaru DID Snapshot A / B & Diff */}
-          <div className="border-t border-zinc-200 dark:border-zinc-800 pt-4 space-y-3">
+          <div className="border-t border-gray-200 pt-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700">
                   Полный слепок DID-регистров Subaru и компаратор изменений (Снимок A vs Снимок B)
                 </h4>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-gray-500">
                   Сканирует карты поддержки <code className="font-mono">1000..D000</code> во всех блоках Subaru и показывает, какие байты изменились при переключении кнопок в салоне.
                 </p>
               </div>
@@ -1706,7 +2082,7 @@ export function SubaruSsmPanel({
                   type="button"
                   onClick={() => void handleCaptureConfigSnapshot("A")}
                   disabled={!ready || busy}
-                  className="rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
+                  className="rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
                 >
                   Снять слепок A (Старая приборка) {configDumpA ? "✓" : ""}
                 </button>
@@ -1715,7 +2091,7 @@ export function SubaruSsmPanel({
                     <button
                       type="button"
                       onClick={() => handleExportDumpJson(configDumpA, "A", true)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-blue-500/40 bg-blue-500/10 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300"
+                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
                     >
                       <Download className="h-3.5 w-3.5" />
                       Скачать файл приборки A (.json)
@@ -1723,14 +2099,14 @@ export function SubaruSsmPanel({
                     <button
                       type="button"
                       onClick={() => handleExportDumpJson(configDumpA, "A", false)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs font-semibold"
+                      className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold"
                     >
                       <Download className="h-3.5 w-3.5" />
                       Полный дамп A
                     </button>
                   </>
                 )}
-                <label className="cursor-pointer rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-blue-400">
+                <label className="cursor-pointer rounded-lg border border-dashed border-gray-300 px-2.5 py-1.5 text-xs text-gray-700 hover:border-emerald-600">
                   Загрузить A (.json)
                   <input
                     type="file"
@@ -1746,7 +2122,7 @@ export function SubaruSsmPanel({
                   type="button"
                   onClick={() => void handleCaptureConfigSnapshot("B")}
                   disabled={!ready || busy}
-                  className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
                 >
                   Снять слепок B (Новая приборка) {configDumpB ? "✓" : ""}
                 </button>
@@ -1754,13 +2130,13 @@ export function SubaruSsmPanel({
                   <button
                     type="button"
                     onClick={() => handleExportDumpJson(configDumpB, "B", true)}
-                    className="inline-flex items-center gap-1 rounded-lg border border-blue-500/40 bg-blue-500/10 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300"
+                    className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
                   >
                     <Download className="h-3.5 w-3.5" />
                     Скачать файл приборки B (.json)
                   </button>
                 )}
-                <label className="cursor-pointer rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-blue-400">
+                <label className="cursor-pointer rounded-lg border border-dashed border-gray-300 px-2.5 py-1.5 text-xs text-gray-700 hover:border-emerald-600">
                   Загрузить B (.json)
                   <input
                     type="file"
@@ -1775,14 +2151,14 @@ export function SubaruSsmPanel({
             </div>
 
             {configProgress && (
-              <div className="rounded-lg bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
                 {configProgress}
               </div>
             )}
 
             {dumpDiffs.length > 0 && (
               <div className="space-y-1.5">
-                <div className="text-xs font-bold text-amber-700 dark:text-amber-300">
+                <div className="text-xs font-bold text-amber-800">
                   Обнаружено различий между Снимком A и Снимком B: {dumpDiffs.length}
                 </div>
                 {dumpDiffs.map((d) => (
@@ -1790,10 +2166,10 @@ export function SubaruSsmPanel({
                     key={`${d.txHex}-${d.did}`}
                     className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs font-mono"
                   >
-                    <div className="font-bold text-zinc-800 dark:text-zinc-200">
+                    <div className="font-bold text-gray-800">
                       {d.moduleTitle} · DID {d.did} ({d.label})
                     </div>
-                    <div className="text-zinc-600 dark:text-zinc-400">
+                    <div className="text-gray-500">
                       A: {d.beforeHex} ({d.beforeDecoded}) → B: {d.afterHex} (
                       {d.afterDecoded})
                     </div>
@@ -1803,7 +2179,7 @@ export function SubaruSsmPanel({
             )}
 
             {(configDumpA || configDumpB) && (
-              <div className="space-y-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 p-3">
+              <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
                 {(() => {
                   const activeDump = (configDumpB ?? configDumpA)!;
                   const codeMatch = extractAppliedModelAndOptionCodeFromDump(
@@ -1812,25 +2188,25 @@ export function SubaruSsmPanel({
                     optionCodeInput,
                   );
                   return (
-                    <div className="rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs space-y-1">
-                      <div className="font-bold text-blue-900 dark:text-blue-200">
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs space-y-1">
+                      <div className="font-bold text-emerald-800">
                         Итоговый код «12 columns» для ввода в SSM4:{" "}
-                        <code className="rounded bg-blue-600/20 px-1.5 py-0.5 font-mono font-bold">
+                        <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold text-emerald-800">
                           {codeMatch.inferredAppliedModel}
                         </code>{" "}
                         + Option Code{" "}
-                        <code className="rounded bg-blue-600/20 px-1.5 py-0.5 font-mono font-bold">
+                        <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold text-emerald-800">
                           {codeMatch.inferredOptionCode}
                         </code>{" "}
                         ({codeMatch.inferredRegion})
                       </div>
-                      <div className="text-[11px] text-zinc-600 dark:text-zinc-300">
+                      <div className="text-[11px] text-gray-700">
                         {codeMatch.explanationRu}
                       </div>
                     </div>
                   );
                 })()}
-                <div className="text-xs font-bold text-zinc-700 dark:text-zinc-200">
+                <div className="text-xs font-bold text-gray-700">
                   Прочитанные DID-регистры Приборки (783), Боди-модуля BIU (752) и Климата (7C4) из{" "}
                   {configDumpB ? "Снимка B" : "Снимка A"}:
                 </div>
@@ -1845,26 +2221,26 @@ export function SubaruSsmPanel({
                   )
                   .map((mod) => (
                     <div key={mod.txHex} className="space-y-1">
-                      <div className="text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                      <div className="text-[11px] font-semibold text-emerald-700">
                         {mod.title} · найдено DID: {mod.dids.length}
                         {mod.partNumber ? ` · Part#: ${mod.partNumber}` : ""}
                         {mod.calId ? ` · CalID: ${mod.calId}` : ""}
                       </div>
-                      <div className="max-h-48 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2 font-mono text-[11px] space-y-1">
+                      <div className="max-h-48 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 font-mono text-[11px] space-y-1">
                         {mod.dids.map((item) => (
                           <div
                             key={item.did}
-                            className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-100 dark:border-zinc-900 pb-0.5"
+                            className="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-200 pb-0.5"
                           >
-                            <span className="font-bold text-zinc-700 dark:text-zinc-300">
+                            <span className="font-bold text-gray-700">
                               DID {item.did}{" "}
-                              <span className="font-normal text-zinc-500">
+                              <span className="font-normal text-gray-500">
                                 ({item.label})
                               </span>
                             </span>
-                            <span className="text-emerald-700 dark:text-emerald-400">
+                            <span className="text-emerald-600">
                               {item.hex}{" "}
-                              <span className="text-zinc-500">({item.decoded})</span>
+                              <span className="text-gray-500">({item.decoded})</span>
                             </span>
                           </div>
                         ))}
@@ -1876,20 +2252,20 @@ export function SubaruSsmPanel({
           </div>
 
           {/* TSB 07-183-20 (MC-10182242-0001.pdf): Safe Procedure B Only — 12 Columns Calculator & Canadian Option Codes */}
-          <div className="border-t border-zinc-200 dark:border-zinc-800 pt-4 space-y-3">
+          <div className="border-t border-gray-200 pt-4 space-y-3">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                <span className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-700">
                   TSB 07-183-20 · Только безопасный Procedure B (БЕЗ чтения/блокировки одометра!)
                 </span>
-                <span className="rounded bg-rose-500/15 px-2 py-0.5 font-mono text-[11px] font-bold text-rose-700 dark:text-rose-300">
+                <span className="rounded bg-rose-500/15 px-2 py-0.5 font-mono text-[11px] font-bold text-rose-700">
                   Procedure A с одометром ИСКЛЮЧЁН (чтобы не залочить приборку в ------)
                 </span>
               </div>
-              <h4 className="mt-1.5 text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200">
+              <h4 className="mt-1.5 text-xs font-bold uppercase tracking-wider text-gray-700">
                 Калькулятор «Write ECU setting 12 columns of models» (7-значный Applied Model + 4-значный Option Code)
               </h4>
-              <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="mt-0.5 text-xs text-gray-500">
                 Для перевода американской приборки и климата в метрику (<strong>°C, км/ч, л/100км</strong>) и активации{" "}
                 <strong>Dual X-Mode</strong> используется исключительно{" "}
                 <code className="font-mono font-bold">Write Control module setting information → Write ECU setting 12 columns of models</code>{" "}
@@ -1900,7 +2276,7 @@ export function SubaruSsmPanel({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
+                <label className="text-[11px] font-semibold text-gray-700">
                   7-значный Applied Model (со стойки B, например BTACYRB):
                 </label>
                 <input
@@ -1909,11 +2285,11 @@ export function SubaruSsmPanel({
                   value={appliedModelInput}
                   onChange={(e) => setAppliedModelInput(e.target.value.toUpperCase())}
                   placeholder="Например: BTACYRB"
-                  className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 font-mono text-xs font-bold uppercase"
+                  className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 font-mono text-xs font-bold uppercase"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
+                <label className="text-[11px] font-semibold text-gray-700">
                   4-значный Option Code (со стойки B, например U45D → C05D):
                 </label>
                 <input
@@ -1922,24 +2298,24 @@ export function SubaruSsmPanel({
                   value={optionCodeInput}
                   onChange={(e) => setOptionCodeInput(e.target.value.toUpperCase())}
                   placeholder="Например: U45D"
-                  className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 font-mono text-xs font-bold uppercase"
+                  className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 font-mono text-xs font-bold uppercase"
                 />
               </div>
             </div>
 
-            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-3 text-xs space-y-2">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                <span className="font-semibold text-gray-700">
                   Исходный код таблички (12 columns):{" "}
-                  <code className="font-mono font-bold text-blue-700 dark:text-blue-300">
+                  <code className="font-mono font-bold text-emerald-700">
                     {appliedModelAnalysis.appliedModel}-{appliedModelAnalysis.optionCode}
                   </code>
                 </span>
                 <span
                   className={`rounded px-2 py-0.5 text-[11px] font-bold ${
                     appliedModelAnalysis.valid
-                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                      : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-500/15 text-amber-800"
                   }`}
                 >
                   {appliedModelAnalysis.valid ? "Формат 7 + 4 корректен" : "Введите 7 + 4 символа"}
@@ -1963,33 +2339,33 @@ export function SubaruSsmPanel({
                 </div>
               </div>
 
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 space-y-1 text-emerald-950 dark:text-emerald-200">
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-50 px-3 py-2 space-y-1 text-emerald-800">
                 <div className="font-bold">
                   Готовый канадский код для «Write ECU setting 12 columns of models» (°C, км/ч, л/100км, TPMS 315 МГц):
                 </div>
                 <div>
                   • Вариант Канада Standard (<code className="font-mono font-bold">C0</code> — для 2.4T FA24F / Wilderness / XT / Ascent и 2.5L):{" "}
-                  <code className="rounded bg-emerald-600/20 px-1.5 py-0.5 font-mono font-bold">
+                  <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold">
                     {appliedModelAnalysis.appliedModel}
                   </code>{" "}
                   + Option Code{" "}
-                  <code className="rounded bg-emerald-600/20 px-1.5 py-0.5 font-mono font-bold">
+                  <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold">
                     {appliedModelAnalysis.canadianOptionCodeC0}
                   </code>
                 </div>
                 <div>
                   • Вариант Канада PZEV (<code className="font-mono font-bold">C5</code> — для атмосферных 2.5L / 2.0L из штатов с U5):{" "}
-                  <code className="rounded bg-emerald-600/20 px-1.5 py-0.5 font-mono font-bold">
+                  <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold">
                     {appliedModelAnalysis.appliedModel}
                   </code>{" "}
                   + Option Code{" "}
-                  <code className="rounded bg-emerald-600/20 px-1.5 py-0.5 font-mono font-bold">
+                  <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold">
                     {appliedModelAnalysis.canadianOptionCodeC5}
                   </code>
                 </div>
                 {appliedModelAnalysis.dualXModeAppliedModelSuggestion !==
                   appliedModelAnalysis.appliedModel && (
-                  <div className="pt-1 text-amber-800 dark:text-amber-300">
+                  <div className="pt-1 text-amber-800">
                     • Чтобы одновременно включить двухрежимный <strong>Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)</strong>: используйте Applied Model{" "}
                     <code className="font-mono font-bold">
                       {appliedModelAnalysis.dualXModeAppliedModelSuggestion}
@@ -2005,12 +2381,12 @@ export function SubaruSsmPanel({
 
             {/* Reference Table of Canadian Option Codes across TSB 07-183-20 models */}
             <div className="space-y-1.5">
-              <div className="text-xs font-bold text-zinc-700 dark:text-zinc-200">
+              <div className="text-xs font-bold text-gray-700">
                 Справочник канадских кодов (Applied Model + Option Code C0/C5) по бюллетеню TSB 07-183-20 (нажмите, чтобы подставить):
               </div>
-              <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="w-full text-left text-[11px]">
-                  <thead className="bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-300">
+                  <thead className="bg-gray-100 text-gray-700">
                     <tr>
                       <th className="px-2.5 py-1.5">Модель / Кузов</th>
                       <th className="px-2.5 py-1.5">Комплектация</th>
@@ -2020,7 +2396,7 @@ export function SubaruSsmPanel({
                       <th className="px-2.5 py-1.5">Режим X-Mode</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                  <tbody className="divide-y divide-gray-200">
                     {SUBARU_CANADIAN_OPTION_PRESETS.map((preset) => (
                       <tr
                         key={preset.id}
@@ -2028,31 +2404,31 @@ export function SubaruSsmPanel({
                           setAppliedModelInput(preset.appliedModel);
                           setOptionCodeInput(preset.usOptionCodeExamples[0] ?? "U45D");
                         }}
-                        className="cursor-pointer hover:bg-blue-50/60 dark:hover:bg-blue-950/30 transition-colors"
+                        className="cursor-pointer hover:bg-emerald-50 transition-colors"
                       >
-                        <td className="px-2.5 py-1.5 font-semibold text-zinc-800 dark:text-zinc-200">
+                        <td className="px-2.5 py-1.5 font-semibold text-gray-800">
                           {preset.modelSeriesRu}{" "}
-                          <span className="text-zinc-400 font-normal">({preset.years})</span>
+                          <span className="text-gray-500 font-normal">({preset.years})</span>
                         </td>
-                        <td className="px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300">
+                        <td className="px-2.5 py-1.5 text-gray-700">
                           <div>{preset.trimRu}</div>
-                          <div className="text-[10px] text-zinc-500">{preset.featuresRu}</div>
+                          <div className="text-[10px] text-gray-500">{preset.featuresRu}</div>
                         </td>
-                        <td className="px-2.5 py-1.5 font-mono font-bold text-blue-700 dark:text-blue-300">
+                        <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700">
                           {preset.appliedModel}
                         </td>
-                        <td className="px-2.5 py-1.5 font-mono text-zinc-600 dark:text-zinc-400">
+                        <td className="px-2.5 py-1.5 font-mono text-gray-500">
                           {preset.usOptionCodeExamples.join(", ")}
                         </td>
-                        <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                        <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700">
                           {preset.canadianOptionCodeC0} / {preset.canadianOptionCodeC5}
                         </td>
                         <td className="px-2.5 py-1.5">
                           <span
                             className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                               preset.xModeTypeRu.startsWith("Dual")
-                                ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
-                                : "bg-zinc-200/70 dark:bg-zinc-700/60 text-zinc-700 dark:text-zinc-300"
+                                ? "bg-amber-500/15 text-amber-800"
+                                : "bg-gray-100 text-gray-700"
                             }`}
                           >
                             {preset.xModeTypeRu}
