@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { readNextBuildId } from "@/lib/obd-diag/read-build-id";
 import { ObdScrollShell } from "./ObdScrollShell";
+
+export const dynamic = "force-dynamic";
 
 const ICON_BASE = "/tools/obd-diag";
 
@@ -24,5 +27,6 @@ export const viewport: Viewport = {
 };
 
 export default function ObdDiagLayout({ children }: { children: ReactNode }) {
-  return <ObdScrollShell>{children}</ObdScrollShell>;
+  const pageBuildId = readNextBuildId();
+  return <ObdScrollShell pageBuildId={pageBuildId}>{children}</ObdScrollShell>;
 }

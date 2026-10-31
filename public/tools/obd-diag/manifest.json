@@ -1,13 +1,13 @@
 {
   "name": "QHub OBD Scanner",
   "short_name": "OBD",
-  "description": "vLinker BLE: коды OBD-II и live-параметры; отдельно Mitsubishi ETACS .kon / .cuf",
-  "start_url": "/tools/obd-diag",
+  "description": "vLinker BLE: коды OBD-II и live-параметры; Subaru / Mitsubishi диагностика",
+  "start_url": "/tools/obd-diag?_pwa=1",
   "scope": "/tools/obd-diag",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#020617",
-  "theme_color": "#059669",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "lang": "ru",
   "icons": [
     {

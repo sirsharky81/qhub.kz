@@ -3,10 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useIosSingleScrollPane } from "@/hooks/useIosSingleScrollPane";
 import ObdScrollContext from "./ObdScrollContext";
+import { ObdDeployGuard } from "./ObdDeployGuard";
 
 const MAX_DEFERRED_UPDATES = 16;
 
-export function ObdScrollShell({ children }: { children: ReactNode }) {
+export function ObdScrollShell({
+  children,
+  pageBuildId,
+}: {
+  children: ReactNode;
+  pageBuildId: string;
+}) {
   const { scrollRef, scrollingRef, onScrollEndRef } = useIosSingleScrollPane({ scrollEndMs: 240 });
   const deferredRef = useRef<(() => void)[]>([]);
   const flushCallbacksRef = useRef(new Set<() => void>());
@@ -60,6 +67,7 @@ export function ObdScrollShell({ children }: { children: ReactNode }) {
         style={{
           position: "fixed",
           inset: 0,
+          minHeight: "100dvh",
           overflowX: "clip",
           overflowY: "auto",
           overscrollBehavior: "none",
@@ -72,6 +80,7 @@ export function ObdScrollShell({ children }: { children: ReactNode }) {
           className="mx-auto max-w-lg min-w-0 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
           style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
         >
+          <ObdDeployGuard pageBuildId={pageBuildId} />
           {children}
         </div>
       </div>

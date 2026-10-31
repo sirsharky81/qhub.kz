@@ -88,6 +88,24 @@ const sharedConfig: NextConfig = {
           },
         ],
       },
+      {
+        source: "/tools/obd-diag",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate, max-age=0",
+          },
+        ],
+      },
+      {
+        source: "/tools/obd-diag/manifest.json",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache, must-revalidate, max-age=0",
+          },
+        ],
+      },
     ];
   },
 };
