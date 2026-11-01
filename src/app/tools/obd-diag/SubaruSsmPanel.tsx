@@ -839,12 +839,13 @@ export function SubaruSsmPanel({
           if (parsed.kind !== "positive" || parsed.payload.length < 3) continue;
           const data = parsed.payload.slice(2);
           const temp = decodeSubaruTemperatureBytes(data);
+          if (!temp) continue;
           const rawHex = data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
           found = {
-            tempC: temp?.celsius ?? null,
+            tempC: temp.celsius,
             source: src.title,
             rawHex,
-            decoded: temp ? formatSubaruTempText(temp) : formatUdsPayload(parsed.payload, 0x22, src.tx),
+            decoded: formatSubaruTempText(temp),
             volts: null,
           };
           break;

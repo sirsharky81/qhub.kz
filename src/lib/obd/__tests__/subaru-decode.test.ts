@@ -13,6 +13,10 @@ describe("subaru-decode", () => {
     expect(decodeSubaruTemperatureBytes([0x01, 0x72])).toEqual({ celsius: 37, formula: "u16/10" });
     // 0x0320 = 800 → 80.0 °C (окно адаптации)
     expect(decodeSubaruTemperatureBytes([0x03, 0x20])).toEqual({ celsius: 80, formula: "u16/10" });
+    // 7A2 mux + A−40 (холодный CVTF ~15 °C)
+    expect(decodeSubaruTemperatureBytes([0x04, 0x37])).toEqual({ celsius: 15, formula: "a-40" });
+    // 7A2: status 0x04 + temp byte with MSB flag (0xB2 → 0x32 → 10 °C), not u16/10=120.2
+    expect(decodeSubaruTemperatureBytes([0x04, 0xb2])).toEqual({ celsius: 10, formula: "a-40" });
   });
 
   it("marks CVTF inspection windows", () => {

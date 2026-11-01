@@ -30,6 +30,16 @@ function looksLikeTempByte(value: number): boolean {
   return (as40 >= -30 && as40 <= 95) || (as50 >= -30 && as50 <= 95);
 }
 
+/** CVTF / ATF on a cold-soak car is rarely above ~95 °C at key-on. */
+function isPlausibleAtfTempC(celsius: number): boolean {
+  return celsius >= -35 && celsius <= 110;
+}
+
+function tempByteToCelsius(rawByte: number): number {
+  const masked = rawByte > 0x7f ? rawByte & 0x7f : rawByte;
+  return masked - 40;
+}
+
 function tempFromByte(value: number): number {
   const as40 = value - 40;
   const as50 = value - 50;
@@ -55,30 +65,57 @@ function packPressure(kpa: number, formula: SubaruTpmsReading["formula"], temper
 export function decodeSubaruTemperatureBytes(dataBytes: number[]): SubaruTempReading | null {
   if (dataBytes.length === 0) return null;
   if (dataBytes.length === 1) {
-    return { celsius: dataBytes[0]! - 40, formula: "a-40" };
+    const celsius = tempByteToCelsius(dataBytes[0]!);
+    return isPlausibleAtfTempC(celsius) ? { celsius, formula: "a-40" } : null;
   }
 
   const hi = dataBytes[0]!;
   const lo = dataBytes[1]!;
   const u16 = (hi << 8) | lo;
+  const candidates: SubaruTempReading[] = [];
+
+  // TCM 7E1 (SGP): 0.1 °C in u16, high byte usually 0x00–0x03 (e.g. 01 72 → 37.0 °C).
+  if (hi <= 0x03 && u16 >= 200 && u16 <= 950) {
+    const celsius = Number((u16 / 10).toFixed(1));
+    if (isPlausibleAtfTempC(celsius)) {
+      candidates.push({ celsius, formula: "u16/10" });
+    }
+  }
+
+  // Powertrain 7A2 fallback: leading mux/status byte + ISO A−40 (bit7 may be a validity flag).
+  if (hi > 0 && hi <= 0x0f && lo !== 0xff) {
+    const celsius = tempByteToCelsius(lo);
+    if (isPlausibleAtfTempC(celsius)) {
+      candidates.push({ celsius, formula: "a-40" });
+    }
+  }
 
   if (hi === 0) {
-    return { celsius: lo - 40, formula: "a-40" };
+    if (lo !== 0xff) {
+      const padded = lo - 40;
+      if (isPlausibleAtfTempC(padded)) {
+        candidates.push({ celsius: padded, formula: "a-40" });
+      }
+    }
+    if (u16 >= 200) {
+      const celsius = Number((u16 / 10).toFixed(1));
+      if (isPlausibleAtfTempC(celsius)) {
+        candidates.push({ celsius, formula: "u16/10" });
+      }
+    }
   }
 
-  const tenth = u16 / 10;
-  const tenthOffset = u16 / 10 - 40;
-  if (u16 >= 200 && tenth >= -40 && tenth <= 200) {
-    if (tenth >= 15 && tenth <= 160) {
-      return { celsius: Number(tenth.toFixed(1)), formula: "u16/10" };
+  if (candidates.length === 0) {
+    const legacyHi = hi - 40;
+    if (isPlausibleAtfTempC(legacyHi)) {
+      return { celsius: legacyHi, formula: "a-40" };
     }
-    if (tenthOffset >= -40 && tenthOffset <= 200) {
-      return { celsius: Number(tenthOffset.toFixed(1)), formula: "u16/10-40" };
-    }
-    return { celsius: Number(tenth.toFixed(1)), formula: "u16/10" };
+    return null;
   }
 
-  return { celsius: hi - 40, formula: "a-40" };
+  // Prefer 0.1 °C TCM encoding when both match (7E1 path).
+  const tenth = candidates.find((c) => c.formula === "u16/10");
+  return tenth ?? candidates[0]!;
 }
 
 /**
