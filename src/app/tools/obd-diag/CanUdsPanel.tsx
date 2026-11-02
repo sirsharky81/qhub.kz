@@ -1308,11 +1308,13 @@ export default function CanUdsPanel({
                     </div>
                     <div
                       className={`mt-1 font-mono text-2xl font-bold ${
-                        mitsuTcmData.atfTempC != null && mitsuTcmData.atfTempC >= 100
-                          ? "text-rose-400"
-                          : mitsuTcmData.atfTempC != null && mitsuTcmData.atfTempC >= 55
-                            ? "text-emerald-600"
-                            : "text-blue-600"
+                        mitsuTcmData.atfTempC == null
+                          ? "text-blue-600"
+                          : mitsubishiFluidBand(mitsuTcmData.atfTempC, mitsuTcmData.transmissionType).id === "hot"
+                            ? "text-rose-400"
+                            : mitsubishiFluidBand(mitsuTcmData.atfTempC, mitsuTcmData.transmissionType).id === "level"
+                              ? "text-emerald-600"
+                              : "text-blue-600"
                       }`}
                     >
                       {mitsuTcmData.atfTempC != null ? `${mitsuTcmData.atfTempC} °C` : "—"}

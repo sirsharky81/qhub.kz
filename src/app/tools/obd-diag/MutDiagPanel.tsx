@@ -721,8 +721,7 @@ export default function MutDiagPanel({ session, phase }: Props) {
           <div>
             <h3 className="text-sm font-bold text-gray-900">АКПП / CVT · температура масла</h3>
             <p className="text-[11px] text-gray-500">
-              MUT-III SE Data List: 8AT V8AWG (Pajero Sport) труба/картер A−50; CVT Outlander 21 03 A−55.
-              Уровень масла проверяют при 70–80 °C, селектор P, холостой ход.
+              MUT-III SE: AT8 по картеру, 40–43 °C на 6B31 и 43–46 °C на 4N15. При 47 °C индикатор мигает, уровень не проверяют. CVT — при 70–80 °C, селектор P, холостой ход.
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">

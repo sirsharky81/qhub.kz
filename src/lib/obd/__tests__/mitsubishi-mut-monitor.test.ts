@@ -31,12 +31,15 @@ function signal(partial: Partial<CatalogSignal> & { id: string; nameEn: string }
 }
 
 describe("mitsubishi MUT-III fluid windows", () => {
-  it("marks 70–80 °C as the ATF / CVT level window", () => {
-    expect(mitsubishiFluidBand(40, "8AT / 5AT").id).toBe("cold");
-    expect(mitsubishiFluidBand(75, "8AT / 5AT").id).toBe("level");
-    expect(mitsubishiFluidBand(75, "CVT").labelRu).toMatch(/CVT/);
-    expect(mitsubishiFluidBand(95, "CVT").id).toBe("work");
-    expect(mitsubishiFluidBand(120, "8AT / 5AT").id).toBe("hot");
+  it("uses the AT8 oil-pan window and keeps 70–80 °C for CVT", () => {
+    expect(mitsubishiFluidBand(35, "8AT").id).toBe("cold");
+    expect(mitsubishiFluidBand(41, "8AT").labelRu).toMatch(/6B31/);
+    expect(mitsubishiFluidBand(45, "8AT").labelRu).toMatch(/4N15/);
+    expect(mitsubishiFluidBand(47, "8AT").id).toBe("work");
+    expect(mitsubishiFluidBand(47, "8AT").labelRu).toMatch(/47/);
+    expect(mitsubishiFluidBand(75, "CVT").id).toBe("level");
+    expect(mitsubishiFluidBand(75, "CVT").labelRu).toMatch(/70–80/);
+    expect(mitsubishiFluidBand(120, "8AT").id).toBe("hot");
   });
 });
 

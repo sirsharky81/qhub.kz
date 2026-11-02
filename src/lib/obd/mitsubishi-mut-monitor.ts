@@ -1,6 +1,6 @@
 import type { CatalogSignal } from "@/lib/etacs-coding/diag-catalog";
 
-export type MitsubishiGearboxKind = "8AT / 5AT" | "CVT";
+export type MitsubishiGearboxKind = "8AT" | "5AT" | "CVT";
 
 export interface MitsubishiFluidBand {
   id: "cold" | "level" | "warm" | "work" | "hot";
@@ -8,31 +8,46 @@ export interface MitsubishiFluidBand {
 }
 
 /**
- * MUT-III SE Data List windows used in the workshop for ATF / CVT fluid level.
- * 8AT V8AWG (Pajero Sport III, AT8_12882300): pan/pipe sensors, A − 50.
- * CVT F1CJC/W1CJA (Outlander III, CVT_14080300): 21 03 oil temperature, A − 55.
+ * Level-check windows from the Mitsubishi service procedure, not the sensor offset.
+ * AT8 V8AWG/R8AWG (Pajero Sport III, 2018 23A): oil-pan temperature,
+ * 40–43 °C on 6B31 and 43–46 °C on 4N15. At 47 °C the warning mark blinks and the check is not done.
+ * CVT (Outlander III): 70–80 °C, selector P, idle.
  */
 export function mitsubishiFluidBand(
   tempC: number,
   kind: MitsubishiGearboxKind,
 ): MitsubishiFluidBand {
-  if (tempC < 50) {
-    return { id: "cold", labelRu: "Холодная — уровень масла ещё рано проверять" };
+  if (kind === "CVT") {
+    if (tempC < 50) return { id: "cold", labelRu: "Холодная — уровень CVT ещё рано проверять" };
+    if (tempC <= 69) return { id: "warm", labelRu: "Прогрев — до окна уровня CVT 70–80 °C ещё рано" };
+    if (tempC <= 80) {
+      return { id: "level", labelRu: "Окно уровня CVT (70–80 °C, селектор P, холостой ход)" };
+    }
+    if (tempC <= 110) return { id: "work", labelRu: "Рабочая температура CVT (после поездки)" };
+    return { id: "hot", labelRu: "Перегрев масла коробки (> 110 °C)" };
   }
-  if (tempC <= 69) {
-    return { id: "warm", labelRu: "Прогрев — до окна уровня 70–80 °C ещё рано" };
+
+  if (kind === "5AT") {
+    if (tempC < 39) return { id: "cold", labelRu: "Рано: уровень 5AT смотрят при 39–46 °C" };
+    if (tempC <= 46) return { id: "level", labelRu: "Окно уровня 5AT (39–46 °C)" };
+    if (tempC <= 110) return { id: "work", labelRu: "Выше окна уровня 5AT (с 47 °C проверку не делают)" };
+    return { id: "hot", labelRu: "Перегрев масла коробки (> 110 °C)" };
   }
-  if (tempC <= 80) {
-    return {
-      id: "level",
-      labelRu:
-        kind === "CVT"
-          ? "Окно уровня CVT (70–80 °C, селектор P, холостой ход)"
-          : "Окно уровня ATF (70–80 °C, селектор P, холостой ход)",
-    };
+
+  if (tempC < 40) {
+    return { id: "cold", labelRu: "Рано: уровень AT8 смотрят по картеру, 40–43 °C на 6B31 или 43–46 °C на 4N15" };
+  }
+  if (tempC <= 42) {
+    return { id: "level", labelRu: "Окно уровня AT8 для 6B31 (40–43 °C, картер). Для 4N15 ещё рано" };
+  }
+  if (tempC === 43) {
+    return { id: "level", labelRu: "Окно уровня AT8: 43 °C подходит и 6B31, и 4N15" };
+  }
+  if (tempC <= 46) {
+    return { id: "level", labelRu: "Окно уровня AT8 для 4N15 (43–46 °C, картер). Для 6B31 уже поздно" };
   }
   if (tempC <= 110) {
-    return { id: "work", labelRu: "Рабочая температура (после поездки)" };
+    return { id: "work", labelRu: "47 °C и выше — окно уровня AT8 закрыто, индикатор мигает" };
   }
   return { id: "hot", labelRu: "Перегрев масла коробки (> 110 °C)" };
 }

@@ -4,7 +4,7 @@ import { decodeSubaruTpmsBytes } from "./subaru-decode";
 import { parseUdsResponse } from "./uds";
 
 export interface MitsubishiTcmTelemetry {
-  transmissionType: "8AT / 5AT" | "CVT";
+  transmissionType: "8AT" | "5AT" | "CVT";
   txHex: string;
   rxHex: string;
   partNumber: string | null;
@@ -262,7 +262,7 @@ export function decodeMitsubishiAt2102And2104(
   }
 
   return {
-    transmissionType: "8AT / 5AT",
+    transmissionType: is8at ? "8AT" : "5AT",
     atfTempC,
     atfTempPipeC,
     atfTempPanC,
