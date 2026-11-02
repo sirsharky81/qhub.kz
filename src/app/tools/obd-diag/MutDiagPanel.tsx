@@ -6,9 +6,14 @@ import { LiveMetricCards } from "./LiveMetricCards";
 import type { CatalogEcu, CatalogSignal, CatalogVehicle, CatalogVehicleSummary } from "@/lib/etacs-coding/diag-catalog";
 import { asciiFromKwpPayload, decodeCatalogSignal } from "@/lib/obd/mut-live";
 import {
+  buildMitsubishiVisitReport,
+  ecuMatchesServiceSet,
   isTransmissionEcu,
   mitsubishiFluidBand,
+  parseMitsubishiModuleIdentity,
   pickPreferredMonitorSignals,
+  pickServiceSetSignals,
+  type MitsubishiServiceSet,
 } from "@/lib/obd/mitsubishi-mut-monitor";
 import { remedyForDtcCode } from "@/lib/obd/dtc-remedies";
 import {
@@ -94,6 +99,7 @@ export default function MutDiagPanel({ session, phase }: Props) {
   const [meter, setMeter] = useState<MitsubishiMeterReport | null>(null);
   const tcmLiveRef = useRef(false);
   const [tcmLive, setTcmLive] = useState(false);
+  const [profileNote, setProfileNote] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -257,7 +263,36 @@ export default function MutDiagPanel({ session, phase }: Props) {
     }
   };
 
-  const openEcu = async (ecu: CatalogEcu) => {
+  const readModuleIdentity = async (tx: string, rx: string) => {
+    const readOnce = async () => {
+      let partNumber: string | null = null;
+      let diagVersion: string | null = null;
+      for (const request of ["1A 9C", "1A 87", "21 87"]) {
+        try {
+          const { parsed } = await session.sendUds("6", tx, rx, request, false);
+          if (parsed.kind !== "positive") continue;
+          const identity = parseMitsubishiModuleIdentity(request, parsed.payload);
+          partNumber = partNumber ?? identity.partNumber;
+          diagVersion = diagVersion ?? identity.diagVersion;
+        } catch {
+          /* the next identification request */
+        }
+      }
+      return { partNumber, diagVersion };
+    };
+    let identity = await readOnce();
+    if (!identity.partNumber && !identity.diagVersion) {
+      try {
+        await session.sendUds("6", tx, rx, "10 92", false);
+      } catch {
+        /* identification still falls back to the catalog profile */
+      }
+      identity = await readOnce();
+    }
+    return identity;
+  };
+
+  const openEcu = async (ecu: CatalogEcu, serviceSet?: MitsubishiServiceSet) => {
     stopLive.current = true;
     setLive(false);
     setSelectedKey(ecu.sysKey);
@@ -266,16 +301,36 @@ export default function MutDiagPanel({ session, phase }: Props) {
     setSamples([]);
     setLiveNow({});
     setSignals([]);
+    setProfileNote(null);
     if (!vehicle) return;
     try {
-      const response = await fetch(
-        `/api/etacs-coding/diag/signals?vkey=${encodeURIComponent(vehicle.vkey)}&sysKey=${ecu.sysKey}`,
-      );
-      const body = (await response.json()) as { error?: string; signals?: CatalogSignal[] };
+      let diagVersion: string | null = null;
+      let partNumber: string | null = null;
+      if (phase === "vehicle") {
+        setStatus("Читаю парт-номер и версию блока…");
+        const identity = await readModuleIdentity(ecu.txCanId, ecu.rxCanId);
+        diagVersion = identity.diagVersion;
+        partNumber = identity.partNumber;
+      }
+      const query = new URLSearchParams({
+        vkey: vehicle.vkey,
+        sysKey: String(ecu.sysKey),
+      });
+      if (diagVersion) query.set("diagVersion", diagVersion);
+      if (partNumber) query.set("partNumber", partNumber);
+      const response = await fetch(`/api/etacs-coding/diag/signals?${query.toString()}`);
+      const body = (await response.json()) as {
+        error?: string;
+        signals?: CatalogSignal[];
+        profileNoteRu?: string;
+      };
       if (!response.ok) throw new Error(body.error || "Список параметров недоступен");
       const list = body.signals ?? [];
       setSignals(list);
-      setPicked(pickPreferredMonitorSignals(list, MAX_LIVE));
+      setProfileNote(body.profileNoteRu ?? null);
+      const serviceIds = serviceSet ? pickServiceSetSignals(list, serviceSet, MAX_LIVE) : [];
+      setPicked(serviceIds.length > 0 ? serviceIds : pickPreferredMonitorSignals(list, MAX_LIVE));
+      setStatus(null);
       requestAnimationFrame(() => {
         document.getElementById("mitsu-live-workspace")?.scrollIntoView({ block: "start", behavior: "smooth" });
       });
@@ -448,6 +503,75 @@ export default function MutDiagPanel({ session, phase }: Props) {
     URL.revokeObjectURL(link.href);
   };
 
+  const downloadVisit = () => {
+    const pressures = pickedSignals
+      .filter((signal) => /pressure|давлени/i.test(`${signal.nameEn} ${signal.nameRu}`))
+      .map((signal) => ({
+        label: signal.nameRu || signal.nameEn,
+        value: liveNow[signal.id] ?? "",
+      }));
+    const csv = buildMitsubishiVisitReport({
+      vin,
+      vehicleName: vehicle ? vehicle.nameRu : null,
+      modules: (vehicle?.ecus ?? []).map((ecu) => {
+        const report = reports[addressKey(ecu.txCanId, ecu.rxCanId)];
+        const master = texts[ecu.dtcMasterId] ?? {};
+        return {
+          nameRu: ecu.nameRu,
+          address: `${ecu.txCanId}→${ecu.rxCanId}`,
+          responded: report ? report.responded : null,
+          partNumber: report?.partNumber ?? null,
+          dtcs: (report?.dtcs ?? []).map((dtc) => ({
+            code: dtc.code,
+            textRu: master[dtc.code]?.ru || dtc.description,
+            remedy: dtc.remedy ?? remedyForDtcCode(dtc.code),
+            active: dtc.active,
+          })),
+        };
+      }),
+      transmission: tcm
+        ? {
+            kind: tcm.transmissionType,
+            tempC: tcm.atfTempC,
+            pipeC: tcm.atfTempPipeC,
+            panC: tcm.atfTempPanC,
+            formula: tcm.atfFormula === "a-55" ? "CVT A-55" : "8AT/5AT A-50",
+            bandRu: tcm.atfTempC != null ? mitsubishiFluidBand(tcm.atfTempC, tcm.transmissionType).labelRu : null,
+            selector: tcm.selectorPosition,
+            gear: tcm.currentGearText,
+            inputRpm: tcm.inputShaftRpm,
+            outputRpm: tcm.outputShaftRpm,
+            degradation: tcm.cvtDegradationCount,
+          }
+        : null,
+      pressures,
+      tpms: (tpms?.wheels ?? []).map((wheel) => ({
+        label: wheel.defaultLabel,
+        bar: wheel.pressureBar,
+        tempC: wheel.temperatureC,
+      })),
+      meter: meter ? { fuelLiters: meter.fuelLiters, odometerKm: meter.odometerKm } : null,
+      live: pickedSignals.map((signal) => ({
+        name: signal.nameRu || signal.nameEn,
+        value: liveNow[signal.id] ?? "",
+        unit: signal.unit,
+      })),
+    });
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `qhub-visit-${vin || vehicle?.vkey || "mitsubishi"}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const serviceButtons: Array<{ set: MitsubishiServiceSet; label: string }> = [
+    { set: "engine", label: "Двигатель" },
+    { set: "gearbox", label: "Коробка" },
+    { set: "4wd", label: "4WD" },
+    { set: "body", label: "Кузов" },
+  ];
+
   const liveWorkspace =
     selected ? (
       <div
@@ -461,6 +585,7 @@ export default function MutDiagPanel({ session, phase }: Props) {
               <p className="font-mono text-[10px] text-gray-500">
                 {selected.txCanId} → {selected.rxCanId}
               </p>
+              {profileNote ? <p className="text-[10px] text-gray-500">{profileNote}</p> : null}
             </div>
             <button
               type="button"
@@ -733,6 +858,35 @@ export default function MutDiagPanel({ session, phase }: Props) {
           </p>
         ) : null}
       </div>
+
+      {vehicle ? (
+        <div className="flex flex-wrap gap-1.5">
+          {serviceButtons.map((item) => {
+            const ecu = vehicle.ecus.find((candidate) =>
+              ecuMatchesServiceSet(candidate.nameEn, candidate.nameRu, item.set),
+            );
+            if (!ecu) return null;
+            return (
+              <button
+                key={item.set}
+                type="button"
+                disabled={busy}
+                onClick={() => void openEcu(ecu, item.set)}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-[11px] text-gray-800 disabled:opacity-40"
+              >
+                {item.label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={downloadVisit}
+            className="rounded-lg border border-gray-900 px-3 py-1.5 text-[11px] font-medium text-gray-900"
+          >
+            Отчёт визита
+          </button>
+        </div>
+      ) : null}
 
       {liveWorkspace}
 

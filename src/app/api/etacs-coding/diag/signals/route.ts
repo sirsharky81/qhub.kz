@@ -13,7 +13,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const list = signalsForEcu(vkey, sysKey);
+    const list = signalsForEcu(vkey, sysKey, undefined, {
+      diagVersion: url.searchParams.get("diagVersion"),
+      partNumber: url.searchParams.get("partNumber"),
+    });
     if (!list) return etacsJson(request, { error: "Блок не найден в каталоге" }, 404);
     return etacsJson(request, list);
   } catch (error) {

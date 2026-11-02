@@ -43,7 +43,19 @@ const db = {
           txCanId: "0x7E0",
           rxCanId: "0x7E8",
           dtcMasterId: "05",
-          variants: [{ exdfFile: "GAS.exdf", diagVersions: [{ diagVersionHex: "0x0000", skey: "10022701" }] }],
+          variants: [
+            {
+              exdfFile: "GAS.exdf",
+              diagVersions: [
+                { diagVersionHex: "0x0000", skey: "10022701" },
+                { diagVersionHex: "0x0104", skey: "10019901" },
+              ],
+            },
+            {
+              exdfFile: "1860D362.exdf",
+              diagVersions: [{ diagVersionHex: "0xFFFF", skey: "10018801" }],
+            },
+          ],
         },
         {
           sysKey: 3,
@@ -129,6 +141,71 @@ const db = {
               offset: 0,
               decimals: 0,
             },
+            {
+              itemNo: 2,
+              nameEn: "Coolant",
+              nameRu: "ОЖ",
+              udsServiceId: "0x21",
+              localId: "0x02",
+              unitRu: "°C",
+              bytePos: 3,
+              byteLen: 1,
+              byteOrder: 2,
+              bitPos: -1,
+              bitLen: -1,
+              signed: false,
+              factor: 1,
+              offset: -40,
+              decimals: 0,
+            },
+          ],
+        },
+        "10019901": {
+          skey: "10019901",
+          dataList: [
+            {
+              itemNo: 1,
+              nameEn: "Diesel rail",
+              nameRu: "Рампа",
+              udsServiceId: "0x21",
+              localId: "0x11",
+              unitRu: "MPa",
+              bytePos: 2,
+              byteLen: 2,
+              byteOrder: 2,
+              bitPos: -1,
+              bitLen: -1,
+              signed: false,
+              factor: 0.1,
+              offset: 0,
+              decimals: 1,
+            },
+          ],
+        },
+      },
+    },
+    "1860D362.exdf": {
+      profiles: {
+        "10018801": {
+          skey: "10018801",
+          dataList: [
+            {
+              itemNo: 1,
+              nameEn: "Part profile",
+              nameRu: "По парт-номеру",
+              udsServiceId: "0x21",
+              localId: "0x01",
+              unitRu: "",
+              bytePos: 2,
+              byteLen: 1,
+              byteOrder: 2,
+              bitPos: -1,
+              bitLen: -1,
+              signed: false,
+              factor: 1,
+              offset: 0,
+              decimals: 0,
+            },
           ],
         },
       },
@@ -168,11 +245,36 @@ describe("catalog signals and DTC text", () => {
     useDiagDb(db);
     const list = signalsForEcu("1108740010", 2);
     expect(list?.skey).toBe("10022701");
-    expect(list?.signals).toHaveLength(1);
+    expect(list?.profileSource).toBe("catalog");
+    expect(list?.profileNoteRu).toBe("Профиль по каталогу, версия блока не прочитана");
+    expect(list?.signals).toHaveLength(2);
     expect(list?.signals[0]).not.toHaveProperty("reqMsg");
     expect(describeCatalogDtcs("05", ["b1000", "P0000"])).toEqual({
       B1000: { en: "Inside temp.sensor performance", ru: "Датчик температуры салона" },
     });
+  });
+});
+
+describe("profile match by ECU version and part number", () => {
+  it("prefers the shorter Data List whose diagnostic version matches the ECU", () => {
+    useDiagDb(db);
+    const list = signalsForEcu("1108740010", 2, undefined, { diagVersion: "0x0104" });
+    expect(list?.skey).toBe("10019901");
+    expect(list?.signals).toHaveLength(1);
+    expect(list?.profileSource).toBe("version");
+    expect(list?.profileNoteRu).toMatch(/0104/);
+  });
+
+  it("uses the part-number file when the version is not in the catalog", () => {
+    useDiagDb(db);
+    const byPart = signalsForEcu("1108740010", 2, undefined, { partNumber: "1860D362" });
+    expect(byPart?.skey).toBe("10018801");
+    expect(byPart?.profileSource).toBe("part");
+    const missing = signalsForEcu("1108740010", 2, undefined, { diagVersion: "0ABC" });
+    expect(missing?.skey).toBe("10022701");
+    expect(missing?.profileSource).toBe("catalog");
+    expect(missing?.profileNoteRu).toMatch(/0ABC/);
+    expect(missing?.profileNoteRu).toMatch(/не найдена/);
   });
 });
 

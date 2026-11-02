@@ -59,6 +59,14 @@ export interface CatalogSignalList {
   txCanId: string;
   rxCanId: string;
   signals: CatalogSignal[];
+  /** `version` / `part` came from the ECU. `catalog` is the longest Data List fallback. */
+  profileSource: "version" | "part" | "catalog";
+  profileNoteRu: string;
+}
+
+export interface CatalogSignalQuery {
+  diagVersion?: string | null;
+  partNumber?: string | null;
 }
 
 interface RawSignal {
@@ -316,7 +324,27 @@ function projectSignal(item: RawSignal, skey: string): CatalogSignal | null {
   };
 }
 
-export function signalsForEcu(vkey: string, sysKey: number, db = loadDiagDb()): CatalogSignalList | null {
+function normalizeDiagVersion(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const hex = value.replace(/^0x/i, "").replace(/[^0-9a-f]/gi, "");
+  if (!hex) return null;
+  return hex.toUpperCase().padStart(4, "0").slice(-4);
+}
+
+interface ProfileCandidate {
+  skey: string;
+  items: RawSignal[];
+  versionHit: boolean;
+  partHit: boolean;
+  listed: boolean;
+}
+
+export function signalsForEcu(
+  vkey: string,
+  sysKey: number,
+  db = loadDiagDb(),
+  query?: CatalogSignalQuery,
+): CatalogSignalList | null {
   const vehicle = matchCatalogVehicle({ vkey }, db);
   const ecu = vehicle?.ecus?.find((item) => item.sysKey === sysKey);
   if (!vehicle || !ecu) return null;
@@ -324,21 +352,52 @@ export function signalsForEcu(vkey: string, sysKey: number, db = loadDiagDb()): 
   if (!projected) return null;
 
   const wanted = new Set(preferredSkeys(ecu));
-  let best: { skey: string; items: RawSignal[] } | null = null;
+  const wantedVersion = normalizeDiagVersion(query?.diagVersion);
+  const part = (query?.partNumber ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const candidates: ProfileCandidate[] = [];
   for (const variant of ecu.variants ?? []) {
     const file = variant.exdfFile;
     if (!file || file === "OPLESS.exdf") continue;
-    const profiles = Object.values(db.ecuDefinitions?.[file]?.profiles ?? {});
-    const preferred = profiles.filter((profile) => wanted.has(profile.skey) && (profile.dataList?.length ?? 0) > 0);
-    const pool = preferred.length > 0 ? preferred : profiles;
-    for (const profile of pool) {
-      const count = profile.dataList?.length ?? 0;
-      if (!best || count > best.items.length) {
-        best = { skey: profile.skey, items: profile.dataList ?? [] };
-      }
+    const versionSkeys = new Set(
+      (variant.diagVersions ?? [])
+        .filter(
+          (version) =>
+            wantedVersion != null &&
+            version.diagVersionHex !== "0xFFFF" &&
+            normalizeDiagVersion(version.diagVersionHex) === wantedVersion,
+        )
+        .map((version) => version.skey),
+    );
+    const partHit = part.length >= 6 && file.toUpperCase().includes(part);
+    for (const profile of Object.values(db.ecuDefinitions?.[file]?.profiles ?? {})) {
+      const items = profile.dataList ?? [];
+      if (items.length === 0) continue;
+      candidates.push({
+        skey: profile.skey,
+        items,
+        versionHit: versionSkeys.has(profile.skey),
+        partHit,
+        listed: wanted.has(profile.skey),
+      });
     }
   }
+  const richest = (pool: ProfileCandidate[]) =>
+    [...pool].sort((left, right) => right.items.length - left.items.length)[0] ?? null;
+  const byVersion = richest(candidates.filter((item) => item.versionHit));
+  const byPart = byVersion ? null : richest(candidates.filter((item) => item.partHit));
+  const listed = candidates.filter((item) => item.listed);
+  const byCatalog = byVersion || byPart ? null : richest(listed.length > 0 ? listed : candidates);
+  const best = byVersion ?? byPart ?? byCatalog;
   if (!best) return null;
+  const profileSource: CatalogSignalList["profileSource"] = byVersion ? "version" : byPart ? "part" : "catalog";
+  const profileNoteRu =
+    profileSource === "version"
+      ? `Профиль ${best.skey} по версии блока ${wantedVersion}`
+      : profileSource === "part"
+        ? `Профиль ${best.skey} по парт-номеру ${part}`
+        : wantedVersion
+          ? `Профиль по каталогу (${best.skey}): версия ${wantedVersion} в базе не найдена`
+          : "Профиль по каталогу, версия блока не прочитана";
   return {
     vkey: vehicle.vkey || vkey,
     sysKey,
@@ -347,8 +406,10 @@ export function signalsForEcu(vkey: string, sysKey: number, db = loadDiagDb()): 
     skey: best.skey,
     txCanId: projected.txCanId,
     rxCanId: projected.rxCanId,
+    profileSource,
+    profileNoteRu,
     signals: best.items
-      .map((item) => projectSignal(item, best!.skey))
+      .map((item) => projectSignal(item, best.skey))
       .filter((item): item is CatalogSignal => item != null),
   };
 }

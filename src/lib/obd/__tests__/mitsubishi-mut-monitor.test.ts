@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { CatalogSignal } from "@/lib/etacs-coding/diag-catalog";
 import {
+  buildMitsubishiVisitReport,
+  ecuMatchesServiceSet,
   isTransmissionEcu,
   mitsubishiFluidBand,
+  parseMitsubishiModuleIdentity,
   pickPreferredMonitorSignals,
+  pickServiceSetSignals,
 } from "../mitsubishi-mut-monitor";
 import { decodeMitsubishiAt2102And2104, decodeMitsubishiCvt } from "../mitsubishi-modules";
 
@@ -45,6 +49,71 @@ describe("MUT-III Data List monitor picker", () => {
     ];
     expect(pickPreferredMonitorSignals(signals, 2)).toEqual(["x-2", "x-3"]);
     expect(isTransmissionEcu("AT/CVT/A-MT/TC-SST", "AT/CVT")).toBe(true);
+  });
+});
+
+describe("module identity and service sets", () => {
+  it("reads diagnostic version 0104 from 1A 9C and the part number from 1A 87", () => {
+    const version = parseMitsubishiModuleIdentity(
+      "1A 9C",
+      [0x9c, 0x01, 0x04, 0x82, 0x00, 0x17, 0xff, 0x3d, 0x00, 0x00, 0x31, 0x38, 0x36, 0x30, 0x44, 0x33, 0x36, 0x32],
+    );
+    expect(version.diagVersion).toBe("0104");
+    expect(version.partNumber).toBeNull();
+    const part = parseMitsubishiModuleIdentity(
+      "1A 87",
+      [0x87, 0x04, 0x82, 0x00, 0x17, 0xff, 0x20, 0x00, 0x3d, 0x00, 0x00, 0x31, 0x38, 0x36, 0x30, 0x44, 0x33, 0x36, 0x32],
+    );
+    expect(part.partNumber).toBe("1860D362");
+    expect(part.diagVersion).toBeNull();
+  });
+
+  it("pins the engine service set and builds a visit CSV", () => {
+    const signals = [
+      signal({ id: "door", nameEn: "Door switch", nameRu: "Концевик двери" }),
+      signal({ id: "rpm", nameEn: "Engine speed", nameRu: "Обороты" }),
+      signal({ id: "stft", nameEn: "Short term fuel trim", nameRu: "STFT" }),
+      signal({ id: "rail", nameEn: "Fuel rail pressure", nameRu: "Давление в рампе" }),
+    ];
+    expect(pickServiceSetSignals(signals, "engine", 3)).toEqual(["rpm", "stft", "rail"]);
+    expect(ecuMatchesServiceSet("MPI/GDI/DIESEL", "Двигатель", "engine")).toBe(true);
+    expect(ecuMatchesServiceSet("4WD/AWC", "Полный привод", "4wd")).toBe(true);
+    expect(ecuMatchesServiceSet("ETACS", "ETACS", "body")).toBe(true);
+    const csv = buildMitsubishiVisitReport({
+      vin: "JMBXKR1WHEZ000001",
+      vehicleName: "Pajero Sport III",
+      modules: [
+        {
+          nameRu: "Двигатель",
+          address: "0x7E0→0x7E8",
+          responded: true,
+          partNumber: "1860D362",
+          dtcs: [{ code: "P0171", textRu: "Бедная смесь", remedy: "Проверить подсос", active: true }],
+        },
+      ],
+      transmission: {
+        kind: "8AT / 5AT",
+        tempC: 75,
+        pipeC: 72,
+        panC: 75,
+        formula: "8AT/5AT A-50",
+        bandRu: "Окно уровня ATF",
+        selector: "P",
+        gear: "P/N",
+        inputRpm: 0,
+        outputRpm: 0,
+        degradation: null,
+      },
+      pressures: [{ label: "Давление в рампе", value: "40" }],
+      tpms: [],
+      meter: null,
+      live: [{ name: "Обороты", value: "800", unit: "r/min" }],
+    });
+    expect(csv).toContain("JMBXKR1WHEZ000001");
+    expect(csv).toContain("P0171");
+    expect(csv).toContain("Бедная смесь");
+    expect(csv).toContain("75");
+    expect(csv).toContain("Давление в рампе");
   });
 });
 
