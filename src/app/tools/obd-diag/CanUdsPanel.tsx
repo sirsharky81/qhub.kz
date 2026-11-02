@@ -42,6 +42,7 @@ import {
   type MitsubishiTcmTelemetry,
   type TpmsModuleReport,
 } from "@/lib/obd/mitsubishi-modules";
+import { mitsubishiFluidBand } from "@/lib/obd/mitsubishi-mut-monitor";
 
 type TpmsWheelPosition = "FL" | "FR" | "RR" | "RL" | "SPARE";
 
@@ -1318,14 +1319,10 @@ export default function CanUdsPanel({
                     </div>
                     <div className="mt-0.5 text-[10px] text-gray-500">
                       {mitsuTcmData.atfTempC == null
-                        ? "Формула F - 40"
-                        : mitsuTcmData.atfTempC > 110
-                          ? "ПЕРЕГРЕВ АКПП (> 110 °C)!"
-                          : mitsuTcmData.atfTempC >= 96
-                            ? "Высокая нагрузка (96–110 °C)"
-                            : mitsuTcmData.atfTempC >= 55
-                              ? "Рабочая норма (55–95 °C)"
-                              : "Холодная (прогрев < 55 °C)"}
+                        ? mitsuTcmData.atfFormula === "a-55"
+                          ? "MUT-III CVT: A−55"
+                          : "MUT-III 8AT: A−50"
+                        : mitsubishiFluidBand(mitsuTcmData.atfTempC, mitsuTcmData.transmissionType).labelRu}
                     </div>
                   </div>
 

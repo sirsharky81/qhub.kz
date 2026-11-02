@@ -9,8 +9,14 @@ export interface MitsubishiTcmTelemetry {
   rxHex: string;
   partNumber: string | null;
   swVersion: string | null;
-  /** ATF / CVT fluid temperature in °C (`F - 40` on AT `21 02`). */
+  /** Primary ATF / CVT fluid temperature in °C (MUT-III: 8AT A−50, CVT A−55). */
   atfTempC: number | null;
+  /** 8AT pipe sensor (MUT-III `A/T fluid temp.sensor (Pipe)`, 21 02 byte F, A−50). */
+  atfTempPipeC: number | null;
+  /** 8AT oil-pan sensor (MUT-III `A/T fluid temp.sensor (Oil pan)`, 21 02 byte G, A−50). */
+  atfTempPanC: number | null;
+  /** Scale taken from MUT-III SE Data List. */
+  atfFormula: "a-50" | "a-55";
   /** Selector lever position (`P`, `R`, `N`, `D`, `2`, `L`, `Ds/M`). */
   selectorPosition: string;
   /** Currently engaged gear (`P/N`, `R`, `1`..`8`, or `—`). */
@@ -121,9 +127,9 @@ export function extractKwp21Data(raw: string, lid: number): number[] | null {
  * - `data[0]` = A (status/header byte)
  * - `data[1]` = B, `data[2]` = C -> Input Shaft RPM = `B * 128 + C * 0.5`
  * - `data[3]` = D, `data[4]` = E -> Output Shaft RPM = `D * 128 + E * 0.5`
- * - `data[5]` = F -> ATF Temperature (°C) = `F - 40`
- * - `data[6]` = G -> TCM Voltage (V) = `G * 33.15 / 255`
- * - `data[7]` = H -> Vehicle Speed (km/h) = `H * 714 / 255`
+ * - `data[5]` = F -> ATF pipe °C = `F − 50` (MUT-III AT8 `A/T fluid temp.sensor (Pipe)`)
+ * - `data[6]` = G -> ATF pan °C = `G − 50` on 8AT; TCM voltage on 5AT (`G * 33.15 / 255`)
+ * - `data[7]` = H -> Vehicle Speed (km/h) = `H * 2.8` (= `H * 714 / 255`)
  * - `data[8]` = I -> Torque Converter Damper Slip (RPM) = `I - 51`
  * - `data[9]` = J -> Gear bitmask:
  *   - bit 0 (`0x01`): P / N (Передача выключена)
@@ -158,8 +164,12 @@ export function decodeMitsubishiAt2102And2104(
 
   const inputShaftRpm = B != null && C != null ? Math.round(B * 128 + C * 0.5) : null;
   const outputShaftRpm = D != null && E != null ? Math.round(D * 128 + E * 0.5) : null;
-  const atfTempC = F != null ? F - 40 : null;
-  const controlVoltageV = G != null ? Number(((G * 33.15) / 255).toFixed(2)) : null;
+  const is8at = data2102.length >= 11;
+  const atfTempPipeC = F != null ? F - 50 : null;
+  const atfTempPanC = is8at && G != null ? G - 50 : null;
+  const atfTempC = atfTempPanC ?? atfTempPipeC;
+  const controlVoltageV =
+    !is8at && G != null ? Number(((G * 33.15) / 255).toFixed(2)) : null;
   const vehicleSpeedKmh = H != null ? Math.round((H * 714) / 255) : null;
   const torqueConverterSlipRpm = I != null ? I - 51 : null;
 
@@ -254,6 +264,9 @@ export function decodeMitsubishiAt2102And2104(
   return {
     transmissionType: "8AT / 5AT",
     atfTempC,
+    atfTempPipeC,
+    atfTempPanC,
+    atfFormula: "a-50",
     selectorPosition,
     currentGearText,
     gearNumber,
@@ -288,15 +301,8 @@ export function decodeMitsubishiCvt(options: {
   let vehicleSpeedKmh: number | null = null;
 
   if (data2103 && data2103.length >= 14) {
-    const rawCount = data2103[13]!; // byte N
-    // Standard Mitsubishi CVT thermistor polynomial approximation from raw ADC count N (or N - 40 fallback)
-    atfTempC = Math.round(
-      -0.0000006318 * rawCount ** 4 +
-        0.00022695 * rawCount ** 3 -
-        0.03076 * rawCount ** 2 +
-        2.2578 * rawCount -
-        35.8,
-    );
+    // MUT-III CVT_14080300 Data List item «CVT oil temperature»: 21 03, bytePos 15, A − 55.
+    atfTempC = data2103[13]! - 55;
     if (data2103.length >= 6) {
       outputShaftRpm = (data2103[0]! << 8) | data2103[1]!;
       inputShaftRpm = (data2103[2]! << 8) | data2103[3]!;
@@ -352,6 +358,9 @@ export function decodeMitsubishiCvt(options: {
   return {
     transmissionType: "CVT",
     atfTempC,
+    atfTempPipeC: null,
+    atfTempPanC: null,
+    atfFormula: "a-55",
     selectorPosition,
     currentGearText,
     gearNumber,

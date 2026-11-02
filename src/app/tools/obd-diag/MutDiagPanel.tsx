@@ -5,6 +5,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LiveMetricCards } from "./LiveMetricCards";
 import type { CatalogEcu, CatalogSignal, CatalogVehicle, CatalogVehicleSummary } from "@/lib/etacs-coding/diag-catalog";
 import { asciiFromKwpPayload, decodeCatalogSignal } from "@/lib/obd/mut-live";
+import {
+  isTransmissionEcu,
+  mitsubishiFluidBand,
+  pickPreferredMonitorSignals,
+} from "@/lib/obd/mitsubishi-mut-monitor";
 import { remedyForDtcCode } from "@/lib/obd/dtc-remedies";
 import {
   ObdBleSession,
@@ -12,6 +17,7 @@ import {
   type ModuleDtcTarget,
   type ObdConnectionPhase,
 } from "@/lib/obd/obd-session";
+import type { MitsubishiMeterReport, MitsubishiTcmTelemetry, TpmsModuleReport } from "@/lib/obd/mitsubishi-modules";
 
 interface Props {
   session: ObdBleSession;
@@ -83,11 +89,17 @@ export default function MutDiagPanel({ session, phase }: Props) {
   const liveRunning = useRef(false);
   const liveMinMaxRef = useRef<Map<string, { min: number; max: number }>>(new Map());
   const [liveMinMaxTick, setLiveMinMaxTick] = useState(0);
+  const [tcm, setTcm] = useState<MitsubishiTcmTelemetry | null>(null);
+  const [tpms, setTpms] = useState<TpmsModuleReport | null>(null);
+  const [meter, setMeter] = useState<MitsubishiMeterReport | null>(null);
+  const tcmLiveRef = useRef(false);
+  const [tcmLive, setTcmLive] = useState(false);
 
   useEffect(() => {
     return () => {
       stopScan.current = true;
       stopLive.current = true;
+      tcmLiveRef.current = false;
     };
   }, []);
 
@@ -261,12 +273,77 @@ export default function MutDiagPanel({ session, phase }: Props) {
       );
       const body = (await response.json()) as { error?: string; signals?: CatalogSignal[] };
       if (!response.ok) throw new Error(body.error || "Список параметров недоступен");
-      setSignals(body.signals ?? []);
+      const list = body.signals ?? [];
+      setSignals(list);
+      setPicked(pickPreferredMonitorSignals(list, MAX_LIVE));
       requestAnimationFrame(() => {
         document.getElementById("mitsu-live-workspace")?.scrollIntoView({ block: "start", behavior: "smooth" });
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Список параметров недоступен");
+    }
+  };
+
+  const readTcmOnce = async () => {
+    if (phase !== "vehicle" || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setTcm(await session.readMitsubishiTransmission());
+    } catch (cause) {
+      setTcm(null);
+      setError(cause instanceof Error ? cause.message : "Нет ответа TCM 7E1");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleTcmLive = async () => {
+    if (tcmLiveRef.current) {
+      tcmLiveRef.current = false;
+      setTcmLive(false);
+      return;
+    }
+    if (phase !== "vehicle" || busy) return;
+    tcmLiveRef.current = true;
+    setTcmLive(true);
+    setError(null);
+    try {
+      while (tcmLiveRef.current) {
+        setTcm(await session.readMitsubishiTransmission());
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Сбой live АКПП/CVT");
+    } finally {
+      tcmLiveRef.current = false;
+      setTcmLive(false);
+    }
+  };
+
+  const readTpmsOnce = async () => {
+    if (phase !== "vehicle" || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setTpms(await session.readTpmsSensors("mitsubishi-auto"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Нет ответа TPMS");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const readMeterOnce = async () => {
+    if (phase !== "vehicle" || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setMeter(await session.readMitsubishiMeter());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Нет ответа приборки 6A0");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -407,19 +484,9 @@ export default function MutDiagPanel({ session, phase }: Props) {
             <button
               type="button"
               className="rounded border border-gray-300 px-2 py-1 text-[10px] text-gray-700"
-              onClick={() => {
-                const ids = signals
-                  .filter((s) =>
-                    /ATF|темп|temp|°C|CVT|акпп|масл|oil|fluid|AT|TCM/i.test(
-                      `${s.nameRu} ${s.nameEn} ${s.unit}`,
-                    ),
-                  )
-                  .slice(0, MAX_LIVE)
-                  .map((s) => s.id);
-                setPicked(ids);
-              }}
+              onClick={() => setPicked(pickPreferredMonitorSignals(signals, MAX_LIVE))}
             >
-              ATF / темп.
+              Датчики MUT-III
             </button>
             <button
               type="button"
@@ -541,6 +608,131 @@ export default function MutDiagPanel({ session, phase }: Props) {
       {phase !== "vehicle" ? (
         <p className="text-xs text-gray-500">Подключите vLinker для опроса блоков.</p>
       ) : null}
+
+      <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900">АКПП / CVT · температура масла</h3>
+            <p className="text-[11px] text-gray-500">
+              MUT-III SE Data List: 8AT V8AWG (Pajero Sport) труба/картер A−50; CVT Outlander 21 03 A−55.
+              Уровень масла проверяют при 70–80 °C, селектор P, холостой ход.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              disabled={phase !== "vehicle" || busy}
+              onClick={() => void readTcmOnce()}
+              className="rounded-lg border border-gray-900 bg-gray-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+            >
+              Считать TCM 7E1
+            </button>
+            <button
+              type="button"
+              disabled={phase !== "vehicle" || busy}
+              onClick={() => void toggleTcmLive()}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 ${
+                tcmLive ? "bg-amber-600" : "border border-emerald-600 bg-emerald-600"
+              }`}
+            >
+              {tcmLive ? "Стоп live" : "Live АКПП"}
+            </button>
+          </div>
+        </div>
+        {tcm ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 col-span-2 sm:col-span-1">
+              <div className="text-[10px] uppercase tracking-wide text-gray-500">
+                {tcm.transmissionType === "CVT" ? "Масло CVT" : "ATF (картер / труба)"}
+              </div>
+              <div className="mt-1 font-mono text-2xl font-bold text-emerald-800">
+                {tcm.atfTempC != null ? `${tcm.atfTempC} °C` : "—"}
+              </div>
+              {tcm.atfTempC != null ? (
+                <div className="mt-1 text-[11px] font-medium text-gray-800">
+                  {mitsubishiFluidBand(tcm.atfTempC, tcm.transmissionType).labelRu}
+                </div>
+              ) : null}
+              <div className="mt-1 font-mono text-[10px] text-gray-500">
+                {tcm.atfFormula === "a-55" ? "MUT-III A−55" : "MUT-III A−50"}
+                {tcm.atfTempPipeC != null ? ` · труба ${tcm.atfTempPipeC} °C` : ""}
+                {tcm.atfTempPanC != null ? ` · картер ${tcm.atfTempPanC} °C` : ""}
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-gray-500">Передача</div>
+              <div className="mt-1 text-sm font-semibold text-gray-900">{tcm.currentGearText}</div>
+              <div className="mt-1 text-[11px] text-gray-500">Селектор: {tcm.selectorPosition}</div>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-gray-500">Валы / скорость</div>
+              <div className="mt-1 text-xs text-gray-800">
+                In {tcm.inputShaftRpm ?? "—"} · Out {tcm.outputShaftRpm ?? "—"} об/мин
+              </div>
+              <div className="mt-1 text-[11px] text-gray-500">
+                {tcm.vehicleSpeedKmh != null ? `${tcm.vehicleSpeedKmh} км/ч` : "скорость —"}
+                {tcm.cvtDegradationCount != null ? ` · деградация CVT ${tcm.cvtDegradationCount}` : ""}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">
+            Зажигание ON. На Pajero Sport III читается 8AT, на Outlander III — вариатор.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            disabled={phase !== "vehicle" || busy}
+            onClick={() => void readTpmsOnce()}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-[11px] text-gray-800 disabled:opacity-40"
+          >
+            Шины TPMS
+          </button>
+          <button
+            type="button"
+            disabled={phase !== "vehicle" || busy}
+            onClick={() => void readMeterOnce()}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-[11px] text-gray-800 disabled:opacity-40"
+          >
+            Топливо / пробег
+          </button>
+          {vehicle?.ecus.find((ecu) => isTransmissionEcu(ecu.nameEn, ecu.nameRu)) ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                const ecu = vehicle.ecus.find((item) => isTransmissionEcu(item.nameEn, item.nameRu));
+                if (ecu) void openEcu(ecu);
+              }}
+              className="rounded-lg border border-emerald-700 px-3 py-1.5 text-[11px] text-emerald-800 disabled:opacity-40"
+            >
+              Data List АКПП из MUT-III
+            </button>
+          ) : null}
+        </div>
+        {tpms ? (
+          <div className="grid grid-cols-2 gap-2">
+            {tpms.wheels.slice(0, 4).map((wheel) => (
+              <div key={wheel.wheelIndex} className="rounded-lg border border-gray-200 p-2">
+                <div className="text-[10px] font-semibold text-gray-700">{wheel.defaultLabel}</div>
+                <div className="font-mono text-sm text-gray-900">
+                  {wheel.pressureBar != null ? `${wheel.pressureBar.toFixed(2)} бар` : "—"}
+                </div>
+                <div className="text-[10px] text-gray-500">
+                  {wheel.temperatureC != null ? `${wheel.temperatureC} °C` : ""} {wheel.statusText}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {meter ? (
+          <p className="text-xs text-gray-700">
+            Топливо {meter.fuelLiters != null ? `${meter.fuelLiters} л` : "—"} · пробег{" "}
+            {meter.odometerKm != null ? `${meter.odometerKm} км` : "—"}
+          </p>
+        ) : null}
+      </div>
 
       {liveWorkspace}
 

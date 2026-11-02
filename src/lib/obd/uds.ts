@@ -527,9 +527,12 @@ export function formatUdsPayload(payload: number[], requestSid?: number, txHex?:
     const cleanTx = txHex?.toUpperCase();
     if (cleanTx === "7E1" && lid === 0x02 && data.length >= 10) {
       const f = data[5]!;
+      const g = data[6];
       const j = data[9]!;
       const k = data[10] ?? 0;
-      const atfTemp = f - 40;
+      const pipeC = f - 50;
+      const panC = data.length >= 11 && g != null ? g - 50 : null;
+      const atfTemp = panC ?? pipeC;
       const isNeutralOrPark = (j & 0x01) !== 0;
       const isReverse = (j & 0x02) !== 0;
       let gear = 0;
@@ -545,7 +548,7 @@ export function formatUdsPayload(payload: number[], requestSid?: number, txHex?:
           : gear > 0
             ? `${gear}-я передача`
             : "Передача разомкнута";
-      return `АКПП (21 02): Темп. ATF = ${atfTemp} °C · ${gearStr} · [${hex}]`;
+      return `АКПП (21 02): Темп. ATF = ${atfTemp} °C (A−50) · ${gearStr} · [${hex}]`;
     }
     if (cleanTx === "6A0" && lid === 0xa3 && data.length >= 3) {
       const liters = Math.max(0, Number(((data[2]! - 16) * 0.7).toFixed(1)));

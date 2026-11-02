@@ -929,7 +929,10 @@ describe("sendUds gate", () => {
     const d02Engaged = [0x00, 10, 0, 8, 0, 122, 108, 25, 51, 0x20, 0x00];
     const d04Drive = [0x00, 0x00, 0x08]; // C = 0x08 (D)
     const tcmEngaged = decodeMitsubishiAt2102And2104(d02Engaged, d04Drive);
-    expect(tcmEngaged.atfTempC).toBe(82);
+    expect(tcmEngaged.atfTempC).toBe(58);
+    expect(tcmEngaged.atfTempPipeC).toBe(72);
+    expect(tcmEngaged.atfTempPanC).toBe(58);
+    expect(tcmEngaged.atfFormula).toBe("a-50");
     expect(tcmEngaged.gearNumber).toBe(4);
     expect(tcmEngaged.currentGearText).toContain("4-я передача");
     expect(tcmEngaged.isGearDisengaged).toBe(false);
@@ -945,7 +948,8 @@ describe("sendUds gate", () => {
     const d02Neutral = [0x00, 6, 0, 0, 0, 110, 108, 0, 51, 0x01, 0x00];
     const d04Neutral = [0x00, 0x00, 0x04];
     const tcmNeutral = decodeMitsubishiAt2102And2104(d02Neutral, d04Neutral);
-    expect(tcmNeutral.atfTempC).toBe(70);
+    expect(tcmNeutral.atfTempC).toBe(58);
+    expect(tcmNeutral.atfTempPipeC).toBe(60);
     expect(tcmNeutral.gearNumber).toBe(0);
     expect(tcmNeutral.isGearDisengaged).toBe(true);
     expect(tcmNeutral.disengagedStateText).toContain("ПЕРЕДАЧА ВЫКЛЮЧЕНА");
@@ -957,7 +961,8 @@ describe("sendUds gate", () => {
       data2107: [0x80], // bit 7 -> D
       data2110: [0x00, 0x00, 0x01, 0x20], // degradation = 288
     });
-    expect(cvt.atfTempC).not.toBeNull();
+    expect(cvt.atfTempC).toBe(25);
+    expect(cvt.atfFormula).toBe("a-55");
     expect(cvt.gearNumber).toBe(3);
     expect(cvt.cvtDegradationCount).toBe(288);
     expect(cvt.isGearDisengaged).toBe(false);
@@ -1075,7 +1080,8 @@ describe("sendUds gate", () => {
     const elm = new Elm327Client(link);
 
     const tcm = await readMitsubishiTransmission(elm);
-    expect(tcm.atfTempC).toBe(82);
+    expect(tcm.atfTempC).toBe(58);
+    expect(tcm.atfTempPipeC).toBe(72);
     expect(tcm.gearNumber).toBe(4);
     expect(tcm.isGearDisengaged).toBe(false);
 
