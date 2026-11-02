@@ -22,8 +22,7 @@ import {
   type ModuleDtcTarget,
   type ObdConnectionPhase,
 } from "@/lib/obd/obd-session";
-import type { MitsubishiMeterReport, MitsubishiTcmTelemetry, TpmsModuleReport } from "@/lib/obd/mitsubishi-modules";
-import { MitsubishiTpmsRegisterCard } from "./MitsubishiTpmsRegisterCard";
+import type { MitsubishiMeterReport, MitsubishiTcmTelemetry } from "@/lib/obd/mitsubishi-modules";
 
 interface Props {
   session: ObdBleSession;
@@ -96,7 +95,6 @@ export default function MutDiagPanel({ session, phase }: Props) {
   const liveMinMaxRef = useRef<Map<string, { min: number; max: number }>>(new Map());
   const [liveMinMaxTick, setLiveMinMaxTick] = useState(0);
   const [tcm, setTcm] = useState<MitsubishiTcmTelemetry | null>(null);
-  const [tpms, setTpms] = useState<TpmsModuleReport | null>(null);
   const [meter, setMeter] = useState<MitsubishiMeterReport | null>(null);
   const tcmLiveRef = useRef(false);
   const [tcmLive, setTcmLive] = useState(false);
@@ -377,19 +375,6 @@ export default function MutDiagPanel({ session, phase }: Props) {
     }
   };
 
-  const readTpmsOnce = async () => {
-    if (phase !== "vehicle" || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      setTpms(await session.readTpmsSensors("mitsubishi-auto"));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Нет ответа TPMS");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const readMeterOnce = async () => {
     if (phase !== "vehicle" || busy) return;
     setBusy(true);
@@ -546,11 +531,7 @@ export default function MutDiagPanel({ session, phase }: Props) {
           }
         : null,
       pressures,
-      tpms: (tpms?.wheels ?? []).map((wheel) => ({
-        label: wheel.defaultLabel,
-        bar: wheel.pressureBar,
-        tempC: wheel.temperatureC,
-      })),
+      tpms: [],
       meter: meter ? { fuelLiters: meter.fuelLiters, odometerKm: meter.odometerKm } : null,
       live: pickedSignals.map((signal) => ({
         name: signal.nameRu || signal.nameEn,
@@ -810,14 +791,6 @@ export default function MutDiagPanel({ session, phase }: Props) {
           <button
             type="button"
             disabled={phase !== "vehicle" || busy}
-            onClick={() => void readTpmsOnce()}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-[11px] text-gray-800 disabled:opacity-40"
-          >
-            Шины TPMS
-          </button>
-          <button
-            type="button"
-            disabled={phase !== "vehicle" || busy}
             onClick={() => void readMeterOnce()}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-[11px] text-gray-800 disabled:opacity-40"
           >
@@ -837,28 +810,6 @@ export default function MutDiagPanel({ session, phase }: Props) {
             </button>
           ) : null}
         </div>
-        <MitsubishiTpmsRegisterCard
-          session={session}
-          phase={phase}
-          vehicle={vehicle}
-          disabled={phase !== "vehicle" || busy || tcmLive}
-          onReport={setTpms}
-        />
-        {tpms ? (
-          <div className="grid grid-cols-2 gap-2">
-            {tpms.wheels.slice(0, 4).map((wheel) => (
-              <div key={wheel.wheelIndex} className="rounded-lg border border-gray-200 p-2">
-                <div className="text-[10px] font-semibold text-gray-700">{wheel.defaultLabel}</div>
-                <div className="font-mono text-sm text-gray-900">
-                  {wheel.pressureBar != null ? `${wheel.pressureBar.toFixed(2)} бар` : "—"}
-                </div>
-                <div className="text-[10px] text-gray-500">
-                  {wheel.temperatureC != null ? `${wheel.temperatureC} °C` : ""} {wheel.statusText}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
         {meter ? (
           <p className="text-xs text-gray-700">
             Топливо {meter.fuelLiters != null ? `${meter.fuelLiters} л` : "—"} · пробег{" "}

@@ -73,6 +73,8 @@ export default function ObdDiagClient() {
       param === "diag" ||
       param === "mitsu-sas" ||
       param === "steering-mitsu" ||
+      param === "tpms" ||
+      param === "mitsu-tpms" ||
       param === "brand-diag"
     ) {
       return "brand-diag";
@@ -82,7 +84,9 @@ export default function ObdDiagClient() {
   const [brandDiagBrand, setBrandDiagBrand] = useState<BrandDiagBrand>(() => {
     const param = searchParams.get("tab");
     if (param === "subaru") return "subaru";
-    if (param === "diag" || param === "mitsu-sas" || param === "steering-mitsu") return "mitsubishi";
+    if (param === "diag" || param === "mitsu-sas" || param === "steering-mitsu" || param === "tpms" || param === "mitsu-tpms") {
+      return "mitsubishi";
+    }
     const brand = searchParams.get("brand");
     if (brand === "mitsubishi") return "mitsubishi";
     return "subaru";
@@ -90,6 +94,7 @@ export default function ObdDiagClient() {
   const [mitsuDiagView, setMitsuDiagView] = useState<MitsubishiDiagView>(() => {
     const param = searchParams.get("tab");
     if (param === "mitsu-sas" || param === "steering-mitsu") return "steering";
+    if (param === "tpms" || param === "mitsu-tpms" || searchParams.get("view") === "tpms") return "tpms";
     if (searchParams.get("view") === "steering") return "steering";
     return "ecu";
   });

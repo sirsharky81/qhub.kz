@@ -3,10 +3,11 @@
 import type { ObdBleSession, ObdConnectionPhase } from "@/lib/obd/obd-session";
 import MutDiagPanel from "./MutDiagPanel";
 import { MitsubishiSteeringPanel } from "./MitsubishiSteeringPanel";
+import { MitsubishiTpmsPanel } from "./MitsubishiTpmsPanel";
 import { SubaruSsmPanel } from "./SubaruSsmPanel";
 
 export type BrandDiagBrand = "subaru" | "mitsubishi";
-export type MitsubishiDiagView = "ecu" | "steering";
+export type MitsubishiDiagView = "ecu" | "steering" | "tpms";
 
 interface Props {
   brand: BrandDiagBrand;
@@ -86,6 +87,9 @@ export function BrandDiagPanel({
             <SubTab active={mitsuView === "steering"} onClick={() => onMitsuViewChange("steering")}>
               Угол руля
             </SubTab>
+            <SubTab active={mitsuView === "tpms"} onClick={() => onMitsuViewChange("tpms")}>
+              Датчики TPMS
+            </SubTab>
           </div>
           {mitsuView === "steering" ? (
             <MitsubishiSteeringPanel
@@ -95,6 +99,8 @@ export function BrandDiagPanel({
               setBusy={setBusy}
               setError={setError}
             />
+          ) : mitsuView === "tpms" ? (
+            <MitsubishiTpmsPanel session={session} phase={phase} busy={busy} />
           ) : (
             <MutDiagPanel session={session} phase={phase} />
           )}
