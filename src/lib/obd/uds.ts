@@ -612,7 +612,7 @@ export function formatUdsPayload(payload: number[], requestSid?: number, txHex?:
       (didHex === "103D" || didHex === "1297" || didHex === "1298" || didHex === "10CB" || didHex === "10CC") &&
       dataBytes.length >= 1
     ) {
-      const temp = decodeSubaruTemperatureBytes(dataBytes);
+      const temp = decodeSubaruTemperatureBytes(dataBytes, { ecuTx: cleanTx });
       if (temp) {
         return `${label ? `${label}: ` : ""}${formatSubaruTempText(temp)}  [${dataHex}]`;
       }

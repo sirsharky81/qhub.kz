@@ -24,6 +24,7 @@ import {
   type TpmsModuleReport,
 } from "./mitsubishi-modules";
 import { calibrateSubaruSteeringZero } from "./subaru-steering-calibration";
+import { readSubaruCvtFluidTemp, type SubaruCvtFluidReading } from "./subaru-cvt-read";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
   DID_SCAN_FROM,
@@ -307,6 +308,14 @@ export class ObdBleSession {
    * Reads Mitsubishi AT (8AT V8AWG / 5AT V5A5A) & CVT (7E1 → 7E9) live telemetry via KWP2000 `21 02` / `21 04` / `21 03`:
    * ATF/CVT temperature (°C), engaged gear (1..8), explicit disengaged gear (P/N) state, shaft RPMs, and damper slip.
    */
+  async readSubaruCvtFluidTemp(): Promise<SubaruCvtFluidReading> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return readSubaruCvtFluidTemp(this.elm!);
+  }
+
   async readMitsubishiTransmission(): Promise<MitsubishiTcmTelemetry> {
     this.requireAdapter();
     await this.waitLeave();

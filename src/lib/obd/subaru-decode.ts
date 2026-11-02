@@ -62,8 +62,13 @@ function packPressure(kpa: number, formula: SubaruTpmsReading["formula"], temper
 /**
  * Decode CVTF / oil / loop temperature from a UDS DID payload (bytes after DID echo).
  */
-export function decodeSubaruTemperatureBytes(dataBytes: number[]): SubaruTempReading | null {
+export function decodeSubaruTemperatureBytes(
+  dataBytes: number[],
+  opts?: { ecuTx?: "7E1" | "7A2" | string },
+): SubaruTempReading | null {
   if (dataBytes.length === 0) return null;
+  const ecuTx = opts?.ecuTx?.toUpperCase();
+
   if (dataBytes.length === 1) {
     const celsius = tempByteToCelsius(dataBytes[0]!);
     return isPlausibleAtfTempC(celsius) ? { celsius, formula: "a-40" } : null;
@@ -74,6 +79,11 @@ export function decodeSubaruTemperatureBytes(dataBytes: number[]): SubaruTempRea
   const u16 = (hi << 8) | lo;
   const candidates: SubaruTempReading[] = [];
 
+  // 7A2 DID 103D: часто 04 xx — счётчик/канал, не °C CVTF (второй байт растёт каждый опрос).
+  if (ecuTx === "7A2" && hi === 0x04) {
+    return null;
+  }
+
   // TCM 7E1 (SGP): 0.1 °C in u16, high byte usually 0x00–0x03 (e.g. 01 72 → 37.0 °C).
   if (hi <= 0x03 && u16 >= 200 && u16 <= 950) {
     const celsius = Number((u16 / 10).toFixed(1));
@@ -82,8 +92,16 @@ export function decodeSubaruTemperatureBytes(dataBytes: number[]): SubaruTempRea
     }
   }
 
-  // Powertrain 7A2 fallback: leading mux/status byte + ISO A−40 (bit7 may be a validity flag).
-  if (hi > 0 && hi <= 0x0f && lo !== 0xff) {
+  // 7E1: SSM catalog — один байт A−40 (первый байт данных).
+  if (ecuTx === "7E1" && hi !== 0xff) {
+    const celsius = tempByteToCelsius(hi);
+    if (isPlausibleAtfTempC(celsius)) {
+      candidates.push({ celsius, formula: "a-40" });
+    }
+  }
+
+  // Powertrain 7A2: mux + A−40 только если mux не 0x04.
+  if (ecuTx === "7A2" && hi > 0 && hi <= 0x0f && hi !== 0x04 && lo !== 0xff) {
     const celsius = tempByteToCelsius(lo);
     if (isPlausibleAtfTempC(celsius)) {
       candidates.push({ celsius, formula: "a-40" });

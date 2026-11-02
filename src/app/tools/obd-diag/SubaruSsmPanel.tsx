@@ -191,11 +191,14 @@ export function SubaruSsmPanel({
     SERVICE_UTILITIES[0]?.id ?? SSM4_UTILITIES[0]!.id,
   );
   const [cvtReading, setCvtReading] = useState<{
-    tempC: number | null;
+    tempC: number;
     source: string;
+    method: string;
     rawHex: string;
     decoded: string;
     volts: string | null;
+    coolantHintC: number | null;
+    noteRu: string | null;
   } | null>(null);
   const [utilityLiveDids, setUtilityLiveDids] = useState<
     Record<string, { rawHex: string; decoded: string }>
@@ -822,57 +825,24 @@ export function SubaruSsmPanel({
     setBusy(true);
     setError(null);
     try {
-      const sources: { tx: string; rx: string; title: string }[] = [
-        { tx: "7E1", rx: "7E9", title: "TCM / вариатор (7E1)" },
-        { tx: "7A2", rx: "7AA", title: "Силовая установка (7A2)" },
-      ];
-      let found: {
-        tempC: number | null;
-        source: string;
-        rawHex: string;
-        decoded: string;
-        volts: string | null;
-      } | null = null;
-      for (const src of sources) {
-        try {
-          const parsed = await readModuleDid(src.tx, src.rx, "103D");
-          if (parsed.kind !== "positive" || parsed.payload.length < 3) continue;
-          const data = parsed.payload.slice(2);
-          const temp = decodeSubaruTemperatureBytes(data);
-          if (!temp) continue;
-          const rawHex = data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-          found = {
-            tempC: temp.celsius,
-            source: src.title,
-            rawHex,
-            decoded: formatSubaruTempText(temp),
-            volts: null,
-          };
-          break;
-        } catch {
-          /* try next module */
-        }
-      }
-      if (!found) {
-        setCvtReading(null);
-        setError("Блок вариатора не ответил по DID 103D (7E1 / 7A2). Проверьте зажигание и связь.");
-        return;
-      }
-      try {
-        const voltParsed = await readModuleDid("7E1", "7E9", "101B");
-        if (voltParsed.kind === "positive" && voltParsed.payload.length >= 4) {
-          found.volts = formatUdsPayload(voltParsed.payload, 0x22, "7E1");
-        }
-      } catch {
-        /* optional */
-      }
-      setCvtReading(found);
+      const res = await session.readSubaruCvtFluidTemp();
+      setCvtReading({
+        tempC: res.tempC,
+        source: res.source,
+        method: res.method,
+        rawHex: res.rawHex,
+        decoded: res.decoded,
+        volts: res.tcmVolts,
+        coolantHintC: res.coolantHintC,
+        noteRu: res.noteRu,
+      });
     } catch (e) {
+      setCvtReading(null);
       setError(e instanceof Error ? e.message : "Ошибка чтения температуры CVT");
     } finally {
       setBusy(false);
     }
-  }, [ready, busy, readModuleDid, setBusy, setError]);
+  }, [ready, busy, session, setBusy, setError]);
 
   const handleReadTpms = useCallback(async () => {
     if (!ready || busy) return;
@@ -1809,6 +1779,17 @@ export function SubaruSsmPanel({
                 <div className="mt-2 font-mono text-[11px] text-gray-500">
                   Raw {cvtReading.rawHex} · {cvtReading.decoded}
                 </div>
+                <div className="mt-1 text-[11px] text-gray-500">{cvtReading.method}</div>
+                {cvtReading.coolantHintC != null ? (
+                  <div className="mt-1 text-[11px] text-gray-600">
+                    ОЖ (7E0 PID 0105) для сравнения: {cvtReading.coolantHintC} °C
+                  </div>
+                ) : null}
+                {cvtReading.noteRu ? (
+                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950">
+                    {cvtReading.noteRu}
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-xl border border-gray-200 p-4">
                 <div className="text-xs text-gray-500">Питание TCM</div>
