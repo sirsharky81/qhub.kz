@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resetDiagCatalogCache } from "@/lib/etacs-coding/diag-catalog";
+import { resetTpmsRegistrationCache } from "@/lib/etacs-coding/tpms-registration-catalog";
 
 const EXCLUDED_DICT_FILES = new Set([
   "crc.json",
   "mut-diag-db.json",
   "mut-coding-catalog.json",
+  "mut-tpms-registration.json",
   "index.json",
 ]);
 
@@ -79,6 +81,7 @@ export function resetEtacsDictionaryCache(): void {
   cachedIndex = null;
   blockCache.clear();
   resetDiagCatalogCache();
+  resetTpmsRegistrationCache();
 }
 
 function dictionaryRoot(): string {

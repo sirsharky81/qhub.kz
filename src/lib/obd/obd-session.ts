@@ -23,6 +23,14 @@ import {
   type SasCalibrationResult,
   type TpmsModuleReport,
 } from "./mitsubishi-modules";
+import {
+  readMitsubishiTpmsDidIds,
+  runMitsubishiTpmsRoutine,
+  writeMitsubishiTpmsIds,
+  type TpmsDidWriteResult,
+  type TpmsRoutineOptions,
+} from "./mitsubishi-tpms-register";
+import type { TpmsDidRecipe, TpmsRoutineResult } from "./mitsubishi-tpms-registration";
 import { calibrateSubaruSteeringZero } from "./subaru-steering-calibration";
 import { readSubaruCvtFluidTemp, type SubaruCvtFluidReading } from "./subaru-cvt-read";
 import { remedyForDtcCode } from "./dtc-remedies";
@@ -336,6 +344,41 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
     await this.ensureUdsProfile("6");
     return readTpmsSensors(this.elm!, target);
+  }
+
+  /**
+   * Mitsubishi TPMS registration. Frames stay inside the matched recipe.
+   * The 20 minute window is fixed here. Stopping the poll does not send a cancel.
+   */
+  async runMitsubishiTpmsRoutine(
+    options: Pick<TpmsRoutineOptions, "tx" | "rx" | "recipe" | "modeId" | "shouldStop" | "onProgress">,
+  ): Promise<TpmsRoutineResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return runMitsubishiTpmsRoutine(this.elm!, options);
+  }
+
+  async readMitsubishiTpmsDidIds(tx: number, rx: number, recipe: TpmsDidRecipe): Promise<Record<string, string | null>> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return readMitsubishiTpmsDidIds(this.elm!, tx, rx, recipe);
+  }
+
+  async writeMitsubishiTpmsIds(
+    tx: number,
+    rx: number,
+    recipe: TpmsDidRecipe,
+    next: Record<string, string | null | undefined>,
+  ): Promise<TpmsDidWriteResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return writeMitsubishiTpmsIds(this.elm!, tx, rx, recipe, next);
   }
 
   /**

@@ -23,6 +23,7 @@ import {
   type ObdConnectionPhase,
 } from "@/lib/obd/obd-session";
 import type { MitsubishiMeterReport, MitsubishiTcmTelemetry, TpmsModuleReport } from "@/lib/obd/mitsubishi-modules";
+import { MitsubishiTpmsRegisterCard } from "./MitsubishiTpmsRegisterCard";
 
 interface Props {
   session: ObdBleSession;
@@ -836,6 +837,13 @@ export default function MutDiagPanel({ session, phase }: Props) {
             </button>
           ) : null}
         </div>
+        <MitsubishiTpmsRegisterCard
+          session={session}
+          phase={phase}
+          vehicle={vehicle}
+          disabled={phase !== "vehicle" || busy || tcmLive}
+          onReport={setTpms}
+        />
         {tpms ? (
           <div className="grid grid-cols-2 gap-2">
             {tpms.wheels.slice(0, 4).map((wheel) => (
