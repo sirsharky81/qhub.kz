@@ -146,4 +146,19 @@ describe("expanded gasoline PIDs", () => {
     expect(maf?.decode([0x01, 0x90])).toBeCloseTo(4);
     expect(pidSupported([0x00, 0x02, 0x00, 0x00], 0x2f, 0x20)).toBe(true);
   });
+
+  it("decodes torque percent, relative pedal and odometer", () => {
+    expect(LIVE_PIDS.find((item) => item.pid === "0162")?.decode([125])).toBe(0);
+    expect(LIVE_PIDS.find((item) => item.pid === "015A")?.decode([255])).toBeCloseTo(100);
+    expect(LIVE_PIDS.find((item) => item.pid === "01A6")?.decode([0x00, 0x01, 0x86, 0xa0])).toBe(10000);
+  });
+
+  it("decodes closed-loop status, wideband lambda, friction torque and fuel mass rate", () => {
+    expect(LIVE_PIDS.find((item) => item.pid === "0103")?.decode([0x02, 0x00])).toBe(1);
+    expect(LIVE_PIDS.find((item) => item.pid === "0103")?.decode([0x01, 0x00])).toBe(0);
+    expect(LIVE_PIDS.find((item) => item.pid === "0134")?.decode([0x80, 0x00, 0x00, 0x00])).toBeCloseTo(1);
+    expect(LIVE_PIDS.find((item) => item.pid === "0163")?.decode([125])).toBe(0);
+    expect(LIVE_PIDS.find((item) => item.pid === "019D")?.decode([0x00, 0x32])).toBeCloseTo(1);
+    expect(LIVE_PIDS.find((item) => item.pid === "015D")?.decode([0x69, 0x00])).toBeCloseTo(0);
+  });
 });

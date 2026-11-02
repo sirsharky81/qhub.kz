@@ -901,8 +901,10 @@ describe("sendUds gate", () => {
     expect(formatUdsPayload([0x10, 0x21, 0xa4], 0x22, "752")).toContain("2.26 бар");
     expect(formatUdsPayload([0x10, 0x21, 0xe6], 0x22, "752")).toContain("2.30 бар");
     expect(formatUdsPayload([0x10, 0x21, 0x00, 0xe6], 0x22, "752")).toContain("2.30 бар");
-    expect(formatUdsPayload([0x10, 0x3d, 0x5a], 0x22, "7E1")).toContain("50 °C");
-    expect(formatUdsPayload([0x10, 0x3d, 0x01, 0x72], 0x22, "7E1")).toContain("37 °C");
+    expect(formatUdsPayload([0x10, 0x17, 0x55], 0x22, "7E1")).toContain("35 °C");
+    expect(formatUdsPayload([0x10, 0xd2, 0x5f], 0x22, "7A3")).toContain("45 °C");
+    expect(formatUdsPayload([0x10, 0x3d, 0x04, 0xb2], 0x22, "7A2")).toContain("не температура CVTF");
+    expect(formatUdsPayload([0x10, 0x3d, 0x04, 0xb2], 0x22, "7A2")).not.toContain("120.2");
 
     // 783 DID 1041: 0x52 (82/255 = 32%)
     expect(formatUdsPayload([0x10, 0x41, 0x52], 0x22, "783")).toContain("32%");

@@ -68,14 +68,26 @@ export const LIVE_PIDS: LivePidDefinition[] = [
     return value == null ? null : value / 4;
   }),
   gauge("010D", "Скорость", "км/ч", 1, 0, "fast", (b) => (b.length >= 1 ? b[0]! : null)),
+  gauge("0103", "Замкнутый контур (CL)", "", 2, 0, "slow", (b) => {
+    if (b.length < 1) return null;
+    return (b[0]! & 0x02) !== 0 ? 1 : 0;
+  }),
   gauge("0104", "Нагрузка", "%", 1, 0, "fast", percentOf255),
   gauge("0111", "Дроссель", "%", 1, 0, "fast", percentOf255),
   gauge("0145", "Дроссель относит.", "%", 1, 0, "slow", percentOf255),
   gauge("0149", "Педаль газа", "%", 1, 0, "fast", percentOf255),
+  gauge("014A", "Педаль газа D", "%", 1, 0, "fast", percentOf255),
+  gauge("014C", "Команда на дроссель", "%", 1, 0, "fast", percentOf255),
+  gauge("015A", "Педаль газа относит.", "%", 1, 0, "fast", percentOf255),
+  gauge("0161", "Момент (запрос)", "%", 1, 0, "fast", (b) => (b.length >= 1 ? b[0]! - 125 : null)),
+  gauge("0162", "Момент (факт)", "%", 1, 0, "fast", (b) => (b.length >= 1 ? b[0]! - 125 : null)),
+  gauge("0163", "Момент (трение)", "%", 1, 0, "slow", (b) => (b.length >= 1 ? b[0]! - 125 : null)),
   gauge("0105", "Темп. ОЖ", "°C", 1, 0, "slow", tempOffset40),
   gauge("010F", "Темп. всасывания", "°C", 1, 0, "slow", tempOffset40),
   gauge("015C", "Темп. масла", "°C", 1, 0, "slow", tempOffset40),
   gauge("0146", "Темп. за бортом", "°C", 1, 0, "slow", tempOffset40),
+  gauge("0147", "Дроссель B", "%", 1, 0, "slow", percentOf255),
+  gauge("014B", "Педаль газа E", "%", 1, 0, "slow", percentOf255),
   gauge("0106", "Краткоср. коррекция (банк 1)", "%", 1, 1, "fast", decodeFuelTrimPercent),
   gauge("0107", "Долгоср. коррекция (банк 1)", "%", 1, 1, "slow", decodeFuelTrimPercent),
   gauge("0108", "Краткоср. коррекция (банк 2)", "%", 1, 1, "slow", decodeFuelTrimPercent),
@@ -130,6 +142,47 @@ export const LIVE_PIDS: LivePidDefinition[] = [
   gauge("0123", "Давление в рампе", "кПа", 2, 0, "slow", (b) => {
     const value = word(b);
     return value == null ? null : value * 10;
+  }),
+  gauge("0159", "Давление в рампе абс.", "кПа", 2, 0, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value * 10;
+  }),
+  gauge("01A6", "Пробег (одометр)", "км", 4, 1, "slow", (b) => {
+    if (b.length < 4) return null;
+    return (b[0]! * 16777216 + b[1]! * 65536 + b[2]! * 256 + b[3]!) / 10;
+  }),
+  gauge("01A4", "Расход по цилиндру", "мг/такт", 2, 1, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value * 0.03125;
+  }),
+  gauge("019D", "Расход топлива (масса)", "г/с", 2, 2, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value * 0.02;
+  }),
+  gauge("015D", "Угол впрыска", "°", 2, 1, "slow", (b) => {
+    const value = word(b);
+    return value == null ? null : value / 128 - 210;
+  }),
+  gauge("0134", "λ широкополосная B1S1", "", 4, 3, "fast", (b) => {
+    const value = word(b);
+    return value == null ? null : value / 32768;
+  }),
+  gauge("012C", "Команда EGR", "%", 1, 0, "slow", percentOf255),
+  gauge("012D", "Ошибка EGR", "%", 1, 1, "slow", decodeFuelTrimPercent),
+  gauge("012E", "Продувка адсорбера", "%", 1, 0, "slow", percentOf255),
+  gauge("0132", "Давление паров EVAP", "Па", 2, 0, "slow", (b) => {
+    if (b.length < 2) return null;
+    let value = b[0]! * 256 + b[1]!;
+    if (value >= 0x8000) value -= 0x10000;
+    return value / 4;
+  }),
+  gauge("0167", "Темп. ОЖ (датчики)", "°C", 3, 0, "slow", (b) => {
+    if (b.length >= 2 && b[0]! <= 0x0f) return b[1]! - 40;
+    return b.length >= 1 ? b[0]! - 40 : null;
+  }),
+  gauge("0168", "Темп. впуска (датчики)", "°C", 3, 0, "slow", (b) => {
+    if (b.length >= 2 && b[0]! <= 0x0f) return b[1]! - 40;
+    return b.length >= 1 ? b[0]! - 40 : null;
   }),
   gauge("0144", "Смесь λ", "", 2, 3, "fast", (b) => {
     const value = word(b);

@@ -944,6 +944,13 @@ export class ObdBleSession {
         mode03Fallback: true,
       },
       {
+        tx: 0x7a3,
+        rx: 0x7ab,
+        title: "Вариатор Lineartronic TCM SGP (7A3 → 7AB)",
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
         tx: 0x7a2,
         rx: 0x7aa,
         title: "Силовая установка 2.4 TURBO SGP (7A2 → 7AA)",
@@ -1058,6 +1065,7 @@ export class ObdBleSession {
     ];
 
     const out: ModuleDtcReport[] = [];
+    const allowMitsubishiKwp = !catalogTargets?.length;
     try {
       await this.elm!.sendCommand("ATST20");
     } catch {
@@ -1090,7 +1098,7 @@ export class ObdBleSession {
         }
 
         let kwpSessionOpened = false;
-        if (!responded) {
+        if (!responded && allowMitsubishiKwp) {
           try {
             const rawKwp10 = await this.udsExchange(target.tx, target.rx, "1092", 900);
             const pKwp10 = parseUdsResponse(rawKwp10, 0x10);
@@ -1134,7 +1142,7 @@ export class ObdBleSession {
         }
 
         // Fallback to KWP2000 18 00 FF 00 (ReadDTCByStatus) for Mitsubishi modules
-        if (!responded || rawStatus.startsWith("UDS 19 02:") || kwpSessionOpened) {
+        if (allowMitsubishiKwp && (!responded || rawStatus.startsWith("UDS 19 02:") || kwpSessionOpened)) {
           try {
             const raw18 = await this.udsExchange(target.tx, target.rx, "1800FF00", 1_400);
             const p18 = parseUdsResponse(raw18, 0x18);
@@ -1222,7 +1230,7 @@ export class ObdBleSession {
           } catch {
             /* ignore */
           }
-          if (!partNumber) {
+          if (!partNumber && allowMitsubishiKwp) {
             try {
               const raw87 = await this.udsExchange(target.tx, target.rx, "1A87", 800);
               const p87 = parseUdsResponse(raw87, 0x1a);

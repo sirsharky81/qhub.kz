@@ -60,7 +60,15 @@ describe("subaru-ssm4-catalog", () => {
     expect(decodeSsm4SignalPayload(coolantObd, [0x05, 0x5a])).toEqual({ text: "50", numeric: 50 });
 
     const cvtSig = SSM4_SIGNALS.find((s) => s.id === "tcm-atf-temp-uds")!;
-    expect(decodeSsm4SignalPayload(cvtSig, [0x10, 0x3d, 0x01, 0x72])?.numeric).toBe(37);
+    expect(cvtSig.addressOrDid).toBe("1017");
+    expect(decodeSsm4SignalPayload(cvtSig, [0x10, 0x17, 0x55])?.numeric).toBe(35);
+    const cvtAlt = SSM4_SIGNALS.find((s) => s.id === "tcm-cvt-temp-10d2")!;
+    expect(cvtAlt.addressOrDid).toBe("10D2");
+    expect(decodeSsm4SignalPayload(cvtAlt, [0x10, 0xd2, 0x5f])?.numeric).toBe(45);
+
+    const fuelSys = SSM4_SIGNALS.find((s) => s.id === "eng-fuel-sys-obd")!;
+    expect(decodeSsm4SignalPayload(fuelSys, [0x03, 0x02])?.text).toContain("замкнутый");
+    expect(decodeSsm4SignalPayload(fuelSys, [0x03, 0x01])?.text).toContain("разомкнутый");
 
     const tpmsSig = SSM4_SIGNALS.find((s) => s.id === "biu-tpms-1")!;
     expect(decodeSsm4SignalPayload(tpmsSig, [0x10, 0x21, 0xe6])?.numeric).toBe(230);

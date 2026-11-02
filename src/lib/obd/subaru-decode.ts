@@ -1,8 +1,8 @@
 /**
  * Subaru live-data scaling used by QHub (SGP UDS 0x22 and classic SSM).
  *
- * Temperature: ISO 14229-style `A − 40` for 1-byte DIDs; 2-byte payloads are
- * either a padded 1-byte value or 0.1 °C.
+ * Coolant-style temperature: ISO 14229 `A − 40` for 1-byte DIDs (and `00`-padded
+ * 2-byte payloads). Lineartronic CVTF uses `A − 50` on TCM 7E1/7A3.
  *
  * TPMS on BIU 752: North-American sensors often send 0.2 PSI/count; European /
  * CIS cars often send kilopascals. 16-bit DID payloads are kPa or 0.1 kPa.
@@ -10,7 +10,7 @@
 
 export interface SubaruTempReading {
   celsius: number;
-  formula: "a-40" | "u16/10" | "u16/10-40";
+  formula: "a-40" | "a-50" | "u16/10" | "u16/10-40";
 }
 
 export interface SubaruTpmsReading {
@@ -30,14 +30,8 @@ function looksLikeTempByte(value: number): boolean {
   return (as40 >= -30 && as40 <= 95) || (as50 >= -30 && as50 <= 95);
 }
 
-/** CVTF / ATF on a cold-soak car is rarely above ~95 °C at key-on. */
-function isPlausibleAtfTempC(celsius: number): boolean {
-  return celsius >= -35 && celsius <= 110;
-}
-
-function tempByteToCelsius(rawByte: number): number {
-  const masked = rawByte > 0x7f ? rawByte & 0x7f : rawByte;
-  return masked - 40;
+function isPlausibleSensorTempC(celsius: number): boolean {
+  return celsius >= -40 && celsius <= 180;
 }
 
 function tempFromByte(value: number): number {
@@ -60,80 +54,31 @@ function packPressure(kpa: number, formula: SubaruTpmsReading["formula"], temper
 }
 
 /**
- * Decode CVTF / oil / loop temperature from a UDS DID payload (bytes after DID echo).
+ * ISO/SAE coolant-style temperature: one data byte, °C = A − 40.
+ * Two-byte payloads with a leading 0x00 are treated as padded 1-byte values.
  */
 export function decodeSubaruTemperatureBytes(
   dataBytes: number[],
-  opts?: { ecuTx?: "7E1" | "7A2" | string },
+  _opts?: { ecuTx?: string },
 ): SubaruTempReading | null {
   if (dataBytes.length === 0) return null;
-  const ecuTx = opts?.ecuTx?.toUpperCase();
+  if (dataBytes.length >= 2 && dataBytes[0] !== 0) return null;
+  const raw = dataBytes.length >= 2 ? dataBytes[1]! : dataBytes[0]!;
+  const celsius = raw - 40;
+  if (!isPlausibleSensorTempC(celsius)) return null;
+  return { celsius, formula: "a-40" };
+}
 
-  if (dataBytes.length === 1) {
-    const celsius = tempByteToCelsius(dataBytes[0]!);
-    return isPlausibleAtfTempC(celsius) ? { celsius, formula: "a-40" } : null;
-  }
-
-  const hi = dataBytes[0]!;
-  const lo = dataBytes[1]!;
-  const u16 = (hi << 8) | lo;
-  const candidates: SubaruTempReading[] = [];
-
-  // 7A2 DID 103D: часто 04 xx — счётчик/канал, не °C CVTF (второй байт растёт каждый опрос).
-  if (ecuTx === "7A2" && hi === 0x04) {
-    return null;
-  }
-
-  // TCM 7E1 (SGP): 0.1 °C in u16, high byte usually 0x00–0x03 (e.g. 01 72 → 37.0 °C).
-  if (hi <= 0x03 && u16 >= 200 && u16 <= 950) {
-    const celsius = Number((u16 / 10).toFixed(1));
-    if (isPlausibleAtfTempC(celsius)) {
-      candidates.push({ celsius, formula: "u16/10" });
-    }
-  }
-
-  // 7E1: SSM catalog — один байт A−40 (первый байт данных).
-  if (ecuTx === "7E1" && hi !== 0xff) {
-    const celsius = tempByteToCelsius(hi);
-    if (isPlausibleAtfTempC(celsius)) {
-      candidates.push({ celsius, formula: "a-40" });
-    }
-  }
-
-  // Powertrain 7A2: mux + A−40 только если mux не 0x04.
-  if (ecuTx === "7A2" && hi > 0 && hi <= 0x0f && hi !== 0x04 && lo !== 0xff) {
-    const celsius = tempByteToCelsius(lo);
-    if (isPlausibleAtfTempC(celsius)) {
-      candidates.push({ celsius, formula: "a-40" });
-    }
-  }
-
-  if (hi === 0) {
-    if (lo !== 0xff) {
-      const padded = lo - 40;
-      if (isPlausibleAtfTempC(padded)) {
-        candidates.push({ celsius: padded, formula: "a-40" });
-      }
-    }
-    if (u16 >= 200) {
-      const celsius = Number((u16 / 10).toFixed(1));
-      if (isPlausibleAtfTempC(celsius)) {
-        candidates.push({ celsius, formula: "u16/10" });
-      }
-    }
-  }
-
-  if (candidates.length === 0) {
-    const legacyHi = hi - 40;
-    if (isPlausibleAtfTempC(legacyHi)) {
-      return { celsius: legacyHi, formula: "a-40" };
-    }
-    return null;
-  }
-
-  // Prefer 0.1 °C TCM encoding when both match (7E1 path).
-  const tenth = candidates.find((c) => c.formula === "u16/10");
-  return tenth ?? candidates[0]!;
+/**
+ * Lineartronic CVTF / ATF: ScanGauge, Torque and Pelican use A − 50
+ * on TCM 7E1 DID 1017 and SGP TCM 7A3 DID 1017 / 10D2.
+ */
+export function decodeSubaruCvtTempBytes(dataBytes: number[]): SubaruTempReading | null {
+  if (dataBytes.length === 0) return null;
+  const raw = dataBytes.length >= 2 && dataBytes[0] === 0 ? dataBytes[1]! : dataBytes[0]!;
+  const celsius = raw - 50;
+  if (!isPlausibleSensorTempC(celsius)) return null;
+  return { celsius, formula: "a-50" };
 }
 
 /**

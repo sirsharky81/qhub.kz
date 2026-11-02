@@ -481,6 +481,27 @@ export default function CanUdsPanel({
           /* ignore */
         }
 
+        for (const src of [
+          { tx: "7E1", rx: "7E9", did: "1017" },
+          { tx: "7A3", rx: "7AB", did: "1017" },
+          { tx: "7A3", rx: "7AB", did: "10D2" },
+        ] as const) {
+          try {
+            await session.sendUds("6", src.tx, src.rx, "10 03", false);
+            const res = await session.sendUds("6", src.tx, src.rx, `22 ${src.did}`, false);
+            if (res.parsed.kind === "positive") {
+              udsRows.push({
+                name: `CVTF ${src.tx} · ${src.did} (A−50)`,
+                value: formatUdsPayload(res.parsed.payload, 0x22, src.tx),
+                unit: "°C",
+              });
+              setCatalog([...udsRows]);
+            }
+          } catch {
+            /* next source */
+          }
+        }
+
         // Probe SGP 2.4 TURBO Powertrain UDS module (7A2 -> 7AA)
         setTx("7A2");
         setRx("7AA");
@@ -496,7 +517,7 @@ export default function CanUdsPanel({
           { did: "F197", label: "Блок силовой установки (7A2)" },
           { did: "1297", label: "7A2 · Темп. ДВС / масла (1297)" },
           { did: "1298", label: "7A2 · Темп. впуска (1298)" },
-          { did: "103D", label: "7A2 · Темп. КПП / узла (103D)" },
+          { did: "103D", label: "7A2 · регистр 103D (не CVTF)" },
           { did: "1001", label: "7A2 · Темп. агрегата 1 (1001)" },
           { did: "1005", label: "7A2 · Темп. агрегата 2 (1005)" },
           { did: "10CB", label: "7A2 · Темп. контура A (10CB)" },

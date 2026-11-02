@@ -149,12 +149,14 @@ export function SubaruSsmPanel({
 
   // Data Monitor state
   const [selectedSignalIds, setSelectedSignalIds] = useState<string[]>([
-    "eng-coolant-obd",
     "eng-rpm-obd",
     "eng-speed-obd",
+    "eng-coolant-obd",
     "eng-load-obd",
     "eng-tps-obd",
-    "eng-iat-obd",
+    "eng-map-obd",
+    "eng-stft-obd",
+    "eng-battery-obd",
   ]);
   const [liveValues, setLiveValues] = useState<Record<string, LiveValueEntry>>({});
   const [samples, setSamples] = useState<SamplePoint[]>([]);
@@ -167,7 +169,7 @@ export function SubaruSsmPanel({
   const [cursorBIdx, setCursorBIdx] = useState<number>(0);
   const [trigger, setTrigger] = useState<TriggerConfig>({
     enabled: false,
-    signalId: "eng-rpm-ssm",
+    signalId: "eng-rpm-obd",
     slope: "above",
     threshold: 2500,
     triggeredAtMs: null,
@@ -273,14 +275,25 @@ export function SubaruSsmPanel({
 
   const defaultSignalsForEcu = useCallback((ecu: Ssm4EcuDef) => {
     const ecuSigs = SSM4_SIGNALS.filter((s) => s.ecuId === ecu.ecuId);
-    if (ecu.ecuId === 118) return ["tcm-atf-temp-uds", "tcm-supply-volts"];
-    if (ecu.ecuId === 170) return ["biu-tpms-1", "biu-tpms-2", "biu-tpms-3", "biu-tpms-4"];
-    if (ecu.ecuId === 234 && selectedVehicle.platform === "SGP") {
-      const obd = ecuSigs.filter((s) => s.protocol === "obd-01");
-      if (obd.length > 0) return obd.slice(0, 6).map((s) => s.id);
+    const pick = (ids: string[]) => ids.filter((id) => ecuSigs.some((s) => s.id === id));
+    if (ecu.ecuId === 118) return pick(["tcm-atf-temp-uds", "tcm-cvt-temp-10d2", "tcm-supply-volts"]);
+    if (ecu.ecuId === 237) return pick(["tcm2-cvt-temp-1017", "tcm2-cvt-temp-10d2"]);
+    if (ecu.ecuId === 170) return pick(["biu-tpms-1", "biu-tpms-2", "biu-tpms-3", "biu-tpms-4"]);
+    if (ecu.ecuId === 234) {
+      const preferred = pick([
+        "eng-rpm-obd",
+        "eng-speed-obd",
+        "eng-coolant-obd",
+        "eng-load-obd",
+        "eng-tps-obd",
+        "eng-map-obd",
+        "eng-stft-obd",
+        "eng-battery-obd",
+      ]);
+      if (preferred.length > 0) return preferred;
     }
     return ecuSigs.slice(0, 6).map((s) => s.id);
-  }, [selectedVehicle.platform]);
+  }, []);
 
   const handleSelectEcu = useCallback((ecu: Ssm4EcuDef) => {
     pollingRef.current = false;
@@ -333,22 +346,24 @@ export function SubaruSsmPanel({
     stopScanRef.current = false;
     setScanProgress("Запуск опроса всех систем Subaru (Powertrain · Chassis · Body)…");
     try {
-      const allReports = await session.scanAllModuleDtcs(
+      const catalogTargets = SSM4_ECUS.map((ecu) => ({
+        tx: Number.parseInt(ecu.txHex, 16),
+        rx: Number.parseInt(ecu.rxHex, 16),
+        title: `${ecu.nameRu} (${ecu.txHex} → ${ecu.rxHex})`,
+        safetyCritical: ecu.safetyCritical,
+        canSafeClear: ecu.canSafeClear,
+        mode03Fallback: ecu.mode03Fallback,
+      }));
+      const allReports = await session.scanCatalogModules(
         "6",
+        catalogTargets,
         (msg, partial) => {
           setScanProgress(msg);
-          // Filter out Mitsubishi-only 6xx/773 modules so the table shows Subaru systems cleanly
-          const subaruTxSet = new Set(SSM4_ECUS.map((e) => e.txHex.toUpperCase()));
-          setDtcReports(
-            partial.filter((r) => subaruTxSet.has(r.txHex.toUpperCase())),
-          );
+          setDtcReports(partial);
         },
         () => stopScanRef.current,
       );
-      const subaruTxSet = new Set(SSM4_ECUS.map((e) => e.txHex.toUpperCase()));
-      const subaruReports = allReports.filter((r) =>
-        subaruTxSet.has(r.txHex.toUpperCase()),
-      );
+      const subaruReports = allReports;
       setDtcReports(subaruReports);
       const respondedCount = subaruReports.filter((r) => r.responded).length;
       const totalDtcs = subaruReports.reduce((acc, r) => acc + r.dtcs.length, 0);
@@ -1749,8 +1764,8 @@ export function SubaruSsmPanel({
                 Температура жидкости вариатора Lineartronic
               </h3>
               <p className="text-xs text-gray-500">
-                Чтение CVTF с блока коробки TCM 7E1 (DID 103D). Если TCM молчит — запасной опрос силовой установки 7A2.
-                35–45 °C — проверка уровня масла, 65–85 °C — окно адаптации.
+                Чтение CVTF с TCM: 7E1 и 7A3, DID 1017 / 10D2, шкала A−50 (как ScanGauge / SSM).
+                35–45 °C — проверка уровня масла, 65–85 °C — окно адаптации. Блок 7A2 сюда не входит.
               </p>
             </div>
             <button

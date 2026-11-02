@@ -2,6 +2,7 @@ import { extractHexTokens, stripElmMultiline } from "./hex";
 import { describeDtcCode } from "./dtc-descriptions";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
+  decodeSubaruCvtTempBytes,
   decodeSubaruTemperatureBytes,
   decodeSubaruTpmsBytes,
   formatSubaruTempText,
@@ -56,13 +57,18 @@ export const DID_LABELS: Record<string, string> = {
 
 export const MODULE_DID_LABELS: Record<string, Record<string, string>> = {
   "7E1": {
-    "103D": "Температура жидкости вариатора CVTF (103D)",
+    "1017": "Температура жидкости вариатора CVTF (1017, A−50)",
+    "10D2": "Температура жидкости вариатора CVTF (10D2, A−50)",
     "101B": "Напряжение питания блока TCM (101B)",
+  },
+  "7A3": {
+    "1017": "Температура жидкости вариатора CVTF (1017, A−50)",
+    "10D2": "Температура жидкости вариатора CVTF (10D2, A−50)",
   },
   "7A2": {
     "1001": "Температура агрегата 1 (1001)",
     "1005": "Температура агрегата 2 (1005)",
-    "103D": "Температура рабочей жидкости КПП/узла (103D)",
+    "103D": "Регистр силовой установки 103D (не CVTF)",
     "10CB": "Температура воздуха / контура A (10CB)",
     "10CC": "Температура контура B (10CC)",
     "1297": "Температура ДВС / масла (1297)",
@@ -140,7 +146,8 @@ export interface KnownModuleTarget {
 export const KNOWN_MODULE_TARGETS: readonly KnownModuleTarget[] = [
   { tx: 0x7e0, rx: 0x7e8, name: "Двигатель (ECM)", brand: "common" },
   { tx: 0x7e1, rx: 0x7e9, name: "Коробка передач (TCM / CVT)", brand: "common" },
-  { tx: 0x7a2, rx: 0x7aa, name: "Силовая установка 2.4 TURBO / КПП SGP (7A2)", brand: "subaru" },
+  { tx: 0x7a2, rx: 0x7aa, name: "Силовая установка SGP / термоконтур (7A2)", brand: "subaru" },
+  { tx: 0x7a3, rx: 0x7ab, name: "Вариатор Lineartronic TCM SGP (7A3)", brand: "subaru" },
   { tx: 0x7b0, rx: 0x7b8, name: "ABS / VDC / Ручник (EPB)", brand: "subaru" },
   { tx: 0x780, rx: 0x788, name: "Подушки SRS (Airbag)", brand: "subaru" },
   { tx: 0x783, rx: 0x78b, name: "Приборка SGP (METER 783)", brand: "subaru" },
@@ -187,7 +194,8 @@ const RX_MODULE_NAMES: Record<number, { name: string; tx: number }> = {
   0x78b: { name: "Приборка SGP (METER 783)", tx: 0x783 },
   0x78f: { name: "Камера EyeSight SGP (787)", tx: 0x787 },
   0x78e: { name: "Сонары / Парктроник RAB (786)", tx: 0x786 },
-  0x7aa: { name: "Силовая установка 2.4 TURBO / КПП SGP (7A2)", tx: 0x7a2 },
+  0x7aa: { name: "Силовая установка SGP / термоконтур (7A2)", tx: 0x7a2 },
+  0x7ab: { name: "Вариатор Lineartronic TCM SGP (7A3)", tx: 0x7a3 },
   0x7c8: { name: "Приборная панель (Meter 7C0)", tx: 0x7c0 },
   0x7cc: { name: "Климат-контроль (A/C)", tx: 0x7c4 },
   0x748: { name: "Боди-модуль BIU старый (740)", tx: 0x740 },
@@ -608,11 +616,25 @@ export function formatUdsPayload(payload: number[], requestSid?: number, txHex?:
         return `${label ? `${label}: ` : ""}${formatSubaruTpmsText(tpms)}  [${dataHex}]`;
       }
     }
+    if (cleanTx === "7A2" && didHex === "103D") {
+      return `${label ? `${label}: ` : ""}${dataHex}  [сырой регистр, не температура CVTF]`;
+    }
     if (
-      (didHex === "103D" || didHex === "1297" || didHex === "1298" || didHex === "10CB" || didHex === "10CC") &&
+      (cleanTx === "7E1" || cleanTx === "7A3") &&
+      (didHex === "1017" || didHex === "10D2") &&
       dataBytes.length >= 1
     ) {
-      const temp = decodeSubaruTemperatureBytes(dataBytes, { ecuTx: cleanTx });
+      const cvt = decodeSubaruCvtTempBytes(dataBytes);
+      if (cvt) {
+        return `${label ? `${label}: ` : ""}${formatSubaruTempText(cvt)}  [${dataHex} · A−50]`;
+      }
+    }
+    if (
+      cleanTx === "7A2" &&
+      (didHex === "1297" || didHex === "1298" || didHex === "10CB" || didHex === "10CC") &&
+      dataBytes.length >= 1
+    ) {
+      const temp = decodeSubaruTemperatureBytes(dataBytes);
       if (temp) {
         return `${label ? `${label}: ` : ""}${formatSubaruTempText(temp)}  [${dataHex}]`;
       }

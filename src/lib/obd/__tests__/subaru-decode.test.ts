@@ -1,26 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   cvtTempBand,
+  decodeSubaruCvtTempBytes,
   decodeSubaruTemperatureBytes,
   decodeSubaruTpmsBytes,
 } from "../subaru-decode";
 
 describe("subaru-decode", () => {
-  it("decodes CVTF temperature from 1-byte and 2-byte DID 103D payloads", () => {
+  it("decodes coolant-style A−40 and Lineartronic CVTF A−50", () => {
     expect(decodeSubaruTemperatureBytes([0x5a])).toEqual({ celsius: 50, formula: "a-40" });
     expect(decodeSubaruTemperatureBytes([0x00, 0x5a])).toEqual({ celsius: 50, formula: "a-40" });
-    // 0x0172 = 370 → 37.0 °C (окно уровня CVTF 35–45)
-    expect(decodeSubaruTemperatureBytes([0x01, 0x72])).toEqual({ celsius: 37, formula: "u16/10" });
-    // 0x0320 = 800 → 80.0 °C (окно адаптации)
-    expect(decodeSubaruTemperatureBytes([0x03, 0x20])).toEqual({ celsius: 80, formula: "u16/10" });
-    // 7A2 mux 0x04 — не температура CVTF (счётчик/канал), не декодируем
-    expect(decodeSubaruTemperatureBytes([0x04, 0xb2], { ecuTx: "7A2" })).toBeNull();
-    expect(decodeSubaruTemperatureBytes([0x04, 0xb4], { ecuTx: "7A2" })).toBeNull();
-    // 7A2 другой mux + A−40
-    expect(decodeSubaruTemperatureBytes([0x05, 0x37], { ecuTx: "7A2" })).toEqual({
-      celsius: 15,
-      formula: "a-40",
-    });
+    // 7A2 04 B2 is not CVTF and is not A−40 coolant (0x04 → −36 °C)
+    expect(decodeSubaruTemperatureBytes([0x04, 0xb2])).toBeNull();
+    // DID 1017 / 10D2: A − 50 (ScanGauge / Pelican)
+    expect(decodeSubaruCvtTempBytes([0x55])).toEqual({ celsius: 35, formula: "a-50" });
+    expect(decodeSubaruCvtTempBytes([0x00, 0x5f])).toEqual({ celsius: 45, formula: "a-50" });
+    expect(decodeSubaruCvtTempBytes([0x8c])).toEqual({ celsius: 90, formula: "a-50" });
   });
 
   it("marks CVTF inspection windows", () => {
