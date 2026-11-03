@@ -7,7 +7,7 @@ import { MitsubishiTpmsPanel } from "./MitsubishiTpmsPanel";
 import { SubaruSsmPanel } from "./SubaruSsmPanel";
 
 export type BrandDiagBrand = "subaru" | "mitsubishi";
-export type MitsubishiDiagView = "ecu" | "steering" | "tpms";
+export type MitsubishiDiagView = "faults" | "ecu" | "steering" | "tpms";
 
 interface Props {
   brand: BrandDiagBrand;
@@ -81,6 +81,9 @@ export function BrandDiagPanel({
       ) : (
         <>
           <div className="flex min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-1">
+            <SubTab active={mitsuView === "faults"} onClick={() => onMitsuViewChange("faults")}>
+              Ошибки
+            </SubTab>
             <SubTab active={mitsuView === "ecu"} onClick={() => onMitsuViewChange("ecu")}>
               Блоки и live
             </SubTab>
@@ -102,7 +105,12 @@ export function BrandDiagPanel({
           ) : mitsuView === "tpms" ? (
             <MitsubishiTpmsPanel session={session} phase={phase} busy={busy} />
           ) : (
-            <MutDiagPanel session={session} phase={phase} />
+            <MutDiagPanel
+              session={session}
+              phase={phase}
+              section={mitsuView === "faults" ? "faults" : "live"}
+              onShowLive={() => onMitsuViewChange("ecu")}
+            />
           )}
         </>
       )}

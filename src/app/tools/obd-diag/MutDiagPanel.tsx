@@ -27,6 +27,9 @@ import type { MitsubishiMeterReport, MitsubishiTcmTelemetry } from "@/lib/obd/mi
 interface Props {
   session: ObdBleSession;
   phase: ObdConnectionPhase;
+  /** «faults» — список блоков и чтение ошибок. «live» — топливо, масло и параметры блока. */
+  section?: "live" | "faults";
+  onShowLive?: () => void;
 }
 
 interface Sample {
@@ -73,7 +76,7 @@ async function readDiagVin(session: ObdBleSession): Promise<string | null> {
   return null;
 }
 
-export default function MutDiagPanel({ session, phase }: Props) {
+export default function MutDiagPanel({ session, phase, section = "live", onShowLive }: Props) {
   const [vehicles, setVehicles] = useState<CatalogVehicleSummary[]>([]);
   const [vehicle, setVehicle] = useState<CatalogVehicle | null>(null);
   const [vin, setVin] = useState<string | null>(null);
@@ -698,14 +701,6 @@ export default function MutDiagPanel({ session, phase }: Props) {
         >
           По VIN
         </button>
-        <button
-          type="button"
-          disabled={busy || phase !== "vehicle" || !vehicle}
-          onClick={() => void scan()}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 disabled:opacity-40"
-        >
-          DTC
-        </button>
       </div>
       {vin ? <p className="truncate font-mono text-[10px] text-gray-500">VIN {vin}</p> : null}
       {status ? <p className="text-xs text-emerald-800">{status}</p> : null}
@@ -716,6 +711,8 @@ export default function MutDiagPanel({ session, phase }: Props) {
         <p className="text-xs text-gray-500">Подключите vLinker для опроса блоков.</p>
       ) : null}
 
+      {section === "live" ? (
+      <>
       <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
@@ -866,13 +863,32 @@ export default function MutDiagPanel({ session, phase }: Props) {
       ) : null}
 
       {liveWorkspace}
-
-      <details className="rounded-xl border border-gray-200 bg-gray-50 p-2" open={!selected}>
-        <summary className="cursor-pointer text-xs font-semibold text-gray-700">
-          Блоки и ошибки {vehicle ? `(${vehicle.ecus.length})` : ""}
-        </summary>
-      <div className="mt-2 flex flex-col gap-2">
-        {vehicle?.ecus.map((ecu) => {
+      </>
+      ) : (
+      <div className="rounded-xl border border-gray-200 bg-white p-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-gray-900">
+              Блоки{vehicle ? ` · ${vehicle.ecus.length}` : ""}
+            </h3>
+            <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
+              {vehicle
+                ? "«Считать ошибки» опрашивает все блоки. «Параметры» открывает показания блока на вкладке «Блоки и live»."
+                : "Сначала выберите машину или нажмите «По VIN»."}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={busy || phase !== "vehicle" || !vehicle}
+            onClick={() => void scan()}
+            className="shrink-0 rounded-lg border border-gray-900 bg-gray-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+          >
+            Считать ошибки
+          </button>
+        </div>
+      {vehicle ? (
+      <div className="mt-3 flex flex-col gap-2">
+        {vehicle.ecus.map((ecu) => {
           const report = reports[addressKey(ecu.txCanId, ecu.rxCanId)];
           const master = texts[ecu.dtcMasterId] ?? {};
           const active = selectedKey === ecu.sysKey;
@@ -881,7 +897,7 @@ export default function MutDiagPanel({ session, phase }: Props) {
               key={ecu.sysKey}
               className={`rounded-xl border p-3 ${active ? "border-emerald-600 bg-white" : "border-gray-200 bg-gray-50"}`}
             >
-              <button type="button" onClick={() => void openEcu(ecu)} className="w-full text-left">
+              <div className="w-full text-left">
                 <div className="flex items-baseline justify-between gap-2">
                   <h3 className="text-sm font-medium text-gray-900">{ecu.nameRu}</h3>
                   <span className="font-mono text-[10px] text-gray-500">
@@ -893,9 +909,9 @@ export default function MutDiagPanel({ session, phase }: Props) {
                     ? report.responded
                       ? `${report.dtcs.length} ошибок${report.partNumber ? ` · ${report.partNumber}` : ""}`
                       : "нет ответа"
-                    : "ещё не опрошен"}
+                    : "ошибки ещё не считаны"}
                 </p>
-              </button>
+              </div>
               {report && report.dtcs.length > 0 ? (
                 <ul className="mt-2 space-y-1 text-xs text-gray-700">
                   {report.dtcs.map((dtc) => (
@@ -913,6 +929,17 @@ export default function MutDiagPanel({ session, phase }: Props) {
                 </ul>
               ) : null}
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    void openEcu(ecu);
+                    onShowLive?.();
+                  }}
+                  className="rounded border border-gray-900 px-2 py-1 font-medium text-gray-900 disabled:opacity-40"
+                >
+                  Параметры
+                </button>
                 {ecu.canSafeClear && report?.responded ? (
                   <button
                     type="button"
@@ -935,8 +962,13 @@ export default function MutDiagPanel({ session, phase }: Props) {
             </article>
           );
         })}
+        {vehicle.ecus.length === 0 ? (
+          <p className="text-xs text-gray-500">В каталоге этой машины нет блоков.</p>
+        ) : null}
       </div>
-      </details>
+      ) : null}
+      </div>
+      )}
     </section>
   );
 }
