@@ -22,8 +22,11 @@ import {
   decodeCanBroadcastFrame,
   decodeMitsubishiAt2102And2104,
   decodeMitsubishiCvt,
+  decodeMitsubishiOdometerKm,
+  decodeMitsubishiOssTyreData,
   decodeMitsubishiTpmsPayload,
   diffCanBusSnapshots,
+  pickMitsubishiSteeringAngle,
   readMitsubishiMeter,
   readMitsubishiSteeringAngle,
   readMitsubishiTransmission,
@@ -986,6 +989,30 @@ describe("sendUds gate", () => {
     expect(tpmsWheels[0]?.temperatureC).toBe(25);
     expect(tpmsWheels[4]?.wheelIndex).toBe(5);
     expect(tpmsWheels[4]?.sensorIdHex).toBe("11223305");
+
+    const oss = Array.from({ length: 10 }, () => 0);
+    oss[8] = 160;
+    oss[9] = 75;
+    const tyre = decodeMitsubishiOssTyreData(oss);
+    expect(tyre?.pressureKpa).toBe(221);
+    expect(tyre?.pressureBar).toBeCloseTo(2.21, 2);
+    expect(tyre?.temperatureC).toBe(25);
+    expect(decodeMitsubishiOssTyreData([0, 0])).toBeNull();
+
+    expect(decodeMitsubishiOdometerKm([0xb0, 0xa5, 0x00])).toBe(42416);
+    expect(decodeMitsubishiOdometerKm([0x01, 0xe2, 0x40])).toBe(123456);
+
+    const absAngle = pickMitsubishiSteeringAngle("abs-784", [
+      { lid: 0x01, data: [0x00, 0x00] },
+      { lid: 0x02, data: [0x64, 0x00] },
+    ]);
+    expect(absAngle?.angleDeg).toBe(10);
+    expect(absAngle?.lid).toBe(0x02);
+    const sasAngle = pickMitsubishiSteeringAngle("sas-622", [
+      { lid: 0x02, data: [0x00, 0x0a] },
+      { lid: 0x01, data: [0x10, 0x00, 0x00] },
+    ]);
+    expect(sasAngle?.angleDeg).toBe(0);
 
     // KWP2000 Service 18 (18 00 FF 00) DTC parser: [count=1, 0xC1, 0x21, 0x20] -> U0121
     const kwpDtcs = parseKwpDtcs18([0x01, 0xc1, 0x21, 0x20]);

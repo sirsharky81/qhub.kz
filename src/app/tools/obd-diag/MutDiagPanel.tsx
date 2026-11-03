@@ -719,6 +719,39 @@ export default function MutDiagPanel({ session, phase }: Props) {
       <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
+            <h3 className="text-sm font-bold text-gray-900">Топливо и пробег</h3>
+            <p className="text-[11px] text-gray-500">Приборка 6A0 → 514, кадры 21 A3 и 21 AD.</p>
+          </div>
+          <button
+            type="button"
+            disabled={phase !== "vehicle" || busy}
+            onClick={() => void readMeterOnce()}
+            className="rounded-lg border border-gray-900 bg-gray-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+          >
+            Считать
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div className="text-[10px] uppercase tracking-wide text-gray-500">Топливо в баке</div>
+            <div className="mt-1 font-mono text-3xl font-bold text-gray-900">
+              {meter?.fuelLiters != null ? meter.fuelLiters.toFixed(1) : "—"}
+              <span className="ml-1 text-base font-semibold text-gray-500">л</span>
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div className="text-[10px] uppercase tracking-wide text-gray-500">Пробег</div>
+            <div className="mt-1 font-mono text-3xl font-bold text-gray-900">
+              {meter?.odometerKm != null ? meter.odometerKm.toLocaleString("ru-RU") : "—"}
+              <span className="ml-1 text-base font-semibold text-gray-500">км</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
             <h3 className="text-sm font-bold text-gray-900">АКПП / CVT · температура масла</h3>
             <p className="text-[11px] text-gray-500">
               MUT-III SE: AT8 по картеру, 40–43 °C на 6B31 и 43–46 °C на 4N15. При 47 °C индикатор мигает, уровень не проверяют. CVT — при 70–80 °C, селектор P, холостой ход.
@@ -787,14 +820,6 @@ export default function MutDiagPanel({ session, phase }: Props) {
           </p>
         )}
         <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            disabled={phase !== "vehicle" || busy}
-            onClick={() => void readMeterOnce()}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-[11px] text-gray-800 disabled:opacity-40"
-          >
-            Топливо / пробег
-          </button>
           {vehicle?.ecus.find((ecu) => isTransmissionEcu(ecu.nameEn, ecu.nameRu)) ? (
             <button
               type="button"
@@ -809,12 +834,6 @@ export default function MutDiagPanel({ session, phase }: Props) {
             </button>
           ) : null}
         </div>
-        {meter ? (
-          <p className="text-xs text-gray-700">
-            Топливо {meter.fuelLiters != null ? `${meter.fuelLiters} л` : "—"} · пробег{" "}
-            {meter.odometerKm != null ? `${meter.odometerKm} км` : "—"}
-          </p>
-        ) : null}
       </div>
 
       {vehicle ? (

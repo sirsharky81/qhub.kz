@@ -820,6 +820,51 @@ export function decodeMitsubishiTpmsPayload(options: {
 }
 
 /**
+ * Pajero Sport / Outlander OSS-KOS tyre frame (`21 A1`–`A5`, `21 23`–`27`, `21 36`–`3A`).
+ * MUT bytePos 10 is pressure (×1.379 kPa) and bytePos 11 is temperature (A−50).
+ * `extractKwp21Data` already drops `61` and the LID, so those positions are indexes 8 and 9.
+ */
+export function decodeMitsubishiOssTyreData(data: number[] | null | undefined): {
+  pressureBar: number | null;
+  pressureKpa: number | null;
+  pressurePsi: number | null;
+  temperatureC: number | null;
+} | null {
+  if (!data || data.length < 9) return null;
+  const rawP = data[8]!;
+  const rawT = data[9];
+  const temperatureC = rawT == null ? null : rawT - 50;
+  if (rawP === 0x00 || rawP === 0xff) {
+    return { pressureBar: null, pressureKpa: null, pressurePsi: null, temperatureC };
+  }
+  const pressureKpa = Math.round(rawP * 1.379);
+  return {
+    pressureKpa,
+    pressureBar: Number((pressureKpa / 100).toFixed(2)),
+    pressurePsi: Number((pressureKpa * 0.145038).toFixed(1)),
+    temperatureC,
+  };
+}
+
+/** Five tyre frames from one LID family. Returns null when none of them carries the pressure byte. */
+export function decodeMitsubishiOssTyreSet(frames: (number[] | null | undefined)[]): TpmsWheelReading[] | null {
+  if (!frames.some((frame) => frame != null && frame.length >= 9)) return null;
+  return ([1, 2, 3, 4, 5] as const).map((wheelIndex, index) => {
+    const decoded = decodeMitsubishiOssTyreData(frames[index]);
+    return {
+      wheelIndex,
+      defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
+      sensorIdHex: null,
+      pressureBar: decoded?.pressureBar ?? null,
+      pressureKpa: decoded?.pressureKpa ?? null,
+      pressurePsi: decoded?.pressurePsi ?? null,
+      temperatureC: decoded?.temperatureC ?? null,
+      statusText: decoded?.pressureBar != null ? "OK" : frames[index] ? "Нет давления" : "Нет данных",
+    };
+  });
+}
+
+/**
  * Read TPMS Tire Pressures, Temperatures, and Registered Sensor IDs on Mitsubishi (`773->774` OSS/TPMS or `600->500` KOS/TPMS)
  * or Subaru (`752->75A` BIU/TPMS).
  */
@@ -938,54 +983,70 @@ export async function readTpmsSensors(
       let lid2128: number[] | null = null;
       const individualWheels: (number[] | null)[] = [null, null, null, null, null];
 
-      for (const lid of [0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x28]) {
+      const readLid = async (lid: number): Promise<number[] | null> => {
         const lidHex = lid.toString(16).padStart(2, "0").toUpperCase();
         try {
-          const raw = await elm.sendPayload(`21${lidHex}`, 1_800);
+          const raw = await elm.sendPayload(`21${lidHex}`, 1_400);
           const data = extractKwp21Data(raw, lid);
           if (data && data.length > 0) {
             rawLogs.push(
               `21${lidHex}: ${data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`,
             );
-            if (lid === 0x01) lid2101 = data;
-            else if (lid >= 0x02 && lid <= 0x05 && data.length >= 2) {
-              individualWheels[lid - 0x02] = data;
-            } else if (lid === 0x10) {
-              lid2110 = data;
-              if (data.length <= 6) individualWheels[0] = data;
-            } else if (lid >= 0x11 && lid <= 0x15) {
-              individualWheels[lid - 0x11] = data;
-            } else if (lid === 0x28) {
-              lid2128 = data;
-            }
+            return data;
           }
         } catch {
           /* try next LID */
         }
+        return null;
+      };
+
+      let ossWheels: TpmsWheelReading[] | null = null;
+      for (const lids of [
+        [0xa1, 0xa2, 0xa3, 0xa4, 0xa5],
+        [0x23, 0x24, 0x25, 0x26, 0x27],
+        [0x36, 0x37, 0x38, 0x39, 0x3a],
+      ]) {
+        const first = await readLid(lids[0]!);
+        if (!first || first.length < 9) continue;
+        const frames: (number[] | null)[] = [first];
+        for (const lid of lids.slice(1)) frames.push(await readLid(lid));
+        ossWheels = decodeMitsubishiOssTyreSet(frames);
+        if (ossWheels?.some((wheel) => wheel.pressureBar != null)) break;
+        ossWheels = null;
       }
 
-      if (rawLogs.length > 0 || passport.partNumber) {
-        const wheels = decodeMitsubishiTpmsPayload({
-          lid2101,
-          lid2110,
-          lid2128,
-          individualWheels: individualWheels.some(Boolean) ? individualWheels : undefined,
-        });
-        if (!wheels.some((w) => w.pressureBar != null)) {
-          const udsAttempt = await readTpmsWheelsUds(elm, mod.tx, mod.rx);
-          if (udsAttempt?.wheels.some((w) => w.pressureBar != null)) {
-            return {
-              brand: "mitsubishi",
-              moduleName: `${mod.name} · UDS 22 1021–1024`,
-              txHex: mod.tx.toString(16).toUpperCase(),
-              rxHex: mod.rx.toString(16).toUpperCase(),
-              partNumber: passport.partNumber,
-              activeSet: 1,
-              wheels: udsAttempt.wheels,
-              rawHex: `${rawLogs.join(" | ")} | ${udsAttempt.rawHex}`,
-            };
+      if (ossWheels) {
+        lid2128 = await readLid(0x28);
+      } else {
+        for (const lid of [0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x28]) {
+          const data = await readLid(lid);
+          if (!data) continue;
+          if (lid === 0x01) lid2101 = data;
+          else if (lid >= 0x02 && lid <= 0x05 && data.length >= 2) {
+            individualWheels[lid - 0x02] = data;
+          } else if (lid === 0x10) {
+            lid2110 = data;
+            if (data.length <= 6) individualWheels[0] = data;
+          } else if (lid >= 0x11 && lid <= 0x15) {
+            individualWheels[lid - 0x11] = data;
+          } else if (lid === 0x28) {
+            lid2128 = data;
           }
         }
+      }
+
+      const legacy = decodeMitsubishiTpmsPayload({
+        lid2101,
+        lid2110,
+        lid2128,
+        individualWheels: individualWheels.some(Boolean) ? individualWheels : undefined,
+      });
+      const wheels = (ossWheels ?? legacy).map((wheel, index) => ({
+        ...wheel,
+        sensorIdHex: wheel.sensorIdHex ?? legacy[index]?.sensorIdHex ?? null,
+      }));
+      const hasReading = wheels.some((wheel) => wheel.pressureBar != null || wheel.sensorIdHex);
+      if (hasReading) {
         return {
           brand: "mitsubishi",
           moduleName: mod.name,
@@ -996,6 +1057,9 @@ export async function readTpmsSensors(
           wheels,
           rawHex: rawLogs.join(" | ") || "Паспорт считан",
         };
+      }
+      if (passport.partNumber) {
+        lastErr = `${mod.name} ответил (${passport.partNumber}), но кадры давления 21 A1–A5 / 23–27 пустые`;
       }
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
@@ -1044,6 +1108,51 @@ export async function readTpmsSensors(
   throw new Error(lastErr);
 }
 
+function decodeSasSteeringWord(data: number[]): number | null {
+  if (data.length < 2) return null;
+  const u16 = (data[0]! << 8) | data[1]!;
+  const angle =
+    u16 >= 0x0800 && u16 <= 0x1800
+      ? Number(((u16 - 4096) * 0.5).toFixed(1))
+      : Number(((u16 >= 0x8000 ? u16 - 0x10000 : u16) / 10).toFixed(1));
+  return Math.abs(angle) <= 720 ? angle : null;
+}
+
+/** ABS/ASC Data List «Steering angle»: `21 02`, little-endian, 0.1° per bit. */
+function decodeAbsSteeringWord(data: number[]): number | null {
+  if (data.length < 2) return null;
+  const word = data[0]! | (data[1]! << 8);
+  const signed = word >= 0x8000 ? word - 0x10000 : word;
+  const angle = Number((signed * 0.1).toFixed(1));
+  return Math.abs(angle) <= 720 ? angle : null;
+}
+
+/**
+ * Pick the steering sample. ABS `21 01` often answers `00 00` while the angle sits on `21 02`.
+ * A real angle wins over a zero frame; a centered wheel still returns 0° from the preferred LID.
+ */
+export function pickMitsubishiSteeringAngle(
+  source: "sas-622" | "abs-784",
+  frames: { lid: number; data: number[] }[],
+): { lid: number; data: number[]; angleDeg: number } | null {
+  const preferred = source === "abs-784" ? 0x02 : 0x01;
+  let best: { lid: number; data: number[]; angleDeg: number; rank: number } | null = null;
+  for (const frame of frames) {
+    const angleDeg =
+      source === "abs-784"
+        ? frame.lid === 0x02
+          ? decodeAbsSteeringWord(frame.data)
+          : null
+        : frame.lid === 0x01
+          ? decodeSasSteeringWord(frame.data)
+          : null;
+    if (angleDeg == null) continue;
+    const rank = angleDeg !== 0 ? 2 : frame.lid === preferred ? 1 : 0;
+    if (!best || rank > best.rank) best = { ...frame, angleDeg, rank };
+  }
+  return best ? { lid: best.lid, data: best.data, angleDeg: best.angleDeg } : null;
+}
+
 /**
  * Read Steering Wheel Angle Sensor (SAS) on Mitsubishi (`622 -> 484` SAS or `784 -> 785` ABS/ASC).
  */
@@ -1056,35 +1165,33 @@ export async function readMitsubishiSteeringAngle(
   await openMitsubishiKwpSession(elm, tx, rx, "1092");
   try {
     const passport = await readMitsubishiKwpPassport(elm);
-    for (const lid of [0x01, 0x02, 0x03, 0x04]) {
-      const lidHex = lid.toString(16).padStart(2, "0").toUpperCase();
-      const raw = await elm.sendPayload(`21${lidHex}`, 1_800);
-      const data = extractKwp21Data(raw, lid);
-      if (data && data.length >= 2) {
-        // 16-bit signed steering angle (0.1 deg or 0.5 deg resolution, or offset 0x1000 / 4096)
-        const u16 = (data[0]! << 8) | data[1]!;
-        let angleDeg: number;
-        if (u16 >= 0x0800 && u16 <= 0x1800 && data[0]! >= 0x08 && data[0]! <= 0x18) {
-          // Offset-4096 encoding (`(u16 - 4096) * 0.5`)
-          angleDeg = Number(((u16 - 4096) * 0.5).toFixed(1));
-        } else {
-          const s16 = u16 >= 0x8000 ? u16 - 0x10000 : u16;
-          angleDeg = Number((s16 / 10).toFixed(1));
-        }
-        const angularSpeedDegPerSec = data.length >= 3 ? data[2]! : null;
-        return {
-          source,
-          txHex: tx.toString(16).toUpperCase(),
-          rxHex: rx.toString(16).toUpperCase(),
-          partNumber: passport.partNumber,
-          angleDeg,
-          angularSpeedDegPerSec,
-          calibrated: true,
-          rawHex: `21 ${lidHex} → ${data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`,
-        };
+    const frames: { lid: number; data: number[] }[] = [];
+    for (const lid of [0x02, 0x01, 0x04, 0x03]) {
+      try {
+        const raw = await elm.sendPayload(`21${lid.toString(16).padStart(2, "0").toUpperCase()}`, 1_800);
+        const data = extractKwp21Data(raw, lid);
+        if (data && data.length >= 2) frames.push({ lid, data });
+      } catch {
+        /* this LID is absent on this block */
       }
     }
-    throw new Error(`Блок ${tx.toString(16).toUpperCase()}→${rx.toString(16).toUpperCase()} не вернул угол руля на 21 01..04`);
+    const picked = pickMitsubishiSteeringAngle(source, frames);
+    if (!picked) {
+      throw new Error(
+        `Блок ${tx.toString(16).toUpperCase()}→${rx.toString(16).toUpperCase()} не вернул угол руля на 21 02 / 21 01`,
+      );
+    }
+    const lidHex = picked.lid.toString(16).padStart(2, "0").toUpperCase();
+    return {
+      source,
+      txHex: tx.toString(16).toUpperCase(),
+      rxHex: rx.toString(16).toUpperCase(),
+      partNumber: passport.partNumber,
+      angleDeg: picked.angleDeg,
+      angularSpeedDegPerSec: picked.lid === 0x01 && picked.data.length >= 3 ? picked.data[2]! : null,
+      calibrated: true,
+      rawHex: `21 ${lidHex} → ${picked.data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`,
+    };
   } finally {
     await closeMitsubishiKwpSession(elm);
   }
@@ -1141,8 +1248,18 @@ export async function calibrateMitsubishiSasZero(elm: Elm327Client): Promise<Sas
 /**
  * Read Mitsubishi Combination Meter (`6A0 -> 514`):
  * - `21 A3`: Fuel level in tank (`(C - 16) * 0.7` liters on Pajero Sport III / Outlander)
- * - `21 AD`: Odometer reading
+ * - `21 AD`: Odometer, MUT byteOrder 1 (little-endian). Big-endian is kept only when the little-endian value is not a mileage.
  */
+export function decodeMitsubishiOdometerKm(data: number[] | null | undefined): number | null {
+  if (!data || data.length < 3) return null;
+  const little =
+    data[0]! + (data[1]! << 8) + (data[2]! << 16);
+  const big = (data[0]! << 16) | (data[1]! << 8) | data[2]!;
+  if (little <= 999_999) return little;
+  if (big <= 999_999) return big;
+  return null;
+}
+
 export async function readMitsubishiMeter(elm: Elm327Client): Promise<MitsubishiMeterReport> {
   await openMitsubishiKwpSession(elm, 0x6a0, 0x514, "1092");
   try {
@@ -1171,7 +1288,7 @@ export async function readMitsubishiMeter(elm: Elm327Client): Promise<Mitsubishi
       const dataAD = extractKwp21Data(rawAD, 0xad);
       if (dataAD && dataAD.length >= 3) {
         rawOdoHex = dataAD.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-        odometerKm = (dataAD[0]! << 16) | (dataAD[1]! << 8) | dataAD[2]!;
+        odometerKm = decodeMitsubishiOdometerKm(dataAD);
       }
     } catch {
       /* ignore */
