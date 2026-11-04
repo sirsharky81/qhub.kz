@@ -10,6 +10,7 @@ export class Elm327Client {
   private queue: Promise<void> = Promise.resolve();
   private txHeader: number | null = null;
   private rxHeader: number | null = null;
+  private fcHeader: number | null = null;
   /** 7E0 talks to the engine only. 7DF wakes every ECU and waits for each. */
   private obdTx = 0x7df;
   /** Protocol used by the live OBD profile, restored when leaving CAN/UDS. */
@@ -116,12 +117,23 @@ export class Elm327Client {
 
   async setCanHeader(txId: number, rxId?: number): Promise<void> {
     if (this.txHeader !== txId) {
-      const tx = txId.toString(16).toUpperCase();
+      const tx = txId.toString(16).padStart(3, "0").toUpperCase();
       await this.sendCommand(`ATSH${tx}`);
       this.txHeader = txId;
     }
+    if (this.fcHeader !== txId && txId >= 0x700 && txId <= 0x7ff && txId !== 0x7df) {
+      const txHex = txId.toString(16).padStart(3, "0").toUpperCase();
+      try {
+        await this.sendCommand(`ATFCSH${txHex}`);
+        await this.sendCommand("ATFCSD30080A");
+        await this.sendCommand("ATFCSM1");
+        this.fcHeader = txId;
+      } catch {
+        /* Simple ELM clones without custom FC support fall back to default auto FC */
+      }
+    }
     if (rxId != null && this.rxHeader !== rxId) {
-      const rx = rxId.toString(16).toUpperCase();
+      const rx = rxId.toString(16).padStart(3, "0").toUpperCase();
       try {
         await this.sendCommand(`ATCRA${rx}`);
         this.rxHeader = rxId;
@@ -190,8 +202,9 @@ export class Elm327Client {
    * ATAR drops ATCRA. On a vLinker that filter turns a real reply into NO DATA; ELM already accepts tx+8.
    */
   async useUdsProfile(protocol: "6" | "7"): Promise<void> {
-    await this.runProfile(["ATE0", "ATL0", "ATH0", "ATS0", `ATSP${protocol}`, "ATCAF1", "ATSTFF"]);
+    await this.runProfile(["ATE0", "ATL0", "ATH0", "ATS0", "ATAL", `ATSP${protocol}`, "ATCAF1", "ATSTFF"]);
     this.txHeader = null;
+    this.fcHeader = null;
     try {
       await this.sendCommand("ATAR");
     } catch {
@@ -262,6 +275,7 @@ export class Elm327Client {
     }
     this.txHeader = null;
     this.rxHeader = null;
+    this.fcHeader = null;
   }
 
   private armMonitorPump(): void {

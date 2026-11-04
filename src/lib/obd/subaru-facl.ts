@@ -46,23 +46,17 @@ export function parseSubaruFaclFile(bytes: Buffer | Uint8Array): ParsedSubaruFac
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]!;
 
-    const dotSlash = seg.match(/^\.\$([0-9A-Fa-f]{3,4})\/(.+)$/);
-    if (dotSlash) {
-      push(dotSlash[1]!, dotSlash[2]!);
+    const slashOrColon = seg.match(/\$([0-9A-Fa-f]{2,4})[/:](.+)$/);
+    if (slashOrColon) {
+      push(slashOrColon[1]!, slashOrColon[2]!);
       continue;
     }
 
-    const slash = seg.match(/^\$([0-9A-Fa-f]{3,4})\/(.+)$/);
-    if (slash) {
-      push(slash[1]!, slash[2]!);
-      continue;
-    }
-
-    const bare = seg.match(/^\$([0-9A-Fa-f]{3,4})$/);
+    const bare = seg.match(/^\$([0-9A-Fa-f]{2,4})$/);
     if (bare) {
       const prev = segments[i - 1];
       const next = segments[i + 1];
-      const labelFromPrev = prev && !prev.includes("$") ? prev : "";
+      const labelFromPrev = prev && !prev.includes("$") ? prev.replace(/^[^\p{L}\p{N}#]+/u, "") : "";
       const labelFromNext = next && !next.startsWith("$") ? next : "";
       push(bare[1]!, labelFromPrev || labelFromNext || "");
     }
@@ -78,6 +72,20 @@ export function ssmAddressToA8Hex(addressHex: string): string {
   return n.toString(16).padStart(6, "0").toUpperCase();
 }
 
+/**
+ * Map a `.FACL` / `.FCLT` address token (`$10D2`, `$05`, `$F40C`) to a 4-digit UDS Service 0x22 DID.
+ * 2-digit SAE J1979 PIDs (`$05`, `$0C`, `$42`) map to UDS DID `F4xx` (`F405`, `F40C`, `F442`),
+ * matching SSM4 `12002_InspectionResultsIdlingData.FCLT` and `12022_TM.FCLT`.
+ */
+export function ssmAddressToUdsDid(addressHex: string): string {
+  const clean = addressHex.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+  if (!clean) return "0000";
+  if (clean.length <= 2) {
+    return `F4${clean.padStart(2, "0")}`;
+  }
+  return clean.padStart(4, "0").slice(-4);
+}
+
 export interface FaclInventoryItem {
   relativePath: string;
   groupId: string;
@@ -87,18 +95,19 @@ export interface FaclInventoryItem {
 }
 
 /**
- * Walk a PIDGroup root (e.g. `.../EU/Data/PIDGroup`) and parse every `.FACL`.
+ * Walk a PIDGroup root (e.g. `.../NA/Data/PIDGroup`) and parse every `.FACL` and `.FCLT`.
  */
 export function inventoryFaclUnderRoot(
   files: { relativePath: string; bytes: Buffer }[],
 ): FaclInventoryItem[] {
   const out: FaclInventoryItem[] = [];
   for (const file of files) {
-    if (!file.relativePath.toLowerCase().endsWith(".facl")) continue;
+    const lower = file.relativePath.toLowerCase();
+    if (!lower.endsWith(".facl") && !lower.endsWith(".fclt")) continue;
     const parts = file.relativePath.replace(/\\/g, "/").split("/");
     const fileName = parts[parts.length - 1] ?? "";
     const groupId = parts.length >= 2 ? parts[parts.length - 2]! : "";
-    const listId = fileName.replace(/\.facl$/i, "");
+    const listId = fileName.replace(/\.(facl|fclt)$/i, "");
     const parsed = parseSubaruFaclFile(file.bytes);
     out.push({
       relativePath: file.relativePath,

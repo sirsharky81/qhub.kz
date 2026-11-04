@@ -4,6 +4,7 @@ import {
   inventoryFaclUnderRoot,
   parseSubaruFaclFile,
   ssmAddressToA8Hex,
+  ssmAddressToUdsDid,
 } from "../subaru-facl";
 
 const SAMPLE_FACL = "C:/Program Files (x86)/subaru/SSM4/SUBARU/EU/Data/PIDGroup/DNOriginal/12105/1.FACL";
@@ -21,9 +22,11 @@ describe("subaru-facl", () => {
     expect(byAddr.get("2001")).toBeTruthy();
   });
 
-  it("maps SSM address to A8 hex width", () => {
+  it("maps SSM address to A8 hex width and UDS DID", () => {
     expect(ssmAddressToA8Hex("2001")).toBe("002001");
     expect(ssmAddressToA8Hex("1039")).toBe("001039");
+    expect(ssmAddressToUdsDid("05")).toBe("F405");
+    expect(ssmAddressToUdsDid("10D2")).toBe("10D2");
   });
 
   it("aggregates inventory from relative paths", () => {

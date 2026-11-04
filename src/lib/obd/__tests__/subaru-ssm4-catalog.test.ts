@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   SSM4_ECUS,
+  SSM4_FUNCTION_CODES,
   SSM4_SIGNALS,
+  SSM4_SRP_UTILITY_CATALOG,
   SSM4_UTILITIES,
   SSM4_VEHICLES,
   SUBARU_CANADIAN_OPTION_PRESETS,
@@ -75,14 +77,26 @@ describe("subaru-ssm4-catalog", () => {
     expect(decodeSsm4SignalPayload(tpmsSig, [0x10, 0x21, 0x08, 0xfc])?.numeric).toBe(230);
   });
 
-  it("defines read-only calibration inspection utilities for EPS, CVT, EPB, EyeSight, and TPMS", () => {
+  it("defines read-only calibration inspection utilities across all SSM4 systems and SRP catalog", () => {
     expect(SSM4_UTILITIES.map((u) => u.id)).toEqual([
       "util-eps-sas-zero",
       "util-cvt-at-inspection",
       "util-epb-brake-service",
       "util-eyesight-camera-check",
       "util-tpms-inspection",
+      "util-ecm-ewg-roughness",
+      "util-ecm-elcm-evap",
+      "util-tcm-eop-startstop",
+      "util-ac-hvac-actuators",
+      "util-srh-adb-headlight",
+      "util-dms-driverfocus",
+      "util-rab-sonar-check",
+      "util-keyless-starter-check",
     ]);
+    expect(SSM4_FUNCTION_CODES.length).toBeGreaterThanOrEqual(19);
+    expect(SSM4_SRP_UTILITY_CATALOG.length).toBeGreaterThanOrEqual(11);
+    expect(SSM4_ECUS.length).toBe(16);
+    expect(SSM4_SIGNALS.length).toBeGreaterThanOrEqual(120);
   });
 
   it("decodes TSB 07-183-20 (MC-10182242-0001.pdf) 7-digit Applied Model + 4-digit Option Code (e.g. BTACYRB + U45D -> C05D)", () => {

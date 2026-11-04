@@ -31,7 +31,11 @@ import {
   type TpmsRoutineOptions,
 } from "./mitsubishi-tpms-register";
 import type { TpmsDidRecipe, TpmsRoutineResult } from "./mitsubishi-tpms-registration";
-import { calibrateSubaruSteeringZero } from "./subaru-steering-calibration";
+import {
+  calibrateSubaruSteeringZero,
+  executeSubaruServiceAction,
+  type SubaruServiceActionId,
+} from "./subaru-steering-calibration";
 import { readSubaruCvtFluidTemp, type SubaruCvtFluidReading } from "./subaru-cvt-read";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
@@ -415,6 +419,17 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
     await this.ensureUdsProfile("6");
     return calibrateSubaruSteeringZero(this.elm!);
+  }
+
+  /**
+   * Executes a Subaru calibration, adaptation, or reset routine from `SUBARU_SERVICE_ACTIONS`.
+   */
+  async runSubaruServiceAction(actionId: SubaruServiceActionId): Promise<SasCalibrationResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return executeSubaruServiceAction(this.elm!, actionId);
   }
 
   /**
@@ -1652,9 +1667,14 @@ export class ObdBleSession {
     timeoutMs = 5_000,
   ): Promise<string> {
     const send = async () => {
-      const standardRx = rx == null || rx === ((tx + 8) & 0x7ff);
-      if (standardRx) await this.elm!.clearRxFilter();
-      await this.elm!.setCanHeader(tx, standardRx ? undefined : rx);
+      const standardObdPair = tx >= 0x7e0 && tx <= 0x7e7 && (rx == null || rx === tx + 8);
+      if (standardObdPair) {
+        await this.elm!.clearRxFilter();
+        await this.elm!.setCanHeader(tx, undefined);
+      } else {
+        const effectiveRx = rx ?? ((tx + 8) & 0x7ff);
+        await this.elm!.setCanHeader(tx, effectiveRx);
+      }
       return this.elm!.sendPayload(request, timeoutMs);
     };
     try {
