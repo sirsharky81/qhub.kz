@@ -1181,9 +1181,9 @@ export function SubaruSsmPanel({
           const rdy = await session.readReadiness();
           if (rdy) {
             ok = true;
-            lines.push(`MIL (Check Engine): ${rdy.milOn ? "ГОРИТ (ON)" : "Погашен (OFF)"} · Кодов DTC: ${rdy.dtcCount}`);
-            for (const m of rdy.monitors.filter((x) => x.supported)) {
-              lines.push(`• ${m.name}: ${m.complete ? "Готов (Complete)" : "Не завершён (Incomplete)"}`);
+            lines.push(`MIL (Check Engine): ${rdy.mil ? "ГОРИТ (ON)" : "Погашен (OFF)"} · Кодов DTC: ${rdy.dtcCount}`);
+            for (const mLine of rdy.lines) {
+              lines.push(`• ${mLine}`);
             }
           }
           for (const pid of ["0121", "0130", "0131", "014D", "014E"]) {
