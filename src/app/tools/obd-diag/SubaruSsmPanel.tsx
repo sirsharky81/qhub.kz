@@ -221,9 +221,110 @@ export function SubaruSsmPanel({
   const [steeringPolling, setSteeringPolling] = useState(false);
   const [steeringCalConfirmOpen, setSteeringCalConfirmOpen] = useState(false);
   const [steeringCalResult, setSteeringCalResult] = useState<SasCalibrationResult | null>(null);
-  const steeringPollRef = useRef(false);
+  const [steeringPollRef] = useState({ current: false });
 
   const [pendingServiceAction, setPendingServiceAction] = useState<SubaruServiceActionSpec | null>(null);
+  // User-defined custom monitor groups (persisted in localStorage)
+  const [userGroups, setUserGroups] = useState<{ id: string; name: string; signalIds: string[] }[]>(
+    () => [
+      {
+        id: "ug-main-diag",
+        name: "1. Основной ДВС (Обороты, ОЖ, Смесь, Дроссель)",
+        signalIds: [
+          "eng-rpm-obd",
+          "eng-speed-obd",
+          "eng-coolant-obd",
+          "eng-load-obd",
+          "eng-tps-obd",
+          "eng-map-obd",
+          "eng-stft-obd",
+          "eng-ltft-obd",
+          "eng-battery-obd",
+        ],
+      },
+      {
+        id: "ug-turbo-ewg",
+        name: "2. Турбо FA24F / Вестгейт EWG / Пропуски цилиндров",
+        signalIds: [
+          "eng-rpm-obd",
+          "eng-map-obd",
+          "eng-uds-ewg-learn",
+          "eng-uds-ewg-target",
+          "eng-uds-ewg-actual",
+          "eng-uds-tcv-opening",
+          "eng-uds-roughness-1",
+          "eng-uds-roughness-2",
+          "eng-uds-roughness-3",
+          "eng-uds-roughness-4",
+        ],
+      },
+      {
+        id: "ug-cvt-awd",
+        name: "3. Вариатор Lineartronic CVT + Полный привод AWD",
+        signalIds: [
+          "tcm-atf-temp-uds",
+          "tcm-cvt-temp-10d2",
+          "tcm-turbine-rpm",
+          "tcm-primary-pulley-rpm",
+          "tcm-secondary-pulley-rpm",
+          "tcm-actual-sec-press",
+          "tcm-actual-pri-press",
+          "tcm-actual-line-press",
+          "tcm-awd-duty",
+          "tcm-awd-actual-curr",
+          "tcm-at-learning",
+        ],
+      },
+      {
+        id: "ug-chassis-epb",
+        name: "4. Тормоза ABS/VDC, Электроручник EPB и Руль EPS",
+        signalIds: [
+          "eps-steering-angle",
+          "eps-steering-torque",
+          "abs-brake-pressure",
+          "abs-fr-wc-press",
+          "abs-fl-wc-press",
+          "abs-g-sensor",
+          "abs-epb-force",
+          "abs-epb-status",
+        ],
+      },
+    ],
+  );
+  const [activeUserGroupId, setActiveUserGroupId] = useState<string>("ug-main-diag");
+  const [newGroupNameInput, setNewGroupNameInput] = useState<string>("");
+  const [signalSearchQuery, setSignalSearchQuery] = useState<string>("");
+
+  // Interactive execution results for SSM4 Function Codes (1..918)
+  const [functionRunResults, setFunctionRunResults] = useState<
+    Record<number, { status: string; lines: string[]; ok: boolean }>
+  >({});
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("qhub.subaru.live-groups");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setUserGroups(parsed);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const saveUserGroups = useCallback(
+    (next: { id: string; name: string; signalIds: string[] }[]) => {
+      setUserGroups(next);
+      try {
+        localStorage.setItem("qhub.subaru.live-groups", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
   const [serviceActionResults, setServiceActionResults] = useState<
     Record<string, SasCalibrationResult>
   >({});
@@ -978,6 +1079,235 @@ export function SubaruSsmPanel({
     }
   }, [pendingServiceAction, session, setBusy, setError]);
 
+  const handleRunSsm4Function = useCallback(
+    async (funcId: number) => {
+      // Navigation-backed SSM4 Functions that can also open interactive workspaces immediately
+      if (funcId === 2) {
+        setTopView("data-monitor");
+        return;
+      }
+      if (funcId === 10) {
+        // Multi-ECU Data Monitor: load Engine + CVT + ABS signals and switch to Live
+        setSelectedSignalIds([
+          "eng-rpm-obd",
+          "eng-speed-obd",
+          "eng-coolant-obd",
+          "tcm-atf-temp-uds",
+          "tcm-cvt-temp-10d2",
+          "tcm-awd-duty",
+          "eps-steering-angle",
+          "abs-brake-pressure",
+        ]);
+        setTopView("data-monitor");
+        return;
+      }
+      if (funcId === 902) {
+        setTopView("utilities");
+        return;
+      }
+      if (funcId === 20 || funcId === 917) {
+        setTopView("customize");
+        if (ready && !busy) {
+          void handleReadCustomizeItems();
+        }
+        return;
+      }
+      if (funcId === 918) {
+        setTopView("all-dtc");
+        if (ready && !busy) {
+          void handleRunAllDtcScan();
+        }
+        return;
+      }
+
+      if (!ready || busy) {
+        setError("Подключите адаптер vLinker для выполнения функции SSM4 на автомобиле");
+        return;
+      }
+
+      setBusy(true);
+      setError(null);
+      const lines: string[] = [];
+      let ok = false;
+      try {
+        if (funcId === 1) {
+          // DIAG_FREEZE: Read DTCs + FreezeFrame + IG Counter 101E on selected ECU
+          const r19 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "19 02 FF", 1500);
+          const p19 = parseUdsResponse(r19, 0x19);
+          if (p19.kind === "positive") {
+            ok = true;
+            lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) UDS 19 02 FF: ${formatUdsPayload(p19.payload, 0x19, selectedEcu.txHex)}`);
+          }
+          const r101e = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "22 101E", 1200);
+          const p101e = parseUdsResponse(r101e, 0x22);
+          if (p101e.kind === "positive") {
+            ok = true;
+            lines.push(`IG Counter (DID 101E): ${formatUdsPayload(p101e.payload, 0x22, selectedEcu.txHex)}`);
+          }
+          const ff = await session.readFreezeFrame();
+          if (ff.readings.length > 0) {
+            ok = true;
+            lines.push(`Freeze Frame DTC: ${ff.dtc ?? "нет"} · параметров: ${ff.readings.map((r) => `${r.label}=${r.value}${r.unit}`).join(", ")}`);
+          }
+        } else if (funcId === 3) {
+          // ACTIVE_TEST: Check active test readiness & read actuator status DIDs on ECM 7E0
+          await sendUdsRaw(session, "can11-500", "7E0", "7E8", "10 03", 900);
+          for (const did of ["10B3", "10AB", "10AE", "11DA", "1272", "1273"]) {
+            const raw = await sendUdsRaw(session, "can11-500", "7E0", "7E8", `22 ${did}`, 1000);
+            const p = parseUdsResponse(raw, 0x22);
+            if (p.kind === "positive") {
+              ok = true;
+              lines.push(`7E0 DID ${did}: ${formatUdsPayload(p.payload, 0x22, "7E0")}`);
+            }
+          }
+          await sendUdsRaw(session, "can11-500", "7E0", "7E8", "10 01", 700);
+        } else if (funcId === 4) {
+          // MODECHANGE: Transition selected ECU 10 03 -> 3E 00 -> 22 F186 -> 10 01
+          const r10 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 03", 1000);
+          const p10 = parseUdsResponse(r10, 0x10);
+          if (p10.kind === "positive") {
+            ok = true;
+            lines.push(`${selectedEcu.txHex}: ${formatUdsPayload(p10.payload, 0x10, selectedEcu.txHex)}`);
+          }
+          const r86 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "22 F186", 900);
+          const p86 = parseUdsResponse(r86, 0x22);
+          if (p86.kind === "positive") {
+            lines.push(`Активная сессия (F186): ${formatUdsPayload(p86.payload, 0x22, selectedEcu.txHex)}`);
+          }
+          await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 01", 800);
+          lines.push(`${selectedEcu.txHex}: Возврат в стандартную сессию (10 01 OK)`);
+        } else if (funcId === 6 || funcId === 16 || funcId === 19 || funcId === 908) {
+          // Readiness / MIL / Mode 06 / Diag Determination
+          const rdy = await session.readReadiness();
+          if (rdy) {
+            ok = true;
+            lines.push(`MIL (Check Engine): ${rdy.milOn ? "ГОРИТ (ON)" : "Погашен (OFF)"} · Кодов DTC: ${rdy.dtcCount}`);
+            for (const m of rdy.monitors.filter((x) => x.supported)) {
+              lines.push(`• ${m.name}: ${m.complete ? "Готов (Complete)" : "Не завершён (Incomplete)"}`);
+            }
+          }
+          for (const pid of ["0121", "0130", "0131", "014D", "014E"]) {
+            try {
+              const raw = await sendUdsRaw(session, "can11-500", "7E0", "7E8", pid, 1000);
+              const p = parseUdsResponse(raw, 0x01);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`OBD ${pid}: ${p.payload.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`);
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        } else if (funcId === 7 || funcId === 907) {
+          // WORK_FREEZEDATA & CANCEL_CODE (787 EyeSight, 7B0 VDC, 7E1 TCM/ISS)
+          for (const target of [
+            { tx: "787", rx: "78F", name: "EyeSight", dids: ["F182", "1000", "1020"] },
+            { tx: "7B0", rx: "7B8", name: "ABS/VDC", dids: ["1001", "1006", "2012"] },
+            { tx: "7E1", rx: "7E9", name: "TCM/ISS", dids: ["101E", "1243", "14F8"] },
+          ]) {
+            await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 03", 800);
+            for (const did of target.dids) {
+              const raw = await sendUdsRaw(session, "can11-500", target.tx, target.rx, `22 ${did}`, 900);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`${target.name} (${target.tx}) DID ${did}: ${formatUdsPayload(p.payload, 0x22, target.tx)}`);
+              }
+            }
+            await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 01", 600);
+          }
+        } else if (funcId === 17) {
+          // COMM_MONITOR: Ping all 16 Subaru ECUs with TesterPresent 3E 00 / 10 03
+          let alive = 0;
+          for (const ecu of SSM4_ECUS) {
+            const raw = await sendUdsRaw(session, "can11-500", ecu.txHex, ecu.rxHex, "10 03", 650);
+            const p = parseUdsResponse(raw, 0x10);
+            if (p.kind !== "empty") {
+              alive += 1;
+              ok = true;
+              lines.push(`✓ ${ecu.code} (${ecu.txHex} → ${ecu.rxHex}): На связи (${ecu.nameRu})`);
+              await sendUdsRaw(session, "can11-500", ecu.txHex, ecu.rxHex, "10 01", 500);
+            } else {
+              lines.push(`— ${ecu.code} (${ecu.txHex}): Нет ответа`);
+            }
+          }
+          lines.unshift(`Проверка шины CAN завершена: ответили ${alive} из ${SSM4_ECUS.length} ЭБУ`);
+        } else if (funcId === 18 || funcId === 909) {
+          // REPRO ROM/CalID check & OBD_VEHICLE_INFO
+          const ident = await session.readVehicleIdentity();
+          if (ident.vin || ident.calid || ident.cvn) {
+            ok = true;
+            lines.push(`VIN: ${ident.vin ?? "—"} · CalID: ${ident.calid ?? "—"} · CVN: ${ident.cvn ?? "—"}`);
+          }
+          for (const did of ["F181", "F182", "F187", "F189", "F18E", "F190", "F197"]) {
+            const raw = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, `22 ${did}`, 900);
+            const p = parseUdsResponse(raw, 0x22);
+            if (p.kind === "positive") {
+              ok = true;
+              lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) DID ${did}: ${formatUdsPayload(p.payload, 0x22, selectedEcu.txHex)}`);
+            }
+          }
+        } else if (funcId === 915) {
+          // AIRBAG_SYSTEM_DATA (SRS 780 -> 788)
+          await sendUdsRaw(session, "can11-500", "780", "788", "10 03", 800);
+          for (const did of ["1007", "1022", "1044", "1045", "1047", "105F", "F18E"]) {
+            const raw = await sendUdsRaw(session, "can11-500", "780", "788", `22 ${did}`, 900);
+            const p = parseUdsResponse(raw, 0x22);
+            if (p.kind === "positive") {
+              ok = true;
+              lines.push(`SRS 780 DID ${did}: ${formatUdsPayload(p.payload, 0x22, "780")}`);
+            }
+          }
+          await sendUdsRaw(session, "can11-500", "780", "788", "10 01", 600);
+        } else if (funcId === 916) {
+          // ALLOBD_SYSTEM_DTC_DATA (Mode 03 + Mode 07 + Mode 0A)
+          const m03 = await session.readObdDtcs();
+          const m07 = await session.readPendingDtcs();
+          const m0a = await session.readPermanentDtcs();
+          ok = true;
+          lines.push(`Сохранённые (Mode 03): ${m03.length} · Ожидающие (Mode 07): ${m07.length} · Постоянные (Mode 0A): ${m0a.length}`);
+          for (const d of [...m03, ...m07, ...m0a]) {
+            lines.push(`• ${d.code}: ${d.description}`);
+          }
+        }
+
+        if (lines.length === 0) {
+          lines.push(`ЭБУ ${selectedEcu.code} (${selectedEcu.txHex}) не вернул данных по FunctionId = ${funcId}. Проверьте зажигание IG ON.`);
+        }
+        setFunctionRunResults((prev) => ({
+          ...prev,
+          [funcId]: {
+            status: ok ? "Выполнено успешно" : "Нет ответа от блока",
+            lines,
+            ok,
+          },
+        }));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Ошибка выполнения функции SSM4";
+        setFunctionRunResults((prev) => ({
+          ...prev,
+          [funcId]: {
+            status: `Ошибка: ${msg}`,
+            lines: [msg],
+            ok: false,
+          },
+        }));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      ready,
+      busy,
+      session,
+      selectedEcu,
+      handleReadCustomizeItems,
+      handleRunAllDtcScan,
+      setBusy,
+      setError,
+    ],
+  );
+
   const handleReadSteering = useCallback(async () => {
     if (!ready || busy) return;
     setBusy(true);
@@ -1383,62 +1713,207 @@ export function SubaruSsmPanel({
       {topView === "data-monitor" && (
         <div
           id="subaru-live-workspace"
-          className="min-w-0 scroll-mt-3 space-y-2 rounded-xl border border-gray-200 bg-white p-3"
+          className="min-w-0 scroll-mt-3 space-y-3 rounded-xl border border-gray-200 bg-white p-3.5"
         >
-          <div className="sticky top-0 z-20 -mx-3 space-y-2 border-b border-gray-200 bg-white/95 px-3 pb-3 pt-0.5 backdrop-blur-sm">
-            <label className="flex min-w-0 flex-col gap-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                Блок для live
-              </span>
-              <select
-                value={selectedEcuId}
-                onChange={(e) => {
-                  const ecu = SSM4_ECUS.find((item) => item.ecuId === Number(e.target.value));
-                  if (ecu) handleSelectEcu(ecu);
-                }}
-                className="w-full min-w-0 rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs font-medium text-gray-900"
-              >
-                {SSM4_ECUS.map((ecu) => (
-                  <option key={ecu.ecuId} value={ecu.ecuId}>
-                    {ecu.code} · {ecu.txHex} — {ecu.nameRu}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => void handleToggleMonitor()}
-                disabled={!ready || (!polling && busy) || selectedSignalIds.length === 0}
-                className={`flex-1 rounded-xl px-3 py-2.5 text-xs font-semibold text-white ${
-                  polling ? "bg-amber-600 hover:bg-amber-500" : "border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-40"
-                }`}
-              >
-                {polling ? "Стоп" : `Старт (${selectedSignalIds.length})`}
-              </button>
-              <button
-                type="button"
-                onClick={handleExportMonitorCsv}
-                disabled={samples.length === 0}
-                className="shrink-0 rounded-xl border border-gray-300 px-3 py-2.5 text-xs text-gray-700 disabled:opacity-40"
-                title="Экспорт CSV"
-              >
-                CSV
-              </button>
+          <div className="sticky top-0 z-20 -mx-3.5 space-y-2.5 border-b border-gray-200 bg-white/95 px-3.5 pb-3 pt-1 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">
+                  Live Монитор параметров SSM4 (Группы и конструктор .FACL / .CT)
+                </h3>
+                <p className="text-[11px] text-gray-500">
+                  Выбирайте готовые группы параметров, создавайте свои собственные наборы или добавляйте/убирайте отдельные датчики из любого из {SSM4_ECUS.length} блоков.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleToggleMonitor()}
+                  disabled={!ready || (!polling && busy) || selectedSignalIds.length === 0}
+                  className={`rounded-xl px-4 py-2.5 text-xs font-semibold text-white ${
+                    polling
+                      ? "bg-amber-600 hover:bg-amber-500"
+                      : "border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-40"
+                  }`}
+                >
+                  {polling ? "Стоп Live-опрос" : `Старт Live (${selectedSignalIds.length} парам.)`}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportMonitorCsv}
+                  disabled={samples.length === 0}
+                  className="shrink-0 rounded-xl border border-gray-300 px-3 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                  title="Экспорт записанного лога в CSV"
+                >
+                  CSV ({samples.length})
+                </button>
+              </div>
             </div>
+
+            {/* User Monitor Groups Bar */}
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-2.5 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
+                  Группы мониторинга (нажмите, чтобы вывести группу на экран):
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={newGroupNameInput}
+                    onChange={(e) => setNewGroupNameInput(e.target.value)}
+                    placeholder="Название новой группы…"
+                    className="w-44 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const title = newGroupNameInput.trim() || `Группа ${userGroups.length + 1}`;
+                      const newGrp = {
+                        id: `ug-${Date.now()}`,
+                        name: title,
+                        signalIds: [...selectedSignalIds],
+                      };
+                      const next = [...userGroups, newGrp];
+                      saveUserGroups(next);
+                      setActiveUserGroupId(newGrp.id);
+                      setNewGroupNameInput("");
+                    }}
+                    className="rounded-lg border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1 text-[11px] font-semibold text-white"
+                  >
+                    + Создать группу из текущих ({selectedSignalIds.length})
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {userGroups.map((grp) => {
+                  const isActive = activeUserGroupId === grp.id;
+                  return (
+                    <div
+                      key={grp.id}
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition ${
+                        isActive
+                          ? "border-emerald-600 bg-emerald-50 font-bold text-emerald-900 ring-1 ring-emerald-500"
+                          : "border-gray-300 bg-white text-gray-700 hover:border-emerald-400"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveUserGroupId(grp.id);
+                          setSelectedSignalIds(grp.signalIds);
+                        }}
+                        className="text-left"
+                      >
+                        {grp.name}{" "}
+                        <span className="font-mono text-[10px] opacity-75">
+                          ({grp.signalIds.length})
+                        </span>
+                      </button>
+                      {isActive && (
+                        <button
+                          type="button"
+                          title="Обновить состав этой группы текущими выбранными параметрами"
+                          onClick={() => {
+                            const next = userGroups.map((g) =>
+                              g.id === grp.id ? { ...g, signalIds: [...selectedSignalIds] } : g,
+                            );
+                            saveUserGroups(next);
+                          }}
+                          className="ml-1 rounded bg-emerald-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900 hover:bg-emerald-300"
+                        >
+                          Сохр.
+                        </button>
+                      )}
+                      {userGroups.length > 1 && (
+                        <button
+                          type="button"
+                          title="Удалить группу"
+                          onClick={() => {
+                            const next = userGroups.filter((g) => g.id !== grp.id);
+                            saveUserGroups(next);
+                            if (isActive && next[0]) {
+                              setActiveUserGroupId(next[0].id);
+                              setSelectedSignalIds(next[0].signalIds);
+                            }
+                          }}
+                          className="ml-0.5 rounded px-1 text-[11px] font-bold text-gray-400 hover:bg-rose-100 hover:text-rose-700"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Active Monitored Signals Strip with quick "-" removal */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-2.5 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-gray-800">
+                Активные параметры на экране ({selectedSignalIds.length}):
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedSignalIds([])}
+                  disabled={selectedSignalIds.length === 0}
+                  className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40"
+                >
+                  Очистить все
+                </button>
+              </div>
+            </div>
+            {selectedSignalIds.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedSignalIds.map((id) => {
+                  const sig = SSM4_SIGNALS.find((s) => s.id === id);
+                  if (!sig) return null;
+                  const ecu = SSM4_ECUS.find((e) => e.ecuId === sig.ecuId);
+                  return (
+                    <span
+                      key={id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] text-emerald-950"
+                    >
+                      <span className="font-mono font-bold text-emerald-700">
+                        {ecu?.code ?? sig.ecuId}:{sig.shortName}
+                      </span>
+                      <span className="truncate max-w-[180px]">{sig.nameRu}</span>
+                      <button
+                        type="button"
+                        title="Убрать параметр из мониторинга"
+                        onClick={() =>
+                          setSelectedSignalIds((prev) => prev.filter((x) => x !== id))
+                        }
+                        className="ml-0.5 rounded bg-emerald-200/70 px-1.5 text-[11px] font-bold text-emerald-900 hover:bg-rose-200 hover:text-rose-900"
+                      >
+                        −
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Список пуст — выберите готовую группу выше или нажмите «+» на нужных параметрах ниже.
+              </p>
+            )}
           </div>
 
           {selectedSignalIds.length > 0 ? (
             <LiveMetricCards
               items={SSM4_SIGNALS.filter((s) => selectedSignalIds.includes(s.id)).map((sig) => {
                 const live = liveValues[sig.id];
+                const ecu = SSM4_ECUS.find((e) => e.ecuId === sig.ecuId);
                 const minStr =
                   live?.min != null ? String(Number(live.min.toFixed(sig.decimals))) : null;
                 const maxStr =
                   live?.max != null ? String(Number(live.max.toFixed(sig.decimals))) : null;
                 return {
                   id: sig.id,
-                  label: `${sig.shortName} · ${sig.nameRu}`,
+                  label: `${ecu ? `${ecu.code} · ` : ""}${sig.shortName} · ${sig.nameRu}`,
                   value: live?.text ?? "—",
                   unit: sig.unit,
                   minText: minStr,
@@ -1447,72 +1922,177 @@ export function SubaruSsmPanel({
                 };
               })}
             />
-          ) : (
-            <p className="text-xs text-gray-500">Отметьте хотя бы один параметр в списке ниже.</p>
-          )}
+          ) : null}
 
-          <details className="rounded-lg border border-gray-200 bg-gray-50 p-2">
-            <summary className="cursor-pointer text-xs font-semibold text-gray-700">
-              Настройка: параметры и паспорт ({selectedSignalIds.length})
-            </summary>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {selectedEcu.customLists.map((listName) => (
-                <button
-                  key={listName}
-                  type="button"
-                  onClick={() => setSelectedCustomList(listName)}
-                  className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
-                    selectedCustomList === listName
-                      ? "bg-gray-900 text-white"
-                      : "border border-gray-300 text-gray-500"
-                  }`}
-                >
-                  {listName === "All Data" ? "Все" : listName}
-                </button>
-              ))}
+          {/* Add / Remove Signals by ECU & Factory .FACL/.CT Group */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-bold text-gray-900">
+                Добавить или убавить параметры по блокам и заводским группам (.FACL / .CT)
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleReadEcuPassportAndFreeze()}
+                disabled={!ready || busy}
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40"
+              >
+                <FileSearch className="h-3 w-3" />
+                Паспорт блока ({selectedEcu.code})
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => void handleReadEcuPassportAndFreeze()}
-              disabled={!ready || busy}
-              className="mt-2 inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-[11px] text-gray-700 disabled:opacity-40"
-            >
-              <FileSearch className="h-3 w-3" />
-              Паспорт блока
-            </button>
+
             {unitPassport ? (
-              <p className="mt-1 font-mono text-[10px] text-gray-500">
-                P/N {unitPassport.partNumber ?? "—"} · Cal {unitPassport.calibrationId ?? "—"}
+              <p className="font-mono text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2.5 py-1">
+                {unitPassport.ecuCode} ({unitPassport.txHex}) · P/N: {unitPassport.partNumber ?? "—"} · CalID: {unitPassport.calibrationId ?? "—"} · SW: {unitPassport.softwareVersion ?? "—"}
               </p>
             ) : null}
-            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto overflow-x-hidden">
-              {signalsForEcu.map((sig) => {
-                const checked = selectedSignalIds.includes(sig.id);
-                return (
-                  <li key={sig.id}>
-                    <label className="flex min-w-0 items-start gap-2 text-xs text-gray-800">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedSignalIds((p) => [...p, sig.id]);
-                          } else {
-                            setSelectedSignalIds((p) => p.filter((id) => id !== sig.id));
-                          }
-                        }}
-                        className="mt-0.5 shrink-0"
-                      />
-                      <span className="min-w-0 flex-1 truncate">
-                        <span className="font-mono text-emerald-600/90">{sig.shortName}</span>{" "}
-                        {sig.nameRu}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  1. Выберите ЭБУ Subaru ({SSM4_ECUS.length} блоков)
+                </span>
+                <select
+                  value={selectedEcuId}
+                  onChange={(e) => {
+                    const ecu = SSM4_ECUS.find((item) => item.ecuId === Number(e.target.value));
+                    if (ecu) {
+                      setSelectedEcuId(ecu.ecuId);
+                      setSelectedCustomList(ecu.customLists[0] ?? "All Data");
+                    }
+                  }}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs font-medium text-gray-900"
+                >
+                  {SSM4_ECUS.map((ecu) => (
+                    <option key={ecu.ecuId} value={ecu.ecuId}>
+                      {ecu.code} · {ecu.txHex} — {ecu.nameRu} ({SSM4_SIGNALS.filter((s) => s.ecuId === ecu.ecuId).length} парам.)
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  2. Поиск параметра по названию или DID/PID
+                </span>
+                <input
+                  type="text"
+                  value={signalSearchQuery}
+                  onChange={(e) => setSignalSearchQuery(e.target.value)}
+                  placeholder="Например: CVTF, давление, 10D2, пропуск, вестгейт…"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-1">
+                {selectedEcu.customLists.map((listName) => (
+                  <button
+                    key={listName}
+                    type="button"
+                    onClick={() => setSelectedCustomList(listName)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                      selectedCustomList === listName
+                        ? "bg-gray-900 text-white"
+                        : "border border-gray-300 bg-white text-gray-700 hover:border-emerald-400"
+                    }`}
+                  >
+                    {listName === "All Data" ? "Все параметры блока" : listName}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idsToAdd = signalsForEcu.map((s) => s.id);
+                    setSelectedSignalIds((prev) =>
+                      Array.from(new Set([...prev, ...idsToAdd])),
+                    );
+                  }}
+                  className="rounded-lg border border-emerald-600 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                >
+                  + Добавить всю подгруппу ({signalsForEcu.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idsToRemove = new Set(signalsForEcu.map((s) => s.id));
+                    setSelectedSignalIds((prev) =>
+                      prev.filter((id) => !idsToRemove.has(id)),
+                    );
+                  }}
+                  className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-100"
+                >
+                  − Убрать подгруппу
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-72 overflow-y-auto pr-1">
+              {signalsForEcu
+                .filter((sig) => {
+                  const q = signalSearchQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    sig.nameRu.toLowerCase().includes(q) ||
+                    sig.nameEn.toLowerCase().includes(q) ||
+                    sig.shortName.toLowerCase().includes(q) ||
+                    sig.addressOrDid.toLowerCase().includes(q)
+                  );
+                })
+                .map((sig) => {
+                  const checked = selectedSignalIds.includes(sig.id);
+                  return (
+                    <div
+                      key={sig.id}
+                      onClick={() => {
+                        if (checked) {
+                          setSelectedSignalIds((p) => p.filter((id) => id !== sig.id));
+                        } else {
+                          setSelectedSignalIds((p) => [...p, sig.id]);
+                        }
+                      }}
+                      className={`cursor-pointer flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition ${
+                        checked
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-950"
+                          : "border-gray-200 bg-white text-gray-800 hover:border-emerald-300"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-bold text-emerald-700">
+                            {sig.shortName}
+                          </span>
+                          <span className="font-mono text-[10px] text-gray-400">
+                            {sig.addressOrDid}
+                          </span>
+                          {sig.unit && (
+                            <span className="rounded bg-gray-100 px-1 text-[10px] text-gray-600">
+                              {sig.unit}
+                            </span>
+                          )}
+                        </div>
+                        <div className="truncate text-[11px] text-gray-700">
+                          {sig.nameRu}
+                        </div>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-md px-2 py-0.5 font-mono text-xs font-bold ${
+                          checked
+                            ? "bg-rose-100 text-rose-800"
+                            : "bg-emerald-600 text-white"
+                        }`}
+                      >
+                        {checked ? "−" : "+"}
                       </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          </details>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
 
           <details className="rounded-lg border border-gray-200 bg-gray-50 p-2">
             <summary className="cursor-pointer text-xs font-semibold text-gray-500">
@@ -2209,49 +2789,122 @@ export function SubaruSsmPanel({
           <div className="border-t border-gray-200 pt-4 space-y-3">
             <div>
               <h4 className="text-xs font-bold uppercase tracking-wider text-gray-800">
-                Полный реестр сценариев калибровок и адаптаций SSM4 (`SUBARU/CONF/*.srp` · 472 скрипта и `FHIUtilityCtrlNK.dll`)
+                Активный реестр сценариев калибровок и адаптаций SSM4 (`SUBARU/CONF/*.srp` · 472 скрипта и `FHIUtilityCtrlNK.dll`)
               </h4>
               <p className="mt-0.5 text-xs text-gray-500">
-                Ниже перечислены все семейства заводских процедур калибровок, обучения и регистрации, найденные в дистрибутиве SSM4 v28.6.0.
+                Каждое семейство `.srp` ниже активно: вы можете сразу запустить исполнительные процедуры (`UDS 31 01` / `22` / `2F`) или открыть соответствующую панель живого контроля регистров.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {SSM4_SRP_UTILITY_CATALOG.map((mod) => (
-                <div
-                  key={mod.prefix}
-                  className="rounded-xl border border-gray-200 bg-gray-50/70 p-3.5 space-y-2 flex flex-col justify-between"
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800">
-                        {mod.prefix} · {mod.scriptCount} .srp
-                      </span>
-                      <span className="font-mono text-[11px] text-gray-600">
-                        {mod.ecuCode} ({mod.txHex} → {mod.rxHex})
-                      </span>
+              {SSM4_SRP_UTILITY_CATALOG.map((mod) => {
+                const modActions = SUBARU_SERVICE_ACTIONS.filter(
+                  (a) => a.srpPrefix === mod.prefix,
+                );
+                return (
+                  <div
+                    key={mod.prefix}
+                    className="rounded-xl border border-gray-200 bg-gray-50/70 p-3.5 space-y-3 flex flex-col justify-between"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800">
+                          {mod.prefix} · {mod.scriptCount} .srp
+                        </span>
+                        <span className="font-mono text-[11px] text-gray-600">
+                          {mod.ecuCode} ({mod.txHex} → {mod.rxHex})
+                        </span>
+                      </div>
+                      <div className="text-xs font-bold text-gray-900">
+                        {mod.titleRu}
+                      </div>
+                      <ul className="list-disc pl-4 space-y-1 text-[11px] text-gray-700">
+                        {mod.proceduresRu.map((proc, i) => (
+                          <li key={i}>{proc}</li>
+                        ))}
+                      </ul>
                     </div>
-                    <div className="text-xs font-bold text-gray-900">
-                      {mod.titleRu}
+
+                    <div className="space-y-2 border-t border-gray-200 pt-2.5">
+                      <div className="text-[11px] font-bold text-gray-800">
+                        Доступные действия по сценарию {mod.prefix}:
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {modActions.map((act) => {
+                          const actResult = serviceActionResults[act.id];
+                          return (
+                            <div key={act.id} className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={!ready || busy}
+                                  onClick={() => setPendingServiceAction(act)}
+                                  className="flex-1 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-1.5 text-left text-[11px] font-semibold text-white disabled:opacity-40 flex items-center justify-between gap-2"
+                                >
+                                  <span>▶ {act.buttonLabelRu}</span>
+                                  <span className="rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">
+                                    {act.txHex} · {act.serviceBadge}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedUtilityId(act.utilityId);
+                                    setUtilityLiveDids({});
+                                    window.scrollTo({ top: 0, behavior: "smooth" });
+                                  }}
+                                  className="shrink-0 rounded-lg border border-emerald-400 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800"
+                                  title="Открыть DID-регистры этого блока сверху"
+                                >
+                                  Регистры DID
+                                </button>
+                              </div>
+                              {actResult && (
+                                <div
+                                  className={`rounded border p-2 text-[10px] font-mono ${
+                                    actResult.success
+                                      ? "border-emerald-400 bg-emerald-50 text-emerald-900"
+                                      : "border-rose-300 bg-rose-50 text-rose-900"
+                                  }`}
+                                >
+                                  <div className="font-sans font-bold">
+                                    {actResult.success
+                                      ? "✓ Выполнено успешно"
+                                      : "✗ Отказ или нет ответа от ЭБУ"}
+                                  </div>
+                                  {actResult.steps.map((s, idx) => (
+                                    <div key={idx}>• {s}</div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {mod.prefix === "MET" && (
+                          <button
+                            type="button"
+                            onClick={() => setTopView("customize")}
+                            className="rounded-lg border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
+                          >
+                            Открыть калькулятор 12 Columns (C0/C5) и слепки приборки →
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {mod.dllFunctions.map((fn) => (
+                          <code
+                            key={fn}
+                            className="rounded bg-white border border-gray-200 px-1.5 py-0.5 font-mono text-[10px] text-gray-500"
+                          >
+                            {fn}()
+                          </code>
+                        ))}
+                      </div>
                     </div>
-                    <ul className="list-disc pl-4 space-y-1 text-[11px] text-gray-700">
-                      {mod.proceduresRu.map((proc, i) => (
-                        <li key={i}>{proc}</li>
-                      ))}
-                    </ul>
                   </div>
-                  <div className="border-t border-gray-200 pt-2 flex flex-wrap gap-1">
-                    {mod.dllFunctions.map((fn) => (
-                      <code
-                        key={fn}
-                        className="rounded bg-white border border-gray-200 px-1.5 py-0.5 font-mono text-[10px] text-gray-600"
-                      >
-                        {fn}()
-                      </code>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -2693,81 +3346,145 @@ export function SubaruSsmPanel({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-gray-900">
-                Коды функций SSM4 (`GetEcuFuncList.ini` / `GetSpecialFunctionKeyList.ini`) и полный каталог параметров по блокам
+                Активные функции SSM4 (`FunctionId` = 1 .. 918) и полный каталог параметров по блокам
               </h3>
               <p className="mt-0.5 text-xs text-gray-500">
-                Внутренние идентификаторы функций Subaru Select Monitor 4 (`FunctionId` / `DetailId`), сервисные ключи доступа (`Keycode`) и все {SSM4_SIGNALS.length} мониторинговых параметра по {SSM4_ECUS.length} блокам управления.
+                Каждая функция SSM4 ниже активна: нажмите кнопку запуска на любой карточке `FunctionId`, чтобы выполнить её на выбранном ЭБУ (`{selectedEcu.code} · {selectedEcu.txHex}`) или открыть соответствующий рабочий режим. В таблице параметров нажимайте «+ В Live» на любом параметре.
               </p>
             </div>
-            <span className="rounded-full bg-emerald-100 px-3 py-1 font-mono text-xs font-bold text-emerald-800">
-              SSM4 v28.6.0 · DB v28.00.001
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={selectedEcuId}
+                onChange={(e) => {
+                  const ecu = SSM4_ECUS.find((item) => item.ecuId === Number(e.target.value));
+                  if (ecu) handleSelectEcu(ecu);
+                }}
+                className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-xs font-semibold text-gray-900"
+              >
+                {SSM4_ECUS.map((ecu) => (
+                  <option key={ecu.ecuId} value={ecu.ecuId}>
+                    Целевой блок: {ecu.code} ({ecu.txHex}) — {ecu.nameRu}
+                  </option>
+                ))}
+              </select>
+              <span className="rounded-full bg-emerald-100 px-3 py-1 font-mono text-xs font-bold text-emerald-800">
+                SSM4 v28.6.0 · DB v28.00.001
+              </span>
+            </div>
           </div>
 
           <div className="space-y-2.5">
             <h4 className="text-xs font-bold uppercase tracking-wider text-gray-800">
-              1. Таблица кодов функций SSM4 (`FunctionId` = 1 .. 918) и паролей спецфункций (`Keycode`)
+              1. Исполняемые функции SSM4 (`FunctionId` = 1 .. 918) и спецключи (`Keycode`)
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {SSM4_FUNCTION_CODES.map((fn) => (
-                <div
-                  key={fn.id}
-                  className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-2 flex flex-col justify-between"
-                >
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="rounded bg-gray-900 px-2 py-0.5 font-mono text-xs font-bold text-white">
-                        FunctionId = {fn.id}
-                      </span>
-                      <code className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800">
-                        {fn.internalName}
-                      </code>
+              {SSM4_FUNCTION_CODES.map((fn) => {
+                const runRes = functionRunResults[fn.id];
+                const isNavOnly = [2, 10, 20, 902, 917, 918].includes(fn.id);
+                return (
+                  <div
+                    key={fn.id}
+                    className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-2.5 flex flex-col justify-between"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="rounded bg-gray-900 px-2 py-0.5 font-mono text-xs font-bold text-white">
+                          FunctionId = {fn.id}
+                        </span>
+                        <code className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800">
+                          {fn.internalName}
+                        </code>
+                      </div>
+                      <div className="text-xs font-bold text-gray-900">
+                        {fn.titleRu}
+                      </div>
+                      <p className="text-[11px] text-gray-600 leading-snug">
+                        {fn.descriptionRu}
+                      </p>
                     </div>
-                    <div className="text-xs font-bold text-gray-900">
-                      {fn.titleRu}
-                    </div>
-                    <p className="text-[11px] text-gray-600 leading-snug">
-                      {fn.descriptionRu}
-                    </p>
-                  </div>
 
-                  {(fn.detailIds || fn.specialKeys) && (
-                    <div className="border-t border-gray-200 pt-2 space-y-1.5 text-[11px]">
-                      {fn.detailIds && (
-                        <div>
-                          <div className="font-semibold text-gray-700">Подфункции (`DetailId`):</div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {fn.detailIds.map((d) => (
-                              <span
-                                key={d.id}
-                                className="rounded border border-gray-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-gray-700"
-                                title={d.name}
-                              >
-                                <strong>{d.id}</strong>: {d.titleRu}
-                              </span>
-                            ))}
-                          </div>
+                    <div className="space-y-2 border-t border-gray-200 pt-2">
+                      {(fn.detailIds || fn.specialKeys) && (
+                        <div className="space-y-1.5 text-[11px]">
+                          {fn.detailIds && (
+                            <div>
+                              <div className="font-semibold text-gray-700">Подфункции (`DetailId`):</div>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {fn.detailIds.map((d) => (
+                                  <span
+                                    key={d.id}
+                                    className="rounded border border-gray-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-gray-700"
+                                    title={d.name}
+                                  >
+                                    <strong>{d.id}</strong>: {d.titleRu}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {fn.specialKeys && (
+                            <div>
+                              <div className="font-semibold text-amber-900">Спецключи (`Keycode` / `Password`):</div>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {fn.specialKeys.map((k, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] text-amber-900"
+                                  >
+                                    Key <strong>{k.keycode}</strong> (<code>{k.password}</code>) — {k.noteRu}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
-                      {fn.specialKeys && (
-                        <div>
-                          <div className="font-semibold text-amber-900">Спецключи (`Keycode` / `Password`):</div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {fn.specialKeys.map((k, idx) => (
-                              <span
-                                key={idx}
-                                className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] text-amber-900"
-                              >
-                                Key <strong>{k.keycode}</strong> (<code>{k.password}</code>) — {k.noteRu}
-                              </span>
+
+                      <button
+                        type="button"
+                        disabled={!isNavOnly && (!ready || busy)}
+                        onClick={() => void handleRunSsm4Function(fn.id)}
+                        className="w-full rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 flex items-center justify-between gap-2"
+                      >
+                        <span>
+                          ▶{" "}
+                          {fn.id === 2
+                            ? "Открыть потоковый монитор (DATA_MONITOR)"
+                            : fn.id === 10
+                              ? "Запустить мульти-монитор ECM + TCM + ABS (MULTI_DATA_MONITOR)"
+                              : fn.id === 20 || fn.id === 917
+                                ? "Открыть и считать параметры персонализации (CUSTOMIZE)"
+                                : fn.id === 902
+                                  ? "Открыть рабочую вкладку калибровок и утилит (UTILITY 902)"
+                                  : fn.id === 918
+                                    ? "Запустить опрос всех систем (GET_DIAG_INFO 918)"
+                                    : `Выполнить FunctionId = ${fn.id} на блоке ${selectedEcu.code} (${selectedEcu.txHex})`}
+                        </span>
+                        <span className="rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">
+                          Run #{fn.id}
+                        </span>
+                      </button>
+
+                      {runRes && (
+                        <div
+                          className={`rounded-lg border p-2.5 text-[11px] ${
+                            runRes.ok
+                              ? "border-emerald-400 bg-emerald-50 text-emerald-950"
+                              : "border-amber-300 bg-amber-50 text-amber-950"
+                          }`}
+                        >
+                          <div className="font-bold">{runRes.status}</div>
+                          <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-gray-800 max-h-40 overflow-y-auto">
+                            {runRes.lines.map((line, i) => (
+                              <li key={i}>{line}</li>
                             ))}
-                          </div>
+                          </ul>
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -2778,9 +3495,16 @@ export function SubaruSsmPanel({
                   2. Все мониторинги параметров по блокам управления ({SSM4_SIGNALS.length} параметров в {SSM4_ECUS.length} ЭБУ)
                 </h4>
                 <p className="text-xs text-gray-500">
-                  Нажмите «Открыть в Live» на любом блоке, чтобы сразу перейти к потоковому чтению выбранного ЭБУ.
+                  Нажимайте «+ В Live» на любом параметре для добавления в текущий мониторинг или «Вывести все в Live» для всего блока.
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setTopView("data-monitor")}
+                className="rounded-lg border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
+              >
+                Перейти в Live ({selectedSignalIds.length} выбрано) →
+              </button>
             </div>
 
             <div className="space-y-3">
@@ -2807,19 +3531,29 @@ export function SubaruSsmPanel({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] text-gray-500">
-                          Functions: [{ecu.functions.join(", ")}]
-                        </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => {
-                            handleSelectEcu(ecu);
+                            const ids = ecuSignals.map((s) => s.id);
+                            setSelectedSignalIds((prev) =>
+                              Array.from(new Set([...prev, ...ids])),
+                            );
+                          }}
+                          className="rounded-lg border border-emerald-500 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-800"
+                        >
+                          + Добавить все ({ecuSignals.length}) в Live
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedEcuId(ecu.ecuId);
+                            setSelectedSignalIds(ecuSignals.map((s) => s.id));
                             setTopView("data-monitor");
                           }}
                           className="rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-1 text-[11px] font-semibold text-white"
                         >
-                          Открыть в Live
+                          Вывести блок в Live →
                         </button>
                       </div>
                     </div>
@@ -2833,11 +3567,13 @@ export function SubaruSsmPanel({
                             <th className="px-2 py-1">Параметр (RU / EN)</th>
                             <th className="px-2 py-1">Протокол и DID/PID</th>
                             <th className="px-2 py-1">Ед. изм.</th>
+                            <th className="px-2 py-1 text-right">В Live</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                           {ecuSignals.map((sig) => {
                             const req = buildSsm4RequestHex(sig);
+                            const inLive = selectedSignalIds.includes(sig.id);
                             return (
                               <tr key={sig.id} className="hover:bg-gray-50/80">
                                 <td className="px-2 py-1 font-medium text-gray-600">
@@ -2857,6 +3593,27 @@ export function SubaruSsmPanel({
                                 </td>
                                 <td className="px-2 py-1 font-mono text-gray-600">
                                   {sig.unit || "статус"}
+                                </td>
+                                <td className="px-2 py-1 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (inLive) {
+                                        setSelectedSignalIds((prev) =>
+                                          prev.filter((id) => id !== sig.id),
+                                        );
+                                      } else {
+                                        setSelectedSignalIds((prev) => [...prev, sig.id]);
+                                      }
+                                    }}
+                                    className={`rounded px-2 py-0.5 font-mono text-[10px] font-bold transition ${
+                                      inLive
+                                        ? "bg-rose-100 text-rose-800 hover:bg-rose-200"
+                                        : "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    }`}
+                                  >
+                                    {inLive ? "− Убрать" : "+ В Live"}
+                                  </button>
                                 </td>
                               </tr>
                             );
