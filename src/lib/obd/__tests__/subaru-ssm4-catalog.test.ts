@@ -8,10 +8,17 @@ import {
   SSM4_UTILITIES,
   SSM4_VEHICLES,
   SUBARU_CANADIAN_OPTION_PRESETS,
+  SUBARU_METER_12COLUMN_READ_DIDS,
+  SUBARU_METER_VARIANT_SAFE_PATH,
+  SUBARU_SSM4_VIN_WMI,
+  asciiFromSubaruDidHex,
   buildSsm4RequestHex,
+  isSubaruSsm4VinWmiAllowed,
   decodeSsm4SignalPayload,
   decodeSubaruAppliedModel12Columns,
+  extractAppliedModelAndOptionCodeFromDump,
   matchSsm4VehicleByVin,
+  parseSubaru12ColumnFromAscii,
 } from "../subaru-ssm4-catalog";
 
 describe("subaru-ssm4-catalog", () => {
@@ -122,5 +129,68 @@ describe("subaru-ssm4-catalog", () => {
     expect(lim25.dualXModeAppliedModelSuggestion).toBe("BT9CYTC");
 
     expect(SUBARU_CANADIAN_OPTION_PRESETS.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it("accepts SIA Outback WMI 4S4 in the SSM4 chkDigit1to3 table and rejects unknown WMI", () => {
+    expect(isSubaruSsm4VinWmiAllowed("4S4BTGUD2N3XXXXXX")).toBe(true);
+    expect(isSubaruSsm4VinWmiAllowed("JF1VA2B62L9XXXXXX")).toBe(true);
+    expect(isSubaruSsm4VinWmiAllowed("WVWZZZ3CZWEXXXXXX")).toBe(false);
+    expect(SUBARU_SSM4_VIN_WMI).toEqual(["JF1", "JF2", "JF3", "4S3", "4S4", "PLP", "MMR", "JT2"]);
+    expect(SUBARU_METER_VARIANT_SAFE_PATH.writeFunction).toBe("sendMetVariByApplied");
+    expect(SUBARU_METER_VARIANT_SAFE_PATH.forbiddenInner).toBe("scr_ext_in_writeCommonArea");
+  });
+
+  it("parses packed 12-column ASCII (BTACYRBU45D) and DID 0250 hex bytes into US vs Canada", () => {
+    expect(parseSubaru12ColumnFromAscii("BTACYRBU45D")).toEqual({
+      appliedModel: "BTACYRB",
+      optionCode: "U45D",
+    });
+    expect(parseSubaru12ColumnFromAscii("BTACYRB C05D")).toEqual({
+      appliedModel: "BTACYRB",
+      optionCode: "C05D",
+    });
+    expect(asciiFromSubaruDidHex("42 54 41 43 59 52 42 55 34 35 44")).toBe("BTACYRBU45D");
+
+    const usDump = extractAppliedModelAndOptionCodeFromDump({
+      vin: "4S4BTGUD2N3000001",
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            {
+              did: "0250",
+              label: "variant",
+              hex: "42 54 41 43 59 52 42 55 34 35 44",
+              decoded: "noise",
+            },
+          ],
+        },
+      ],
+    });
+    expect(usDump.foundDirectAscii).toBe(true);
+    expect(usDump.directAppliedModel).toBe("BTACYRB");
+    expect(usDump.directOptionCode).toBe("U45D");
+    expect(usDump.inferredRegion).toContain("USA");
+    expect(usDump.sourceDid).toBe("783 DID 0250");
+
+    const caDump = extractAppliedModelAndOptionCodeFromDump({
+      vin: null,
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            {
+              did: "0250",
+              label: "variant",
+              hex: "42 54 41 43 59 52 42 43 30 35 44",
+              decoded: "",
+            },
+          ],
+        },
+      ],
+    });
+    expect(caDump.directOptionCode).toBe("C05D");
+    expect(caDump.inferredRegion).toContain("CANADA");
+    expect(SUBARU_METER_12COLUMN_READ_DIDS[0]).toBe("0250");
   });
 });

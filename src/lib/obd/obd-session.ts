@@ -37,6 +37,11 @@ import {
   type SubaruServiceActionId,
 } from "./subaru-steering-calibration";
 import { readSubaruCvtFluidTemp, type SubaruCvtFluidReading } from "./subaru-cvt-read";
+import {
+  SUBARU_METER_12COLUMN_READ_DIDS,
+  extractAppliedModelAndOptionCodeFromDump,
+  type SubaruDumpCodeMatch,
+} from "./subaru-ssm4-catalog";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
   DID_SCAN_FROM,
@@ -129,6 +134,15 @@ export interface SubaruRegionConfigDump {
   capturedAt: string;
   vin: string | null;
   modules: SubaruRegionModuleReport[];
+}
+
+export interface SubaruMeter12ColumnRead {
+  capturedAt: string;
+  txHex: string;
+  rxHex: string;
+  vin: string | null;
+  dids: { did: string; label: string; hex: string; decoded: string }[];
+  match: SubaruDumpCodeMatch;
 }
 
 export interface ModuleDtcItem {
@@ -785,6 +799,8 @@ export class ObdBleSession {
       0xf1a0, 0xf1a1, 0xf1a2, 0xf1a3, 0xf1a4, 0xf1b0, 0xf1c0, 0xf1d0,
     ];
 
+    const meterVariantDids = [0x0250, 0x0251, 0x0240, 0x0200, 0x0220, 0x0100];
+
     const rootBitmaps = [0x1000, 0x1100, 0x1200, 0x2000, 0x2100, 0x3000, 0x3100, 0x3200, 0xd000];
 
     let vin: string | null = null;
@@ -851,7 +867,10 @@ export class ObdBleSession {
           let step = 0;
           const visited = new Set<number>();
           const emptyHops = new Map<number, number>();
-          const queue: number[] = [...passportDids, ...rootBitmaps];
+          const queue: number[] =
+            target.tx === 0x783 || target.tx === 0x7c0 || target.tx === 0x752
+              ? [...meterVariantDids, ...passportDids, ...rootBitmaps]
+              : [...passportDids, ...rootBitmaps];
 
           while (queue.length > 0) {
             if (shouldStop?.()) break;
@@ -955,6 +974,117 @@ export class ObdBleSession {
       capturedAt: new Date().toISOString(),
       vin,
       modules: reports,
+    };
+  }
+
+  /**
+   * Read-only (UDS 22 only) capture of Combination Meter 12-column Applied Model + Option Code.
+   * Never sends 2E / 27 / 31 / writeCommonArea.
+   */
+  async readSubaruMeter12ColumnCode(
+    protocol: CanProtocol = "6",
+  ): Promise<SubaruMeter12ColumnRead> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед чтением приборки");
+    await this.ensureUdsProfile(protocol);
+
+    const targets: { tx: number; rx: number }[] = [
+      { tx: 0x783, rx: 0x78b },
+      { tx: 0x7c0, rx: 0x7c8 },
+    ];
+
+    let vin: string | null = null;
+    let usedTx = 0x783;
+    let usedRx = 0x78b;
+    const dids: { did: string; label: string; hex: string; decoded: string }[] = [];
+
+    try {
+      await this.elm!.sendCommand("ATST20");
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      for (const target of targets) {
+        const txHex = target.tx.toString(16).toUpperCase();
+        try {
+          await this.udsExchange(target.tx, target.rx, "3E00", 800);
+          await this.udsExchange(target.tx, target.rx, "1003", 900);
+        } catch {
+          /* ignore */
+        }
+
+        let gotPositive = false;
+        for (const didHex of SUBARU_METER_12COLUMN_READ_DIDS) {
+          try {
+            const raw22 = await this.udsExchange(target.tx, target.rx, `22${didHex}`, 900);
+            const parsed = parseUdsResponse(raw22, 0x22);
+            if (parsed.kind !== "positive") continue;
+            gotPositive = true;
+            const didNum = Number.parseInt(didHex, 16);
+            const body =
+              parsed.payload.length >= 2 &&
+              parsed.payload[0] === ((didNum >> 8) & 0xff) &&
+              parsed.payload[1] === (didNum & 0xff)
+                ? parsed.payload.slice(2)
+                : parsed.payload;
+            const hex = body.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+            const decoded = formatUdsPayload(parsed.payload, 0x22, txHex);
+            dids.push({
+              did: didHex,
+              label: resolveDidLabel(didHex, txHex) ?? `DID ${didHex}`,
+              hex,
+              decoded,
+            });
+            if (didHex === "F190") {
+              const ascii = body
+                .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
+                .join("")
+                .trim();
+              if (ascii.length >= 11) vin = ascii;
+            }
+          } catch {
+            /* DID not supported on this meter */
+          }
+        }
+
+        if (gotPositive) {
+          usedTx = target.tx;
+          usedRx = target.rx;
+          try {
+            await this.udsExchange(target.tx, target.rx, "1001", 700);
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+      }
+    } finally {
+      try {
+        await this.elm!.sendCommand("ATSTFF");
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const match = extractAppliedModelAndOptionCodeFromDump({
+      vin,
+      modules: [
+        {
+          txHex: usedTx.toString(16).toUpperCase(),
+          dids,
+        },
+      ],
+    });
+
+    return {
+      capturedAt: new Date().toISOString(),
+      txHex: usedTx.toString(16).toUpperCase(),
+      rxHex: usedRx.toString(16).toUpperCase(),
+      vin,
+      dids,
+      match,
     };
   }
 

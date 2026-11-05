@@ -289,7 +289,7 @@ export const SUBARU_SERVICE_ACTIONS: readonly SubaruServiceActionSpec[] = [
     serviceBadge: "UDS 22",
     warningRu:
       "Зажигание IG ON. Считывает конфигурацию комбинации приборов (783 → 78B), диммер освещённости (1062) и калибровку обоих датчиков уровня топлива (1041/1042).",
-    candidatePayloads: ["22F18E", "22F182", "221041", "221042", "221062", "221007"],
+    candidatePayloads: ["220250", "220251", "22F190", "22F18E", "22F182", "221041", "221042", "221062", "221007"],
   },
   {
     id: "immo-key-count-check",

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ObdBleSession, ModuleDtcReport, SubaruRegionConfigDump } from "@/lib/obd/obd-session";
+import type {
+  ObdBleSession,
+  ModuleDtcReport,
+  SubaruMeter12ColumnRead,
+  SubaruRegionConfigDump,
+} from "@/lib/obd/obd-session";
 import type { SasCalibrationResult, TpmsWheelReading } from "@/lib/obd/mitsubishi-modules";
 import {
   SUBARU_SERVICE_ACTIONS,
@@ -220,6 +225,7 @@ export function SubaruSsmPanel({
   const [configProgress, setConfigProgress] = useState<string | null>(null);
   const [appliedModelInput, setAppliedModelInput] = useState<string>("BTACYRB");
   const [optionCodeInput, setOptionCodeInput] = useState<string>("U45D");
+  const [meter12Read, setMeter12Read] = useState<SubaruMeter12ColumnRead | null>(null);
 
   const appliedModelAnalysis = useMemo(
     () => decodeSubaruAppliedModel12Columns(appliedModelInput, optionCodeInput),
@@ -882,6 +888,28 @@ export function SubaruSsmPanel({
     },
     [ready, busy, session, setBusy, setError],
   );
+
+  const handleReadMeter12Column = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    setConfigProgress("Чтение 12-колоночного кода приборки (UDS 22, без записи)…");
+    try {
+      const result = await session.readSubaruMeter12ColumnCode("6");
+      setMeter12Read(result);
+      if (result.match.directAppliedModel) {
+        setAppliedModelInput(result.match.directAppliedModel);
+      }
+      if (result.match.directOptionCode) {
+        setOptionCodeInput(result.match.directOptionCode);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка чтения 12-колоночного кода приборки");
+    } finally {
+      setConfigProgress(null);
+      setBusy(false);
+    }
+  }, [ready, busy, session, setBusy, setError]);
 
   const handleExportDumpJson = useCallback((dump: SubaruRegionConfigDump, slot: "A" | "B", onlyMeter = false) => {
     const payload = onlyMeter
@@ -4460,10 +4488,73 @@ export function SubaruSsmPanel({
                 Для перевода американской приборки и климата в метрику (<strong>°C, км/ч, л/100км</strong>) и активации{" "}
                 <strong>Dual X-Mode</strong> используется исключительно{" "}
                 <code className="font-mono font-bold">Write Control module setting information → Write ECU setting 12 columns of models</code>{" "}
-                (Operation Procedure B по бюллетеню <code className="font-mono">MC-10182242-0001.pdf</code>). В этом режиме одометр родной приборки{" "}
-                <strong>не затрагивается и не блокируется</strong>.
+                (Operation Procedure B по бюллетеню <code className="font-mono">MC-10182242-0001.pdf</code>). В SSM4 это цепочка{" "}
+                <code className="font-mono">changeVariant → getOpDigit/findOpCode → sendMetVariByApplied</code>: в приборку уходит только DID-список вариантной маски
+                (UDS <code className="font-mono">2E</code>, в том числе DID <code className="font-mono">0250</code>). Одометр в этот список не входит.
+                Путь <code className="font-mono">sendMetVariant / writeCommonArea</code> (файл вариантной прошивки) — это Procedure A, его здесь нет.
               </p>
             </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleReadMeter12Column()}
+                disabled={!ready || busy}
+                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Считать 12-колоночный код с приборки (только чтение 22)
+              </button>
+              <span className="text-[11px] text-gray-500">
+                IG ON. Одометр не пишется: запрос `22 0250` / `22 0251`, без `2E`.
+              </span>
+            </div>
+
+            {meter12Read && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs space-y-1.5">
+                <div className="font-bold text-emerald-900">
+                  Считано с {meter12Read.txHex} → {meter12Read.rxHex}
+                  {meter12Read.vin ? ` · VIN ${meter12Read.vin}` : ""}:{" "}
+                  <code className="rounded bg-white px-1.5 py-0.5 font-mono">
+                    {meter12Read.match.inferredAppliedModel}
+                  </code>{" "}
+                  +{" "}
+                  <code className="rounded bg-white px-1.5 py-0.5 font-mono">
+                    {meter12Read.match.inferredOptionCode}
+                  </code>
+                </div>
+                <div
+                  className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold ${
+                    meter12Read.match.inferredRegion.startsWith("CANADA")
+                      ? "bg-emerald-200 text-emerald-900"
+                      : meter12Read.match.inferredRegion.startsWith("USA")
+                        ? "bg-amber-200 text-amber-900"
+                        : "bg-gray-200 text-gray-800"
+                  }`}
+                >
+                  {meter12Read.match.inferredRegion}
+                </div>
+                <div className="text-[11px] text-gray-700">{meter12Read.match.explanationRu}</div>
+                {meter12Read.dids.length > 0 ? (
+                  <div className="max-h-36 overflow-y-auto rounded border border-emerald-100 bg-white p-2 font-mono text-[11px] space-y-0.5">
+                    {meter12Read.dids.map((d) => (
+                      <div key={d.did} className="flex flex-wrap justify-between gap-2">
+                        <span className="font-bold text-gray-700">
+                          DID {d.did}{" "}
+                          <span className="font-normal text-gray-500">({d.label})</span>
+                        </span>
+                        <span className="text-emerald-700">
+                          {d.hex} <span className="text-gray-500">({d.decoded})</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-amber-800">
+                    Приборка не ответила на variant DID. Проверьте IG ON и адрес 783.
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">

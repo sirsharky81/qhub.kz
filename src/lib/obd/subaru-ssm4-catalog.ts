@@ -5155,16 +5155,19 @@ export const SSM4_SRP_UTILITY_CATALOG: readonly Ssm4SrpUtilityModule[] = [
     group: "Body",
     titleRu: "Комбинация приборов Combination Meter (MET-001 .. MET-010.srp)",
     proceduresRu: [
-      "Запись 12-колоночного кода модели и опций («Write ECU setting 12 columns of models» — sendMetVariByApplied / TSB 07-183-20 Procedure B)",
-      "Чтение и сохранение вариантной конфигурации приборной панели в файл (readMetVariant / saveMetVariantFile / loadMetVariantFile)",
-      "Индивидуальная настройка параметров предупреждений и подсветки приборки (setMetIndividualParamList / sendMetIndividualParam)",
+      "Безопасно для °C/км/ч (TSB 07-183-20 Procedure B): changeVariant → getOpDigit/findOpCode → GetFindByAppliedModelList → sendMetVariByApplied. Пишет только DID-список вариантной маски (UDS 2E, в т.ч. DID 0250), одометр не входит в этот список",
+      "Только чтение текущей маски: readMetVariant / getMetReadDidTbl / getMetDidListFile (без последующего sendMetVariant)",
+      "ЗАПРЕЩЕНО для смены единиц: saveMetVariantFile → loadMetVariantFile → sendMetVariant (scr_ext_in_writeCommonArea) — это Procedure A, перенос всей common-area включая одометр, риск ------ на дисплее",
+      "Не путать с Цельсием: setMetIndividualItemList / sendMetIndividualParam / SetIndividualItem — это предупреждения и подсветка, не destination/единицы",
     ],
     dllFunctions: [
       "readMetVariant",
       "sendMetVariByApplied",
-      "saveMetVariantFile",
-      "loadMetVariantFile",
-      "sendMetIndividualParam",
+      "changeVariant",
+      "getOpDigit",
+      "findOpCode",
+      "GetFindByAppliedModelList",
+      "chkDigit1to3",
     ],
   },
   {
@@ -6091,6 +6094,73 @@ export interface SubaruAppliedModelAnalysis {
   dualXModeAppliedModelSuggestion: string;
 }
 
+/**
+ * VIN WMI whitelist from FHIUtilityCtrlNK.dll chkDigit1to3
+ * (UTF-16 table at VA 0x10074AC8, logged as vinTopCode[0..2]).
+ * Outback BT / SIA is 4S4 — the check accepts the car; it does not lock US→CA units.
+ */
+export const SUBARU_SSM4_VIN_WMI = [
+  "JF1",
+  "JF2",
+  "JF3",
+  "4S3",
+  "4S4",
+  "PLP",
+  "MMR",
+  "JT2",
+] as const;
+
+export function isSubaruSsm4VinWmiAllowed(vin: string): boolean {
+  const wmi = vin.trim().toUpperCase().slice(0, 3);
+  return (SUBARU_SSM4_VIN_WMI as readonly string[]).includes(wmi);
+}
+
+/**
+ * Meter variant pipeline inside FHIUtilityCtrlNK.dll (SSM4 v28.6.0),
+ * mapped onto TSB 07-183-20 Procedure A vs B:
+ *
+ * Procedure B (safe °C / km/h, no odometer):
+ *   listShowSet_Type17 (12-col) or listShowSet_Type17_24Column
+ *   → changeVariant / changeVariantExtend
+ *     splits input into Applied + divOpCode1 + divOpCode2, logs flgOpDigit3
+ *   → getOpDigit / findOpCode / GetFindByAppliedModelList / getVariantData
+ *   → sendMetVariByApplied
+ *     getMetDidListFile → getMetVariByApplied → DIDWrite / SendDid0250
+ *     (UDS 0x2E WriteDataByIdentifier, positive 0x6E; NRC 0x21 / 0x78 retried)
+ *
+ * Procedure A (forbidden here):
+ *   readMetVariant → saveMetVariantFile (XOR key cGZGBPHB-WmTWLZ.mHZ)
+ *   → loadMetVariantFile → sendMetVariant → scr_ext_in_writeCommonArea
+ *   copies the whole meter common area, including odometer.
+ *
+ * VIN helpers (identity only, not a destination lock):
+ *   getVINCode / getVehicleFrameNum / checkVinChar / calcChkDigit /
+ *   chkDigit1to3 (WMI table) / makeCommVin
+ */
+export const SUBARU_METER_VARIANT_SAFE_PATH = {
+  writeFunction: "sendMetVariByApplied",
+  writeSid: 0x2e,
+  variantDidHint: "0250",
+  forbiddenWriteFunction: "sendMetVariant",
+  forbiddenInner: "scr_ext_in_writeCommonArea",
+} as const;
+
+/** Read-only UDS 22 DIDs that SSM4 uses for Combination Meter 12-column variant. */
+export const SUBARU_METER_12COLUMN_READ_DIDS = [
+  "0250",
+  "0251",
+  "0240",
+  "0200",
+  "0220",
+  "0100",
+  "F190",
+  "F18E",
+  "F187",
+  "F1A0",
+  "F1A1",
+  "F191",
+] as const;
+
 const SUBARU_OPTION_DEST_MAP: Record<string, string> = {
   U4: "США — Federal 50-State Emissions (USDM: Фаренгейты °F, мили MPH, галлоны)",
   U5: "США — California / PZEV Emissions (USDM: Фаренгейты °F, мили MPH, галлоны)",
@@ -6210,6 +6280,53 @@ export interface SubaruDumpCodeMatch {
   explanationRu: string;
 }
 
+const SUBARU_APPLIED_MODEL_RE =
+  /(BT[9A]|BW[9A]|SK[79]|GT[7A]|GU[7A]|GK[7A]|WMA)[A-Z][YLK5][A-Z0-9]{2}/;
+const SUBARU_OPTION_CODE_RE = /(U4|U5|U6|C0|C5|C4|C6|EC|EA|K0)[A-Z0-9]{2}/;
+const SUBARU_12COLUMN_PACKED_RE =
+  /((?:BT[9A]|BW[9A]|SK[79]|GT[7A]|GU[7A]|GK[7A]|WMA)[A-Z][YLK5][A-Z0-9]{2})((?:U4|U5|U6|C0|C5|C4|C6|EC|EA|K0)[A-Z0-9]{2})/;
+
+export function asciiFromSubaruDidHex(hex: string): string {
+  return hex
+    .trim()
+    .split(/\s+/)
+    .map((tok) => {
+      const n = Number.parseInt(tok, 16);
+      if (!Number.isFinite(n)) return "";
+      return n >= 0x20 && n <= 0x7e ? String.fromCharCode(n) : " ";
+    })
+    .join("");
+}
+
+/** Pull 7-char Applied Model + 4-char Option Code from ASCII or packed 11-char blob. */
+export function parseSubaru12ColumnFromAscii(text: string): {
+  appliedModel: string | null;
+  optionCode: string | null;
+} {
+  const compact = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const packed = compact.match(SUBARU_12COLUMN_PACKED_RE);
+  if (packed) {
+    return { appliedModel: packed[1] ?? null, optionCode: packed[2] ?? null };
+  }
+  return {
+    appliedModel: compact.match(SUBARU_APPLIED_MODEL_RE)?.[0] ?? null,
+    optionCode: compact.match(SUBARU_OPTION_CODE_RE)?.[0] ?? null,
+  };
+}
+
+function regionFromOptionCode(
+  optionCode: string | null,
+): SubaruDumpCodeMatch["inferredRegion"] {
+  if (!optionCode) return "UNKNOWN";
+  if (optionCode.startsWith("C0") || optionCode.startsWith("C5")) {
+    return "CANADA (C0 / C5 — °C, км/ч)";
+  }
+  if (optionCode.startsWith("U4") || optionCode.startsWith("U5") || optionCode.startsWith("U6")) {
+    return "USA (U4 / U5 / U6 — °F, мили)";
+  }
+  return "UNKNOWN";
+}
+
 /**
  * Inspects a captured Subaru Meter (783/7C0) & BIU (752) dump and extracts or reconstructs
  * the exact 7-character Applied Model + 4-character Option Code (e.g. BTACYRB + C05D),
@@ -6226,27 +6343,40 @@ export function extractAppliedModelAndOptionCodeFromDump(
   fallbackAppliedModel = "BTACYRB",
   fallbackUsOptionCode = "U45D",
 ): SubaruDumpCodeMatch {
-  const appRegex = /\b(BT[9A]|BW[9A]|SK[79]|GT[7A]|GU[7A]|GK[7A]|WMA)[A-Z][YLK5][A-Z0-9]{2}\b/;
-  const optRegex = /\b(U4|U5|U6|C0|C5|C4|C6|EC|EA|K0)[A-Z0-9]{2}\b/;
-
   let directAppliedModel: string | null = null;
   let directOptionCode: string | null = null;
   let sourceDid: string | null = null;
 
+  const preferredDidOrder = ["0250", "0251", "F1A0", "F1A1", "0200", "0240"];
+  const records: { txHex: string; did: string; text: string }[] = [];
   for (const mod of dump.modules) {
     if (mod.txHex !== "783" && mod.txHex !== "7C0" && mod.txHex !== "752") continue;
     for (const d of mod.dids) {
-      const mApp = d.decoded.match(appRegex);
-      if (mApp && !directAppliedModel) {
-        directAppliedModel = mApp[0];
-        sourceDid = `${mod.txHex} DID ${d.did}`;
-      }
-      const mOpt = d.decoded.match(optRegex);
-      if (mOpt && !directOptionCode) {
-        directOptionCode = mOpt[0];
-        if (!sourceDid) sourceDid = `${mod.txHex} DID ${d.did}`;
-      }
+      const fromHex = asciiFromSubaruDidHex(d.hex);
+      records.push({
+        txHex: mod.txHex,
+        did: d.did,
+        text: `${d.decoded} ${fromHex}`,
+      });
     }
+  }
+  records.sort((a, b) => {
+    const ai = preferredDidOrder.indexOf(a.did);
+    const bi = preferredDidOrder.indexOf(b.did);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+
+  for (const rec of records) {
+    const parsed = parseSubaru12ColumnFromAscii(rec.text);
+    if (parsed.appliedModel && !directAppliedModel) {
+      directAppliedModel = parsed.appliedModel;
+      sourceDid = `${rec.txHex} DID ${rec.did}`;
+    }
+    if (parsed.optionCode && !directOptionCode) {
+      directOptionCode = parsed.optionCode;
+      if (!sourceDid) sourceDid = `${rec.txHex} DID ${rec.did}`;
+    }
+    if (directAppliedModel && directOptionCode) break;
   }
 
   // Also check VIN if available to refine series/year/trim
@@ -6268,15 +6398,12 @@ export function extractAppliedModelAndOptionCodeFromDump(
 
   if (directAppliedModel || directOptionCode) {
     const finalOpt = directOptionCode ?? `C0${suffix}`;
-    const isCan = finalOpt.startsWith("C0") || finalOpt.startsWith("C5");
     return {
       foundDirectAscii: true,
       directAppliedModel,
       directOptionCode,
       sourceDid,
-      inferredRegion: isCan
-        ? "CANADA (C0 / C5 — °C, км/ч)"
-        : "USA (U4 / U5 / U6 — °F, мили)",
+      inferredRegion: regionFromOptionCode(finalOpt),
       inferredAppliedModel: baseApp,
       inferredOptionCode: finalOpt,
       explanationRu: `Прямое совпадение ASCII-кода найдено в ответе блока (${sourceDid}): ${baseApp} + ${finalOpt}`,
