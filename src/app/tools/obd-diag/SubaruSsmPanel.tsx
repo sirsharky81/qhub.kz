@@ -82,6 +82,10 @@ import {
   type Ssm4UtilitySpec,
 } from "@/lib/obd/subaru-ssm4-catalog";
 import { isSubaruMeterWriteDestination } from "@/lib/obd/subaru-meter-variant";
+import type {
+  SubaruResProbeResult,
+  SubaruResRegistrationResult,
+} from "@/lib/obd/subaru-res-cm-registration";
 
 interface Props {
   session: ObdBleSession;
@@ -357,6 +361,10 @@ export function SubaruSsmPanel({
     Record<string, { rawHex: string; decoded: string }>
   >({});
   const [immoWizardStep, setImmoWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [resProbe, setResProbe] = useState<SubaruResProbeResult | null>(null);
+  const [resRegisterResult, setResRegisterResult] = useState<SubaruResRegistrationResult | null>(null);
+  const [resConfirmOpen, setResConfirmOpen] = useState(false);
+  const [resConfirmTyped, setResConfirmTyped] = useState("");
 
   useEffect(() => {
     try {
@@ -1930,6 +1938,50 @@ export function SubaruSsmPanel({
     },
     [ready, busy, session, setBusy, setError],
   );
+
+  const handleProbeResCm = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    setConfigProgress("Опрос Keyless 750, BIU 752 и кандидатов RES CM (только чтение)…");
+    try {
+      const result = await session.probeSubaruResCm("6");
+      setResProbe(result);
+      setImmoLogLines((prev) => [...prev, ...result.steps]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка опроса RES CM");
+    } finally {
+      setConfigProgress(null);
+      setBusy(false);
+    }
+  }, [ready, busy, session, setBusy, setError]);
+
+  const handleRegisterResCm = useCallback(async () => {
+    if (!ready || busy) return;
+    if (resConfirmTyped.trim().toUpperCase() !== "YES") return;
+    setResConfirmOpen(false);
+    setResConfirmTyped("");
+    setBusy(true);
+    setError(null);
+    setConfigProgress("Remote Engine Start CM Registration (UDS 31 на 750/752, без удаления ключей)…");
+    try {
+      const result = await session.registerSubaruResCm("6");
+      setResRegisterResult(result);
+      setImmoLogLines((prev) => [...prev, ...result.steps]);
+      if (!result.success) {
+        setError(
+          result.securityAccessRequired
+            ? "RES CM: блок запросил SecurityAccess (NRC 33). AES-ключ не подставляется — введите дилерский 27 02 ниже и повторите."
+            : (result.steps.at(-1) ?? "RES CM не подтвердил регистрацию."),
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка регистрации RES CM");
+    } finally {
+      setConfigProgress(null);
+      setBusy(false);
+    }
+  }, [ready, busy, resConfirmTyped, session, setBusy, setError]);
 
   const dumpDiffs = useMemo<SubaruDidDiffEntry[]>(() => {
     if (!configDumpA || !configDumpB) return [];
@@ -3626,6 +3678,150 @@ export function SubaruSsmPanel({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          <div className="rounded-xl border border-blue-300 bg-blue-50/60 p-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <span className="rounded bg-blue-700 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                  SSM4 F2 · NA/US · Remote Engine Start CM Registration
+                </span>
+                <h4 className="mt-1 text-xs font-bold text-gray-900">
+                  Регистрация уже установленного блока Remote Engine Start (H-type Push Start)
+                </h4>
+                <p className="text-[11px] text-gray-600 leading-snug">
+                  Как в SSM4 США: <code className="font-mono">Immobilizer etc. registration</code> →{" "}
+                  <code className="font-mono">Remote Engine Start CM Registration</code>. Сканер говорит с Keyless{" "}
+                  <code className="font-mono">750</code> и BIU <code className="font-mono">752</code>; они сами связывают
+                  RES по CAN. Нужен один уже прописанный смарт-ключ в салоне, IG ON, дверь водителя лучше открыть.
+                  Не удаляет ключи, не пишет одометр.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleProbeResCm()}
+                disabled={!ready || busy}
+                className="rounded-lg bg-blue-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                1. Опросить 750 / 752 / RES
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResConfirmTyped("");
+                  setResConfirmOpen(true);
+                }}
+                disabled={!ready || busy}
+                className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                2. Execute Remote Engine Start CM Registration
+              </button>
+            </div>
+            {resProbe && (
+              <div className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs space-y-1">
+                <div className="font-bold text-blue-950">
+                  Keyless 750: {resProbe.keylessOk ? "на связи" : "нет ответа"} · BIU 752:{" "}
+                  {resProbe.biuOk ? "на связи" : "нет ответа"}
+                </div>
+                {resProbe.modules.map((mod) => (
+                  <div key={mod.txHex} className="flex flex-wrap justify-between gap-2 font-mono text-[11px]">
+                    <span className={mod.responded ? "text-emerald-800" : "text-gray-500"}>
+                      {mod.txHex}→{mod.rxHex} {mod.titleRu}
+                    </span>
+                    <span className="text-gray-700">
+                      {mod.responded ? "✓" : "—"} {mod.partNumber ?? ""} {mod.systemName ?? ""} {mod.noteRu}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {resRegisterResult && (
+              <div
+                className={`rounded-lg border px-3 py-2 text-xs space-y-1 ${
+                  resRegisterResult.success
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-rose-200 bg-rose-50"
+                }`}
+              >
+                <div className="font-bold">
+                  {resRegisterResult.success
+                    ? `RES CM зарегистрирован (${resRegisterResult.acceptedTx} ${resRegisterResult.acceptedPayload}). Выключите зажигание.`
+                    : resRegisterResult.securityAccessRequired
+                      ? "NRC 33: нужен дилерский SecurityAccess 27 02, AES не подставляется"
+                      : "Регистрация RES CM не подтверждена"}
+                </div>
+                <ul className="max-h-32 overflow-y-auto space-y-0.5 font-mono text-[10px] text-gray-700">
+                  {resRegisterResult.steps.map((step, idx) => (
+                    <li key={idx}>• {step}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {resConfirmOpen && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => {
+                setResConfirmOpen(false);
+                setResConfirmTyped("");
+              }}
+            >
+              <div
+                className="w-full max-w-md rounded-2xl border border-blue-300 bg-white p-5 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="rounded bg-blue-100 px-2 py-0.5 font-mono text-xs font-bold text-blue-900">
+                  750 → 758 · 752 → 75A · UDS 31 01
+                </span>
+                <h2 className="mt-2 text-base font-bold text-gray-900">
+                  Execute Remote Engine Start CM Registration?
+                </h2>
+                <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950 space-y-1.5">
+                  <p>
+                    IG ON, один зарегистрированный смарт-ключ в салоне, блок RES уже установлен. SSM4 ждёт связь BIU ↔
+                    RES. Не выполняется удаление ключей, не пишется одометр, AES-ключ не подбирается.
+                  </p>
+                </div>
+                <label className="mt-4 block space-y-1">
+                  <span className="text-sm font-medium text-gray-900">
+                    Введите <code className="font-mono">YES</code> для подтверждения:
+                  </span>
+                  <input
+                    type="text"
+                    maxLength={8}
+                    value={resConfirmTyped}
+                    onChange={(e) => setResConfirmTyped(e.target.value.toUpperCase())}
+                    className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
+                    autoFocus
+                  />
+                </label>
+                <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResConfirmOpen(false);
+                      setResConfirmTyped("");
+                    }}
+                    className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2.5 text-xs font-semibold text-gray-900 hover:bg-gray-200"
+                  >
+                    No
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRegisterResCm()}
+                    disabled={resConfirmTyped.trim().toUpperCase() !== "YES"}
+                    className="rounded-xl border border-gray-900 bg-gray-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
+                  >
+                    Yes, зарегистрировать RES CM
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

@@ -5182,6 +5182,7 @@ export const SSM4_SRP_UTILITY_CATALOG: readonly Ssm4SrpUtilityModule[] = [
       "Проверка количества зарегистрированных ключей и верификация смарт-ключа (imb_in_ReadKeyNumConfirm / keyVerificationAS1)",
       "Регистрация новых смарт-ключей и удаление утерянных ключей (keyRegistAS1 / keyAddAS1 / keyDeleteAS1)",
       "Синхронизация и привязка блоков при замене (ECM ↔ Immobilizer ↔ Steering Lock ↔ Meter: sysRegist / meterScuRegistAS1 / ImbTlmCuRegist)",
+      "US/NA F2: регистрация уже установленного Remote Engine Start CM (H-type Push Start, Keyless 750 ↔ BIU 752, RES-001.srp) — без writeCommonArea и без удаления ключей",
       "Криптографическая авторизация SecurityAccess 2018+ AES (SecurityAccess2018CY_AesKey / GetSecurityAccessImb)",
     ],
     dllFunctions: [
@@ -5190,6 +5191,7 @@ export const SSM4_SRP_UTILITY_CATALOG: readonly Ssm4SrpUtilityModule[] = [
       "keyAddAS1",
       "keyDeleteAS1",
       "systemRegistAS1",
+      "ImbTlmCuRegist",
       "SecurityAccess2018CY_AesKey",
     ],
   },

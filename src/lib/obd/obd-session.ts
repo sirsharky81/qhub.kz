@@ -46,6 +46,12 @@ import {
   writeSubaruMeter12ColumnCode as executeSubaruMeter12ColumnWrite,
   type SubaruMeter12ColumnWriteResult,
 } from "./subaru-meter-variant";
+import {
+  probeSubaruResCm as executeSubaruResCmProbe,
+  registerSubaruResCm as executeSubaruResCmRegister,
+  type SubaruResProbeResult,
+  type SubaruResRegistrationResult,
+} from "./subaru-res-cm-registration";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
   DID_SCAN_FROM,
@@ -1128,6 +1134,29 @@ export class ObdBleSession {
     }
 
     return { ...write, before, after };
+  }
+
+  /**
+   * Read-only probe before SSM4 F2 «Remote Engine Start CM Registration» (Keyless 750 + BIU 752).
+   */
+  async probeSubaruResCm(protocol: CanProtocol = "6"): Promise<SubaruResProbeResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед опросом RES CM");
+    await this.ensureUdsProfile(protocol);
+    return executeSubaruResCmProbe(this.elm!);
+  }
+
+  /**
+   * SSM4 NA/US F2: bind an already-installed Remote Engine Start CM to Keyless/BIU.
+   * Never deletes keys, never writeCommonArea, never invents SecurityAccess keys.
+   */
+  async registerSubaruResCm(protocol: CanProtocol = "6"): Promise<SubaruResRegistrationResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед регистрацией RES CM");
+    await this.ensureUdsProfile(protocol);
+    return executeSubaruResCmRegister(this.elm!);
   }
 
   /**
