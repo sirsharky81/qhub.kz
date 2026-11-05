@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SSM4_ECUS,
+  SSM4_FULL_SYSTEMS,
   SSM4_FUNCTION_CODES,
   SSM4_SIGNALS,
   SSM4_SRP_UTILITY_CATALOG,
@@ -94,6 +95,11 @@ describe("subaru-ssm4-catalog", () => {
       "util-keyless-starter-check",
     ]);
     expect(SSM4_FUNCTION_CODES.length).toBeGreaterThanOrEqual(19);
+    for (const fn of SSM4_FUNCTION_CODES) {
+      expect(fn.subOptions.length).toBeGreaterThan(0);
+    }
+    expect(SSM4_FULL_SYSTEMS.length).toBe(40);
+    expect(SSM4_FULL_SYSTEMS.filter((s) => s.supportsCustomize).length).toBe(16);
     expect(SSM4_SRP_UTILITY_CATALOG.length).toBeGreaterThanOrEqual(11);
     expect(SSM4_ECUS.length).toBe(16);
     expect(SSM4_SIGNALS.length).toBeGreaterThanOrEqual(120);

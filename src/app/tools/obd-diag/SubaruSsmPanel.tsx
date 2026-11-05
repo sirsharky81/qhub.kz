@@ -56,6 +56,7 @@ import {
 import {
   SSM4_CUSTOMIZE_ITEMS,
   SSM4_ECUS,
+  SSM4_FULL_SYSTEMS,
   SSM4_FUNCTION_CODES,
   SSM4_SIGNALS,
   SSM4_SRP_UTILITY_CATALOG,
@@ -68,8 +69,10 @@ import {
   extractAppliedModelAndOptionCodeFromDump,
   matchSsm4VehicleByVin,
   type Ssm4EcuDef,
+  type Ssm4FunctionSubOption,
   type Ssm4Group,
   type Ssm4SignalDef,
+  type Ssm4SystemEntry,
   type Ssm4UtilitySpec,
 } from "@/lib/obd/subaru-ssm4-catalog";
 
@@ -82,14 +85,18 @@ interface Props {
   vinHint?: string | null;
 }
 
+type Ssm4StartMode = "f1-diag" | "f2-immo" | "f3-repro" | "f4-obd" | "f5-recorder";
+
 type Ssm4TopView =
   | "all-dtc"
+  | "each-system"
+  | "multi-system"
   | "data-monitor"
+  | "utilities"
+  | "customize"
   | "steering"
   | "cvt"
   | "tpms"
-  | "utilities"
-  | "customize"
   | "ssm4-db";
 
 const SERVICE_UTILITIES = SSM4_UTILITIES;
@@ -134,12 +141,36 @@ export function SubaruSsmPanel({
   setError,
   vinHint,
 }: Props) {
+  const [startMode, setStartMode] = useState<Ssm4StartMode>("f1-diag");
   const [topView, setTopView] = useState<Ssm4TopView>("all-dtc");
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string>(SSM4_VEHICLES[0]!.id);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string>(SSM4_VEHICLES[1]?.id ?? SSM4_VEHICLES[0]!.id);
   const [detectedVin, setDetectedVin] = useState<string | null>(vinHint ?? null);
   const [selectedGroup, setSelectedGroup] = useState<Ssm4Group | "ALL">("ALL");
   const [selectedEcuId, setSelectedEcuId] = useState<number>(234);
   const [selectedCustomList, setSelectedCustomList] = useState<string>("Diagnosis");
+
+  // F2 Each System & F3 Multiple System & F6 Customize states
+  const [selectedSystemId, setSelectedSystemId] = useState<string>("sys-egi");
+  const [eachSystemStep, setEachSystemStep] = useState<"select" | "functions">("select");
+  const [systemSearchQuery, setSystemSearchQuery] = useState<string>("");
+  const [multiSystemIds, setMultiSystemIds] = useState<string[]>([
+    "sys-egi",
+    "sys-tm",
+    "sys-bc",
+    "sys-tpm",
+  ]);
+  const [selectedCustomizeSysId, setSelectedCustomizeSysId] = useState<string>("ALL");
+  const [selectedSubOptionByFunc, setSelectedSubOptionByFunc] = useState<Record<number, string>>(
+    () => {
+      const init: Record<number, string> = {};
+      for (const fn of SSM4_FUNCTION_CODES) {
+        if (fn.subOptions[0]) {
+          init[fn.id] = fn.subOptions[0].subId;
+        }
+      }
+      return init;
+    },
+  );
 
   // All-System DTC scan state
   const [dtcReports, setDtcReports] = useState<ModuleDtcReport[]>([]);
@@ -1079,40 +1110,123 @@ export function SubaruSsmPanel({
     }
   }, [pendingServiceAction, session, setBusy, setError]);
 
+  const selectedSystem = useMemo<Ssm4SystemEntry>(
+    () =>
+      SSM4_FULL_SYSTEMS.find((s) => s.id === selectedSystemId) ??
+      SSM4_FULL_SYSTEMS[0]!,
+    [selectedSystemId],
+  );
+
+  const handleSelectSystemEntry = useCallback(
+    (sys: Ssm4SystemEntry, openFunctions = true) => {
+      setSelectedSystemId(sys.id);
+      const ecu = SSM4_ECUS.find((e) => e.ecuId === sys.ecuId);
+      if (ecu) {
+        handleSelectEcu(ecu);
+      }
+      if (openFunctions) {
+        setEachSystemStep("functions");
+      }
+    },
+    [handleSelectEcu],
+  );
+
   const handleRunSsm4Function = useCallback(
-    async (funcId: number) => {
-      // Navigation-backed SSM4 Functions that can also open interactive workspaces immediately
-      if (funcId === 2) {
-        setTopView("data-monitor");
-        return;
-      }
-      if (funcId === 10) {
-        // Multi-ECU Data Monitor: load Engine + CVT + ABS signals and switch to Live
-        setSelectedSignalIds([
-          "eng-rpm-obd",
-          "eng-speed-obd",
-          "eng-coolant-obd",
-          "tcm-atf-temp-uds",
-          "tcm-cvt-temp-10d2",
-          "tcm-awd-duty",
-          "eps-steering-angle",
-          "abs-brake-pressure",
-        ]);
-        setTopView("data-monitor");
-        return;
-      }
-      if (funcId === 902) {
-        setTopView("utilities");
-        return;
-      }
-      if (funcId === 20 || funcId === 917) {
-        setTopView("customize");
-        if (ready && !busy) {
-          void handleReadCustomizeItems();
+    async (funcId: number, explicitSubId?: string) => {
+      const fnDef = SSM4_FUNCTION_CODES.find((f) => f.id === funcId);
+      const activeSubId =
+        explicitSubId ??
+        selectedSubOptionByFunc[funcId] ??
+        fnDef?.subOptions[0]?.subId ??
+        "";
+      const subOpt = fnDef?.subOptions.find((o) => o.subId === activeSubId) ?? fnDef?.subOptions[0];
+
+      // 1. If the chosen sub-option is linked to a concrete service calibration/reset action, open its confirmation dialog
+      if (subOpt?.serviceActionId) {
+        const act = SUBARU_SERVICE_ACTIONS.find((a) => a.id === subOpt.serviceActionId);
+        if (act) {
+          setPendingServiceAction(act);
+          return;
         }
+      }
+
+      // 2. Sub-options that configure and open Live Data Monitor / Multi-System / Customize / All-DTC views
+      if (funcId === 2) {
+        const ecuSigs = SSM4_SIGNALS.filter((s) => s.ecuId === selectedEcu.ecuId);
+        if (activeSubId === "dm-all-data") {
+          setSelectedCustomList("All Data");
+          setSelectedSignalIds(ecuSigs.map((s) => s.id));
+        } else if (activeSubId === "dm-roughness") {
+          const rough = ecuSigs.filter((s) => s.customList === "Roughness");
+          setSelectedCustomList("Roughness");
+          setSelectedSignalIds(rough.length > 0 ? rough.map((s) => s.id) : ecuSigs.slice(0, 8).map((s) => s.id));
+        } else if (activeSubId === "dm-special-eng") {
+          const spec = ecuSigs.filter((s) =>
+            ["EGR & Evap", "VVT & Turbo", "AWD & Solenoids", "Start-Stop & Battery"].includes(s.customList),
+          );
+          setSelectedSignalIds(spec.length > 0 ? spec.map((s) => s.id) : ecuSigs.map((s) => s.id));
+        }
+        setTopView("data-monitor");
         return;
       }
-      if (funcId === 918) {
+
+      if (funcId === 10) {
+        if (activeSubId === "mdm-select-custom") {
+          setTopView("multi-system");
+          return;
+        }
+        if (activeSubId === "mdm-powertrain") {
+          setSelectedSignalIds([
+            "eng-rpm-obd",
+            "eng-speed-obd",
+            "eng-coolant-obd",
+            "eng-map-obd",
+            "tcm-atf-temp-uds",
+            "tcm-cvt-temp-10d2",
+            "tcm-turbine-rpm",
+            "tcm-primary-pulley-rpm",
+            "tcm-secondary-pulley-rpm",
+            "tcm-actual-sec-press",
+          ]);
+        } else if (activeSubId === "mdm-chassis-adas") {
+          setSelectedSignalIds([
+            "eps-steering-angle",
+            "eps-steering-torque",
+            "abs-brake-pressure",
+            "abs-fr-wc-press",
+            "abs-fl-wc-press",
+            "abs-g-sensor",
+            "abs-epb-force",
+            "tcm-awd-duty",
+            "tcm-awd-actual-curr",
+          ]);
+        } else if (activeSubId === "mdm-body-climate") {
+          setSelectedSignalIds([
+            "biu-tpms-1",
+            "biu-tpms-2",
+            "biu-tpms-3",
+            "biu-tpms-4",
+            "met-fuel-sub-left",
+            "met-fuel-sub-right",
+            "ac-in-car-temp",
+            "ac-ambient-temp",
+            "ac-evap-core-temp",
+          ]);
+        }
+        setTopView("data-monitor");
+        return;
+      }
+
+      if (funcId === 20 && activeSubId === "cust-open-tab") {
+        setTopView("customize");
+        return;
+      }
+
+      if (funcId === 918 && activeSubId === "alldtc-open-table") {
+        setTopView("all-dtc");
+        return;
+      }
+      if (funcId === 918 && activeSubId === "alldtc-full-scan") {
         setTopView("all-dtc");
         if (ready && !busy) {
           void handleRunAllDtcScan();
@@ -1121,7 +1235,7 @@ export function SubaruSsmPanel({
       }
 
       if (!ready || busy) {
-        setError("Подключите адаптер vLinker для выполнения функции SSM4 на автомобиле");
+        setError("Подключите адаптер vLinker для выполнения выбранной подфункции SSM4 на автомобиле");
         return;
       }
 
@@ -1129,82 +1243,168 @@ export function SubaruSsmPanel({
       setError(null);
       const lines: string[] = [];
       let ok = false;
+      const subTitle = subOpt ? `${subOpt.titleRu} (${subOpt.protocolHint})` : `FunctionId = ${funcId}`;
+
       try {
         if (funcId === 1) {
-          // DIAG_FREEZE: Read DTCs + FreezeFrame + IG Counter 101E on selected ECU
-          const r19 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "19 02 FF", 1500);
-          const p19 = parseUdsResponse(r19, 0x19);
-          if (p19.kind === "positive") {
+          if (activeSubId === "dtc-clear") {
+            const res = await session.clearModuleDtcsSafe("6", selectedEcu.txHex, selectedEcu.rxHex);
             ok = true;
-            lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) UDS 19 02 FF: ${formatUdsPayload(p19.payload, 0x19, selectedEcu.txHex)}`);
-          }
-          const r101e = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "22 101E", 1200);
-          const p101e = parseUdsResponse(r101e, 0x22);
-          if (p101e.kind === "positive") {
+            lines.push(res);
+          } else if (activeSubId === "dtc-pending") {
+            const m07 = await session.readPendingDtcs();
             ok = true;
-            lines.push(`IG Counter (DID 101E): ${formatUdsPayload(p101e.payload, 0x22, selectedEcu.txHex)}`);
-          }
-          const ff = await session.readFreezeFrame();
-          if (ff.readings.length > 0) {
+            lines.push(`Pending DTC (Mode 07): найдено ${m07.length}`);
+            for (const d of m07) lines.push(`• ${d.code}: ${d.description}`);
+          } else if (activeSubId === "dtc-permanent") {
+            const m0a = await session.readPermanentDtcs();
             ok = true;
-            lines.push(`Freeze Frame DTC: ${ff.dtc ?? "нет"} · параметров: ${ff.readings.map((r) => `${r.label}=${r.value}${r.unit}`).join(", ")}`);
+            lines.push(`Permanent DTC (Mode 0A): найдено ${m0a.length}`);
+            for (const d of m0a) lines.push(`• ${d.code}: ${d.description}`);
+          } else if (activeSubId === "dtc-freeze-single" || activeSubId === "dtc-freeze-multi") {
+            const ff = await session.readFreezeFrame();
+            ok = true;
+            lines.push(`Freeze Frame DTC: ${ff.dtc ?? "нет ошибок в стоп-кадре"}`);
+            for (const r of ff.readings) {
+              lines.push(`• ${r.label}: ${r.value} ${r.unit}`);
+            }
+            const r101e = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "22 101E", 1000);
+            const p101e = parseUdsResponse(r101e, 0x22);
+            if (p101e.kind === "positive") {
+              lines.push(`IG Counter (101E): ${formatUdsPayload(p101e.payload, 0x22, selectedEcu.txHex)}`);
+            }
+          } else if (activeSubId === "dtc-ig-counter") {
+            for (const did of ["101E", "101F"]) {
+              const raw = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, `22 ${did}`, 1100);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) DID ${did}: ${formatUdsPayload(p.payload, 0x22, selectedEcu.txHex)}`);
+              }
+            }
+          } else {
+            // dtc-current or dtc-history
+            const mask = activeSubId === "dtc-current" ? "09" : "28";
+            await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 03", 800);
+            const r19 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "19 02 FF", 1500);
+            const p19 = parseUdsResponse(r19, 0x19);
+            if (p19.kind === "positive") {
+              ok = true;
+              lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) [Mask 0x${mask}]: ${formatUdsPayload(p19.payload, 0x19, selectedEcu.txHex)}`);
+            }
+            await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 01", 600);
           }
         } else if (funcId === 3) {
-          // ACTIVE_TEST: Check active test readiness & read actuator status DIDs on ECM 7E0
-          await sendUdsRaw(session, "can11-500", "7E0", "7E8", "10 03", 900);
-          for (const did of ["10B3", "10AB", "10AE", "11DA", "1272", "1273"]) {
-            const raw = await sendUdsRaw(session, "can11-500", "7E0", "7E8", `22 ${did}`, 1000);
+          // ACTIVE_TEST sub-selection
+          const actMap: Record<string, { tx: string; rx: string; dids: string[] }> = {
+            "act-111-fuel-pump": { tx: "7E0", rx: "7E8", dids: ["11DE", "10B3"] },
+            "act-112-cpc1": { tx: "7E0", rx: "7E8", dids: ["10AE"] },
+            "act-113-rad-fan": { tx: "7E0", rx: "7E8", dids: ["10AB", "11DC"] },
+            "act-114-ac-comp": { tx: "7E0", rx: "7E8", dids: ["11DA"] },
+            "act-115-wastegate": { tx: "7E0", rx: "7E8", dids: ["10AC", "10D3", "10D4"] },
+            "act-116-cpc2": { tx: "7E0", rx: "7E8", dids: ["11F0"] },
+            "act-118-fp-duty": { tx: "7E0", rx: "7E8", dids: ["10B3", "111E"] },
+            "act-119-fixed-ign": { tx: "7E0", rx: "7E8", dids: ["F40E", "F40C"] },
+            "act-120-isc": { tx: "7E0", rx: "7E8", dids: ["F40C", "1277"] },
+            "act-elcm-evap": { tx: "7E0", rx: "7E8", dids: ["1272", "1273"] },
+            "act-meter-speedo": { tx: "783", rx: "78B", dids: ["101B", "1062", "1007"] },
+          };
+          const target = actMap[activeSubId] ?? { tx: "7E0", rx: "7E8", dids: ["10B3", "10AB"] };
+          await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 03", 900);
+          for (const did of target.dids) {
+            const raw = await sendUdsRaw(session, "can11-500", target.tx, target.rx, `22 ${did}`, 1000);
             const p = parseUdsResponse(raw, 0x22);
             if (p.kind === "positive") {
               ok = true;
-              lines.push(`7E0 DID ${did}: ${formatUdsPayload(p.payload, 0x22, "7E0")}`);
+              lines.push(`${target.tx} DID ${did}: ${formatUdsPayload(p.payload, 0x22, target.tx)}`);
             }
           }
-          await sendUdsRaw(session, "can11-500", "7E0", "7E8", "10 01", 700);
+          await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 01", 700);
         } else if (funcId === 4) {
-          // MODECHANGE: Transition selected ECU 10 03 -> 3E 00 -> 22 F186 -> 10 01
-          const r10 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 03", 1000);
-          const p10 = parseUdsResponse(r10, 0x10);
-          if (p10.kind === "positive") {
-            ok = true;
-            lines.push(`${selectedEcu.txHex}: ${formatUdsPayload(p10.payload, 0x10, selectedEcu.txHex)}`);
-          }
-          const r86 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "22 F186", 900);
-          const p86 = parseUdsResponse(r86, 0x22);
-          if (p86.kind === "positive") {
-            lines.push(`Активная сессия (F186): ${formatUdsPayload(p86.payload, 0x22, selectedEcu.txHex)}`);
-          }
-          await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 01", 800);
-          lines.push(`${selectedEcu.txHex}: Возврат в стандартную сессию (10 01 OK)`);
-        } else if (funcId === 6 || funcId === 16 || funcId === 19 || funcId === 908) {
-          // Readiness / MIL / Mode 06 / Diag Determination
-          const rdy = await session.readReadiness();
-          if (rdy) {
-            ok = true;
-            lines.push(`MIL (Check Engine): ${rdy.mil ? "ГОРИТ (ON)" : "Погашен (OFF)"} · Кодов DTC: ${rdy.dtcCount}`);
-            for (const mLine of rdy.lines) {
-              lines.push(`• ${mLine}`);
+          if (activeSubId === "mode-default-1001") {
+            const r10 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 01", 1000);
+            const p10 = parseUdsResponse(r10, 0x10);
+            if (p10.kind === "positive") {
+              ok = true;
+              lines.push(`${selectedEcu.txHex}: ${formatUdsPayload(p10.payload, 0x10, selectedEcu.txHex)}`);
             }
-          }
-          for (const pid of ["0121", "0130", "0131", "014D", "014E"]) {
-            try {
-              const raw = await sendUdsRaw(session, "can11-500", "7E0", "7E8", pid, 1000);
-              const p = parseUdsResponse(raw, 0x01);
+          } else if (activeSubId === "mode-extended-1003" || activeSubId === "mode-testmode-49228") {
+            const r10 = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "10 03", 1000);
+            const p10 = parseUdsResponse(r10, 0x10);
+            if (p10.kind === "positive") {
+              ok = true;
+              lines.push(`${selectedEcu.txHex}: ${formatUdsPayload(p10.payload, 0x10, selectedEcu.txHex)}`);
+            }
+            const r3e = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, "3E 00", 800);
+            if (parseUdsResponse(r3e, 0x3e).kind === "positive") {
+              lines.push(`${selectedEcu.txHex}: TesterPresent 3E 00 -> 7E 00 OK`);
+            }
+          } else {
+            // mode-ig-confirm-14
+            for (const did of ["F186", "101E", "101B"]) {
+              const raw = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, `22 ${did}`, 900);
+              const p = parseUdsResponse(raw, 0x22);
               if (p.kind === "positive") {
                 ok = true;
-                lines.push(`OBD ${pid}: ${p.payload.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`);
+                lines.push(`${selectedEcu.txHex} DID ${did}: ${formatUdsPayload(p.payload, 0x22, selectedEcu.txHex)}`);
               }
-            } catch {
-              /* ignore */
+            }
+          }
+        } else if (funcId === 6 || funcId === 16 || funcId === 19 || funcId === 908) {
+          if (activeSubId === "obm-misfire-cyl") {
+            await sendUdsRaw(session, "can11-500", "7E0", "7E8", "10 03", 800);
+            for (const did of ["110B", "110C", "110D", "110E", "2021", "2022", "2023", "2024", "2027"]) {
+              const raw = await sendUdsRaw(session, "can11-500", "7E0", "7E8", `22 ${did}`, 900);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`7E0 DID ${did}: ${formatUdsPayload(p.payload, 0x22, "7E0")}`);
+              }
+            }
+            await sendUdsRaw(session, "can11-500", "7E0", "7E8", "10 01", 600);
+          } else {
+            const rdy = await session.readReadiness();
+            if (rdy) {
+              ok = true;
+              lines.push(`MIL (Check Engine): ${rdy.mil ? "ГОРИТ (ON)" : "Погашен (OFF)"} · Кодов DTC: ${rdy.dtcCount}`);
+              for (const mLine of rdy.lines) {
+                lines.push(`• ${mLine}`);
+              }
+            }
+            const pids =
+              activeSubId === "mil-clear-counters"
+                ? ["0130", "0131", "014E"]
+                : activeSubId === "mil-lamp-distance"
+                  ? ["0101", "0121", "014D"]
+                  : ["0101", "0141", "0121", "0131"];
+            for (const pid of pids) {
+              try {
+                const raw = await sendUdsRaw(session, "can11-500", "7E0", "7E8", pid, 1000);
+                const p = parseUdsResponse(raw, 0x01);
+                if (p.kind === "positive") {
+                  ok = true;
+                  lines.push(`OBD ${pid}: ${p.payload.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`);
+                }
+              } catch {
+                /* ignore */
+              }
             }
           }
         } else if (funcId === 7 || funcId === 907) {
-          // WORK_FREEZEDATA & CANCEL_CODE (787 EyeSight, 7B0 VDC, 7E1 TCM/ISS)
-          for (const target of [
-            { tx: "787", rx: "78F", name: "EyeSight", dids: ["F182", "1000", "1020"] },
-            { tx: "7B0", rx: "7B8", name: "ABS/VDC", dids: ["1001", "1006", "2012"] },
-            { tx: "7E1", rx: "7E9", name: "TCM/ISS", dids: ["101E", "1243", "14F8"] },
-          ]) {
+          const targetsBySub: Record<string, { tx: string; rx: string; name: string; dids: string[] }[]> = {
+            "wff-eyesight-aeb": [{ tx: "787", rx: "78F", name: "EyeSight Pre-Crash", dids: ["F182", "F18E", "1000", "1020", "1040"] }],
+            "cancel-eyesight": [{ tx: "787", rx: "78F", name: "EyeSight Cancel", dids: ["F182", "1000", "1020", "1040"] }],
+            "wff-vdc-epb": [{ tx: "7B0", rx: "7B8", name: "ABS/VDC/EPB", dids: ["1001", "1006", "1501", "200A", "200D", "2012"] }],
+            "cancel-vdc-avh": [{ tx: "7B0", rx: "7B8", name: "VDC/AVH Cancel", dids: ["1001", "1006", "1501", "2012"] }],
+            "wff-rab-sonar": [{ tx: "786", rx: "78E", name: "RAB Sonar", dids: ["F182", "F18E", "1000", "101B"] }],
+            "cancel-iss-startstop": [{ tx: "7E1", rx: "7E9", name: "Auto Start-Stop (AS.FCLT)", dids: ["1472", "1473", "14E9", "14EA", "14F8", "1501", "1521"] }],
+            "cancel-ecm-cruise": [{ tx: "7E0", rx: "7E8", name: "ECM Cruise Cancel", dids: ["101E", "F40C", "F40D"] }],
+          };
+          const list = targetsBySub[activeSubId] ?? [
+            { tx: "787", rx: "78F", name: "EyeSight", dids: ["F182", "1000"] },
+            { tx: "7B0", rx: "7B8", name: "ABS/VDC", dids: ["1001", "1006"] },
+          ];
+          for (const target of list) {
             await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 03", 800);
             for (const did of target.dids) {
               const raw = await sendUdsRaw(session, "can11-500", target.tx, target.rx, `22 ${did}`, 900);
@@ -1217,40 +1417,105 @@ export function SubaruSsmPanel({
             await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 01", 600);
           }
         } else if (funcId === 17) {
-          // COMM_MONITOR: Ping all 16 Subaru ECUs with TesterPresent 3E 00 / 10 03
-          let alive = 0;
-          for (const ecu of SSM4_ECUS) {
-            const raw = await sendUdsRaw(session, "can11-500", ecu.txHex, ecu.rxHex, "10 03", 650);
-            const p = parseUdsResponse(raw, 0x10);
-            if (p.kind !== "empty") {
-              alive += 1;
-              ok = true;
-              lines.push(`✓ ${ecu.code} (${ecu.txHex} → ${ecu.rxHex}): На связи (${ecu.nameRu})`);
-              await sendUdsRaw(session, "can11-500", ecu.txHex, ecu.rxHex, "10 01", 500);
-            } else {
-              lines.push(`— ${ecu.code} (${ecu.txHex}): Нет ответа`);
+          if (activeSubId === "comm-cgw-status") {
+            await sendUdsRaw(session, "can11-500", "750", "758", "10 03", 800);
+            for (const did of ["F18E", "104E", "1052", "1057", "1067"]) {
+              const raw = await sendUdsRaw(session, "can11-500", "750", "758", `22 ${did}`, 900);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`CGTW 750 DID ${did}: ${formatUdsPayload(p.payload, 0x22, "750")}`);
+              }
             }
+            await sendUdsRaw(session, "can11-500", "750", "758", "10 01", 600);
+          } else {
+            let alive = 0;
+            for (const ecu of SSM4_ECUS) {
+              const raw = await sendUdsRaw(session, "can11-500", ecu.txHex, ecu.rxHex, "10 03", 650);
+              const p = parseUdsResponse(raw, 0x10);
+              if (p.kind !== "empty") {
+                alive += 1;
+                ok = true;
+                lines.push(`✓ ${ecu.code} (${ecu.txHex} → ${ecu.rxHex}): На связи (${ecu.nameRu})`);
+                await sendUdsRaw(session, "can11-500", ecu.txHex, ecu.rxHex, "10 01", 500);
+              } else {
+                lines.push(`— ${ecu.code} (${ecu.txHex}): Нет ответа`);
+              }
+            }
+            lines.unshift(`Проверка шины CAN завершена: ответили ${alive} из ${SSM4_ECUS.length} ЭБУ`);
           }
-          lines.unshift(`Проверка шины CAN завершена: ответили ${alive} из ${SSM4_ECUS.length} ЭБУ`);
         } else if (funcId === 18 || funcId === 909) {
-          // REPRO ROM/CalID check & OBD_VEHICLE_INFO
-          const ident = await session.readVehicleIdentity();
-          if (ident.vin || ident.calid || ident.cvn) {
-            ok = true;
-            lines.push(`VIN: ${ident.vin ?? "—"} · CalID: ${ident.calid ?? "—"} · CVN: ${ident.cvn ?? "—"}`);
-          }
-          for (const did of ["F181", "F182", "F187", "F189", "F18E", "F190", "F197"]) {
-            const raw = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, `22 ${did}`, 900);
-            const p = parseUdsResponse(raw, 0x22);
-            if (p.kind === "positive") {
+          if (activeSubId === "vinfo-vin") {
+            const ident = await session.readVehicleIdentity();
+            if (ident.vin) {
               ok = true;
-              lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) DID ${did}: ${formatUdsPayload(p.payload, 0x22, selectedEcu.txHex)}`);
+              setDetectedVin(ident.vin);
+              const matched = matchSsm4VehicleByVin(ident.vin);
+              lines.push(`VIN: ${ident.vin} · Модель: ${matched?.nameRu ?? "Subaru"}`);
             }
+          } else if (activeSubId === "repro-history-date") {
+            for (const did of ["F198", "F199", "F18B", "F18C"]) {
+              const raw = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, `22 ${did}`, 900);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) DID ${did}: ${formatUdsPayload(p.payload, 0x22, selectedEcu.txHex)}`);
+              }
+            }
+          } else {
+            const ident = await session.readVehicleIdentity();
+            if (ident.vin || ident.calid || ident.cvn) {
+              ok = true;
+              lines.push(`VIN: ${ident.vin ?? "—"} · CalID: ${ident.calid ?? "—"} · CVN: ${ident.cvn ?? "—"}`);
+            }
+            const dids =
+              activeSubId === "repro-boot-sw"
+                ? ["F180", "F181", "F188", "F189", "F195"]
+                : ["F182", "F187", "F189", "F18E", "F190", "F197"];
+            for (const did of dids) {
+              const raw = await sendUdsRaw(session, "can11-500", selectedEcu.txHex, selectedEcu.rxHex, `22 ${did}`, 900);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`${selectedEcu.code} (${selectedEcu.txHex}) DID ${did}: ${formatUdsPayload(p.payload, 0x22, selectedEcu.txHex)}`);
+              }
+            }
+          }
+        } else if (funcId === 20 || funcId === 917) {
+          const targetMap: Record<string, { tx: string; rx: string; dids: string[] }[]> = {
+            "cust-biu-752": [{ tx: "752", rx: "75A", dids: ["101E", "101B", "1061", "1066", "106B", "106C", "107A", "2028"] }],
+            "cust-meter-783": [{ tx: "783", rx: "78B", dids: ["1062", "1041", "1042", "1007", "F182", "F18E"] }],
+            "cust-ac-7c4": [{ tx: "7C4", rx: "7CC", dids: ["1221", "122D", "122E", "122F", "1230", "123C", "12B0"] }],
+            "cust-eyesight-787": [{ tx: "787", rx: "78F", dids: ["F182", "F18E", "1000"] }],
+            "pers-dms-driver": [{ tx: "763", rx: "76B", dids: ["1025", "F18E", "F197"] }],
+            "pers-key-id1-5": [{ tx: "750", rx: "758", dids: ["104E", "1057", "F18E"] }],
+          };
+          const list = targetMap[activeSubId] ?? [
+            { tx: "752", rx: "75A", dids: ["101E", "101B"] },
+            { tx: "783", rx: "78B", dids: ["1062", "1041", "1042"] },
+            { tx: "787", rx: "78F", dids: ["F182"] },
+          ];
+          for (const t of list) {
+            await sendUdsRaw(session, "can11-500", t.tx, t.rx, "10 03", 800);
+            for (const did of t.dids) {
+              const raw = await sendUdsRaw(session, "can11-500", t.tx, t.rx, `22 ${did}`, 900);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive") {
+                ok = true;
+                lines.push(`${t.tx} DID ${did}: ${formatUdsPayload(p.payload, 0x22, t.tx)}`);
+              }
+            }
+            await sendUdsRaw(session, "can11-500", t.tx, t.rx, "10 01", 600);
           }
         } else if (funcId === 915) {
-          // AIRBAG_SYSTEM_DATA (SRS 780 -> 788)
+          const didsBySub: Record<string, string[]> = {
+            "srs-505-temp": ["1022", "1023", "1024", "1026", "102E", "102F"],
+            "srs-506-mem": ["1007", "105F", "F18E", "F197"],
+            "srs-507-belts-ods": ["1044", "1045", "1047"],
+          };
+          const dids = didsBySub[activeSubId] ?? ["1007", "1022", "1044", "1045", "1047", "105F"];
           await sendUdsRaw(session, "can11-500", "780", "788", "10 03", 800);
-          for (const did of ["1007", "1022", "1044", "1045", "1047", "105F", "F18E"]) {
+          for (const did of dids) {
             const raw = await sendUdsRaw(session, "can11-500", "780", "788", `22 ${did}`, 900);
             const p = parseUdsResponse(raw, 0x22);
             if (p.kind === "positive") {
@@ -1260,34 +1525,41 @@ export function SubaruSsmPanel({
           }
           await sendUdsRaw(session, "can11-500", "780", "788", "10 01", 600);
         } else if (funcId === 916) {
-          // ALLOBD_SYSTEM_DTC_DATA (Mode 03 + Mode 07 + Mode 0A)
-          const m03 = await session.readObdDtcs();
-          const m07 = await session.readPendingDtcs();
-          const m0a = await session.readPermanentDtcs();
-          ok = true;
-          lines.push(`Сохранённые (Mode 03): ${m03.length} · Ожидающие (Mode 07): ${m07.length} · Постоянные (Mode 0A): ${m0a.length}`);
-          for (const d of [...m03, ...m07, ...m0a]) {
-            lines.push(`• ${d.code}: ${d.description}`);
+          if (activeSubId === "obddtc-mode07") {
+            const m07 = await session.readPendingDtcs();
+            ok = true;
+            lines.push(`Ожидающие коды (Mode 07): ${m07.length}`);
+            for (const d of m07) lines.push(`• ${d.code}: ${d.description}`);
+          } else if (activeSubId === "obddtc-mode0a") {
+            const m0a = await session.readPermanentDtcs();
+            ok = true;
+            lines.push(`Постоянные коды (Mode 0A): ${m0a.length}`);
+            for (const d of m0a) lines.push(`• ${d.code}: ${d.description}`);
+          } else {
+            const m03 = await session.readObdDtcs();
+            ok = true;
+            lines.push(`Подтверждённые коды (Mode 03): ${m03.length}`);
+            for (const d of m03) lines.push(`• ${d.code}: ${d.description}`);
           }
         }
 
         if (lines.length === 0) {
-          lines.push(`ЭБУ ${selectedEcu.code} (${selectedEcu.txHex}) не вернул данных по FunctionId = ${funcId}. Проверьте зажигание IG ON.`);
+          lines.push(`ЭБУ ${selectedEcu.code} (${selectedEcu.txHex}) не вернул данных по «${subTitle}». Проверьте зажигание IG ON.`);
         }
         setFunctionRunResults((prev) => ({
           ...prev,
           [funcId]: {
-            status: ok ? "Выполнено успешно" : "Нет ответа от блока",
+            status: ok ? `✓ Выполнено: ${subTitle}` : `Нет ответа: ${subTitle}`,
             lines,
             ok,
           },
         }));
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "Ошибка выполнения функции SSM4";
+        const msg = e instanceof Error ? e.message : "Ошибка выполнения подфункции SSM4";
         setFunctionRunResults((prev) => ({
           ...prev,
           [funcId]: {
-            status: `Ошибка: ${msg}`,
+            status: `Ошибка (${subTitle}): ${msg}`,
             lines: [msg],
             ok: false,
           },
@@ -1301,7 +1573,7 @@ export function SubaruSsmPanel({
       busy,
       session,
       selectedEcu,
-      handleReadCustomizeItems,
+      selectedSubOptionByFunc,
       handleRunAllDtcScan,
       setBusy,
       setError,
@@ -1358,34 +1630,105 @@ export function SubaruSsmPanel({
           {selectedVehicle.nameRu} · блок {selectedEcu.code} ({selectedEcu.txHex})
         </p>
       ) : (
-      <div className="rounded-xl border border-gray-200 bg-white p-3.5">
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                <Cpu className="h-3.5 w-3.5" />
-                Subaru · SSM4
+      <div className="rounded-xl border border-gray-200 bg-white p-3.5 space-y-2.5">
+        {/* SSM4 Start Menu Strip (Screenshot 1: F1 Diagnosis, F2 Immobilizer, F3 Reprogram, F4 Generic OBDII, F5 Driving Recorder) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
+          <div className="flex flex-wrap items-center gap-1">
+            {(
+              [
+                { id: "f1-diag", label: "F1 Diagnosis", action: () => setTopView("all-dtc") },
+                {
+                  id: "f2-immo",
+                  label: "F2 Immobilizer / Reg.",
+                  action: () => {
+                    setSelectedUtilityId("util-keyless-starter-check");
+                    setTopView("utilities");
+                  },
+                },
+                {
+                  id: "f3-repro",
+                  label: "F3 Reprogram / ROM",
+                  action: () => {
+                    setTopView("ssm4-db");
+                    void handleRunSsm4Function(18, "repro-rom-calid");
+                  },
+                },
+                {
+                  id: "f4-obd",
+                  label: "F4 Generic OBDII",
+                  action: () => {
+                    setTopView("ssm4-db");
+                    void handleRunSsm4Function(916, "obddtc-mode03");
+                  },
+                },
+                {
+                  id: "f5-recorder",
+                  label: "F5 Driving Recorder",
+                  action: () => {
+                    setTopView("ssm4-db");
+                    void handleRunSsm4Function(7, "wff-eyesight-aeb");
+                  },
+                },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  setStartMode(m.id);
+                  m.action();
+                }}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                  startMode === m.id
+                    ? "bg-blue-700 text-white shadow-sm"
+                    : "border border-gray-200 bg-gray-50 text-gray-700 hover:border-blue-400"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+            <span className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 font-bold text-blue-900">
+              SUBARU Select Monitor 4
+            </span>
+            {detectedVin ? (
+              <span className="truncate rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 font-bold text-emerald-900">
+                VIN: {detectedVin}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-100 px-2.5 py-0.5 text-[11px] font-semibold text-gray-700">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                Read-Only Gate
+            ) : null}
+          </div>
+        </div>
+
+        {/* Vehicle Selection Bar (Screenshot 2: Vehicle specifications / Legacy / Outback / 22MY / SSM4) */}
+        <div className="flex min-w-0 flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-0.5">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="font-bold text-gray-900">
+                Vehicle: <span className="text-blue-700">{selectedVehicle.division}</span>
               </span>
-              {detectedVin ? (
-                <span className="max-w-full truncate rounded-full border border-gray-300 bg-gray-50 px-2.5 py-0.5 font-mono text-[11px] text-gray-800">
-                  VIN {detectedVin}
-                </span>
-              ) : null}
+              <span>·</span>
+              <span className="font-semibold text-gray-700">
+                Model: <code className="font-mono">{selectedVehicle.modelCode}</code> ({selectedVehicle.years})
+              </span>
+              <span>·</span>
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-gray-700">
+                Software: SSM4 ({selectedVehicle.platform})
+              </span>
             </div>
-            <p className="text-xs text-gray-500">
-              Ошибки, live, CVT, TPMS, угол руля и калибровки — вкладки ниже.
-            </p>
+            <div className="text-[11px] text-gray-500">
+              Кузова: <code className="font-mono">{selectedVehicle.chassisCodes.join(", ")}</code> · Выбранная система:{" "}
+              <strong className="text-gray-800">
+                {selectedSystem.nameEn} ({selectedSystem.abbr} · {selectedSystem.txHex} → {selectedSystem.rxHex})
+              </strong>
+            </div>
           </div>
 
-          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:max-w-sm">
+          <div className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:flex-row sm:items-center">
             <select
               value={selectedVehicleId}
               onChange={(e) => setSelectedVehicleId(e.target.value)}
-              className="w-full min-w-0 max-w-full truncate rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-900"
+              className="w-full min-w-0 truncate rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-900 sm:w-64"
             >
               {SSM4_VEHICLES.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -1397,42 +1740,34 @@ export function SubaruSsmPanel({
               type="button"
               onClick={() => void handleAutoDetectVin()}
               disabled={!ready || busy}
-              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Определить по VIN
+              Авто-VIN
             </button>
           </div>
-        </div>
-
-        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-gray-500">
-          <span>
-            Платформа: <strong className="text-gray-700">{selectedVehicle.platform}</strong>
-          </span>
-          <span className="hidden sm:inline">·</span>
-          <span className="min-w-0 break-words">
-            Кузова:{" "}
-            <code className="font-mono text-gray-500">{selectedVehicle.chassisCodes.join(", ")}</code>
-          </span>
         </div>
       </div>
       )}
 
+      {/* SSM4 Main Menu Navigation Bar (Screenshot 3: F1 All DTC, F2 Each System, F3 Multiple System, Live, Utilities, F6 Customize, etc.) */}
       <div
         className="flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role="tablist"
-        aria-label="Разделы Subaru"
+        aria-label="Главное меню SSM4"
       >
         {(
           [
-            { id: "all-dtc", title: "Ошибки", icon: Layers },
-            { id: "data-monitor", title: "Live", icon: Activity },
+            { id: "all-dtc", title: "F1 Все ошибки (All DTC)", icon: Layers },
+            { id: "each-system", title: "F2 По блокам (40 систем)", icon: Cpu },
+            { id: "multi-system", title: "F3 Мульти-система", icon: Layers },
+            { id: "data-monitor", title: "Live Монитор (Группы)", icon: Activity },
+            { id: "utilities", title: "Адаптации и калибровки (.srp)", icon: Wrench },
+            { id: "customize", title: "F6 Кастомизация (Вариант)", icon: Sliders },
             { id: "steering", title: "Угол руля", icon: Gauge },
-            { id: "cvt", title: "CVT", icon: Gauge },
-            { id: "tpms", title: "TPMS", icon: AlertTriangle },
-            { id: "utilities", title: "Адаптации и калибровки", icon: Wrench },
-            { id: "customize", title: "Вариант", icon: Sliders },
-            { id: "ssm4-db", title: "Коды SSM4 и база", icon: FileSearch },
+            { id: "cvt", title: "CVT Темп.", icon: Gauge },
+            { id: "tpms", title: "TPMS Шины", icon: AlertTriangle },
+            { id: "ssm4-db", title: "Коды функций SSM4", icon: FileSearch },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
@@ -1446,8 +1781,8 @@ export function SubaruSsmPanel({
               onClick={() => setTopView(tab.id)}
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
                 active
-                  ? "border-gray-900 bg-gray-900 text-white"
-                  : "border-gray-200 bg-gray-100 text-gray-700 hover:border-emerald-400"
+                  ? "border-blue-700 bg-blue-700 text-white shadow-sm"
+                  : "border-gray-200 bg-gray-100 text-gray-700 hover:border-blue-400"
               }`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0 opacity-90" />
@@ -1667,6 +2002,19 @@ export function SubaruSsmPanel({
                           Защита калибровок (Read-Only)
                         </span>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleSelectEcu(ecu);
+                          const sys = SSM4_FULL_SYSTEMS.find((s) => s.ecuId === ecu.ecuId);
+                          if (sys) setSelectedSystemId(sys.id);
+                          setEachSystemStep("functions");
+                          setTopView("each-system");
+                        }}
+                        className="rounded-md border border-blue-600 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800 hover:bg-blue-100"
+                      >
+                        Функции блока →
+                      </button>
                     </div>
                   </div>
 
@@ -1706,6 +2054,385 @@ export function SubaruSsmPanel({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* VIEW F2: EACH SYSTEM (Screenshot 5: Select System -> System Function Menu with Sub-selection) */}
+      {topView === "each-system" && (
+        <div className="rounded-xl border border-gray-200 bg-white p-3.5 space-y-3.5">
+          {/* Breadcrumb Bar matching SSM4 */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 pb-2.5">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setEachSystemStep("select")}
+                className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                  eachSystemStep === "select"
+                    ? "bg-blue-700 text-white"
+                    : "border border-gray-300 bg-gray-100 text-gray-800 hover:border-blue-500"
+                }`}
+              >
+                1. Выбор системы ({SSM4_FULL_SYSTEMS.length})
+              </button>
+              <span className="text-gray-400">→</span>
+              <button
+                type="button"
+                onClick={() => setEachSystemStep("functions")}
+                className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                  eachSystemStep === "functions"
+                    ? "bg-blue-700 text-white"
+                    : "border border-gray-300 bg-gray-100 text-gray-800 hover:border-blue-500"
+                }`}
+              >
+                2. Функции и подвыбор: {selectedSystem.nameEn} ({selectedSystem.abbr})
+              </button>
+            </div>
+            <span className="font-mono text-[11px] font-bold text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+              CAN {selectedSystem.txHex} → {selectedSystem.rxHex}
+            </span>
+          </div>
+
+          {eachSystemStep === "select" ? (
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">
+                    F2 Each System — Выберите систему автомобиля (40 систем SSM4)
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Нажмите на любую систему, чтобы открыть её диагностическое меню с подвыбором функций (DTC, Data Monitor, Active Test, Work Support / Utility, Customize, Unit Info).
+                  </p>
+                </div>
+                <input
+                  type="text"
+                  value={systemSearchQuery}
+                  onChange={(e) => setSystemSearchQuery(e.target.value)}
+                  placeholder="Поиск системы (Engine, EyeSight, BIU, EPB)…"
+                  className="w-full sm:w-64 rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-xs"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {(["ALL", "Powertrain", "Chassis", "Body"] as const).map((grp) => (
+                  <button
+                    key={grp}
+                    type="button"
+                    onClick={() => setSelectedGroup(grp)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                      selectedGroup === grp
+                        ? "bg-gray-900 text-white"
+                        : "border border-gray-300 bg-gray-50 text-gray-700 hover:border-blue-400"
+                    }`}
+                  >
+                    {grp === "ALL"
+                      ? `Все системы (${SSM4_FULL_SYSTEMS.length})`
+                      : grp === "Powertrain"
+                        ? "Powertrain (ДВС / КПП)"
+                        : grp === "Chassis"
+                          ? "Chassis (Тормоза / Руль / ADAS)"
+                          : "Body (Кузов / Салон / Свет)"}
+                  </button>
+                ))}
+              </div>
+
+              {/* 2-Column Mobile/Desktop Grid matching Screenshot 5 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {SSM4_FULL_SYSTEMS.filter((sys) => {
+                  if (selectedGroup !== "ALL" && sys.group !== selectedGroup) return false;
+                  const q = systemSearchQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    sys.nameEn.toLowerCase().includes(q) ||
+                    sys.nameRu.toLowerCase().includes(q) ||
+                    sys.abbr.toLowerCase().includes(q) ||
+                    sys.txHex.toLowerCase().includes(q)
+                  );
+                }).map((sys) => {
+                  const active = sys.id === selectedSystem.id;
+                  return (
+                    <button
+                      key={sys.id}
+                      type="button"
+                      onClick={() => handleSelectSystemEntry(sys, true)}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition ${
+                        active
+                          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                          : "border-gray-200 bg-gray-50/80 text-gray-900 hover:border-blue-400 hover:bg-blue-50/40"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-xs truncate">
+                            {sys.nameEn} ({sys.abbr})
+                          </span>
+                          {sys.supportsCustomize && (
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                                active ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"
+                              }`}
+                            >
+                              Customize
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`truncate text-[11px] ${
+                            active ? "text-blue-100" : "text-gray-500"
+                          }`}
+                        >
+                          {sys.nameRu}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right font-mono text-[10px]">
+                        <div className={active ? "font-bold text-white" : "font-bold text-blue-700"}>
+                          {sys.txHex}
+                        </div>
+                        <div className={active ? "text-blue-100" : "text-gray-400"}>Next →</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            /* Step 2 inside F2 Each System: System Function Menu with Sub-selection */
+            <div className="space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 p-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded bg-blue-700 px-2 py-0.5 font-mono text-xs font-bold text-white">
+                      {selectedSystem.abbr} · {selectedSystem.txHex} → {selectedSystem.rxHex}
+                    </span>
+                    <span className="text-sm font-bold text-gray-900">
+                      {selectedSystem.nameEn} — {selectedSystem.nameRu}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Выберите нужную функцию блока ниже, укажите конкретный подрежим в списке подвыбора и нажмите «▶ Выполнить».
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEachSystemStep("select")}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
+                >
+                  ← Сменить систему
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {SSM4_FUNCTION_CODES.filter((fn) =>
+                  selectedSystem.functions.includes(fn.id),
+                ).map((fn) => {
+                  const selectedSubId =
+                    selectedSubOptionByFunc[fn.id] ?? fn.subOptions[0]?.subId ?? "";
+                  const currentSub =
+                    fn.subOptions.find((o) => o.subId === selectedSubId) ?? fn.subOptions[0];
+                  const runRes = functionRunResults[fn.id];
+                  return (
+                    <div
+                      key={fn.id}
+                      className="rounded-xl border border-gray-200 bg-gray-50/70 p-3.5 space-y-2.5 flex flex-col justify-between"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="rounded bg-gray-900 px-2 py-0.5 font-mono text-[11px] font-bold text-white">
+                            FunctionId = {fn.id}
+                          </span>
+                          <code className="rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] font-bold text-blue-900">
+                            {fn.internalName}
+                          </code>
+                        </div>
+                        <div className="text-xs font-bold text-gray-900">{fn.titleRu}</div>
+                        <p className="text-[11px] text-gray-600 leading-snug">{fn.descriptionRu}</p>
+                      </div>
+
+                      {/* Sub-selection (Подвыбор внутри функции) */}
+                      <div className="space-y-2 border-t border-gray-200 pt-2.5">
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-bold text-gray-800">
+                            Подвыбор режима / процедуры ({fn.subOptions.length} вар.):
+                          </span>
+                          <select
+                            value={selectedSubId}
+                            onChange={(e) =>
+                              setSelectedSubOptionByFunc((prev) => ({
+                                ...prev,
+                                [fn.id]: e.target.value,
+                              }))
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs font-medium text-gray-900"
+                          >
+                            {fn.subOptions.map((opt) => (
+                              <option key={opt.subId} value={opt.subId}>
+                                {opt.titleRu} [{opt.protocolHint}]
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        {currentSub && (
+                          <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono text-gray-500">
+                            <span>EN: {currentSub.titleEn}</span>
+                            <span className="rounded bg-white border border-gray-200 px-1.5 py-0.5 text-emerald-700 font-bold">
+                              {currentSub.protocolHint}
+                            </span>
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => void handleRunSsm4Function(fn.id, selectedSubId)}
+                          disabled={busy}
+                          className="w-full rounded-lg border border-blue-700 bg-blue-700 hover:bg-blue-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 flex items-center justify-between gap-2"
+                        >
+                          <span className="truncate">
+                            ▶ Запустить: {currentSub?.titleRu ?? fn.titleRu}
+                          </span>
+                          <span className="shrink-0 rounded bg-white/20 px-1.5 py-0.5 font-mono text-[10px]">
+                            {selectedSystem.txHex}
+                          </span>
+                        </button>
+
+                        {runRes && (
+                          <div
+                            className={`rounded-lg border p-2.5 text-[11px] ${
+                              runRes.ok
+                                ? "border-emerald-400 bg-emerald-50 text-emerald-950"
+                                : "border-amber-300 bg-amber-50 text-amber-950"
+                            }`}
+                          >
+                            <div className="font-bold">{runRes.status}</div>
+                            <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-gray-800 max-h-40 overflow-y-auto">
+                              {runRes.lines.map((line, i) => (
+                                <li key={i}>{line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW F3: MULTIPLE SYSTEM (Screenshot 6: Select multiple system with checkboxes + Next) */}
+      {topView === "multi-system" && (
+        <div className="rounded-xl border border-gray-200 bg-white p-3.5 space-y-3.5">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">
+                F3 Multiple System — Выбор нескольких систем для синхронной работы ({multiSystemIds.length} выбрано)
+              </h3>
+              <p className="text-xs text-gray-500">
+                Отметьте галочками нужные блоки автомобиля (как в окне «Select multiple system» SSM4) и нажмите кнопку «Next» внизу для запуска мульти-монитора параметров или мульти-опроса ошибок.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setMultiSystemIds(SSM4_FULL_SYSTEMS.map((s) => s.id))}
+                className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Выбрать все (40)
+              </button>
+              <button
+                type="button"
+                onClick={() => setMultiSystemIds([])}
+                className="rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Сбросить
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-96 overflow-y-auto pr-1">
+            {SSM4_FULL_SYSTEMS.map((sys) => {
+              const checked = multiSystemIds.includes(sys.id);
+              return (
+                <label
+                  key={sys.id}
+                  className={`cursor-pointer flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs transition ${
+                    checked
+                      ? "border-blue-600 bg-blue-50/80 text-blue-950 font-semibold"
+                      : "border-gray-200 bg-gray-50/50 text-gray-800 hover:border-blue-300"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMultiSystemIds((prev) => [...prev, sys.id]);
+                        } else {
+                          setMultiSystemIds((prev) => prev.filter((id) => id !== sys.id));
+                        }
+                      }}
+                      className="h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate font-bold">
+                        {sys.nameEn} ({sys.abbr})
+                      </div>
+                      <div className="truncate text-[11px] font-normal text-gray-500">
+                        {sys.nameRu}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="shrink-0 font-mono text-[10px] text-gray-500">
+                    {sys.txHex}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-3">
+            <span className="text-xs text-gray-600">
+              Выбрано систем: <strong>{multiSystemIds.length}</strong>
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={multiSystemIds.length === 0}
+                onClick={() => {
+                  const chosenEcuIds = new Set(
+                    SSM4_FULL_SYSTEMS.filter((s) => multiSystemIds.includes(s.id)).map(
+                      (s) => s.ecuId,
+                    ),
+                  );
+                  const sigs: string[] = [];
+                  for (const ecuId of chosenEcuIds) {
+                    const ecuSigs = SSM4_SIGNALS.filter((s) => s.ecuId === ecuId).slice(0, 4);
+                    for (const s of ecuSigs) sigs.push(s.id);
+                  }
+                  if (sigs.length > 0) setSelectedSignalIds(sigs);
+                  setTopView("data-monitor");
+                }}
+                className="rounded-xl border border-blue-700 bg-blue-700 hover:bg-blue-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                ✓ Next → Открыть Multi-System Live Монитор
+              </button>
+              <button
+                type="button"
+                disabled={multiSystemIds.length === 0}
+                onClick={() => {
+                  setTopView("all-dtc");
+                  if (ready && !busy) {
+                    void handleRunAllDtcScan();
+                  }
+                }}
+                className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                ✓ Next → Проверить ошибки выбранных систем
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2916,25 +3643,69 @@ export function SubaruSsmPanel({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-gray-900">
-                Конфигурация блоков и сравнение дампов
+                F6 Customize — Выбор системы кастомизации (17 систем SSM4) и конфигурация блоков
               </h3>
               <p className="text-xs text-gray-500">
-                Чтение регистров BIU, приборки и EyeSight. Слепки A/B нужны, чтобы увидеть, какие байты меняются после работ в салоне.
+                Выберите систему для кастомизации (как в окне «Customize → Select System» SSM4) или «All system», чтобы считать настраиваемые регистры, рассчитать код 12 Columns (C0/C5) и сравнить дампы A/B.
               </p>
             </div>
             <button
               type="button"
               onClick={() => void handleReadCustomizeItems()}
               disabled={!ready || busy}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-blue-700 bg-blue-700 hover:bg-blue-800 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white"
             >
               <Sliders className="h-3.5 w-3.5" />
               Считать параметры Customize
             </button>
           </div>
 
+          {/* 17-System Customize Selector matching Screenshot 7 */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
+              Select System (17 систем кастомизации SSM4):
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedCustomizeSysId("ALL")}
+                className={`rounded-lg border px-3 py-1.5 text-left text-xs font-semibold transition ${
+                  selectedCustomizeSysId === "ALL"
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-gray-200 bg-white text-gray-800 hover:border-blue-400"
+                }`}
+              >
+                All system (Все системы кастомизации)
+              </button>
+              {SSM4_FULL_SYSTEMS.filter((s) => s.supportsCustomize).map((sys) => {
+                const active = selectedCustomizeSysId === sys.id;
+                return (
+                  <button
+                    key={sys.id}
+                    type="button"
+                    onClick={() => setSelectedCustomizeSysId(sys.id)}
+                    className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left text-xs transition ${
+                      active
+                        ? "border-blue-600 bg-blue-600 text-white font-bold"
+                        : "border-gray-200 bg-white text-gray-800 hover:border-blue-400"
+                    }`}
+                  >
+                    <span className="truncate">{sys.nameEn} ({sys.abbr})</span>
+                    <span className={`font-mono text-[10px] ${active ? "text-blue-100" : "text-gray-400"}`}>
+                      {sys.txHex}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            {SSM4_CUSTOMIZE_ITEMS.map((item) => (
+            {SSM4_CUSTOMIZE_ITEMS.filter((item) => {
+              if (selectedCustomizeSysId === "ALL") return true;
+              const sys = SSM4_FULL_SYSTEMS.find((s) => s.id === selectedCustomizeSysId);
+              return sys ? item.ecuId === sys.ecuId : true;
+            }).map((item) => (
               <div
                 key={item.id}
                 className="rounded-lg border border-gray-200 p-3 flex flex-col justify-between gap-2"
@@ -3375,23 +4146,26 @@ export function SubaruSsmPanel({
 
           <div className="space-y-2.5">
             <h4 className="text-xs font-bold uppercase tracking-wider text-gray-800">
-              1. Исполняемые функции SSM4 (`FunctionId` = 1 .. 918) и спецключи (`Keycode`)
+              1. Исполняемые функции SSM4 (`FunctionId` = 1 .. 918) с внутренним подвыбором режима (`DetailId` / `SignalId` / `Keycode`)
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {SSM4_FUNCTION_CODES.map((fn) => {
                 const runRes = functionRunResults[fn.id];
-                const isNavOnly = [2, 10, 20, 902, 917, 918].includes(fn.id);
+                const selectedSubId =
+                  selectedSubOptionByFunc[fn.id] ?? fn.subOptions[0]?.subId ?? "";
+                const currentSub =
+                  fn.subOptions.find((o) => o.subId === selectedSubId) ?? fn.subOptions[0];
                 return (
                   <div
                     key={fn.id}
-                    className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-2.5 flex flex-col justify-between"
+                    className="rounded-xl border border-gray-200 bg-gray-50/70 p-3.5 space-y-2.5 flex flex-col justify-between"
                   >
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="rounded bg-gray-900 px-2 py-0.5 font-mono text-xs font-bold text-white">
                           FunctionId = {fn.id}
                         </span>
-                        <code className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800">
+                        <code className="rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] font-bold text-blue-900">
                           {fn.internalName}
                         </code>
                       </div>
@@ -3403,12 +4177,12 @@ export function SubaruSsmPanel({
                       </p>
                     </div>
 
-                    <div className="space-y-2 border-t border-gray-200 pt-2">
+                    <div className="space-y-2 border-t border-gray-200 pt-2.5">
                       {(fn.detailIds || fn.specialKeys) && (
                         <div className="space-y-1.5 text-[11px]">
                           {fn.detailIds && (
                             <div>
-                              <div className="font-semibold text-gray-700">Подфункции (`DetailId`):</div>
+                              <div className="font-semibold text-gray-700">Коды `DetailId` в базе:</div>
                               <div className="mt-1 flex flex-wrap gap-1">
                                 {fn.detailIds.map((d) => (
                                   <span
@@ -3440,28 +4214,49 @@ export function SubaruSsmPanel({
                         </div>
                       )}
 
+                      {/* Sub-selection dropdown inside every FunctionId */}
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-bold text-gray-800">
+                          Подвыбор внутри функции ({fn.subOptions.length} подрежимов):
+                        </span>
+                        <select
+                          value={selectedSubId}
+                          onChange={(e) =>
+                            setSelectedSubOptionByFunc((prev) => ({
+                              ...prev,
+                              [fn.id]: e.target.value,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs font-medium text-gray-900"
+                        >
+                          {fn.subOptions.map((opt) => (
+                            <option key={opt.subId} value={opt.subId}>
+                              {opt.titleRu} [{opt.protocolHint}]
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      {currentSub && (
+                        <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono text-gray-500">
+                          <span>{currentSub.titleEn}</span>
+                          <span className="rounded bg-white border border-gray-200 px-1.5 py-0.5 font-bold text-emerald-700">
+                            {currentSub.protocolHint}
+                          </span>
+                        </div>
+                      )}
+
                       <button
                         type="button"
-                        disabled={!isNavOnly && (!ready || busy)}
-                        onClick={() => void handleRunSsm4Function(fn.id)}
-                        className="w-full rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 flex items-center justify-between gap-2"
+                        disabled={busy}
+                        onClick={() => void handleRunSsm4Function(fn.id, selectedSubId)}
+                        className="w-full rounded-lg border border-blue-700 bg-blue-700 hover:bg-blue-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 flex items-center justify-between gap-2"
                       >
-                        <span>
-                          ▶{" "}
-                          {fn.id === 2
-                            ? "Открыть потоковый монитор (DATA_MONITOR)"
-                            : fn.id === 10
-                              ? "Запустить мульти-монитор ECM + TCM + ABS (MULTI_DATA_MONITOR)"
-                              : fn.id === 20 || fn.id === 917
-                                ? "Открыть и считать параметры персонализации (CUSTOMIZE)"
-                                : fn.id === 902
-                                  ? "Открыть рабочую вкладку калибровок и утилит (UTILITY 902)"
-                                  : fn.id === 918
-                                    ? "Запустить опрос всех систем (GET_DIAG_INFO 918)"
-                                    : `Выполнить FunctionId = ${fn.id} на блоке ${selectedEcu.code} (${selectedEcu.txHex})`}
+                        <span className="truncate">
+                          ▶ Запустить подрежим: {currentSub?.titleRu ?? fn.titleRu}
                         </span>
-                        <span className="rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">
-                          Run #{fn.id}
+                        <span className="shrink-0 rounded bg-white/20 px-1.5 py-0.5 font-mono text-[10px]">
+                          {selectedEcu.code} · #{fn.id}
                         </span>
                       </button>
 
