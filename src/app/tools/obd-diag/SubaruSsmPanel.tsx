@@ -92,6 +92,7 @@ type Ssm4TopView =
   | "each-system"
   | "multi-system"
   | "data-monitor"
+  | "immo"
   | "utilities"
   | "customize"
   | "steering"
@@ -329,6 +330,16 @@ export function SubaruSsmPanel({
   // Interactive execution results for SSM4 Function Codes (1..918)
   const [functionRunResults, setFunctionRunResults] = useState<
     Record<number, { status: string; lines: string[]; ok: boolean }>
+  >({});
+
+  // F2 Immobilizer & Smart Key Registration state (750 -> 758)
+  const [immoProcedure, setImmoProcedure] = useState<string>("read-key-count");
+  const [immoSeedHex, setImmoSeedHex] = useState<string | null>(null);
+  const [immoKeyInputHex, setImmoKeyInputHex] = useState<string>("");
+  const [immoTeachingCode, setImmoTeachingCode] = useState<string>("");
+  const [immoLogLines, setImmoLogLines] = useState<string[]>([]);
+  const [immoStatusDids, setImmoStatusDids] = useState<
+    Record<string, { rawHex: string; decoded: string }>
   >({});
 
   useEffect(() => {
@@ -1615,6 +1626,152 @@ export function SubaruSsmPanel({
     setSteeringPolling(false);
   }, [ready, busy, readSteeringOnce, setError]);
 
+  // F2 Immobilizer & Smart Key Registration handlers (750 -> 758)
+  const handleReadImmoStatus = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    const logs: string[] = [];
+    const nextDids: Record<string, { rawHex: string; decoded: string }> = {};
+    try {
+      await sendUdsRaw(session, "can11-500", "750", "758", "10 03", 900);
+      logs.push("750→758 (SMTC/IMMB): Открыта расширенная диагностическая сессия (10 03)");
+
+      const didList = [
+        { did: "F18E", label: "Каталожный номер блока Keyless/Immo" },
+        { did: "F182", label: "ID калибровки / прошивки" },
+        { did: "F197", label: "Название системы" },
+        { did: "104E", label: "Напряжение питания Smart Key (104E)" },
+        { did: "1052", label: "АЦП реле стартера (1052)" },
+        { did: "1057", label: "Статус реле стартера 1 (1057)" },
+        { did: "1058", label: "Статус реле стартера 2 (1058)" },
+        { did: "1059", label: "Реле блокировки стартера Starter Cut (1059)" },
+        { did: "105A", label: "Реле привода ICR (105A)" },
+        { did: "1067", label: "Статус DC/DC конвертера 1 (1067)" },
+        { did: "101E", label: "Счётчик циклов зажигания IG (101E)" },
+      ];
+
+      for (const item of didList) {
+        try {
+          const raw = await sendUdsRaw(session, "can11-500", "750", "758", `22 ${item.did}`, 1000);
+          const p = parseUdsResponse(raw, 0x22);
+          if (p.kind === "positive" && p.payload.length >= 2) {
+            const hexStr = p.payload
+              .slice(2)
+              .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+              .join(" ");
+            const dec = formatUdsPayload(p.payload, 0x22, "750");
+            nextDids[item.did] = { rawHex: hexStr || "—", decoded: dec };
+            logs.push(`✓ DID ${item.did} (${item.label}): ${dec}`);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      try {
+        const raw19 = await sendUdsRaw(session, "can11-500", "750", "758", "19 02 FF", 1200);
+        const p19 = parseUdsResponse(raw19, 0x19);
+        if (p19.kind === "positive") {
+          logs.push(`Коды ошибок иммобилайзера (19 02 FF): ${formatUdsPayload(p19.payload, 0x19, "750")}`);
+        }
+      } catch {
+        /* ignore */
+      }
+
+      await sendUdsRaw(session, "can11-500", "750", "758", "10 01", 700);
+      setImmoStatusDids(nextDids);
+      setImmoLogLines(logs);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка опроса иммобилайзера 750");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, session, setBusy, setError]);
+
+  const handleRequestImmoSeed = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    const logs: string[] = [];
+    try {
+      const elm = session.getElm();
+      if (!elm) throw new Error("Адаптер не подключён");
+      await elm.setCanHeader(0x750, 0x758);
+      const r10 = await elm.sendPayload("1003", 1200);
+      logs.push(`750→758: Сессия 10 03 → ${r10.replace(/>/g, "").trim()}`);
+
+      for (const sub of ["2701", "2703", "2711"] as const) {
+        const raw = await elm.sendPayload(sub, 2000);
+        const clean = raw.replace(/>/g, "").trim();
+        const p = parseUdsResponse(raw, 0x27);
+        logs.push(`750→758: Запрос Seed (${sub.slice(0, 2)} ${sub.slice(2)}) → ${clean}`);
+        if (p.kind === "positive" && p.payload.length >= 2) {
+          const seedBytes = p.payload.slice(1);
+          const seedStr = seedBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          setImmoSeedHex(seedStr);
+          logs.push(`✓ Получен Seed от блока 750 (${seedBytes.length} байт): ${seedStr}`);
+          break;
+        } else if (p.kind === "negative") {
+          logs.push(`Отказ 7F 27: ${p.nrcText ?? ""}`);
+        }
+      }
+      setImmoLogLines((prev) => [...prev, ...logs]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка запроса SecurityAccess Seed (27 01)");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, session, setBusy, setError]);
+
+  const handleSendImmoKeyAndProcedure = useCallback(async () => {
+    if (!ready || busy) return;
+    const cleanKey = immoKeyInputHex.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+    if (cleanKey.length < 4 || cleanKey.length % 2 !== 0) {
+      setError("Введите корректный ответный Key в HEX (например, 4 или 32 hex-символа для 27 02)");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const logs: string[] = [];
+    try {
+      const elm = session.getElm();
+      if (!elm) throw new Error("Адаптер не подключён");
+      await elm.setCanHeader(0x750, 0x758);
+      await elm.sendPayload("1003", 1000);
+      await elm.sendPayload("3E00", 800);
+
+      const raw27 = await elm.sendPayload(`2702${cleanKey}`, 3000);
+      const p27 = parseUdsResponse(raw27, 0x27);
+      logs.push(`750→758: Отправка Key (27 02 ${cleanKey}) → ${raw27.replace(/>/g, "").trim()}`);
+
+      if (p27.kind === "positive") {
+        logs.push("✓ Доступ SecurityAccess (67 02) ОТКРЫТ! Запуск выбранной процедуры иммобилайзера…");
+        const procPayloads: Record<string, string[]> = {
+          "read-key-count": ["22104E", "221057", "31010101"],
+          "verify-smart-key": ["31010102", "22104E"],
+          "register-add-key": ["31010201", "31010301"],
+          "delete-lost-keys": ["31010202", "31010302"],
+          "sync-ecu-immo-cgtw": ["31010401", "31010501"],
+        };
+        const cmds = procPayloads[immoProcedure] ?? ["22104E"];
+        for (const cmd of cmds) {
+          const r = await elm.sendPayload(cmd, 5000);
+          logs.push(`750→758 (${immoProcedure}): ${cmd} → ${r.replace(/>/g, "").trim()}`);
+        }
+      } else if (p27.kind === "negative") {
+        logs.push(`✗ Блок 750 отклонил Key (7F 27): ${p27.nrcText ?? "неверный ключ"}`);
+      } else {
+        logs.push("✗ Нет подтверждения 67 02 от блока 750");
+      }
+      setImmoLogLines((prev) => [...prev, ...logs]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка отправки Key (27 02)");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, immoKeyInputHex, immoProcedure, session, setBusy, setError]);
+
   const dumpDiffs = useMemo<SubaruDidDiffEntry[]>(() => {
     if (!configDumpA || !configDumpB) return [];
     return diffSubaruDumps(configDumpA, configDumpB);
@@ -1641,8 +1798,7 @@ export function SubaruSsmPanel({
                   id: "f2-immo",
                   label: "F2 Immobilizer / Reg.",
                   action: () => {
-                    setSelectedUtilityId("util-keyless-starter-check");
-                    setTopView("utilities");
+                    setTopView("immo");
                   },
                 },
                 {
@@ -1762,6 +1918,7 @@ export function SubaruSsmPanel({
             { id: "each-system", title: "F2 По блокам (40 систем)", icon: Cpu },
             { id: "multi-system", title: "F3 Мульти-система", icon: Layers },
             { id: "data-monitor", title: "Live Монитор (Группы)", icon: Activity },
+            { id: "immo", title: "F2 Иммобилайзер и ключи", icon: Lock },
             { id: "utilities", title: "Адаптации и калибровки (.srp)", icon: Wrench },
             { id: "customize", title: "F6 Кастомизация (Вариант)", icon: Sliders },
             { id: "steering", title: "Угол руля", icon: Gauge },
@@ -3237,6 +3394,193 @@ export function SubaruSsmPanel({
               Давление не декодировалось — проверьте IG ON и поездку для пробуждения датчиков; статусы колёс см. выше.
             </p>
           ) : null}
+        </div>
+      )}
+
+      {/* VIEW F2 IMMOBILIZER & SMART KEY REGISTRATION (750 -> 758 · IMM-000..073 / KEY-001..016 / SMA-001..021) */}
+      {topView === "immo" && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 pb-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded bg-blue-700 px-2.5 py-0.5 font-mono text-xs font-bold text-white">
+                  F2 Immobilizer etc. registration
+                </span>
+                <span className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800">
+                  В QHub вход БЕЗ 6-месячного пароля SSM4
+                </span>
+              </div>
+              <h3 className="mt-1.5 text-sm font-bold text-gray-900">
+                Иммобилайзер, смарт-ключи и синхронизация блоков Subaru (CAN 750 → 758 · IMM / KEY / SMA)
+              </h3>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Прямая диагностика блока Smart Key / Immobilizer (750 → 758), проверка реле запуска и количества ключей, чтение криптографического <code className="font-mono">Seed (27 01)</code> и отправка ответного <code className="font-mono">Key (27 02)</code>.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleReadImmoStatus()}
+              disabled={!ready || busy}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-blue-700 bg-blue-700 hover:bg-blue-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Опросить блок иммобилайзера (750)
+            </button>
+          </div>
+
+          {/* Architecture Explanation of the 3 security layers in SSM4 */}
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3.5 text-xs space-y-2">
+            <div className="font-bold text-blue-950">
+              Как устроена защита раздела «F2 Immobilizer» в файлах программы SSM4 (`System.ini`, `FHIUtilityWebNKRU.dll`, `FHIUtilityCtrlNK.dll`):
+            </div>
+            <ul className="list-disc pl-5 space-y-1 text-gray-700">
+              <li>
+                <strong>1. 6-месячный пароль запуска в самом SSM4 (`System.ini` → `ImmobilizerSelect = 41005 / 40762 / 40763`):</strong> в десктопной программе SSM4 это программная блокировка оболочки (`FHIUtilityWebNKRU.dll`: <em>«Ключ идентификации подключения к серверу регулярно обновляется»</em>). <strong>В вашем веб-сервисе QHub этой блокировки нет</strong> — раздел открыт всегда.
+              </li>
+              <li>
+                <strong>2. Автомобили до 2018 г. (Gen3 / Gen4, система `AS1` — `keyRegistAS1` / `GetSecurityAccessImb`):</strong> блок `750` запрашивает классический 2/4-байтовый `Seed → Key` (`UDS 27 01 / 27 02`) и <strong>Teaching Code</strong> (обучающий код с бирки ключей), а также требует наличия одного рабочего мастер-ключа в замке/у кнопки (`keyVerificationAS1`).
+              </li>
+              <li>
+                <strong>3. Автомобили SGP 2018–2026 г. (Outback BT, Forester SK, XV GT/GU, Ascent WM — `SecurityAccess2018CY_AesKey`):</strong> блок Smart Key (`750`) и шлюз `CGW` используют <strong>128-битный AES Challenge-Response</strong> (`16-байтовый Seed`). Сама программа SSM4 не считает этот ключ локально, а отправляет полученный `Seed` на сервер Subaru через `HttpGetSecurityKey` / `HttpMacDataUpDownLoad`. Ниже вы можете <strong>считать `Seed (27 01)` с автомобиля</strong> и ввести рассчитанный дилерским калькулятором / ключным программатором ответный `Key (27 02)`.
+              </li>
+            </ul>
+          </div>
+
+          {/* Live Status DIDs of 750 -> 758 */}
+          {Object.keys(immoStatusDids).length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {Object.entries(immoStatusDids).map(([did, info]) => (
+                <div
+                  key={did}
+                  className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 flex items-center justify-between gap-2"
+                >
+                  <div>
+                    <div className="font-mono text-[11px] font-bold text-blue-800">
+                      750 · DID {did}
+                    </div>
+                    <div className="font-mono text-[10px] text-gray-500">
+                      Raw: {info.rawHex}
+                    </div>
+                  </div>
+                  <div className="text-right font-mono text-xs font-bold text-emerald-700">
+                    {info.decoded}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* UDS 0x27 Seed-Key & Immobilizer Procedure Console */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-gray-200 p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-gray-900">
+                  Шаг 1. Выбор процедуры иммобилайзера (`FHIUtilityCtrlNK.dll`)
+                </span>
+                <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-gray-700">
+                  CAN 750 → 758
+                </span>
+              </div>
+
+              <select
+                value={immoProcedure}
+                onChange={(e) => setImmoProcedure(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-900"
+              >
+                <option value="read-key-count">
+                  1. Проверка количества зарегистрированных ключей (imb_in_ReadKeyNumConfirm)
+                </option>
+                <option value="verify-smart-key">
+                  2. Верификация смарт-ключа / транспондера в салоне (keyVerificationAS1)
+                </option>
+                <option value="register-add-key">
+                  3. Дописать новый смарт-ключ к существующему (keyAddAS1 / keyRegistAS1)
+                </option>
+                <option value="delete-lost-keys">
+                  4. Удалить утерянные смарт-ключи кроме активного (keyDeleteAS1)
+                </option>
+                <option value="sync-ecu-immo-cgtw">
+                  5. Синхронизация блоков ECM ↔ Immobilizer ↔ Meter ↔ CGW (systemRegistAS1 / makeUpdateMacData)
+                </option>
+              </select>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-gray-700">
+                  Обучающий код бирки ключей (Teaching Code — для систем AS1 до 2018 г., опционально):
+                </label>
+                <input
+                  type="text"
+                  value={immoTeachingCode}
+                  onChange={(e) => setImmoTeachingCode(e.target.value.toUpperCase())}
+                  placeholder="Например: 5-значный или HEX Teaching Code"
+                  className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 font-mono text-xs"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void handleRequestImmoSeed()}
+                disabled={!ready || busy}
+                className="w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                1. Запросить SecurityAccess Seed у блока 750 (`10 03` → `27 01`)
+              </button>
+
+              {immoSeedHex && (
+                <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs">
+                  <div className="font-bold text-emerald-900">
+                    Полученный от автомобиля Seed (`67 01`):
+                  </div>
+                  <div className="mt-1 font-mono text-sm font-bold text-emerald-800 select-all">
+                    {immoSeedHex}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-amber-300 bg-amber-50/50 p-3.5 space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-amber-950">
+                    Шаг 2. Отправка ответного ключа `Key (27 02)` и запуск процедуры
+                  </span>
+                  <span className="rounded bg-amber-200/70 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-900">
+                    UDS 27 02
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-700 leading-relaxed">
+                  Введите ответный <code className="font-mono font-bold">Key (HEX)</code>, рассчитанный по полученному выше <code className="font-mono">Seed</code> (2/4 байта для систем `AS1` или 16 байт для `SecurityAccess2018CY_AesKey`), чтобы открыть запись в блок <code className="font-mono">750</code> и выполнить выбранную процедуру.
+                </p>
+                <input
+                  type="text"
+                  value={immoKeyInputHex}
+                  onChange={(e) => setImmoKeyInputHex(e.target.value.toUpperCase())}
+                  placeholder="Введите ответный Key в HEX (например: A1 B2 C3 D4 …)"
+                  className="w-full rounded-lg border border-amber-400 bg-white px-3 py-2 font-mono text-xs font-bold uppercase"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void handleSendImmoKeyAndProcedure()}
+                disabled={!ready || busy || !immoKeyInputHex.trim()}
+                className="w-full rounded-xl border border-blue-700 bg-blue-700 hover:bg-blue-800 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                2. Отправить `27 02 Key` и запустить процедуру на блоке 750
+              </button>
+            </div>
+          </div>
+
+          {immoLogLines.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-gray-900 p-3 font-mono text-[11px] text-emerald-300 space-y-1 max-h-56 overflow-y-auto">
+              <div className="text-[10px] uppercase tracking-wider text-gray-400">
+                Журнал обмена с блоком Иммобилайзера / Smart Key (750 → 758):
+              </div>
+              {immoLogLines.map((line, idx) => (
+                <div key={idx}>{line}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
