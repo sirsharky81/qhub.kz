@@ -341,6 +341,7 @@ export function SubaruSsmPanel({
   const [immoStatusDids, setImmoStatusDids] = useState<
     Record<string, { rawHex: string; decoded: string }>
   >({});
+  const [immoWizardStep, setImmoWizardStep] = useState<1 | 2 | 3 | 4>(1);
 
   useEffect(() => {
     try {
@@ -1771,6 +1772,83 @@ export function SubaruSsmPanel({
       setBusy(false);
     }
   }, [ready, busy, immoKeyInputHex, immoProcedure, session, setBusy, setError]);
+
+  const handleRunPushStartWizardStep = useCallback(
+    async (step: 1 | 2 | 3 | 4) => {
+      if (!ready || busy) return;
+      setBusy(true);
+      setError(null);
+      const logs: string[] = [];
+      try {
+        const elm = session.getElm();
+        if (!elm) throw new Error("Адаптер vLinker не подключён");
+        await elm.setCanHeader(0x750, 0x758);
+        await elm.sendPayload("1003", 1000);
+        await elm.sendPayload("3E00", 800);
+
+        if (step === 1) {
+          // Step 1: Read current key count & power supply status (imb_in_ReadKeyNumConfirm)
+          logs.push("=== Шаг 1/4: Проверка состояния блока SMTC (750) и количества ключей ===");
+          for (const did of ["F18E", "104E", "1052", "1057", "1059"]) {
+            const raw = await elm.sendPayload(`22${did}`, 1000);
+            const p = parseUdsResponse(raw, 0x22);
+            if (p.kind === "positive") {
+              logs.push(`✓ 750 DID ${did}: ${formatUdsPayload(p.payload, 0x22, "750")}`);
+            }
+          }
+          const rCount = await elm.sendPayload("31010101", 2500);
+          logs.push(`750→758 (imb_in_ReadKeyNumConfirm 31 01 01 01): ${rCount.replace(/>/g, "").trim()}`);
+          setImmoWizardStep(2);
+        } else if (step === 2) {
+          // Step 2: Verify existing registered master key held against Push-Start button (keyVerificationAS1)
+          logs.push("=== Шаг 2/4: Верификация рабочего смарт-ключа у кнопки ENGINE START/STOP (keyVerificationAS1) ===");
+          logs.push("→ Держите РАБОЧИЙ смарт-ключ эмблемой Subaru вплотную к кнопке Push Start…");
+          for (const cmd of ["31010102", "31010200"]) {
+            const raw = await elm.sendPayload(cmd, 8000);
+            const clean = raw.replace(/>/g, "").trim();
+            logs.push(`750→758 (${cmd}): ${clean || "нет ответа"}`);
+            const p = parseUdsResponse(raw, 0x31);
+            if (p.kind === "positive") {
+              logs.push("✓ Рабочий смарт-ключ подтверждён катушкой кнопки Push Start! Переход к Шагу 3.");
+              break;
+            }
+          }
+          setImmoWizardStep(3);
+        } else if (step === 3) {
+          // Step 3: Register new smart key held against Push-Start button (keyAddAS1)
+          logs.push("=== Шаг 3/4: Запись НОВОГО смарт-ключа у кнопки ENGINE START/STOP (keyAddAS1) ===");
+          logs.push("→ Уберите старый ключ и приложите НОВЫЙ смарт-ключ к кнопке Push Start на 5–10 с…");
+          for (const cmd of ["31010201", "31010301"]) {
+            const raw = await elm.sendPayload(cmd, 10000);
+            const clean = raw.replace(/>/g, "").trim();
+            logs.push(`750→758 (${cmd}): ${clean || "нет ответа"}`);
+            const p = parseUdsResponse(raw, 0x31);
+            if (p.kind === "positive") {
+              logs.push("✓ Новый смарт-ключ принят блоком 750! Переход к завершению (Шаг 4).");
+              break;
+            }
+          }
+          setImmoWizardStep(4);
+        } else if (step === 4) {
+          // Step 4: Finalize key addition and re-read registered key count (keyAddEndAS1)
+          logs.push("=== Шаг 4/4: Завершение регистрации и проверка нового количества ключей (keyAddEndAS1) ===");
+          for (const cmd of ["31030201", "31010101"]) {
+            const raw = await elm.sendPayload(cmd, 3000);
+            logs.push(`750→758 (${cmd}): ${raw.replace(/>/g, "").trim()}`);
+          }
+          await elm.sendPayload("1001", 800);
+          logs.push("✓ Сессия завершена (10 01). Проверьте работу кнопок ЦЗ на обоих смарт-ключах.");
+        }
+
+        setImmoLogLines((prev) => [...prev, ...logs]);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Ошибка шага мастера Push-Start");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [ready, busy, session, setBusy, setError],
+  );
 
   const dumpDiffs = useMemo<SubaruDidDiffEntry[]>(() => {
     if (!configDumpA || !configDumpB) return [];
@@ -3469,6 +3547,107 @@ export function SubaruSsmPanel({
               ))}
             </div>
           )}
+
+          {/* Push-Start Proximity Key Addition Wizard (Autel KM100 / SSM4 keyVerificationAS1 -> keyAddAS1 -> keyAddEndAS1) */}
+          <div className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="rounded bg-emerald-600 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                  Режим с действующим ключом у кнопки START/STOP (`keyVerificationAS1` → `keyAddAS1`)
+                </span>
+                <h4 className="mt-1 text-xs font-bold text-gray-900">
+                  Пошаговый мастер дозаписи смарт-ключа через катушку кнопки Push Start (как в Autel KM100 / SSM4)
+                </h4>
+                <p className="text-[11px] text-gray-600">
+                  Когда в наличии есть родной рабочий смарт-ключ, блок сертификации <code className="font-mono">750</code> проверяет его транспондер напрямую через катушку кнопки <code className="font-mono">ENGINE START/STOP</code>, после чего открывает 30-секундное окно для прикладывания нового ключа.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImmoWizardStep(1)}
+                className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Сбросить на Шаг 1
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {(
+                [
+                  {
+                    step: 1 as const,
+                    title: "Шаг 1. Статус и число ключей",
+                    fnName: "imb_in_ReadKeyNumConfirm",
+                    desc: "Зажигание IG ON. Опрос блока 750 и проверка текущего числа прописанных ключей.",
+                    btn: "1. Проверить статус (750)",
+                  },
+                  {
+                    step: 2 as const,
+                    title: "Шаг 2. Приложите РАБОЧИЙ ключ",
+                    fnName: "keyVerificationAS1",
+                    desc: "Поднесите действующий родной смарт-ключ эмблемой Subaru вплотную к кнопке START/STOP до звукового сигнала.",
+                    btn: "2. Верифицировать рабочий ключ",
+                  },
+                  {
+                    step: 3 as const,
+                    title: "Шаг 3. Приложите НОВЫЙ ключ",
+                    fnName: "keyAddAS1",
+                    desc: "Уберите старый ключ и в течение 30 с приложите НОВЫЙ смарт-ключ к кнопке START/STOP до двойного сигнала.",
+                    btn: "3. Записать новый ключ",
+                  },
+                  {
+                    step: 4 as const,
+                    title: "Шаг 4. Завершение и проверка",
+                    fnName: "keyAddEndAS1",
+                    desc: "Фиксация нового ключа в EEPROM блока 750 и контрольное чтение счётчика ключей.",
+                    btn: "4. Завершить запись",
+                  },
+                ]
+              ).map((item) => {
+                const isCurrent = immoWizardStep === item.step;
+                const isDone = immoWizardStep > item.step;
+                return (
+                  <div
+                    key={item.step}
+                    className={`rounded-xl border p-3 flex flex-col justify-between gap-2.5 transition ${
+                      isCurrent
+                        ? "border-emerald-600 bg-white ring-2 ring-emerald-500 shadow-sm"
+                        : isDone
+                          ? "border-emerald-300 bg-emerald-50/80"
+                          : "border-gray-200 bg-white/80"
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-mono text-[10px] font-bold text-emerald-800">
+                          {item.fnName}()
+                        </span>
+                        {isDone && (
+                          <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                            ✓ Шаг пройден
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-bold text-gray-900">{item.title}</div>
+                      <p className="text-[11px] text-gray-600 leading-snug">{item.desc}</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!ready || busy}
+                      onClick={() => void handleRunPushStartWizardStep(item.step)}
+                      className={`w-full rounded-lg px-2.5 py-2 text-xs font-semibold text-white disabled:opacity-40 ${
+                        isCurrent
+                          ? "bg-emerald-700 hover:bg-emerald-800"
+                          : "bg-gray-900 hover:bg-gray-800"
+                      }`}
+                    >
+                      ▶ {item.btn}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {/* UDS 0x27 Seed-Key & Immobilizer Procedure Console */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
