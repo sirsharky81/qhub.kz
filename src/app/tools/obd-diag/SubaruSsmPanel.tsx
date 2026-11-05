@@ -3,6 +3,7 @@ import type {
   ObdBleSession,
   ModuleDtcReport,
   SubaruMeter12ColumnRead,
+  SubaruMeter12ColumnWriteSessionResult,
   SubaruRegionConfigDump,
 } from "@/lib/obd/obd-session";
 import type { SasCalibrationResult, TpmsWheelReading } from "@/lib/obd/mitsubishi-modules";
@@ -80,6 +81,7 @@ import {
   type Ssm4SystemEntry,
   type Ssm4UtilitySpec,
 } from "@/lib/obd/subaru-ssm4-catalog";
+import { isSubaruMeterWriteDestination } from "@/lib/obd/subaru-meter-variant";
 
 interface Props {
   session: ObdBleSession;
@@ -226,6 +228,13 @@ export function SubaruSsmPanel({
   const [appliedModelInput, setAppliedModelInput] = useState<string>("BTACYRB");
   const [optionCodeInput, setOptionCodeInput] = useState<string>("U45D");
   const [meter12Read, setMeter12Read] = useState<SubaruMeter12ColumnRead | null>(null);
+  const [meter12WritePending, setMeter12WritePending] = useState<{
+    appliedModel: string;
+    optionCode: string;
+  } | null>(null);
+  const [meter12WriteConfirmTyped, setMeter12WriteConfirmTyped] = useState("");
+  const [meter12WriteResult, setMeter12WriteResult] =
+    useState<SubaruMeter12ColumnWriteSessionResult | null>(null);
 
   const appliedModelAnalysis = useMemo(
     () => decodeSubaruAppliedModel12Columns(appliedModelInput, optionCodeInput),
@@ -910,6 +919,50 @@ export function SubaruSsmPanel({
       setBusy(false);
     }
   }, [ready, busy, session, setBusy, setError]);
+
+  const openMeter12WriteConfirm = useCallback(
+    (appliedModel: string, optionCode: string) => {
+      if (!ready || busy) return;
+      setMeter12WriteConfirmTyped("");
+      setMeter12WritePending({ appliedModel, optionCode });
+    },
+    [ready, busy],
+  );
+
+  const executeMeter12Write = useCallback(async () => {
+    if (!ready || busy || !meter12WritePending) return;
+    const pending = meter12WritePending;
+    if (meter12WriteConfirmTyped.trim().toUpperCase() !== pending.optionCode) return;
+    setMeter12WritePending(null);
+    setMeter12WriteConfirmTyped("");
+    setBusy(true);
+    setError(null);
+    setConfigProgress(
+      `Запись 12-колоночного кода ${pending.appliedModel} + ${pending.optionCode} (UDS 2E 0250, без одометра)…`,
+    );
+    try {
+      const result = await session.writeSubaruMeter12ColumnCode(
+        pending.appliedModel,
+        pending.optionCode,
+        "6",
+      );
+      setMeter12WriteResult(result);
+      if (result.after) setMeter12Read(result.after);
+      else if (result.before) setMeter12Read(result.before);
+      if (!result.success) {
+        setError(
+          result.securityAccessRequired
+            ? "Приборка запросила SecurityAccess (NRC 33). Ключ не подставляется — нужна дилерская SSM4."
+            : result.steps.at(-1) ?? "Приборка не подтвердила запись DID 0250/0251.",
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка записи 12-колоночного кода приборки");
+    } finally {
+      setConfigProgress(null);
+      setBusy(false);
+    }
+  }, [ready, busy, meter12WritePending, meter12WriteConfirmTyped, session, setBusy, setError]);
 
   const handleExportDumpJson = useCallback((dump: SubaruRegionConfigDump, slot: "A" | "B", onlyMeter = false) => {
     const payload = onlyMeter
@@ -4661,6 +4714,97 @@ export function SubaruSsmPanel({
               </div>
             </div>
 
+            <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+              <div className="text-xs font-bold text-amber-950">
+                Запись в приборку (Procedure B): UDS 2E только DID 0250 / 0251. Одометр и writeCommonArea не трогаются.
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    openMeter12WriteConfirm(
+                      appliedModelAnalysis.appliedModel,
+                      appliedModelAnalysis.optionCode,
+                    )
+                  }
+                  disabled={
+                    !ready ||
+                    busy ||
+                    !appliedModelAnalysis.valid ||
+                    !isSubaruMeterWriteDestination(appliedModelAnalysis.optionDestinationPrefix)
+                  }
+                  className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Записать код из полей ({appliedModelAnalysis.appliedModel}+{appliedModelAnalysis.optionCode})
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openMeter12WriteConfirm(
+                      appliedModelAnalysis.appliedModel,
+                      appliedModelAnalysis.canadianOptionCodeC0,
+                    )
+                  }
+                  disabled={!ready || busy || !appliedModelAnalysis.valid}
+                  className="rounded-lg bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Записать Канада {appliedModelAnalysis.canadianOptionCodeC0} (°C, км/ч)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const usCode = isSubaruMeterWriteDestination(
+                      appliedModelAnalysis.optionDestinationPrefix,
+                    ) && appliedModelAnalysis.optionDestinationPrefix.startsWith("U")
+                      ? appliedModelAnalysis.optionCode
+                      : `U4${appliedModelAnalysis.optionEquipmentSuffix || "5D"}`;
+                    openMeter12WriteConfirm(appliedModelAnalysis.appliedModel, usCode);
+                  }}
+                  disabled={!ready || busy || !appliedModelAnalysis.valid}
+                  className="rounded-lg border border-gray-400 bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 disabled:opacity-40"
+                >
+                  Вернуть США (°F, mph)
+                </button>
+              </div>
+              <p className="text-[11px] text-amber-900">
+                Сначала читается текущий DID 0250, код вшивается в ту же длину/паддинг, затем 2E. EC/EA (433 МГц) заблокированы.
+                Для подтверждения нужно ввести 4-значный Option Code.
+              </p>
+            </div>
+
+            {meter12WriteResult && (
+              <div
+                className={`rounded-lg border px-3 py-2 text-xs space-y-1.5 ${
+                  meter12WriteResult.success
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-rose-200 bg-rose-50"
+                }`}
+              >
+                <div className="font-bold">
+                  {meter12WriteResult.success
+                    ? `Записано DID ${meter12WriteResult.writtenDid}: ${meter12WriteResult.plan.appliedModel} + ${meter12WriteResult.plan.optionCode}`
+                    : meter12WriteResult.securityAccessRequired
+                      ? "Запись остановлена: приборка требует SecurityAccess (NRC 33)"
+                      : "Запись не подтверждена приборкой"}
+                </div>
+                {meter12WriteResult.after && (
+                  <div>
+                    После записи считано:{" "}
+                    <code className="font-mono font-bold">
+                      {meter12WriteResult.after.match.inferredAppliedModel} +{" "}
+                      {meter12WriteResult.after.match.inferredOptionCode}
+                    </code>{" "}
+                    ({meter12WriteResult.after.match.inferredRegion})
+                  </div>
+                )}
+                <ul className="max-h-36 overflow-y-auto space-y-0.5 font-mono text-[10px] text-gray-700">
+                  {meter12WriteResult.steps.map((step, idx) => (
+                    <li key={idx}>• {step}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Reference Table of Canadian Option Codes across TSB 07-183-20 models */}
             <div className="space-y-1.5">
               <div className="text-xs font-bold text-gray-700">
@@ -4723,6 +4867,86 @@ export function SubaruSsmPanel({
               </div>
             </div>
           </div>
+
+          {meter12WritePending && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => {
+                setMeter12WritePending(null);
+                setMeter12WriteConfirmTyped("");
+              }}
+            >
+              <div
+                className="w-full max-w-md rounded-2xl border border-amber-300 bg-white p-5 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-xs font-bold text-amber-900">
+                  783 → 78B · UDS 2E DID 0250 / 0251
+                </span>
+                <h2 className="mt-2 text-base font-bold text-gray-900">
+                  Записать 12-колоночный код в приборку
+                </h2>
+                <div className="mt-3 rounded-xl border border-amber-400/50 bg-amber-50 p-3 text-xs text-amber-950 space-y-1.5">
+                  <div>
+                    Сейчас на приборке:{" "}
+                    <code className="font-mono font-bold">
+                      {meter12Read
+                        ? `${meter12Read.match.inferredAppliedModel} + ${meter12Read.match.inferredOptionCode}`
+                        : "считаем DID 0250 перед записью"}
+                    </code>
+                  </div>
+                  <div>
+                    Будет записано:{" "}
+                    <code className="font-mono font-bold">
+                      {meter12WritePending.appliedModel} + {meter12WritePending.optionCode}
+                    </code>
+                  </div>
+                  <p className="leading-relaxed">
+                    Только Procedure B (`sendMetVariByApplied`). Не выполняется `writeCommonArea`, не пишется одометр,
+                    не подбирается SecurityAccess. IG ON, двигатель заглушен.
+                  </p>
+                </div>
+                <label className="mt-4 block space-y-1">
+                  <span className="text-sm font-medium text-gray-900">
+                    Введите Option Code{" "}
+                    <code className="font-mono">{meter12WritePending.optionCode}</code> для подтверждения:
+                  </span>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={meter12WriteConfirmTyped}
+                    onChange={(e) => setMeter12WriteConfirmTyped(e.target.value.toUpperCase())}
+                    className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
+                    autoFocus
+                  />
+                </label>
+                <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMeter12WritePending(null);
+                      setMeter12WriteConfirmTyped("");
+                    }}
+                    className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2.5 text-xs font-semibold text-gray-900 hover:bg-gray-200"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void executeMeter12Write()}
+                    disabled={
+                      meter12WriteConfirmTyped.trim().toUpperCase() !== meter12WritePending.optionCode
+                    }
+                    className="rounded-xl border border-gray-900 bg-gray-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
+                  >
+                    Да, записать в приборку
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

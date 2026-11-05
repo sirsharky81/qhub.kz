@@ -42,6 +42,10 @@ import {
   extractAppliedModelAndOptionCodeFromDump,
   type SubaruDumpCodeMatch,
 } from "./subaru-ssm4-catalog";
+import {
+  writeSubaruMeter12ColumnCode as executeSubaruMeter12ColumnWrite,
+  type SubaruMeter12ColumnWriteResult,
+} from "./subaru-meter-variant";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
   DID_SCAN_FROM,
@@ -143,6 +147,11 @@ export interface SubaruMeter12ColumnRead {
   vin: string | null;
   dids: { did: string; label: string; hex: string; decoded: string }[];
   match: SubaruDumpCodeMatch;
+}
+
+export interface SubaruMeter12ColumnWriteSessionResult extends SubaruMeter12ColumnWriteResult {
+  before: SubaruMeter12ColumnRead;
+  after: SubaruMeter12ColumnRead | null;
 }
 
 export interface ModuleDtcItem {
@@ -1086,6 +1095,39 @@ export class ObdBleSession {
       dids,
       match,
     };
+  }
+
+  /**
+   * Procedure B only: UDS 2E on Combination Meter DID 0250/0251 (sendMetVariByApplied).
+   * Reads current layout first, writes Applied+Option, then re-reads. Never writeCommonArea.
+   */
+  async writeSubaruMeter12ColumnCode(
+    appliedModel: string,
+    optionCode: string,
+    protocol: CanProtocol = "6",
+  ): Promise<SubaruMeter12ColumnWriteSessionResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед записью приборки");
+    await this.ensureUdsProfile(protocol);
+
+    const before = await this.readSubaruMeter12ColumnCode(protocol);
+    const write = await executeSubaruMeter12ColumnWrite(this.elm!, {
+      appliedModel,
+      optionCode,
+      currentDids: before.dids,
+      txHex: before.txHex,
+      rxHex: before.rxHex,
+    });
+
+    let after: SubaruMeter12ColumnRead | null = null;
+    try {
+      after = await this.readSubaruMeter12ColumnCode(protocol);
+    } catch {
+      /* write result still stands */
+    }
+
+    return { ...write, before, after };
   }
 
   /**
