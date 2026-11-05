@@ -5182,8 +5182,8 @@ export const SSM4_SRP_UTILITY_CATALOG: readonly Ssm4SrpUtilityModule[] = [
       "Проверка количества зарегистрированных ключей и верификация смарт-ключа (imb_in_ReadKeyNumConfirm / keyVerificationAS1)",
       "Регистрация новых смарт-ключей и удаление утерянных ключей (keyRegistAS1 / keyAddAS1 / keyDeleteAS1)",
       "Синхронизация и привязка блоков при замене (ECM ↔ Immobilizer ↔ Steering Lock ↔ Meter: sysRegist / meterScuRegistAS1 / ImbTlmCuRegist)",
-      "US/NA F2: регистрация уже установленного Remote Engine Start CM (H-type Push Start, Keyless 750 ↔ BIU 752, RES-001.srp) — без writeCommonArea и без удаления ключей",
-      "Криптографическая авторизация SecurityAccess 2018+ AES (SecurityAccess2018CY_AesKey / GetSecurityAccessImb)",
+      "US/NA F2: Remote Engine Start CM Registration — из расшифрованных IMM-071.srp (H-type 7B4→7BC) и IMM-017.srp (D-type 751→759) пишет 2E 11 B0 01 → 6E 11 B0; для замка с ключом IMM-005/064.srp (BIU 752→75A) запускает 31 01 40 05 → 31 03 40 05. Телематика — отдельный скрипт IMM-072/052 (2E 11 B2 01)",
+      "Криптографическая авторизация SecurityAccess 2018+ AES (SecurityAccess2018CY_AesKey / GetSecurityAccessImb) — ключ в продукт не выносится",
     ],
     dllFunctions: [
       "keyVerificationAS1",

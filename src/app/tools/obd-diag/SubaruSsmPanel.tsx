@@ -85,6 +85,7 @@ import { isSubaruMeterWriteDestination } from "@/lib/obd/subaru-meter-variant";
 import type {
   SubaruResProbeResult,
   SubaruResRegistrationResult,
+  SubaruResSystemType,
 } from "@/lib/obd/subaru-res-cm-registration";
 
 interface Props {
@@ -363,6 +364,7 @@ export function SubaruSsmPanel({
   const [immoWizardStep, setImmoWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [resProbe, setResProbe] = useState<SubaruResProbeResult | null>(null);
   const [resRegisterResult, setResRegisterResult] = useState<SubaruResRegistrationResult | null>(null);
+  const [resSystemType, setResSystemType] = useState<SubaruResSystemType>("auto");
   const [resConfirmOpen, setResConfirmOpen] = useState(false);
   const [resConfirmTyped, setResConfirmTyped] = useState("");
 
@@ -1943,7 +1945,7 @@ export function SubaruSsmPanel({
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
-    setConfigProgress("Опрос Keyless 750, BIU 752 и кандидатов RES CM (только чтение)…");
+    setConfigProgress("Опрос Keyless 750 и BIU 752 (только чтение)…");
     try {
       const result = await session.probeSubaruResCm("6");
       setResProbe(result);
@@ -1963,25 +1965,21 @@ export function SubaruSsmPanel({
     setResConfirmTyped("");
     setBusy(true);
     setError(null);
-    setConfigProgress("Remote Engine Start CM Registration (UDS 31 на 750/752, без удаления ключей)…");
+    setConfigProgress(`Прописка RES (${resSystemType})…`);
     try {
-      const result = await session.registerSubaruResCm("6");
+      const result = await session.registerSubaruResCm("6", { systemType: resSystemType });
       setResRegisterResult(result);
       setImmoLogLines((prev) => [...prev, ...result.steps]);
       if (!result.success) {
-        setError(
-          result.securityAccessRequired
-            ? "RES CM: блок запросил SecurityAccess (NRC 33). AES-ключ не подставляется — введите дилерский 27 02 ниже и повторите."
-            : (result.steps.at(-1) ?? "RES CM не подтвердил регистрацию."),
-        );
+        setError(result.steps.at(-1) ?? "Блок не подтвердил прописку RES.");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка регистрации RES CM");
+      setError(e instanceof Error ? e.message : "Ошибка привязки RES");
     } finally {
       setConfigProgress(null);
       setBusy(false);
     }
-  }, [ready, busy, resConfirmTyped, session, setBusy, setError]);
+  }, [ready, busy, resConfirmTyped, resSystemType, session, setBusy, setError]);
 
   const dumpDiffs = useMemo<SubaruDidDiffEntry[]>(() => {
     if (!configDumpA || !configDumpB) return [];
@@ -3682,22 +3680,47 @@ export function SubaruSsmPanel({
           )}
 
           <div className="rounded-xl border border-blue-300 bg-blue-50/60 p-4 space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <span className="rounded bg-blue-700 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
-                  SSM4 F2 · NA/US · Remote Engine Start CM Registration
-                </span>
-                <h4 className="mt-1 text-xs font-bold text-gray-900">
-                  Регистрация уже установленного блока Remote Engine Start (H-type Push Start)
-                </h4>
-                <p className="text-[11px] text-gray-600 leading-snug">
-                  Как в SSM4 США: <code className="font-mono">Immobilizer etc. registration</code> →{" "}
-                  <code className="font-mono">Remote Engine Start CM Registration</code>. Сканер говорит с Keyless{" "}
-                  <code className="font-mono">750</code> и BIU <code className="font-mono">752</code>; они сами связывают
-                  RES по CAN. Нужен один уже прописанный смарт-ключ в салоне, IG ON, дверь водителя лучше открыть.
-                  Не удаляет ключи, не пишет одометр.
-                </p>
-              </div>
+            <div>
+              <span className="rounded bg-blue-700 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                SSM4 F2 · Remote Engine Start CM Registration
+              </span>
+              <h4 className="mt-1 text-xs font-bold text-gray-900">
+                Прописка уже установленного блока Remote Engine Start (H-type / Push Start)
+              </h4>
+              <p className="mt-1 text-[11px] text-gray-700 leading-snug">
+                Из расшифрованных сценариев SSM4: для Push-Start (<strong>H-type</strong>{" "}
+                <code className="font-mono">IMM-071.srp</code> на <code className="font-mono">7B4→7BC</code> и{" "}
+                <strong>D-type</strong> <code className="font-mono">IMM-017.srp</code> на{" "}
+                <code className="font-mono">751→759</code>) привязка RES — это запись{" "}
+                <code className="font-mono">2E 11 B0 01</code> → ответ <code className="font-mono">6E 11 B0</code>; для
+                замка с ключом (<strong>B/G-type</strong> <code className="font-mono">IMM-005/064.srp</code> на BIU{" "}
+                <code className="font-mono">752→75A</code>) — рутина{" "}
+                <code className="font-mono">31 01 40 05</code> → <code className="font-mono">31 03 40 05</code>.
+                Телематика (<code className="font-mono">2E 11 B2 01</code>) и удаление ключей не вызываются.
+              </p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-gray-800">
+                Тип иммобилайзера (`PopUpImmMenuTypeSel` в SSM4):
+              </label>
+              <select
+                value={resSystemType}
+                onChange={(e) => setResSystemType(e.target.value as SubaruResSystemType)}
+                className="w-full rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-900"
+              >
+                <option value="auto">
+                  Автоопределение по CAN (7B4 H-type → 751 D-type → 750 → 752 B/G-type)
+                </option>
+                <option value="h-type-7b4">
+                  H-type · Push Start SGP (Outback BT / Forester SK / Ascent · 7B4→7BC · IMM-071 · 2E 11 B0 01)
+                </option>
+                <option value="d-type-751">
+                  D-type · Push Start до SGP (Outback BS / Legacy BN · 751→759 · IMM-017 · 2E 11 B0 01)
+                </option>
+                <option value="key-biu-752">
+                  B-type / G-type · Замок с ключом (BIU 752→75A · IMM-005 / IMM-064 · 31 01 40 05)
+                </option>
+              </select>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -3706,7 +3729,7 @@ export function SubaruSsmPanel({
                 disabled={!ready || busy}
                 className="rounded-lg bg-blue-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                1. Опросить 750 / 752 / RES
+                1. Опросить 7B4 / 751 / 752 / 750
               </button>
               <button
                 type="button"
@@ -3717,7 +3740,7 @@ export function SubaruSsmPanel({
                 disabled={!ready || busy}
                 className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                2. Execute Remote Engine Start CM Registration
+                2. Прописать RES
               </button>
             </div>
             {resProbe && (
@@ -3748,10 +3771,10 @@ export function SubaruSsmPanel({
               >
                 <div className="font-bold">
                   {resRegisterResult.success
-                    ? `RES CM зарегистрирован (${resRegisterResult.acceptedTx} ${resRegisterResult.acceptedPayload}). Выключите зажигание.`
+                    ? `RES CM прописан (${resRegisterResult.acceptedTx} · ${resRegisterResult.acceptedPayload}). Выключите зажигание и проверьте брелок RES.`
                     : resRegisterResult.securityAccessRequired
-                      ? "NRC 33: нужен дилерский SecurityAccess 27 02, AES не подставляется"
-                      : "Регистрация RES CM не подтверждена"}
+                      ? "Блок запросил SecurityAccess (NRC 33 / ненулевой Seed)"
+                      : "Блок не подтвердил 6E 11 B0 / 71 01 40 05"}
                 </div>
                 <ul className="max-h-32 overflow-y-auto space-y-0.5 font-mono text-[10px] text-gray-700">
                   {resRegisterResult.steps.map((step, idx) => (
@@ -3777,20 +3800,18 @@ export function SubaruSsmPanel({
                 onClick={(e) => e.stopPropagation()}
               >
                 <span className="rounded bg-blue-100 px-2 py-0.5 font-mono text-xs font-bold text-blue-900">
-                  750 → 758 · 752 → 75A · UDS 31 01
+                  7B4 / 751 (2E 11 B0 01) · 752 (31 01 40 05)
                 </span>
-                <h2 className="mt-2 text-base font-bold text-gray-900">
-                  Execute Remote Engine Start CM Registration?
-                </h2>
-                <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950 space-y-1.5">
-                  <p>
-                    IG ON, один зарегистрированный смарт-ключ в салоне, блок RES уже установлен. SSM4 ждёт связь BIU ↔
-                    RES. Не выполняется удаление ключей, не пишется одометр, AES-ключ не подбирается.
-                  </p>
-                </div>
+                <h2 className="mt-2 text-base font-bold text-gray-900">Прописать блок RES?</h2>
+                <p className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950">
+                  IG ON, один рабочий ключ в салоне, блок RES уже установлен. Отправляет точную команду из{" "}
+                  <code className="font-mono">IMM-071.srp</code> / <code className="font-mono">IMM-017.srp</code> (
+                  <code className="font-mono">2E 11 B0 01</code>) или <code className="font-mono">IMM-005/064.srp</code>{" "}
+                  (<code className="font-mono">31 01 40 05</code>). Ключи не удаляются.
+                </p>
                 <label className="mt-4 block space-y-1">
                   <span className="text-sm font-medium text-gray-900">
-                    Введите <code className="font-mono">YES</code> для подтверждения:
+                    Введите <code className="font-mono">YES</code>:
                   </span>
                   <input
                     type="text"
@@ -3810,7 +3831,7 @@ export function SubaruSsmPanel({
                     }}
                     className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2.5 text-xs font-semibold text-gray-900 hover:bg-gray-200"
                   >
-                    No
+                    Нет
                   </button>
                   <button
                     type="button"
@@ -3818,7 +3839,7 @@ export function SubaruSsmPanel({
                     disabled={resConfirmTyped.trim().toUpperCase() !== "YES"}
                     className="rounded-xl border border-gray-900 bg-gray-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
                   >
-                    Yes, зарегистрировать RES CM
+                    Yes, прописать RES
                   </button>
                 </div>
               </div>

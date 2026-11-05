@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   SUBARU_RES_BLOCKED_PAYLOADS,
   SUBARU_RES_CM_SAFE_PATH,
-  SUBARU_RES_REGISTRATION_CANDIDATES,
   probeSubaruResCm,
   registerSubaruResCm,
   type SubaruResLink,
@@ -35,48 +34,71 @@ function scriptedElm(replies: Record<string, string | string[]>): SubaruResLink 
 }
 
 describe("subaru-res-cm-registration", () => {
-  it("keeps F2 RES registration on Keyless/BIU and never includes key-delete payloads", () => {
+  it("documents exact SSM4 IMM-071/017 (2E 11 B0 01) and IMM-005/064 (31 01 40 05) frames and blocks key-delete & telematics", () => {
     expect(SUBARU_RES_CM_SAFE_PATH.ssm4MenuEn).toBe("Remote Engine Start CM Registration");
-    expect(SUBARU_RES_CM_SAFE_PATH.talkTx).toEqual(["750", "752"]);
-    expect(SUBARU_RES_REGISTRATION_CANDIDATES.every((c) => c.txHex === "750" || c.txHex === "752")).toBe(true);
-    expect(SUBARU_RES_REGISTRATION_CANDIDATES.every((c) => c.payloadHex.startsWith("3101"))).toBe(true);
-    for (const blocked of SUBARU_RES_BLOCKED_PAYLOADS) {
-      expect(SUBARU_RES_REGISTRATION_CANDIDATES.some((c) => c.payloadHex === blocked)).toBe(false);
-    }
+    expect(SUBARU_RES_CM_SAFE_PATH.pushStartWriteFrame).toBe("2E11B001");
+    expect(SUBARU_RES_CM_SAFE_PATH.keyStartRoutineStart).toBe("31014005");
+    expect(SUBARU_RES_BLOCKED_PAYLOADS).toContain("2E11B201");
+    expect(SUBARU_RES_BLOCKED_PAYLOADS).toContain("31014004");
+    expect(SUBARU_RES_BLOCKED_PAYLOADS).toContain("31010601");
   });
 
-  it("probes 750 F18E without sending 2E or 27", async () => {
+  it("probes 7B4, 751, 752, and 750 without sending 2E, 27, or 31", async () => {
     const elm = scriptedElm({
       "22F18E": "62 F1 8E 48 30 30 31 53 41 4E 30 30 30",
     });
     const probe = await probeSubaruResCm(elm);
     expect(probe.keylessOk).toBe(true);
-    expect(elm.sent.some((s) => s.startsWith("2E") || s.startsWith("27"))).toBe(false);
-    expect(elm.sent.some((s) => (SUBARU_RES_BLOCKED_PAYLOADS as readonly string[]).includes(s))).toBe(false);
+    expect(probe.biuOk).toBe(true);
+    expect(probe.modules.map((m) => m.txHex)).toEqual(["7B4", "751", "752", "750"]);
+    expect(elm.sent.some((s) => s.startsWith("2E") || s.startsWith("27") || s.startsWith("31"))).toBe(false);
   });
 
-  it("registers on 31 01 06 01 71 and polls 31 03 without SecurityAccess", async () => {
+  it("registers Push-Start RES via 2E 11 B0 01 on 7B4 (IMM-071)", async () => {
     const elm = scriptedElm({
-      "31010601": "71 01 06 01",
-      "31030601": "71 03 06 01",
+      "2707": `67 07 ${Array(16).fill("00").join(" ")}`,
+      "2E11B001": "6E 11 B0",
     });
     const result = await registerSubaruResCm(elm);
     expect(result.success).toBe(true);
-    expect(result.acceptedPayload).toBe("31010601");
-    expect(result.acceptedTx).toBe("750");
+    expect(result.acceptedPayload).toBe("2E11B001");
+    expect(result.acceptedTx).toBe("7B4");
     expect(result.securityAccessRequired).toBe(false);
-    expect(elm.sent.filter((s) => s.startsWith("31"))).toEqual(["31010601", "31030601"]);
-    expect(elm.sent.some((s) => s.startsWith("27") || s.startsWith("2E"))).toBe(false);
+    expect(elm.sent).toContain("2E11B001");
+    expect(elm.sent.some((s) => (SUBARU_RES_BLOCKED_PAYLOADS as readonly string[]).includes(s))).toBe(false);
   });
 
-  it("stops on NRC 33 without inventing a seed-key", async () => {
+  it("falls back to BIU 752 31 01 40 05 -> 31 03 40 05 when Push-Start ECUs do not answer", async () => {
     const elm = scriptedElm({
-      "31010601": "7F 31 33",
+      "1003": ["NO DATA", "NO DATA", "NO DATA", "50 03"],
+      "31014005": "71 01 40 05",
+      "31034005": "71 03 40 05 00 02",
     });
     const result = await registerSubaruResCm(elm);
-    expect(result.success).toBe(false);
-    expect(result.securityAccessRequired).toBe(true);
-    expect(elm.sent.some((s) => s.startsWith("27"))).toBe(false);
-    expect(elm.sent.some((s) => (SUBARU_RES_BLOCKED_PAYLOADS as readonly string[]).includes(s))).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.acceptedPayload).toBe("31014005");
+    expect(result.acceptedTx).toBe("752");
+  });
+
+  it("respects explicit systemType (d-type-751 only talks to 751, key-biu-752 only talks to 752)", async () => {
+    const elmD = scriptedElm({
+      "2703": "67 03 00 00 00 00",
+      "2E11B001": "6E 11 B0",
+    });
+    const resD = await registerSubaruResCm(elmD, { systemType: "d-type-751" });
+    expect(resD.success).toBe(true);
+    expect(resD.acceptedTx).toBe("751");
+    expect(elmD.sent).toContain("ATFCSH751");
+    expect(elmD.sent).not.toContain("ATFCSH7B4");
+
+    const elmBiu = scriptedElm({
+      "31014005": "71 01 40 05",
+      "31034005": "71 03 40 05 00 02",
+    });
+    const resBiu = await registerSubaruResCm(elmBiu, { systemType: "key-biu-752" });
+    expect(resBiu.success).toBe(true);
+    expect(resBiu.acceptedTx).toBe("752");
+    expect(elmBiu.sent).toContain("ATFCSH752");
+    expect(elmBiu.sent).not.toContain("2E11B001");
   });
 });

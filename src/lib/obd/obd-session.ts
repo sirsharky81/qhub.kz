@@ -50,7 +50,9 @@ import {
   probeSubaruResCm as executeSubaruResCmProbe,
   registerSubaruResCm as executeSubaruResCmRegister,
   type SubaruResProbeResult,
+  type SubaruResRegistrationOptions,
   type SubaruResRegistrationResult,
+  type SubaruResSystemType,
 } from "./subaru-res-cm-registration";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
@@ -1148,15 +1150,17 @@ export class ObdBleSession {
   }
 
   /**
-   * SSM4 NA/US F2: bind an already-installed Remote Engine Start CM to Keyless/BIU.
-   * Never deletes keys, never writeCommonArea, never invents SecurityAccess keys.
+   * SSM4 RES CM Registration (`IMM-071` / `IMM-017` `2E 11 B0 01` or `IMM-005`/`064` `31 01 40 05`).
    */
-  async registerSubaruResCm(protocol: CanProtocol = "6"): Promise<SubaruResRegistrationResult> {
+  async registerSubaruResCm(
+    protocol: CanProtocol = "6",
+    options?: SubaruResRegistrationOptions,
+  ): Promise<SubaruResRegistrationResult> {
     this.requireAdapter();
     await this.waitLeave();
-    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед регистрацией RES CM");
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед пропиской RES CM");
     await this.ensureUdsProfile(protocol);
-    return executeSubaruResCmRegister(this.elm!);
+    return executeSubaruResCmRegister(this.elm!, options);
   }
 
   /**
