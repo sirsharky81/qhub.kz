@@ -3799,8 +3799,7 @@ export function SubaruSsmPanel({
                     ))}
                   </ul>
                 </div>
-                ) : null}
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
