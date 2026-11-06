@@ -110,7 +110,8 @@ type Ssm4TopView =
   | "steering"
   | "cvt"
   | "tpms"
-  | "ssm4-db";
+  | "ssm4-db"
+  | "legacy-tools";
 
 const SERVICE_UTILITIES = SSM4_UTILITIES;
 
@@ -230,8 +231,8 @@ export function SubaruSsmPanel({
   const [configDumpA, setConfigDumpA] = useState<SubaruRegionConfigDump | null>(null);
   const [configDumpB, setConfigDumpB] = useState<SubaruRegionConfigDump | null>(null);
   const [configProgress, setConfigProgress] = useState<string | null>(null);
-  const [appliedModelInput, setAppliedModelInput] = useState<string>("BTACYRB");
-  const [optionCodeInput, setOptionCodeInput] = useState<string>("U45D");
+  const [appliedModelInput, setAppliedModelInput] = useState<string>("BTAEYR8");
+  const [optionCodeInput, setOptionCodeInput] = useState<string>("U45L");
   const [meter12Read, setMeter12Read] = useState<SubaruMeter12ColumnRead | null>(null);
   const [meter12WritePending, setMeter12WritePending] = useState<{
     appliedModel: string;
@@ -352,7 +353,7 @@ export function SubaruSsmPanel({
     Record<number, { status: string; lines: string[]; ok: boolean }>
   >({});
 
-  // F2 Immobilizer & Smart Key Registration state (750 -> 758)
+  // F2 Immobilizer & Smart Key Registration state (7B4->7BC H-type / 751->759 D-type / 752->75A BIU / 750->758)
   const [immoProcedure, setImmoProcedure] = useState<string>("read-key-count");
   const [immoSeedHex, setImmoSeedHex] = useState<string | null>(null);
   const [immoKeyInputHex, setImmoKeyInputHex] = useState<string>("");
@@ -361,7 +362,17 @@ export function SubaruSsmPanel({
   const [immoStatusDids, setImmoStatusDids] = useState<
     Record<string, { rawHex: string; decoded: string }>
   >({});
+  const [immoKeyCountRead, setImmoKeyCountRead] = useState<{
+    ecuTx: string;
+    did: string;
+    count: number | null;
+    rawHex: string;
+    historyHex: string | null;
+    lastFailureCodeHex: string | null;
+  } | null>(null);
   const [immoWizardStep, setImmoWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [immoDeleteConfirmTyped, setImmoDeleteConfirmTyped] = useState<string>("");
+  const [immoDeleteConfirmOpen, setImmoDeleteConfirmOpen] = useState<boolean>(false);
   const [resProbe, setResProbe] = useState<SubaruResProbeResult | null>(null);
   const [resRegisterResult, setResRegisterResult] = useState<SubaruResRegistrationResult | null>(null);
   const [resSystemType, setResSystemType] = useState<SubaruResSystemType>("auto");
@@ -916,11 +927,11 @@ export function SubaruSsmPanel({
     try {
       const result = await session.readSubaruMeter12ColumnCode("6");
       setMeter12Read(result);
-      if (result.match.directAppliedModel) {
-        setAppliedModelInput(result.match.directAppliedModel);
+      if (result.match.actualAppliedModel) {
+        setAppliedModelInput(result.match.actualAppliedModel);
       }
-      if (result.match.directOptionCode) {
-        setOptionCodeInput(result.match.directOptionCode);
+      if (result.match.actualOptionCode) {
+        setOptionCodeInput(result.match.actualOptionCode);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка чтения 12-колоночного кода приборки");
@@ -1726,60 +1737,218 @@ export function SubaruSsmPanel({
     const logs: string[] = [];
     const nextDids: Record<string, { rawHex: string; decoded: string }> = {};
     try {
-      await sendUdsRaw(session, "can11-500", "750", "758", "10 03", 900);
-      logs.push("750→758 (SMTC/IMMB): Открыта расширенная диагностическая сессия (10 03)");
+      const immoTargets =
+        resSystemType === "h-type-7b4"
+          ? [{ tx: "7B4", rx: "7BC", name: "H-type Smart Key (7B4→7BC · IMM-066..073)" }]
+          : resSystemType === "d-type-751"
+            ? [{ tx: "751", rx: "759", name: "D-type Keyless Access (751→759 · IMM-012..018)" }]
+            : resSystemType === "key-biu-752"
+              ? [{ tx: "752", rx: "75A", name: "B/G-type BIU Key-Start (752→75A · IMM-001..006/060..065)" }]
+              : [
+                  { tx: "7B4", rx: "7BC", name: "H-type Smart Key (7B4→7BC · SGP)" },
+                  { tx: "751", rx: "759", name: "D-type Keyless Access (751→759)" },
+                  { tx: "752", rx: "75A", name: "B/G-type BIU (752→75A)" },
+                  { tx: "750", rx: "758", name: "CGW / E/I-type Immo (750→758)" },
+                ];
 
-      const didList = [
-        { did: "F18E", label: "Каталожный номер блока Keyless/Immo" },
-        { did: "F182", label: "ID калибровки / прошивки" },
-        { did: "F197", label: "Название системы" },
-        { did: "104E", label: "Напряжение питания Smart Key (104E)" },
-        { did: "1052", label: "АЦП реле стартера (1052)" },
-        { did: "1057", label: "Статус реле стартера 1 (1057)" },
-        { did: "1058", label: "Статус реле стартера 2 (1058)" },
-        { did: "1059", label: "Реле блокировки стартера Starter Cut (1059)" },
-        { did: "105A", label: "Реле привода ICR (105A)" },
-        { did: "1067", label: "Статус DC/DC конвертера 1 (1067)" },
-        { did: "101E", label: "Счётчик циклов зажигания IG (101E)" },
-      ];
+      let activeTx = "7B4";
+      let activeRx = "7BC";
+      let detectedCount: number | null = null;
+      let detectedCountDid = "1378";
+      let detectedCountRaw = "—";
+      let historyHex: string | null = null;
+      let lastFailureCodeHex: string | null = null;
 
-      for (const item of didList) {
+      for (const target of immoTargets) {
         try {
-          const raw = await sendUdsRaw(session, "can11-500", "750", "758", `22 ${item.did}`, 1000);
-          const p = parseUdsResponse(raw, 0x22);
-          if (p.kind === "positive" && p.payload.length >= 2) {
-            const hexStr = p.payload
-              .slice(2)
-              .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-              .join(" ");
-            const dec = formatUdsPayload(p.payload, 0x22, "750");
-            nextDids[item.did] = { rawHex: hexStr || "—", decoded: dec };
-            logs.push(`✓ DID ${item.did} (${item.label}): ${dec}`);
+          const r10 = await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 03", 1000);
+          const p10 = parseUdsResponse(r10, 0x10);
+          const r3e = await sendUdsRaw(session, "can11-500", target.tx, target.rx, "3E 00", 700);
+          const p3e = parseUdsResponse(r3e, 0x3e);
+          if (p10.kind !== "positive" && p3e.kind !== "positive") continue;
+
+          activeTx = target.tx;
+          activeRx = target.rx;
+          logs.push(`✓ На связи ${target.name}: сессия 10 03 / 3E 00 открыта`);
+
+          const didList =
+            target.tx === "7B4" || target.tx === "751"
+              ? [
+                  { did: "1378", label: "Фактическое кол-во ключей (IMM-069 / IMM-015)" },
+                  { did: "1360", label: "Флаги истории регистрации (IMM-073 / IMM-018)" },
+                  { did: "137A", label: "Код последней причины отказа (IMM-073 / IMM-018)" },
+                  { did: "1220", label: "Статус синхронизации Immo/Steering Lock (1220)" },
+                  { did: "1233", label: "Статус синхронизации ECM (1233)" },
+                  { did: "201B", label: "Статус защёлки / ID Box (201B)" },
+                  { did: "0251", label: "Версия крипто-ключа SGP (0251)" },
+                  { did: "2047", label: "Подвариант H-type (2047)" },
+                  { did: "F18E", label: "Каталожный номер детали (F18E)" },
+                  { did: "F197", label: "Название системы (F197)" },
+                ]
+              : target.tx === "752"
+                ? [
+                    { did: "1158", label: "Фактическое кол-во ключей BIU (IMM-004 / IMM-034)" },
+                    { did: "1023", label: "Напряжение питания BIU (1023)" },
+                    { did: "1140", label: "Конфигурация иммобилайзера BIU (1140)" },
+                    { did: "F18E", label: "Каталожный номер BIU (F18E)" },
+                  ]
+                : [
+                    { did: "1044", label: "Фактическое кол-во ключей (IMM-009 / IMM-056)" },
+                    { did: "0250", label: "Алгоритм криптографии CGW (0250)" },
+                    { did: "0251", label: "Версия ключа CGW (0251)" },
+                    { did: "104E", label: "Питание Keyless (104E)" },
+                    { did: "F18E", label: "Каталожный номер (F18E)" },
+                  ];
+
+          for (const item of didList) {
+            try {
+              const raw = await sendUdsRaw(session, "can11-500", target.tx, target.rx, `22 ${item.did}`, 1000);
+              const p = parseUdsResponse(raw, 0x22);
+              if (p.kind === "positive" && p.payload.length >= 2) {
+                const body = p.payload.slice(2);
+                const hexStr = body.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+                let dec = formatUdsPayload(p.payload, 0x22, target.tx);
+                if (item.did === "1378" || item.did === "1158" || item.did === "1044") {
+                  const rawCount = body[0] ?? 0;
+                  const cleanCount = rawCount >= 8 ? 0 : rawCount;
+                  detectedCount = cleanCount;
+                  detectedCountDid = item.did;
+                  detectedCountRaw = hexStr;
+                  dec = `${cleanCount} шт. (сырой байт: 0x${rawCount.toString(16).padStart(2, "0").toUpperCase()})`;
+                } else if (item.did === "1360") {
+                  historyHex = hexStr;
+                  const b4 = body[3] ?? 0;
+                  dec = `${hexStr} (${(b4 & 0x40) !== 0 ? "есть записи отказов в 137A" : "ошибок регистрации нет"})`;
+                } else if (item.did === "137A") {
+                  lastFailureCodeHex = hexStr;
+                }
+                nextDids[`${target.tx}:${item.did}`] = { rawHex: hexStr || "—", decoded: dec };
+                logs.push(`✓ ${target.tx} DID ${item.did} (${item.label}): ${dec}`);
+              }
+            } catch {
+              /* ignore */
+            }
           }
+
+          try {
+            const raw19 = await sendUdsRaw(session, "can11-500", target.tx, target.rx, "19 02 FF", 1200);
+            const p19 = parseUdsResponse(raw19, 0x19);
+            if (p19.kind === "positive") {
+              logs.push(`Коды ошибок (${target.tx} · 19 02 FF): ${formatUdsPayload(p19.payload, 0x19, target.tx)}`);
+            }
+          } catch {
+            /* ignore */
+          }
+
+          await sendUdsRaw(session, "can11-500", target.tx, target.rx, "10 01", 700);
+          if (Object.keys(nextDids).length > 0) break;
         } catch {
-          /* ignore */
+          /* try next */
         }
       }
 
-      try {
-        const raw19 = await sendUdsRaw(session, "can11-500", "750", "758", "19 02 FF", 1200);
-        const p19 = parseUdsResponse(raw19, 0x19);
-        if (p19.kind === "positive") {
-          logs.push(`Коды ошибок иммобилайзера (19 02 FF): ${formatUdsPayload(p19.payload, 0x19, "750")}`);
-        }
-      } catch {
-        /* ignore */
+      if (detectedCount != null || Object.keys(nextDids).length > 0) {
+        setImmoKeyCountRead({
+          ecuTx: activeTx,
+          did: detectedCountDid,
+          count: detectedCount,
+          rawHex: detectedCountRaw,
+          historyHex,
+          lastFailureCodeHex,
+        });
       }
-
-      await sendUdsRaw(session, "can11-500", "750", "758", "10 01", 700);
+      if (Object.keys(nextDids).length === 0) {
+        logs.push("✗ Ни один блок иммобилайзера (7B4 / 751 / 752 / 750) не ответил. Проверьте IG ON и открытую дверь водителя.");
+      }
       setImmoStatusDids(nextDids);
       setImmoLogLines(logs);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка опроса иммобилайзера 750");
+      setError(e instanceof Error ? e.message : "Ошибка опроса блока иммобилайзера");
     } finally {
       setBusy(false);
     }
-  }, [ready, busy, session, setBusy, setError]);
+  }, [ready, busy, resSystemType, session, setBusy, setError]);
+
+  /** SSM4 Function 4: Number of Registered Access Key(s) (`IMM-069.srp` / `IMM-015.srp` / `IMM-004.srp`) */
+  const handleReadActualKeyCountOnly = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    const logs: string[] = [
+      "=== SSM4 F2 · Пункт 4: Number of Registered Access Key(s) (IMM-069 / IMM-015 / IMM-004) ===",
+    ];
+    try {
+      const targets =
+        resSystemType === "h-type-7b4"
+          ? [{ tx: "7B4", rx: "7BC", did: "1378", script: "IMM-069.srp" }]
+          : resSystemType === "d-type-751"
+            ? [{ tx: "751", rx: "759", did: "1378", script: "IMM-015.srp" }]
+            : resSystemType === "key-biu-752"
+              ? [{ tx: "752", rx: "75A", did: "1158", script: "IMM-004.srp" }]
+              : [
+                  { tx: "7B4", rx: "7BC", did: "1378", script: "IMM-069.srp (H-type SGP)" },
+                  { tx: "751", rx: "759", did: "1378", script: "IMM-015.srp (D-type)" },
+                  { tx: "752", rx: "75A", did: "1158", script: "IMM-004.srp (BIU Key-Start)" },
+                  { tx: "750", rx: "758", did: "1044", script: "IMM-009/056.srp (750)" },
+                ];
+
+      let found = false;
+      for (const t of targets) {
+        try {
+          await sendUdsRaw(session, "can11-500", t.tx, t.rx, "10 03", 900);
+          const raw = await sendUdsRaw(session, "can11-500", t.tx, t.rx, `22 ${t.did}`, 1200);
+          const p = parseUdsResponse(raw, 0x22);
+          logs.push(`${t.tx}→${t.rx} (${t.script}): 22 ${t.did} → ${raw.replace(/>/g, "").trim() || "нет ответа"}`);
+          if (p.kind === "positive" && p.payload.length >= 3) {
+            const rawByte = p.payload[2] ?? 0;
+            // Per IMM-069 B02 C01: <IF COND="INT01 GE 8"><CALC OUT="INT01" OPE="0"/></IF>
+            const count = rawByte >= 8 ? 0 : rawByte;
+            let histStr: string | null = null;
+            let failStr: string | null = null;
+            if (t.tx === "7B4" || t.tx === "751") {
+              try {
+                const r60 = await sendUdsRaw(session, "can11-500", t.tx, t.rx, "22 1360", 900);
+                const p60 = parseUdsResponse(r60, 0x22);
+                if (p60.kind === "positive") {
+                  histStr = p60.payload.slice(2).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+                }
+                const r7a = await sendUdsRaw(session, "can11-500", t.tx, t.rx, "22 137A", 900);
+                const p7a = parseUdsResponse(r7a, 0x22);
+                if (p7a.kind === "positive") {
+                  failStr = p7a.payload.slice(2).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+                }
+              } catch {
+                /* optional */
+              }
+            }
+            await sendUdsRaw(session, "can11-500", t.tx, t.rx, "10 01", 700);
+            setImmoKeyCountRead({
+              ecuTx: t.tx,
+              did: t.did,
+              count,
+              rawHex: rawByte.toString(16).padStart(2, "0").toUpperCase(),
+              historyHex: histStr,
+              lastFailureCodeHex: failStr,
+            });
+            logs.push(`✓ Number of Registered Access Key(s) = ${count} (блок ${t.tx}, DID ${t.did})`);
+            found = true;
+            break;
+          }
+          await sendUdsRaw(session, "can11-500", t.tx, t.rx, "10 01", 700);
+        } catch {
+          /* next */
+        }
+      }
+      if (!found) {
+        setError("Не удалось считать количество ключей (7B4 / 751 / 752 не ответили на 22 1378 / 1158). Проверьте IG ON.");
+      }
+      setImmoLogLines((prev) => [...prev, ...logs]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка чтения количества ключей");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, resSystemType, session, setBusy, setError]);
 
   const handleRequestImmoSeed = useCallback(async () => {
     if (!ready || busy) return;
@@ -1789,20 +1958,27 @@ export function SubaruSsmPanel({
     try {
       const elm = session.getElm();
       if (!elm) throw new Error("Адаптер не подключён");
-      await elm.setCanHeader(0x750, 0x758);
-      const r10 = await elm.sendPayload("1003", 1200);
-      logs.push(`750→758: Сессия 10 03 → ${r10.replace(/>/g, "").trim()}`);
+      const target =
+        resSystemType === "d-type-751"
+          ? { tx: 0x751, rx: 0x759, hex: "751→759", subs: ["2703", "2707", "2701"] as const }
+          : resSystemType === "key-biu-752"
+            ? { tx: 0x752, rx: 0x75a, hex: "752→75A", subs: ["2703", "2707", "2701"] as const }
+            : { tx: 0x7b4, rx: 0x7bc, hex: "7B4→7BC", subs: ["2707", "2703", "2701"] as const };
 
-      for (const sub of ["2701", "2703", "2711"] as const) {
+      await elm.setCanHeader(target.tx, target.rx);
+      const r10 = await elm.sendPayload("1003", 1200);
+      logs.push(`${target.hex}: Сессия 10 03 → ${r10.replace(/>/g, "").trim()}`);
+
+      for (const sub of target.subs) {
         const raw = await elm.sendPayload(sub, 2000);
         const clean = raw.replace(/>/g, "").trim();
         const p = parseUdsResponse(raw, 0x27);
-        logs.push(`750→758: Запрос Seed (${sub.slice(0, 2)} ${sub.slice(2)}) → ${clean}`);
+        logs.push(`${target.hex}: Запрос Seed (${sub.slice(0, 2)} ${sub.slice(2)}) → ${clean}`);
         if (p.kind === "positive" && p.payload.length >= 2) {
           const seedBytes = p.payload.slice(1);
           const seedStr = seedBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
           setImmoSeedHex(seedStr);
-          logs.push(`✓ Получен Seed от блока 750 (${seedBytes.length} байт): ${seedStr}`);
+          logs.push(`✓ Получен Seed от блока ${target.hex} (${seedBytes.length} байт): ${seedStr}`);
           break;
         } else if (p.kind === "negative") {
           logs.push(`Отказ 7F 27: ${p.nrcText ?? ""}`);
@@ -1810,17 +1986,17 @@ export function SubaruSsmPanel({
       }
       setImmoLogLines((prev) => [...prev, ...logs]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка запроса SecurityAccess Seed (27 01)");
+      setError(e instanceof Error ? e.message : "Ошибка запроса SecurityAccess Seed (27 07 / 27 03)");
     } finally {
       setBusy(false);
     }
-  }, [ready, busy, session, setBusy, setError]);
+  }, [ready, busy, resSystemType, session, setBusy, setError]);
 
   const handleSendImmoKeyAndProcedure = useCallback(async () => {
     if (!ready || busy) return;
     const cleanKey = immoKeyInputHex.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
     if (cleanKey.length < 4 || cleanKey.length % 2 !== 0) {
-      setError("Введите корректный ответный Key в HEX (например, 4 или 32 hex-символа для 27 02)");
+      setError("Введите корректный ответный Key в HEX (8 символов для 27 04 или 32 символа для 27 08)");
       return;
     }
     setBusy(true);
@@ -1829,40 +2005,62 @@ export function SubaruSsmPanel({
     try {
       const elm = session.getElm();
       if (!elm) throw new Error("Адаптер не подключён");
-      await elm.setCanHeader(0x750, 0x758);
+      const target =
+        resSystemType === "d-type-751"
+          ? { tx: 0x751, rx: 0x759, hex: "751→759", keySub: cleanKey.length === 32 ? "2708" : "2704" }
+          : resSystemType === "key-biu-752"
+            ? { tx: 0x752, rx: 0x75a, hex: "752→75A", keySub: cleanKey.length >= 12 ? "2708" : "2704" }
+            : { tx: 0x7b4, rx: 0x7bc, hex: "7B4→7BC", keySub: cleanKey.length === 8 ? "2704" : "2708" };
+
+      await elm.setCanHeader(target.tx, target.rx);
       await elm.sendPayload("1003", 1000);
       await elm.sendPayload("3E00", 800);
 
-      const raw27 = await elm.sendPayload(`2702${cleanKey}`, 3000);
+      const raw27 = await elm.sendPayload(`${target.keySub}${cleanKey}`, 3000);
       const p27 = parseUdsResponse(raw27, 0x27);
-      logs.push(`750→758: Отправка Key (27 02 ${cleanKey}) → ${raw27.replace(/>/g, "").trim()}`);
+      logs.push(`${target.hex}: Отправка Key (${target.keySub} ${cleanKey}) → ${raw27.replace(/>/g, "").trim()}`);
 
       if (p27.kind === "positive") {
-        logs.push("✓ Доступ SecurityAccess (67 02) ОТКРЫТ! Запуск выбранной процедуры иммобилайзера…");
-        const procPayloads: Record<string, string[]> = {
-          "read-key-count": ["22104E", "221057", "31010101"],
-          "verify-smart-key": ["31010102", "22104E"],
-          "register-add-key": ["31010201", "31010301"],
-          "delete-lost-keys": ["31010202", "31010302"],
-          "sync-ecu-immo-cgtw": ["31010401", "31010501"],
-        };
-        const cmds = procPayloads[immoProcedure] ?? ["22104E"];
+        logs.push(`✓ Доступ SecurityAccess (67 ${target.keySub.slice(2)}) ОТКРЫТ на ${target.hex}! Запуск процедуры SSM4…`);
+        // Exact SSM4 decrypted frames per IMM-066..073 / IMM-012..018 / IMM-001..006
+        const procPayloads: Record<string, string[]> =
+          target.tx === 0x752
+            ? {
+                "read-key-count": ["221158"],
+                "register-add-key": ["31014002", "31034002"],
+                "steering-lock-reg": ["31014001", "31034001"],
+                "ecm-immo-reg": ["31014003", "31034003"],
+                "delete-lost-keys": ["31014004", "31034004"],
+                "res-cm-reg": ["31014005", "31034005"],
+                "telematics-cm-reg": ["31014006", "31034006"],
+              }
+            : {
+                "read-key-count": ["221378", "221360", "22137A"],
+                "register-add-key": ["221378", "2E11C101", "221361", "221369", "22136A"],
+                "steering-lock-reg": ["221378", "2E11E101", "221362", "221369"],
+                "ecm-immo-reg": ["221220", "221233", "22201B"],
+                "delete-lost-keys": ["221378", "2E11C102", "221361", "221369"],
+                "res-cm-reg": ["2E11B001"],
+                "telematics-cm-reg": ["2E11B201"],
+                "read-history": ["221360", "22137A"],
+              };
+        const cmds = procPayloads[immoProcedure] ?? ["221378"];
         for (const cmd of cmds) {
           const r = await elm.sendPayload(cmd, 5000);
-          logs.push(`750→758 (${immoProcedure}): ${cmd} → ${r.replace(/>/g, "").trim()}`);
+          logs.push(`${target.hex} (${immoProcedure}): ${cmd} → ${r.replace(/>/g, "").trim()}`);
         }
       } else if (p27.kind === "negative") {
-        logs.push(`✗ Блок 750 отклонил Key (7F 27): ${p27.nrcText ?? "неверный ключ"}`);
+        logs.push(`✗ Блок ${target.hex} отклонил Key (7F 27): ${p27.nrcText ?? "неверный ключ"}`);
       } else {
-        logs.push("✗ Нет подтверждения 67 02 от блока 750");
+        logs.push(`✗ Нет подтверждения 67 от блока ${target.hex}`);
       }
       setImmoLogLines((prev) => [...prev, ...logs]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка отправки Key (27 02)");
+      setError(e instanceof Error ? e.message : "Ошибка отправки Key (27 08 / 27 04)");
     } finally {
       setBusy(false);
     }
-  }, [ready, busy, immoKeyInputHex, immoProcedure, session, setBusy, setError]);
+  }, [ready, busy, immoKeyInputHex, immoProcedure, resSystemType, session, setBusy, setError]);
 
   const handleRunPushStartWizardStep = useCallback(
     async (step: 1 | 2 | 3 | 4) => {
@@ -1873,62 +2071,76 @@ export function SubaruSsmPanel({
       try {
         const elm = session.getElm();
         if (!elm) throw new Error("Адаптер vLinker не подключён");
-        await elm.setCanHeader(0x750, 0x758);
+        const target =
+          resSystemType === "d-type-751"
+            ? { tx: 0x751, rx: 0x759, hex: "751→759 (D-type · IMM-012/016)" }
+            : { tx: 0x7b4, rx: 0x7bc, hex: "7B4→7BC (H-type · IMM-066/070)" };
+
+        await elm.setCanHeader(target.tx, target.rx);
         await elm.sendPayload("1003", 1000);
         await elm.sendPayload("3E00", 800);
 
         if (step === 1) {
-          // Step 1: Read current key count & power supply status (imb_in_ReadKeyNumConfirm)
-          logs.push("=== Шаг 1/4: Проверка состояния блока SMTC (750) и количества ключей ===");
-          for (const did of ["F18E", "104E", "1052", "1057", "1059"]) {
+          // Step 1: Read current key count (DID 1378) and status (DID 1360 / 137A / 1220) per IMM-066/069
+          logs.push(`=== Шаг 1/4: Чтение числа зарегистрированных смарт-ключей и статуса (${target.hex}) ===`);
+          for (const did of ["1378", "1360", "137A", "1220", "1233", "201B", "F18E"]) {
             const raw = await elm.sendPayload(`22${did}`, 1000);
             const p = parseUdsResponse(raw, 0x22);
             if (p.kind === "positive") {
-              logs.push(`✓ 750 DID ${did}: ${formatUdsPayload(p.payload, 0x22, "750")}`);
+              const body = p.payload.slice(2);
+              const hexStr = body.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+              if (did === "1378") {
+                const count = (body[0] ?? 0) >= 8 ? 0 : (body[0] ?? 0);
+                logs.push(`✓ DID 1378 (Number of Registered Access Keys): ${count} шт. (raw ${hexStr})`);
+              } else {
+                logs.push(`✓ DID ${did}: ${hexStr}`);
+              }
             }
           }
-          const rCount = await elm.sendPayload("31010101", 2500);
-          logs.push(`750→758 (imb_in_ReadKeyNumConfirm 31 01 01 01): ${rCount.replace(/>/g, "").trim()}`);
           setImmoWizardStep(2);
         } else if (step === 2) {
-          // Step 2: Verify existing registered master key held against Push-Start button (keyVerificationAS1)
-          logs.push("=== Шаг 2/4: Верификация рабочего смарт-ключа у кнопки ENGINE START/STOP (keyVerificationAS1) ===");
-          logs.push("→ Держите РАБОЧИЙ смарт-ключ эмблемой Subaru вплотную к кнопке Push Start…");
-          for (const cmd of ["31010102", "31010200"]) {
-            const raw = await elm.sendPayload(cmd, 8000);
-            const clean = raw.replace(/>/g, "").trim();
-            logs.push(`750→758 (${cmd}): ${clean || "нет ответа"}`);
-            const p = parseUdsResponse(raw, 0x31);
-            if (p.kind === "positive") {
-              logs.push("✓ Рабочий смарт-ключ подтверждён катушкой кнопки Push Start! Переход к Шагу 3.");
+          // Step 2: Enter Key Registration Mode (2E 11 C1 01) or Key Deletion Mode (2E 11 C1 02) and verify master key via coil (22 13 69 -> 62 13 69 00)
+          logs.push(`=== Шаг 2/4: Вход в режим и верификация РАБОЧЕГО ключа у кнопки START/STOP (${target.hex}) ===`);
+          logs.push("→ Поднесите родной рабочий смарт-ключ эмблемой Subaru вплотную к кнопке ENGINE START/STOP (30 с)…");
+          const rawStart = await elm.sendPayload("2E11C101", 3000);
+          logs.push(`${target.hex}: 2E 11 C1 01 (старт IMM-066/012) → ${rawStart.replace(/>/g, "").trim()}`);
+          const r61 = await elm.sendPayload("221361", 1500);
+          logs.push(`${target.hex}: 22 13 61 (статус режима = 01) → ${r61.replace(/>/g, "").trim()}`);
+          for (let poll = 1; poll <= 5; poll++) {
+            const raw69 = await elm.sendPayload("221369", 2000);
+            const clean69 = raw69.replace(/>/g, "").trim();
+            logs.push(`${target.hex}: опрос катушки 22 13 69 (${poll}/5) → ${clean69}`);
+            const p69 = parseUdsResponse(raw69, 0x22);
+            if (p69.kind === "positive" && p69.payload[2] === 0x00) {
+              logs.push("✓ Рабочий смарт-ключ подтверждён катушкой (62 13 69 00)! Уберите его от кнопки.");
               break;
             }
           }
           setImmoWizardStep(3);
         } else if (step === 3) {
-          // Step 3: Register new smart key held against Push-Start button (keyAddAS1)
-          logs.push("=== Шаг 3/4: Запись НОВОГО смарт-ключа у кнопки ENGINE START/STOP (keyAddAS1) ===");
-          logs.push("→ Уберите старый ключ и приложите НОВЫЙ смарт-ключ к кнопке Push Start на 5–10 с…");
-          for (const cmd of ["31010201", "31010301"]) {
-            const raw = await elm.sendPayload(cmd, 10000);
-            const clean = raw.replace(/>/g, "").trim();
-            logs.push(`750→758 (${cmd}): ${clean || "нет ответа"}`);
-            const p = parseUdsResponse(raw, 0x31);
-            if (p.kind === "positive") {
-              logs.push("✓ Новый смарт-ключ принят блоком 750! Переход к завершению (Шаг 4).");
+          // Step 3: Poll 22 13 6A (key moved away) then 22 13 73 / 22 13 78 for new key at Push-Start button (IMM-066 B04..B08)
+          logs.push(`=== Шаг 3/4: Приложите НОВЫЙ смарт-ключ к кнопке ENGINE START/STOP (${target.hex}) ===`);
+          const r6a = await elm.sendPayload("22136A", 2000);
+          logs.push(`${target.hex}: 22 13 6A (контроль отвода старого ключа) → ${r6a.replace(/>/g, "").trim()}`);
+          for (let poll = 1; poll <= 5; poll++) {
+            const r73 = await elm.sendPayload("221373", 2000);
+            logs.push(`${target.hex}: 22 13 73 (чтение нового транспондера ${poll}/5) → ${r73.replace(/>/g, "").trim()}`);
+            const p73 = parseUdsResponse(r73, 0x22);
+            if (p73.kind === "positive" && p73.payload[2] === 0x00) {
+              logs.push("✓ Новый смарт-ключ считан катушкой (62 13 73 00)!");
               break;
             }
           }
           setImmoWizardStep(4);
         } else if (step === 4) {
-          // Step 4: Finalize key addition and re-read registered key count (keyAddEndAS1)
-          logs.push("=== Шаг 4/4: Завершение регистрации и проверка нового количества ключей (keyAddEndAS1) ===");
-          for (const cmd of ["31030201", "31010101"]) {
-            const raw = await elm.sendPayload(cmd, 3000);
-            logs.push(`750→758 (${cmd}): ${raw.replace(/>/g, "").trim()}`);
-          }
+          // Step 4: Finalize key mode (2E 11 C1 00) and re-read registered key count (22 13 78) per IMM-066 B10/B11
+          logs.push(`=== Шаг 4/4: Завершение режима (2E 11 C1 00) и проверка нового числа ключей (22 13 78) ===`);
+          const rEnd = await elm.sendPayload("2E11C100", 2500);
+          logs.push(`${target.hex}: 2E 11 C1 00 → ${rEnd.replace(/>/g, "").trim()}`);
+          const r78 = await elm.sendPayload("221378", 1500);
+          logs.push(`${target.hex}: 22 13 78 (новое кол-во ключей) → ${r78.replace(/>/g, "").trim()}`);
           await elm.sendPayload("1001", 800);
-          logs.push("✓ Сессия завершена (10 01). Проверьте работу кнопок ЦЗ на обоих смарт-ключах.");
+          logs.push("✓ Сессия завершена (10 01). Проверьте работу кнопок ЦЗ на всех смарт-ключах.");
         }
 
         setImmoLogLines((prev) => [...prev, ...logs]);
@@ -1938,8 +2150,114 @@ export function SubaruSsmPanel({
         setBusy(false);
       }
     },
-    [ready, busy, session, setBusy, setError],
+    [ready, busy, resSystemType, session, setBusy, setError],
   );
+
+  /**
+   * SSM4 Function 5: Immobilizer Access Key ID Deletion (`IMM-070.srp` on `7B4` / `IMM-016.srp` on `751` / `IMM-005`/`063` on `752`).
+   * Keeps ONLY the 1 key held against the Push-Start button and deletes all lost keys.
+   */
+  const handleExecuteDeleteOtherKeys = useCallback(async () => {
+    if (!ready || busy) return;
+    if (immoDeleteConfirmTyped.trim().toUpperCase() !== "DELETE") return;
+    setImmoDeleteConfirmOpen(false);
+    setImmoDeleteConfirmTyped("");
+    setBusy(true);
+    setError(null);
+    const logs: string[] = [
+      "=== SSM4 F2 · Пункт 5: Immobilizer Access Key ID Deletion (удаление всех ключей кроме присутствующего в машине) ===",
+    ];
+    try {
+      const elm = session.getElm();
+      if (!elm) throw new Error("Адаптер не подключён");
+
+      if (resSystemType === "key-biu-752") {
+        await elm.setCanHeader(0x752, 0x75a);
+        await elm.sendPayload("1003", 1000);
+        const rStart = await elm.sendPayload("31014004", 4000);
+        logs.push(`752→75A (BIU · IMM-005/063): 31 01 40 04 → ${rStart.replace(/>/g, "").trim()}`);
+        const pStart = parseUdsResponse(rStart, 0x31);
+        if (pStart.kind === "positive") {
+          const rPoll = await elm.sendPayload("31034004", 4000);
+          logs.push(`752→75A: 31 03 40 04 → ${rPoll.replace(/>/g, "").trim()}`);
+        } else if (pStart.kind === "negative" && pStart.nrc === 0x33) {
+          logs.push("752→75A: NRC 33 SecurityAccess — сначала откройте доступ 27 03/04 или 27 07/08.");
+        }
+        await elm.sendPayload("1001", 800);
+      } else {
+        const target =
+          resSystemType === "d-type-751"
+            ? { tx: 0x751, rx: 0x759, hex: "751→759 (D-type · IMM-016.srp)" }
+            : { tx: 0x7b4, rx: 0x7bc, hex: "7B4→7BC (H-type · IMM-070.srp)" };
+        await elm.setCanHeader(target.tx, target.rx);
+        await elm.sendPayload("1003", 1000);
+
+        // 1. Read current key count (22 13 78) — per IMM-070 B02 C02, if < 2 keys, deletion is not needed
+        const r78 = await elm.sendPayload("221378", 1200);
+        const p78 = parseUdsResponse(r78, 0x22);
+        const beforeCount = p78.kind === "positive" ? (p78.payload[2] ?? 0) : null;
+        logs.push(`${target.hex}: текущее число ключей (22 13 78) = ${beforeCount ?? "?"} (${r78.replace(/>/g, "").trim()})`);
+        if (beforeCount != null && beforeCount < 2) {
+          logs.push("В памяти уже оставлен только 1 ключ (INT02 < 2 в IMM-070 B02 C02) — удаление не требуется.");
+          await elm.sendPayload("1001", 800);
+          setImmoLogLines((prev) => [...prev, ...logs]);
+          return;
+        }
+
+        // 2. Write 2E 11 C1 02 (Enter Access Key ID Deletion mode, IMM-070 B02 C03)
+        const rDel = await elm.sendPayload("2E11C102", 3000);
+        const pDel = parseUdsResponse(rDel, 0x2e);
+        logs.push(`${target.hex}: 2E 11 C1 02 (вход в режим удаления остальных ключей) → ${rDel.replace(/>/g, "").trim()}`);
+        if (pDel.kind !== "positive") {
+          logs.push(
+            pDel.kind === "negative" && pDel.nrc === 0x33
+              ? "NRC 33 SecurityAccess: блок закрыт. Сначала разблокируйте 27 07/08 (H-type) или 27 03/04 (D-type)."
+              : "Блок не подтвердил 6E 11 C1.",
+          );
+          await elm.sendPayload("1001", 800);
+          setImmoLogLines((prev) => [...prev, ...logs]);
+          return;
+        }
+
+        // 3. Check mode status 22 13 61 == 62 13 61 02 (IMM-070 B02 C04)
+        const r61 = await elm.sendPayload("221361", 1200);
+        logs.push(`${target.hex}: 22 13 61 (проверка режима 02) → ${r61.replace(/>/g, "").trim()}`);
+
+        // 4. Poll 22 13 69 (30s window to touch the ONE key to keep against the Push-Start button, IMM-070 B03 C01)
+        logs.push("→ Поднесите ОДИН сохраняемый смарт-ключ к кнопке ENGINE START/STOP (опрос 22 13 69)…");
+        let keptKeyConfirmed = false;
+        for (let i = 1; i <= 8; i++) {
+          const r69 = await elm.sendPayload("221369", 2000);
+          const p69 = parseUdsResponse(r69, 0x22);
+          logs.push(`${target.hex}: 22 13 69 (${i}/8) → ${r69.replace(/>/g, "").trim()}`);
+          if (p69.kind === "positive" && p69.payload[2] === 0x00) {
+            keptKeyConfirmed = true;
+            logs.push("✓ Сохраняемый смарт-ключ распознан катушкой (62 13 69 00)! Уберите ключ от кнопки.");
+            break;
+          }
+        }
+
+        if (keptKeyConfirmed) {
+          // 5. Poll 22 13 6A (key moved away) and 22 13 78 == 01 (all other keys erased, IMM-070 B04..B06)
+          const r6a = await elm.sendPayload("22136A", 1500);
+          logs.push(`${target.hex}: 22 13 6A → ${r6a.replace(/>/g, "").trim()}`);
+          const r78After = await elm.sendPayload("221378", 1500);
+          logs.push(`${target.hex}: 22 13 78 (остаток ключей = 01) → ${r78After.replace(/>/g, "").trim()}`);
+        }
+
+        // 6. Always exit mode with 2E 11 C1 00 (IMM-070 B06 C02 / C05)
+        const rExit = await elm.sendPayload("2E11C100", 2000);
+        logs.push(`${target.hex}: 2E 11 C1 00 (завершение режима) → ${rExit.replace(/>/g, "").trim()}`);
+        await elm.sendPayload("1001", 800);
+      }
+
+      setImmoLogLines((prev) => [...prev, ...logs]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка удаления утерянных ключей");
+    } finally {
+      setBusy(false);
+    }
+  }, [ready, busy, immoDeleteConfirmTyped, resSystemType, session, setBusy, setError]);
 
   const handleProbeResCm = useCallback(async () => {
     if (!ready || busy) return;
@@ -2115,7 +2433,7 @@ export function SubaruSsmPanel({
       </div>
       )}
 
-      {/* SSM4 Main Menu Navigation Bar (Screenshot 3: F1 All DTC, F2 Each System, F3 Multiple System, Live, Utilities, F6 Customize, etc.) */}
+      {/* SSM4 Main Menu Navigation Bar — strictly aligned with SSM4 v28.6.0 */}
       <div
         className="flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role="tablist"
@@ -2124,16 +2442,14 @@ export function SubaruSsmPanel({
         {(
           [
             { id: "all-dtc", title: "F1 Все ошибки (All DTC)", icon: Layers },
-            { id: "each-system", title: "F2 По блокам (40 систем)", icon: Cpu },
-            { id: "multi-system", title: "F3 Мульти-система", icon: Layers },
-            { id: "data-monitor", title: "Live Монитор (Группы)", icon: Activity },
-            { id: "immo", title: "F2 Иммобилайзер и ключи", icon: Lock },
-            { id: "utilities", title: "Адаптации и калибровки (.srp)", icon: Wrench },
-            { id: "customize", title: "F6 Кастомизация (Вариант)", icon: Sliders },
-            { id: "steering", title: "Угол руля", icon: Gauge },
-            { id: "cvt", title: "CVT Темп.", icon: Gauge },
-            { id: "tpms", title: "TPMS Шины", icon: AlertTriangle },
-            { id: "ssm4-db", title: "Коды функций SSM4", icon: FileSearch },
+            { id: "each-system", title: "F1 По блокам (40 систем)", icon: Cpu },
+            { id: "multi-system", title: "F1 Мульти-система", icon: Layers },
+            { id: "data-monitor", title: "Data Monitor (Live)", icon: Activity },
+            { id: "customize", title: "Customize / 12 Columns (°C / км/ч)", icon: Sliders },
+            { id: "immo", title: "F2 Immobilizer / Ключи / RES", icon: Lock },
+            { id: "utilities", title: "Utility (.srp Калибровки)", icon: Wrench },
+            { id: "ssm4-db", title: "F3 / F4 / F5 Коды SSM4", icon: FileSearch },
+            { id: "legacy-tools", title: "Ранние утилиты (Угол руля / CVT / TPMS)", icon: Gauge },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
@@ -3344,8 +3660,13 @@ export function SubaruSsmPanel({
         </div>
       )}
 
-      {topView === "steering" && (
+      {(topView === "steering" || topView === "legacy-tools") && (
         <div className="relative space-y-3">
+          {topView === "legacy-tools" && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-3 text-xs text-amber-950">
+              <strong>Ранние виджеты быстрой диагностики (Угол руля EPS / Температура CVT / Давление шин TPMS)</strong> — собраны в отдельную вкладку, чтобы основное меню строго повторяло структуру SSM4.
+            </div>
+          )}
           <SteeringCalConfirmDialog
             brand="subaru"
             open={steeringCalConfirmOpen}
@@ -3478,13 +3799,14 @@ export function SubaruSsmPanel({
                     ))}
                   </ul>
                 </div>
-              ) : null}
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {topView === "cvt" && (
+      {(topView === "cvt" || topView === "legacy-tools") && (
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -3549,7 +3871,7 @@ export function SubaruSsmPanel({
         </div>
       )}
 
-      {topView === "tpms" && (
+      {(topView === "tpms" || topView === "legacy-tools") && (
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -3606,56 +3928,119 @@ export function SubaruSsmPanel({
         </div>
       )}
 
-      {/* VIEW F2 IMMOBILIZER & SMART KEY REGISTRATION (750 -> 758 · IMM-000..073 / KEY-001..016 / SMA-001..021) */}
+      {/* VIEW F2 IMMOBILIZER & SMART KEY REGISTRATION (IMM-000.srp · 7B4->7BC H-type / 751->759 D-type / 752->75A BIU) */}
       {topView === "immo" && (
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 pb-3">
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded bg-blue-700 px-2.5 py-0.5 font-mono text-xs font-bold text-white">
-                  F2 Immobilizer etc. registration
+                  F2 Immobilizer etc. registration (`IMM-000.srp` · FuncId 41005)
                 </span>
                 <span className="rounded bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800">
-                  В QHub вход БЕЗ 6-месячного пароля SSM4
+                  Вход без 6-месячного пароля SSM4
                 </span>
               </div>
               <h3 className="mt-1.5 text-sm font-bold text-gray-900">
-                Иммобилайзер, смарт-ключи и синхронизация блоков Subaru (CAN 750 → 758 · IMM / KEY / SMA)
+                Главное меню иммобилайзера SSM4 (H-type `7B4→7BC` · D-type `751→759` · B/G-type BIU `752→75A`)
               </h3>
               <p className="mt-0.5 text-xs text-gray-500">
-                Прямая диагностика блока Smart Key / Immobilizer (750 → 758), проверка реле запуска и количества ключей, чтение криптографического <code className="font-mono">Seed (27 01)</code> и отправка ответного <code className="font-mono">Key (27 02)</code>.
+                Все 8 эталонных функций меню <code className="font-mono">IMM-000.srp</code>: чтение фактического числа ключей (<code className="font-mono">DID 1378</code>), дозапись ключа (<code className="font-mono">2E 11 C1 01</code>), удаление утерянных ключей кроме присутствующего в машине (<code className="font-mono">2E 11 C1 02</code>), привязка защёлки руля (<code className="font-mono">2E 11 E1 01</code>), синхронизация ECM, прописка автозапуска RES (<code className="font-mono">2E 11 B0 01</code> / <code className="font-mono">31 01 40 05</code>) и история регистрации (<code className="font-mono">DID 1360 / 137A</code>).
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => void handleReadImmoStatus()}
-              disabled={!ready || busy}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-blue-700 bg-blue-700 hover:bg-blue-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Опросить блок иммобилайзера (750)
-            </button>
-          </div>
-
-          {/* Architecture Explanation of the 3 security layers in SSM4 */}
-          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3.5 text-xs space-y-2">
-            <div className="font-bold text-blue-950">
-              Как устроена защита раздела «F2 Immobilizer» в файлах программы SSM4 (`System.ini`, `FHIUtilityWebNKRU.dll`, `FHIUtilityCtrlNK.dll`):
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleReadActualKeyCountOnly()}
+                disabled={!ready || busy}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-700 bg-emerald-700 hover:bg-emerald-800 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                4. Считать фактическое кол-во ключей (`22 1378`)
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleReadImmoStatus()}
+                disabled={!ready || busy}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-700 bg-blue-700 hover:bg-blue-800 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Опросить общий блок иммобилайзера (`7B4 / 751 / 752`)
+              </button>
             </div>
-            <ul className="list-disc pl-5 space-y-1 text-gray-700">
-              <li>
-                <strong>1. 6-месячный пароль запуска в самом SSM4 (`System.ini` → `ImmobilizerSelect = 41005 / 40762 / 40763`):</strong> в десктопной программе SSM4 это программная блокировка оболочки (`FHIUtilityWebNKRU.dll`: <em>«Ключ идентификации подключения к серверу регулярно обновляется»</em>). <strong>В вашем веб-сервисе QHub этой блокировки нет</strong> — раздел открыт всегда.
-              </li>
-              <li>
-                <strong>2. Автомобили до 2018 г. (Gen3 / Gen4, система `AS1` — `keyRegistAS1` / `GetSecurityAccessImb`):</strong> блок `750` запрашивает классический 2/4-байтовый `Seed → Key` (`UDS 27 01 / 27 02`) и <strong>Teaching Code</strong> (обучающий код с бирки ключей), а также требует наличия одного рабочего мастер-ключа в замке/у кнопки (`keyVerificationAS1`).
-              </li>
-              <li>
-                <strong>3. Автомобили SGP 2018–2026 г. (Outback BT, Forester SK, XV GT/GU, Ascent WM — `SecurityAccess2018CY_AesKey`):</strong> блок Smart Key (`750`) и шлюз `CGW` используют <strong>128-битный AES Challenge-Response</strong> (`16-байтовый Seed`). Сама программа SSM4 не считает этот ключ локально, а отправляет полученный `Seed` на сервер Subaru через `HttpGetSecurityKey` / `HttpMacDataUpDownLoad`. Ниже вы можете <strong>считать `Seed (27 01)` с автомобиля</strong> и ввести рассчитанный дилерским калькулятором / ключным программатором ответный `Key (27 02)`.
-              </li>
-            </ul>
           </div>
 
-          {/* Live Status DIDs of 750 -> 758 */}
+          {/* Step 0: Select Immobilizer Type (PopUpImmMenuTypeSel in IMM-000.srp B02) */}
+          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-bold text-blue-950">
+                Тип иммобилайзера (`PopUpImmMenuTypeSel` в `IMM-000.srp`):
+              </label>
+              <span className="font-mono text-[11px] text-blue-900">
+                На Outback BT / Forester SK / Ascent (SGP Push-Start) Smart Key отвечает на <strong>7B4 → 7BC</strong> (а не 750!)
+              </span>
+            </div>
+            <select
+              value={resSystemType}
+              onChange={(e) => setResSystemType(e.target.value as SubaruResSystemType)}
+              className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900"
+            >
+              <option value="auto">
+                Автоопределение по CAN (7B4 H-type SGP → 751 D-type → 752 B/G-type BIU → 750)
+              </option>
+              <option value="h-type-7b4">
+                H-type · Push Start SGP (Outback BT / Forester SK / Ascent / Crosstrek · 7B4→7BC · IMM-066..073)
+              </option>
+              <option value="d-type-751">
+                D-type · Push Start до SGP (Outback BS / Legacy BN / Forester SJ · 751→759 · IMM-012..018)
+              </option>
+              <option value="key-biu-752">
+                B-type / G-type · Замок с ключом (BIU 752→75A · IMM-001..006 / IMM-060..065)
+              </option>
+            </select>
+          </div>
+
+          {/* Actual Key Count & Registration History Card (IMM-069 / IMM-073) */}
+          {immoKeyCountRead && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+              <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                  4. Number of Registered Access Key(s) (`IMM-069 / 015`)
+                </div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="font-mono text-3xl font-bold text-emerald-800">
+                    {immoKeyCountRead.count != null ? `${immoKeyCountRead.count} шт.` : "—"}
+                  </span>
+                  <span className="font-mono text-xs text-gray-600">
+                    ({immoKeyCountRead.ecuTx} · DID {immoKeyCountRead.did} = {immoKeyCountRead.rawHex})
+                  </span>
+                </div>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-600">
+                  8. Read Registration History (`IMM-073 / 018` · DID 1360)
+                </div>
+                <div className="mt-1 font-mono text-sm font-bold text-gray-900">
+                  {immoKeyCountRead.historyHex ?? "—"}
+                </div>
+                <div className="text-[11px] text-gray-500">
+                  Бит 0x40 в 4-м байте указывает на наличие записи в DID 137A
+                </div>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-600">
+                  Последний код отказа (`DID 137A`)
+                </div>
+                <div className="mt-1 font-mono text-sm font-bold text-gray-900">
+                  {immoKeyCountRead.lastFailureCodeHex ?? "00 (Ошибок нет)"}
+                </div>
+                <div className="text-[11px] text-gray-500">
+                  00=ОК, 10=Key Reg, 2x=Delete, 3x=System/Lock
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Live Status DIDs of 7B4 / 751 / 752 / 750 */}
           {Object.keys(immoStatusDids).length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {Object.entries(immoStatusDids).map(([did, info]) => (
@@ -3665,7 +4050,7 @@ export function SubaruSsmPanel({
                 >
                   <div>
                     <div className="font-mono text-[11px] font-bold text-blue-800">
-                      750 · DID {did}
+                      DID {did}
                     </div>
                     <div className="font-mono text-[10px] text-gray-500">
                       Raw: {info.rawHex}
@@ -3676,6 +4061,99 @@ export function SubaruSsmPanel({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* SSM4 Function 5: Immobilizer Access Key ID Deletion (IMM-070.srp / IMM-016.srp) */}
+          <div className="rounded-xl border border-rose-300 bg-rose-50/50 p-4 space-y-2.5">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <span className="rounded bg-rose-700 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                  SSM4 F2 · Пункт 5 · Immobilizer Access Key ID Deletion (`IMM-070.srp` / `IMM-016.srp`)
+                </span>
+                <h4 className="mt-1 text-xs font-bold text-gray-900">
+                  Удалить все утерянные смарт-ключи, кроме ключа, находящегося в машине
+                </h4>
+                <p className="mt-1 text-[11px] text-gray-700 leading-snug">
+                  <strong>Как эта функция устроена в SSM4 (`IMM-070.srp` на `7B4` / `IMM-016.srp` на `751`):</strong>{" "}
+                  1) читает текущее число ключей <code className="font-mono">22 13 78</code> (если меньше 2 — удаление не требуется);{" "}
+                  2) после разблокировки <code className="font-mono">27 07/08</code> (или <code className="font-mono">27 03/04</code>) включает режим стирания записью{" "}
+                  <code className="font-mono font-bold">2E 11 C1 02</code> и проверяет статус <code className="font-mono">22 13 61 → 62 13 61 02</code>;{" "}
+                  3) запускает 30-секундный таймер и опрашивает катушку кнопки START/STOP <code className="font-mono">22 13 69</code> — вы подносите вплотную к кнопке <strong>ОДИН ключ, который нужно ОСТАВИТЬ</strong>, до зуммера (<code className="font-mono">62 13 69 00</code>);{" "}
+                  4) ждёт отвода ключа (<code className="font-mono">22 13 6A → 00</code>), стирает все остальные ID (счётчик <code className="font-mono">22 13 78</code> становится <code className="font-mono">01</code>) и закрывает режим командой <code className="font-mono font-bold">2E 11 C1 00</code>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setImmoDeleteConfirmTyped("");
+                  setImmoDeleteConfirmOpen(true);
+                }}
+                disabled={!ready || busy}
+                className="shrink-0 rounded-lg bg-rose-700 hover:bg-rose-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                5. Удалить остальные ключи (`2E 11 C1 02`)
+              </button>
+            </div>
+          </div>
+
+          {immoDeleteConfirmOpen && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => {
+                setImmoDeleteConfirmOpen(false);
+                setImmoDeleteConfirmTyped("");
+              }}
+            >
+              <div
+                className="w-full max-w-md rounded-2xl border border-rose-300 bg-white p-5 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="rounded bg-rose-100 px-2 py-0.5 font-mono text-xs font-bold text-rose-900">
+                  IMM-070.srp / IMM-016.srp · 2E 11 C1 02
+                </span>
+                <h2 className="mt-2 text-base font-bold text-gray-900">
+                  Execute Immobilizer Access Key ID Deletion?
+                </h2>
+                <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-950">
+                  Все ключи, кроме ОДНОГО ключа, который вы поднесёте к кнопке ENGINE START/STOP в течение 30 секунд, будут удалены из памяти иммобилайзера.
+                </p>
+                <label className="mt-4 block space-y-1">
+                  <span className="text-sm font-medium text-gray-900">
+                    Введите <code className="font-mono">DELETE</code> для подтверждения:
+                  </span>
+                  <input
+                    type="text"
+                    maxLength={10}
+                    value={immoDeleteConfirmTyped}
+                    onChange={(e) => setImmoDeleteConfirmTyped(e.target.value.toUpperCase())}
+                    className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
+                    autoFocus
+                  />
+                </label>
+                <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImmoDeleteConfirmOpen(false);
+                      setImmoDeleteConfirmTyped("");
+                    }}
+                    className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2.5 text-xs font-semibold text-gray-900"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleExecuteDeleteOtherKeys()}
+                    disabled={immoDeleteConfirmTyped.trim().toUpperCase() !== "DELETE"}
+                    className="rounded-xl bg-rose-700 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                  >
+                    Yes, удалить остальные ключи
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -3846,18 +4324,18 @@ export function SubaruSsmPanel({
             </div>
           )}
 
-          {/* Push-Start Proximity Key Addition Wizard (Autel KM100 / SSM4 keyVerificationAS1 -> keyAddAS1 -> keyAddEndAS1) */}
+          {/* Push-Start Proximity Key Addition Wizard (SSM4 IMM-066.srp 7B4 / IMM-012.srp 751: 2E 11 C1 01 -> 22 13 69 -> 22 13 73 -> 2E 11 C1 00) */}
           <div className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <span className="rounded bg-emerald-600 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
-                  Режим с действующим ключом у кнопки START/STOP (`keyVerificationAS1` → `keyAddAS1`)
+                  SSM4 F2 · Пункт 1 · Keyless Access Immobilizer Registration (`IMM-066.srp` · `7B4` / `IMM-012.srp` · `751`)
                 </span>
                 <h4 className="mt-1 text-xs font-bold text-gray-900">
-                  Пошаговый мастер дозаписи смарт-ключа через катушку кнопки Push Start (как в Autel KM100 / SSM4)
+                  Пошаговый мастер дозаписи смарт-ключа через катушку кнопки Push Start (`2E 11 C1 01`)
                 </h4>
                 <p className="text-[11px] text-gray-600">
-                  Когда в наличии есть родной рабочий смарт-ключ, блок сертификации <code className="font-mono">750</code> проверяет его транспондер напрямую через катушку кнопки <code className="font-mono">ENGINE START/STOP</code>, после чего открывает 30-секундное окно для прикладывания нового ключа.
+                  Точный протокол <code className="font-mono">IMM-066.srp</code> / <code className="font-mono">IMM-012.srp</code>: чтение текущего счётчика <code className="font-mono">22 13 78</code>, вход в режим регистрации <code className="font-mono">2E 11 C1 01</code>, опрос катушки кнопки <code className="font-mono">22 13 69</code> (родной ключ) → <code className="font-mono">22 13 6A</code> (отвод ключа) → <code className="font-mono">22 13 73</code> (новый ключ) → завершение <code className="font-mono">2E 11 C1 00</code>.
                 </p>
               </div>
               <button
@@ -3875,29 +4353,29 @@ export function SubaruSsmPanel({
                   {
                     step: 1 as const,
                     title: "Шаг 1. Статус и число ключей",
-                    fnName: "imb_in_ReadKeyNumConfirm",
-                    desc: "Зажигание IG ON. Опрос блока 750 и проверка текущего числа прописанных ключей.",
-                    btn: "1. Проверить статус (750)",
+                    fnName: "22 13 78 / 13 60",
+                    desc: "Зажигание IG ON. Чтение фактического числа ключей (DID 1378) и истории на 7B4 / 751.",
+                    btn: "1. Проверить статус (7B4/751)",
                   },
                   {
                     step: 2 as const,
                     title: "Шаг 2. Приложите РАБОЧИЙ ключ",
-                    fnName: "keyVerificationAS1",
-                    desc: "Поднесите действующий родной смарт-ключ эмблемой Subaru вплотную к кнопке START/STOP до звукового сигнала.",
+                    fnName: "2E 11 C1 01 → 22 13 69",
+                    desc: "Вход в режим 2E 11 C1 01. Поднесите рабочий смарт-ключ эмблемой к кнопке START/STOP до 62 13 69 00.",
                     btn: "2. Верифицировать рабочий ключ",
                   },
                   {
                     step: 3 as const,
                     title: "Шаг 3. Приложите НОВЫЙ ключ",
-                    fnName: "keyAddAS1",
-                    desc: "Уберите старый ключ и в течение 30 с приложите НОВЫЙ смарт-ключ к кнопке START/STOP до двойного сигнала.",
+                    fnName: "22 13 6A → 22 13 73",
+                    desc: "Уберите старый ключ и в течение 30 с поднесите НОВЫЙ смарт-ключ к кнопке START/STOP (62 13 73 00).",
                     btn: "3. Записать новый ключ",
                   },
                   {
                     step: 4 as const,
                     title: "Шаг 4. Завершение и проверка",
-                    fnName: "keyAddEndAS1",
-                    desc: "Фиксация нового ключа в EEPROM блока 750 и контрольное чтение счётчика ключей.",
+                    fnName: "2E 11 C1 00 → 22 13 78",
+                    desc: "Выход из режима 2E 11 C1 00 и контрольное чтение нового количества ключей (DID 1378).",
                     btn: "4. Завершить запись",
                   },
                 ]
@@ -3918,7 +4396,7 @@ export function SubaruSsmPanel({
                     <div className="space-y-1">
                       <div className="flex items-center justify-between gap-1">
                         <span className="font-mono text-[10px] font-bold text-emerald-800">
-                          {item.fnName}()
+                          {item.fnName}
                         </span>
                         {isDone && (
                           <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
@@ -3947,15 +4425,15 @@ export function SubaruSsmPanel({
             </div>
           </div>
 
-          {/* UDS 0x27 Seed-Key & Immobilizer Procedure Console */}
+          {/* UDS 0x27 Seed-Key & All 8 SSM4 F2 Immobilizer Procedures Console */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div className="rounded-xl border border-gray-200 p-3.5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold text-gray-900">
-                  Шаг 1. Выбор процедуры иммобилайзера (`FHIUtilityCtrlNK.dll`)
+                  Шаг 1. Выбор процедуры меню F2 SSM4 (`IMM-000.srp`)
                 </span>
                 <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-gray-700">
-                  CAN 750 → 758
+                  7B4 / 751 / 752
                 </span>
               </div>
 
@@ -3965,31 +4443,40 @@ export function SubaruSsmPanel({
                 className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-900"
               >
                 <option value="read-key-count">
-                  1. Проверка количества зарегистрированных ключей (imb_in_ReadKeyNumConfirm)
-                </option>
-                <option value="verify-smart-key">
-                  2. Верификация смарт-ключа / транспондера в салоне (keyVerificationAS1)
+                  4. Number of Registered Access Key(s) (IMM-069 / 015 / 004 · 22 1378 / 1158)
                 </option>
                 <option value="register-add-key">
-                  3. Дописать новый смарт-ключ к существующему (keyAddAS1 / keyRegistAS1)
+                  1. Keyless Access Immobilizer Registration — дописать ключ (IMM-066 / 012 · 2E 11 C1 01)
+                </option>
+                <option value="steering-lock-reg">
+                  2. Steering Lock CM / ID Code Box Registration (IMM-067 / 013 · 2E 11 E1 01)
+                </option>
+                <option value="ecm-immo-reg">
+                  3. Engine Control Module Registration (IMM-068 / 014 · 22 1220 / 7E0 31 01 50 00)
                 </option>
                 <option value="delete-lost-keys">
-                  4. Удалить утерянные смарт-ключи кроме активного (keyDeleteAS1)
+                  5. Immobilizer Access Key ID Deletion — удалить кроме ключа в машине (IMM-070 / 016 · 2E 11 C1 02)
                 </option>
-                <option value="sync-ecu-immo-cgtw">
-                  5. Синхронизация блоков ECM ↔ Immobilizer ↔ Meter ↔ CGW (systemRegistAS1 / makeUpdateMacData)
+                <option value="res-cm-reg">
+                  6. Remote Engine Start CM Registration (IMM-071 / 017 / 005 · 2E 11 B0 01 / 31 01 40 05)
+                </option>
+                <option value="telematics-cm-reg">
+                  7. Telematics CM Registration (IMM-072 / 052 · 2E 11 B2 01)
+                </option>
+                <option value="read-history">
+                  8. Read Registration History (IMM-073 / 018 · 22 1360 / 137A)
                 </option>
               </select>
 
               <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold text-gray-700">
-                  Обучающий код бирки ключей (Teaching Code — для систем AS1 до 2018 г., опционально):
+                  Обучающий код бирки ключей (Teaching Code — только для систем AS1/KWP до 2014 г., опционально):
                 </label>
                 <input
                   type="text"
                   value={immoTeachingCode}
                   onChange={(e) => setImmoTeachingCode(e.target.value.toUpperCase())}
-                  placeholder="Например: 5-значный или HEX Teaching Code"
+                  placeholder="Опционально"
                   className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 font-mono text-xs"
                 />
               </div>
@@ -4000,13 +4487,13 @@ export function SubaruSsmPanel({
                 disabled={!ready || busy}
                 className="w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                1. Запросить SecurityAccess Seed у блока 750 (`10 03` → `27 01`)
+                1. Запросить SecurityAccess Seed (`10 03` → `27 07` на 7B4 / `27 03` на 751/752)
               </button>
 
               {immoSeedHex && (
                 <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs">
                   <div className="font-bold text-emerald-900">
-                    Полученный от автомобиля Seed (`67 01`):
+                    Полученный от автомобиля Seed (`67 07` / `67 03`):
                   </div>
                   <div className="mt-1 font-mono text-sm font-bold text-emerald-800 select-all">
                     {immoSeedHex}
@@ -4019,20 +4506,20 @@ export function SubaruSsmPanel({
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-bold text-amber-950">
-                    Шаг 2. Отправка ответного ключа `Key (27 02)` и запуск процедуры
+                    Шаг 2. Отправка ответного ключа `Key (27 08 / 27 04)` и запуск процедуры
                   </span>
                   <span className="rounded bg-amber-200/70 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-900">
-                    UDS 27 02
+                    UDS 27 08 / 27 04
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-700 leading-relaxed">
-                  Введите ответный <code className="font-mono font-bold">Key (HEX)</code>, рассчитанный по полученному выше <code className="font-mono">Seed</code> (2/4 байта для систем `AS1` или 16 байт для `SecurityAccess2018CY_AesKey`), чтобы открыть запись в блок <code className="font-mono">750</code> и выполнить выбранную процедуру.
+                  Если Seed выше равен нулям (<code className="font-mono">00 00…</code>), блок уже разблокирован. Если Seed ненулевой — введите ответный <code className="font-mono font-bold">Key (HEX)</code> (4 байта для `27 04` на D/B-type или 16 байт для `27 08` на H-type SGP), чтобы выполнить выбранную процедуру.
                 </p>
                 <input
                   type="text"
                   value={immoKeyInputHex}
                   onChange={(e) => setImmoKeyInputHex(e.target.value.toUpperCase())}
-                  placeholder="Введите ответный Key в HEX (например: A1 B2 C3 D4 …)"
+                  placeholder="Введите ответный Key в HEX (8 или 32 hex-символа)"
                   className="w-full rounded-lg border border-amber-400 bg-white px-3 py-2 font-mono text-xs font-bold uppercase"
                 />
               </div>
@@ -4043,7 +4530,7 @@ export function SubaruSsmPanel({
                 disabled={!ready || busy || !immoKeyInputHex.trim()}
                 className="w-full rounded-xl border border-blue-700 bg-blue-700 hover:bg-blue-800 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                2. Отправить `27 02 Key` и запустить процедуру на блоке 750
+                2. Отправить `27 08 / 27 04 Key` и запустить выбранную процедуру
               </button>
             </div>
           </div>
@@ -4051,7 +4538,7 @@ export function SubaruSsmPanel({
           {immoLogLines.length > 0 && (
             <div className="rounded-xl border border-gray-200 bg-gray-900 p-3 font-mono text-[11px] text-emerald-300 space-y-1 max-h-56 overflow-y-auto">
               <div className="text-[10px] uppercase tracking-wider text-gray-400">
-                Журнал обмена с блоком Иммобилайзера / Smart Key (750 → 758):
+                Журнал обмена F2 Immobilizer (7B4→7BC · 751→759 · 752→75A):
               </div>
               {immoLogLines.map((line, idx) => (
                 <div key={idx}>{line}</div>
@@ -4677,20 +5164,41 @@ export function SubaruSsmPanel({
                     optionCodeInput,
                   );
                   return (
-                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs space-y-1">
-                      <div className="font-bold text-emerald-800">
-                        Итоговый код «12 columns» для ввода в SSM4:{" "}
-                        <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold text-emerald-800">
-                          {codeMatch.inferredAppliedModel}
-                        </code>{" "}
-                        + Option Code{" "}
-                        <code className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono font-bold text-emerald-800">
-                          {codeMatch.inferredOptionCode}
-                        </code>{" "}
-                        ({codeMatch.inferredRegion})
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 space-y-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                          1. Фактический код в приборке / на табличке стойки B
+                        </div>
+                        <div className="font-bold text-gray-900">
+                          <code className="rounded bg-white px-1.5 py-0.5 font-mono font-bold text-amber-900">
+                            {codeMatch.actualAppliedModel}
+                          </code>{" "}
+                          + Option Code{" "}
+                          <code className="rounded bg-white px-1.5 py-0.5 font-mono font-bold text-amber-900">
+                            {codeMatch.actualOptionCode}
+                          </code>
+                        </div>
+                        <div className="text-[11px] font-semibold text-amber-900">
+                          {codeMatch.actualRegion}
+                        </div>
                       </div>
-                      <div className="text-[11px] text-gray-700">
-                        {codeMatch.explanationRu}
+                      <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 space-y-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                          2. Рекомендуемый канадский код (°C, км/ч, л/100км, TPMS 315 МГц)
+                        </div>
+                        <div className="font-bold text-emerald-950">
+                          <code className="rounded bg-white px-1.5 py-0.5 font-mono font-bold text-emerald-800">
+                            {codeMatch.actualAppliedModel}
+                          </code>{" "}
+                          + Option Code{" "}
+                          <code className="rounded bg-white px-1.5 py-0.5 font-mono font-bold text-emerald-800">
+                            {codeMatch.recommendedCanadianOptionC0}
+                          </code>{" "}
+                          (или PZEV <code className="font-mono">{codeMatch.recommendedCanadianOptionC5}</code>)
+                        </div>
+                        <div className="text-[11px] text-gray-700">
+                          {codeMatch.explanationRu}
+                        </div>
                       </div>
                     </div>
                   );
@@ -4780,32 +5288,83 @@ export function SubaruSsmPanel({
             </div>
 
             {meter12Read && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs space-y-1.5">
-                <div className="font-bold text-emerald-900">
-                  Считано с {meter12Read.txHex} → {meter12Read.rxHex}
-                  {meter12Read.vin ? ` · VIN ${meter12Read.vin}` : ""}:{" "}
-                  <code className="rounded bg-white px-1.5 py-0.5 font-mono">
-                    {meter12Read.match.inferredAppliedModel}
-                  </code>{" "}
-                  +{" "}
-                  <code className="rounded bg-white px-1.5 py-0.5 font-mono">
-                    {meter12Read.match.inferredOptionCode}
-                  </code>
-                </div>
-                <div
-                  className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold ${
-                    meter12Read.match.inferredRegion.startsWith("CANADA")
-                      ? "bg-emerald-200 text-emerald-900"
-                      : meter12Read.match.inferredRegion.startsWith("USA")
-                        ? "bg-amber-200 text-amber-900"
-                        : "bg-gray-200 text-gray-800"
-                  }`}
-                >
-                  {meter12Read.match.inferredRegion}
+              <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  <div className="rounded-lg border border-amber-300 bg-amber-50/80 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded bg-amber-600 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                        ФАКТИЧЕСКИЙ КОД (В ПРИБОРКЕ / ПО VIN)
+                      </span>
+                      <span className="font-mono text-[10px] text-amber-900">
+                        {meter12Read.txHex} → {meter12Read.rxHex}
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-gray-900">
+                      Applied Model:{" "}
+                      <code className="rounded bg-white px-2 py-0.5 font-mono text-amber-900 shadow-sm">
+                        {meter12Read.match.actualAppliedModel}
+                      </code>{" "}
+                      + Option:{" "}
+                      <code className="rounded bg-white px-2 py-0.5 font-mono text-amber-900 shadow-sm">
+                        {meter12Read.match.actualOptionCode}
+                      </code>
+                    </div>
+                    {meter12Read.vin && (
+                      <div className="font-mono text-[11px] text-gray-700">
+                        VIN: <strong>{meter12Read.vin}</strong>
+                      </div>
+                    )}
+                    <div
+                      className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold ${
+                        meter12Read.match.actualRegion.startsWith("CANADA")
+                          ? "bg-emerald-200 text-emerald-900"
+                          : "bg-amber-200 text-amber-950"
+                      }`}
+                    >
+                      Активный регион: {meter12Read.match.actualRegion}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-emerald-400 bg-emerald-50 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded bg-emerald-700 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                        РЕКОМЕНДУЕМЫЙ КАНАДСКИЙ КОД (°C, КМ/Ч)
+                      </span>
+                      <span className="font-mono text-[10px] text-emerald-900">
+                        TSB 07-183-20 · Procedure B
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-emerald-950">
+                      Applied Model:{" "}
+                      <code className="rounded bg-white px-2 py-0.5 font-mono text-emerald-900 shadow-sm">
+                        {meter12Read.match.actualAppliedModel}
+                      </code>{" "}
+                      + Option C0:{" "}
+                      <code className="rounded bg-white px-2 py-0.5 font-mono text-emerald-900 shadow-sm">
+                        {meter12Read.match.recommendedCanadianOptionC0}
+                      </code>
+                    </div>
+                    <div className="text-[11px] text-emerald-900">
+                      Альтернатива PZEV (C5):{" "}
+                      <code className="rounded bg-white px-1.5 py-0.5 font-mono font-bold">
+                        {meter12Read.match.actualAppliedModel} + {meter12Read.match.recommendedCanadianOptionC5}
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAppliedModelInput(meter12Read.match.actualAppliedModel);
+                        setOptionCodeInput(meter12Read.match.recommendedCanadianOptionC0);
+                      }}
+                      className="rounded bg-emerald-700 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-800"
+                    >
+                      Подставить канадский {meter12Read.match.actualAppliedModel} + {meter12Read.match.recommendedCanadianOptionC0} в поля ниже
+                    </button>
+                  </div>
                 </div>
                 <div className="text-[11px] text-gray-700">{meter12Read.match.explanationRu}</div>
                 {meter12Read.dids.length > 0 ? (
-                  <div className="max-h-36 overflow-y-auto rounded border border-emerald-100 bg-white p-2 font-mono text-[11px] space-y-0.5">
+                  <div className="max-h-36 overflow-y-auto rounded border border-emerald-100 bg-gray-50 p-2 font-mono text-[11px] space-y-0.5">
                     {meter12Read.dids.map((d) => (
                       <div key={d.did} className="flex flex-wrap justify-between gap-2">
                         <span className="font-bold text-gray-700">
@@ -4829,27 +5388,27 @@ export function SubaruSsmPanel({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold text-gray-700">
-                  7-значный Applied Model (со стойки B, например BTACYRB):
+                  7-значный Applied Model (со стойки B, например BTAEYR8 или BTACYRB):
                 </label>
                 <input
                   type="text"
                   maxLength={7}
                   value={appliedModelInput}
                   onChange={(e) => setAppliedModelInput(e.target.value.toUpperCase())}
-                  placeholder="Например: BTACYRB"
+                  placeholder="Например: BTAEYR8"
                   className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 font-mono text-xs font-bold uppercase"
                 />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold text-gray-700">
-                  4-значный Option Code (со стойки B, например U45D → C05D):
+                  4-значный Option Code (со стойки B, например U45L → C05L):
                 </label>
                 <input
                   type="text"
                   maxLength={4}
                   value={optionCodeInput}
                   onChange={(e) => setOptionCodeInput(e.target.value.toUpperCase())}
-                  placeholder="Например: U45D"
+                  placeholder="Например: U45L"
                   className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 font-mono text-xs font-bold uppercase"
                 />
               </div>

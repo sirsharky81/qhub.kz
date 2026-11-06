@@ -17,14 +17,18 @@ export function decodeSubaruEpsSteeringAngleDeg(data: number[]): number | null {
 }
 
 /**
- * Candidate RoutineControl (31 01) starts for «VDC Sensor Midpoint Setting» on SGP ABS/VDC (7B0).
- * Exact routine ID varies by ROM; we try known community captures in order and stop on first 71 xx.
+ * RoutineControl (31 01) starts for «VDC Sensor Midpoint Setting» on ABS/VDC (7B0)
+ * from decrypted `ABS-034..036.srp`, `ABS-028..029.srp`, and `ABS-001A..004B.srp`.
  */
 const VDC_MIDPOINT_ROUTINE_HEX = [
-  "31010301",
-  "31010201",
-  "31010101",
-  "31012001",
+  "31010202",
+  "31010203",
+  "31010204",
+  "31010024",
+  "31010025",
+  "31010026",
+  "31010207",
+  "31010208",
 ] as const;
 
 async function openSubaruModuleSession(elm: Elm327Client, tx: number, rx: number): Promise<void> {
@@ -93,7 +97,10 @@ export type SubaruServiceActionId =
   | "dms-seat-memory-read"
   | "rab-sonar-history"
   | "srh-headlight-zero"
-  | "cgw-unlock-mac-check";
+  | "cgw-unlock-mac-check"
+  | "fcr-bsd-radar-cal"
+  | "avn-headunit-diag"
+  | "tlm-dcm-diag";
 
 export interface SubaruServiceActionSpec {
   id: SubaruServiceActionId;
@@ -113,261 +120,261 @@ export const SUBARU_SERVICE_ACTIONS: readonly SubaruServiceActionSpec[] = [
     id: "vdc-steering-zero",
     utilityId: "util-eps-sas-zero",
     srpPrefix: "ABS / EBB",
-    titleRu: "Калибровка нуля датчика угла руля и G-сенсора (VDC Sensor Midpoint Setting Mode · ABS-001..045.srp)",
+    titleRu: "Калибровка нуля датчика угла руля и G-сенсора (VDC Sensor Midpoint Setting Mode · ABS-001..004, ABS-034..036.srp)",
     buttonLabelRu: "Калибровать нуль руля и G-сенсора (VDC 7B0)",
     txHex: "7B0",
     rxHex: "7B8",
     serviceBadge: "UDS 31 01",
     warningRu:
-      "Автомобиль должен стоять на ровной горизонтальной площадке, колёса и руль выставлены строго прямо (около 0.0°), ручник затянут.",
-    candidatePayloads: ["31010301", "31010201", "31010101", "31012001"],
+      "Автомобиль должен стоять на ровной горизонтальной площадке, колёса и руль выставлены строго прямо (около 0.0°), ручник затянут. В ABS-034..036.srp запускаются 31 01 02 02 / 02 03 / 02 04 / 00 24..26.",
+    candidatePayloads: ["31010202", "31010203", "31010204", "31010024", "31010025", "31010026"],
   },
   {
     id: "ecm-Clear-learned",
     utilityId: "util-ecm-ewg-roughness",
     srpPrefix: "PU",
-    titleRu: "Сброс адаптаций ЭБУ двигателя (Clear Memory 2 — топливные коррекции, дроссель ETCS, IAM/детонация · PU-001..078.srp)",
+    titleRu: "Сброс адаптаций ЭБУ двигателя (Clear Memory 2 — топливные коррекции, дроссель ETCS, IAM · PU-044 / PU-077 / APS-001.srp)",
     buttonLabelRu: "Сбросить адаптации ДВС и дросселя (ECM 7E0)",
     txHex: "7E0",
     rxHex: "7E8",
-    serviceBadge: "UDS 31 01 / 14",
+    serviceBadge: "UDS 31 01 FF00",
     warningRu:
-      "Двигатель должен быть заглушен, зажигание включено (IG ON), педаль газа отпущена. После сброса выключите зажигание на 10 с, затем включите IG ON на 15 с для самообучения заслонки ETCS перед запуском.",
-    candidatePayloads: ["31010101", "31010201", "31010F01", "14FFFFFF", "04"],
+      "Двигатель заглушен, зажигание IG ON, педаль газа отпущена. В PU-044 / PU-077 / APS-001.srp выполняется 31 01 FF 00 00 01 → 31 03 FF 00 (инициализация педали/дросселя 31 01 02 00 в APS-004.srp).",
+    candidatePayloads: ["3101FF000001", "3103FF00", "31010200", "14FFFFFF"],
   },
   {
     id: "ecm-avcs-learning",
     utilityId: "util-ecm-ewg-roughness",
     srpPrefix: "PU",
-    titleRu: "Обучение и сохранение фазовращателей AVCS и электронного вестгейта EWG (SaveAVCSLearning · PU-012..038.srp)",
-    buttonLabelRu: "Запустить обучение AVCS / EWG (ECM 7E0)",
+    titleRu: "Обучение и сохранение фазовращателей AVCS и электронного вестгейта EWG (SaveAVCSLearning · PU-063 / PU-072 / PU-073.srp)",
+    buttonLabelRu: "Опросить / обучить AVCS и EWG (ECM 7E0)",
     txHex: "7E0",
     rxHex: "7E8",
-    serviceBadge: "UDS 31 01 / 22",
+    serviceBadge: "UDS 22 / 31 01",
     warningRu:
-      "Двигатель прогрет (ОЖ > 75 °C), селектор в P, кондиционер выключен. Процедура считывает и фиксирует начальные углы муфт AVCS и положение штока вестгейта (10D2–10D4).",
-    candidatePayloads: ["31010301", "31010401", "2210D2", "2210D3", "2210D4"],
+      "Двигатель прогрет (ОЖ > 75 °C), селектор в P. Считывает регистры обучения муфт AVCS (11AB, 11AC, 11AE, 11AF из PU-063/073.srp), шток вестгейта (10D2–10D4, 1622–1624 из PU-072.srp) и запускает рутины 31 01 80 10 / 80 11.",
+    candidatePayloads: ["2211AB", "2211AC", "2211AE", "2211AF", "2210D2", "2210D3", "2210D4", "31018010", "31018011"],
   },
   {
     id: "ecm-injector-check",
     utilityId: "util-ecm-elcm-evap",
     srpPrefix: "PU",
-    titleRu: "Чтение и проверка компенсационных кодов форсунок и обучения ТНВД (PopupInjectorCodeInput / commPumpListKWP · PU-040..062.srp)",
+    titleRu: "Чтение компенсационных кодов форсунок, обучения ТНВД и рутин топливной системы (PU-030..041 / PU-064 / PU-076.srp)",
     buttonLabelRu: "Проверить коды форсунок и ТНВД (ECM 7E0)",
     txHex: "7E0",
     rxHex: "7E8",
     serviceBadge: "UDS 22 / 31 01",
     warningRu:
-      "Зажигание IG ON. Опрашивает регистры давления ТНВД (111E), длительности впрыска PFI/DI (10A3, 13EF, 13F0) и статус обучения топливного насоса.",
-    candidatePayloads: ["22111E", "2210A3", "2213EF", "2213F0", "31010501"],
+      "Зажигание IG ON. Читает коды форсунок цилиндров (DID 1020, 102A..102F из PU-030..033.srp), обучение насоса (1030, 1031, 114D, 1260 из PU-040.srp) и рутины 31 01 80 00 / 80 01 / 80 02.",
+    candidatePayloads: ["221020", "22102A", "22102B", "22102C", "22102D", "221030", "221031", "22111E", "31018000", "31018001", "31018002"],
   },
   {
     id: "ecm-dpf-gpf-reset",
     utilityId: "util-ecm-elcm-evap",
     srpPrefix: "PU",
-    titleRu: "Инспекция и сброс счётчика сажи фильтра DPF / GPF и разжижения масла (commGpfWriteData / setGpfDataValue · PU-063..078.srp)",
-    buttonLabelRu: "Проверка / сброс счётчика GPF / DPF (7E0)",
+    titleRu: "Инспекция и сервисные рутины фильтра DPF / GPF и продувки (commDpfReadListCAN / commGpfWriteData · PU-042..043 / PU-067..078.srp)",
+    buttonLabelRu: "Проверка / сброс GPF / DPF (7E0)",
     txHex: "7E0",
     rxHex: "7E8",
-    serviceBadge: "UDS 31 01 / 22",
+    serviceBadge: "UDS 22 / 31 01",
     warningRu:
-      "Зажигание IG ON, двигатель заглушен. Выполняется после сервисной регенерации или замены фильтра GPF/DPF и моторного масла.",
-    candidatePayloads: ["31010601", "31010701", "2212E2", "2213EC"],
+      "Зажигание IG ON, двигатель заглушен. Читает DID 1140, 1180, 11A0 (PU-042.srp), DID 12E1, 13D8 и запускает рутины 31 01 41 70 00 (PU-067.srp), 31 01 80 20..22 (PU-076.srp), 31 01 80 30..31 (PU-078.srp).",
+    candidatePayloads: ["221180", "221140", "2211A0", "2212E1", "2213D8", "3101417000", "31018020", "31018021", "31018030"],
   },
   {
     id: "tcm-at-learning-clear",
     utilityId: "util-cvt-at-inspection",
     srpPrefix: "PU",
-    titleRu: "Сброс таблиц адаптации вариатора Lineartronic (AT Learning Memory Clear / Clear Memory 2 · PU-001..025.srp)",
+    titleRu: "Сброс таблиц адаптации вариатора Lineartronic (AT Learning Memory Clear · PU-027 / PU-028 / PU-044 / PU-077.srp)",
     buttonLabelRu: "Сбросить адаптации вариатора (AT Learning Clear)",
     txHex: "7E1",
     rxHex: "7E9",
     serviceBadge: "UDS 31 01",
     warningRu:
-      "Выполняйте сброс AT Learning только если после него вы готовы провести цикл обучения муфты переднего хода и гидроблока при температуре CVTF 65–85 °C. Рычаг в P, стояночный тормоз включён, IG ON (двигатель заглушен).",
-    candidatePayloads: ["31010101", "31010201", "31010301", "14FFFFFF"],
+      "Рычаг в P, ручник включён, IG ON (двигатель заглушен). Точные кадры из PU-044 / PU-077 / PU-027 / PU-028.srp: 31 01 FF 00 00 01 → 31 03 FF 00, 31 01 50 04, 31 01 42 04.",
+    candidatePayloads: ["3101FF000001", "31015004", "31014204"],
   },
   {
     id: "tcm-at-learning-start",
     utilityId: "util-cvt-at-inspection",
     srpPrefix: "PU",
-    titleRu: "Запуск режима обучения вариатора Lineartronic (AT Learning Mode / commLearnCAN · PU-001..025.srp)",
+    titleRu: "Запуск режима обучения вариатора Lineartronic (AT Learning Mode / commLearnCAN · PU-034..038.srp)",
     buttonLabelRu: "Запустить адаптацию вариатора (AT Learning Mode)",
     txHex: "7E1",
     rxHex: "7E9",
-    serviceBadge: "UDS 31 01",
+    serviceBadge: "UDS 31 01 70xx",
     warningRu:
-      "Температура CVTF должна быть в окне 65–85 °C, автомобиль неподвижен, педаль тормоза нажата до упора, руль прямо, кондиционер и фары выключены.",
-    candidatePayloads: ["31010202", "31010102", "31010302", "31011001", "221243"],
+      "Температура CVTF 65–85 °C, педаль тормоза нажата до упора, руль прямо, фары и A/C выключены. Точные кадры из PU-034..038.srp: 31 01 70 00 .. 31 01 70 05 и чтение 22 10 30 / 12 5E / 12 60.",
+    candidatePayloads: ["221030", "22125E", "221260", "31017000", "31017001", "31017002", "31017003", "31017004", "31017005"],
   },
   {
     id: "epb-pad-release",
     utilityId: "util-epb-brake-service",
     srpPrefix: "ABS / EBB",
-    titleRu: "Сервисный режим замены задних колодок: РАЗВЕДЕНИЕ электроручника EPB (Pad Exchange Release · ABS-018..031.srp)",
+    titleRu: "Сервисный режим замены задних колодок: РАЗВЕДЕНИЕ электроручника EPB (Pad Exchange Release · ABS-010 / ABS-032 / ABS-038 / ABS-039.srp)",
     buttonLabelRu: "Развести колодки EPB (Сервисный режим)",
     txHex: "7B0",
     rxHex: "7B8",
-    serviceBadge: "UDS 31 01 / 2F",
+    serviceBadge: "UDS 31 01",
     warningRu:
-      "Поставьте противооткатные упоры под передние колёса! Зажигание IG ON, селектор в P, педаль тормоза не нажата. Моторы суппортов полностью разведут поршни.",
-    candidatePayloads: ["31010501", "31010401", "2F20120302", "3101201202"],
+      "Поставьте противооткатные упоры! Зажигание IG ON, селектор в P, педаль тормоза не нажата. В ABS-032 / ABS-038 / ABS-010 / ABS-039.srp читается 22 10 2B и запускается 31 01 03 01 / 31 01 01 23.",
+    candidatePayloads: ["22102B", "31010301", "31010123", "31010209"],
   },
   {
     id: "epb-pad-return",
     utilityId: "util-epb-brake-service",
     srpPrefix: "ABS / EBB",
-    titleRu: "Выход из сервисного режима замены колодок: СВЕДЕНИЕ электроручника EPB (Pad Exchange Return · ABS-018..031.srp)",
+    titleRu: "Выход из сервисного режима замены колодок: СВЕДЕНИЕ электроручника EPB (Pad Exchange Return · ABS-010 / ABS-032 / ABS-038 / ABS-039.srp)",
     buttonLabelRu: "Свести колодки EPB (Завершить замену)",
     txHex: "7B0",
     rxHex: "7B8",
-    serviceBadge: "UDS 31 01 / 2F",
+    serviceBadge: "UDS 31 01",
     warningRu:
-      "Убедитесь, что новые тормозные колодки и суппорты полностью установлены на место! Моторы EPB сведут колодки к дискам.",
-    candidatePayloads: ["31010502", "31010402", "2F20120301", "3101201201"],
+      "Убедитесь, что новые колодки и суппорты установлены на место! В ABS-032 / ABS-038 / ABS-010 / ABS-039.srp запускается 31 01 03 00 / 31 01 01 22.",
+    candidatePayloads: ["22102B", "31010300", "31010122", "3101020A"],
   },
   {
     id: "epb-stroke-cal",
     utilityId: "util-epb-brake-service",
     srpPrefix: "ABS / EBB",
-    titleRu: "Калибровка хода и усилия затяжки электроручника EPB (EPB Clamp Force / Stroke Calibration · ABS-030..045.srp)",
+    titleRu: "Калибровка хода и усилия затяжки электроручника EPB (Stroke / Force Test · ABS-033 / ABS-040..045.srp)",
     buttonLabelRu: "Откалибровать ход и затяжку EPB",
     txHex: "7B0",
     rxHex: "7B8",
     serviceBadge: "UDS 31 01",
     warningRu:
-      "Выполняется после сведения новых задних колодок. Автомобиль неподвижен на ровной поверхности, IG ON.",
-    candidatePayloads: ["31010503", "31010403", "31010303", "3101200D", "22200D"],
+      "Выполняется после сведения новых задних колодок. В ABS-033 / ABS-040..045.srp запускаются 31 01 03 03 и 31 01 02 0B .. 02 0E.",
+    candidatePayloads: ["22102B", "31010303", "3101020B", "3101020C", "3101020D", "3101020E"],
   },
   {
     id: "ebb-air-bleeding",
     utilityId: "util-epb-brake-service",
     srpPrefix: "ABS / EBB",
-    titleRu: "Проверка и прокачка гидравлического контура ABS / электробустера тормозов EBB (EBB-001..009.srp)",
-    buttonLabelRu: "Проверить контур EBB / давление суппортов (7B0)",
+    titleRu: "Проверка и прокачка гидравлического контура электробустера тормозов EBB (EBB-001..009.srp)",
+    buttonLabelRu: "Проверить / прокачать контур EBB (7B0)",
     txHex: "7B0",
     rxHex: "7B8",
-    serviceBadge: "UDS 22 / 31 01",
+    serviceBadge: "UDS 22 / 31 01 04xx",
     warningRu:
-      "Зажигание IG ON, автомобиль неподвижен. Выполняет контроль давления ГТЦ (1001), целевого давления (1501) и передних суппортов FR/FL (28C4/28C5).",
-    candidatePayloads: ["221001", "221501", "2228C4", "2228C5", "31010601"],
+      "Зажигание IG ON, автомобиль неподвижен. В EBB-006..009.srp читаются 22 31 44, 22 10 01, 22 15 01, 22 28 C4/C5 и запускаются 31 01 04 00 / 04 08 / 04 0F / 04 13.",
+    candidatePayloads: ["223144", "221001", "221501", "2228C4", "2228C5", "31010400", "31010408", "3101040F", "31010413"],
   },
   {
     id: "eyesight-camera-check",
     utilityId: "util-eyesight-camera-check",
     srpPrefix: "ADA / FSC / MCAM",
-    titleRu: "Проверка юстировки, вариантного кода и готовности стереокамеры EyeSight (SaveCameraAdjastMode / CheckAdaVariantDid · ADA-001..041.srp)",
-    buttonLabelRu: "Проверить калибровку и вариант EyeSight (787)",
+    titleRu: "Чтение 12-колоночного варианта и готовности стереокамеры EyeSight (ADA-002 / ADA-038 / ADA-040..041 / MCAM-010.srp)",
+    buttonLabelRu: "Проверить вариант и статус EyeSight (787)",
     txHex: "787",
     rxHex: "78F",
-    serviceBadge: "UDS 22 / 10 03",
+    serviceBadge: "UDS 22 309x / 31 01",
     warningRu:
-      "Зажигание IG ON, лобовое стекло чистое. Выгружает калибровочный ID (F182), паспорт камеры (F18E, F197) и проверяет готовность к статической/дорожной юстировке.",
-    candidatePayloads: ["22F182", "22F18E", "22F197", "221000"],
+      "Зажигание IG ON, лобовое стекло чистое. Читает вариантные DID 3091..309D (ADA-002/038.srp), 3501..3506 (ADA-031/032.srp), A001 (MCAM-009.srp), F182 и проверяет рутины 31 01 11 04 / 11 05 / 21 03.",
+    candidatePayloads: ["22F182", "22F18E", "223091", "223092", "223093", "223094", "22309D", "223501", "22A001"],
   },
   {
     id: "eyesight-precrash-history",
     utilityId: "util-eyesight-camera-check",
     srpPrefix: "ADA / FSC / MCAM",
-    titleRu: "Чтение истории срабатываний автоторможения Pre-Crash / AEB и счётчиков отключения EyeSight (preCrushReadSave · Keycode 49232)",
+    titleRu: "Чтение истории срабатываний автоторможения Pre-Crash / AEB EyeSight (preCrushReadSave · c7YcwYGEJWLZiB6.mHZ)",
     buttonLabelRu: "Считать историю Pre-Crash / AEB (787)",
     txHex: "787",
     rxHex: "78F",
-    serviceBadge: "UDS 22 / 19 02",
+    serviceBadge: "UDS 22 40xx / 43Ex",
     warningRu:
-      "Зажигание IG ON. Опрашивает регистры истории событий предаварийного торможения и коды временной приостановки камеры EyeSight.",
-    candidatePayloads: ["1902FF", "221000", "221020", "221040", "22F182"],
+      "Зажигание IG ON. Читает регистры истории AEB из таблиц c7YcwYGEJWLZiB6.mHZ (DID 4001..4006) и CBG7BrLIdHEhG.mHZ (DID 43E1..43E3) + ошибки 19 02 FF.",
+    candidatePayloads: ["1902FF", "224001", "224002", "224003", "2243E1", "2243E2", "2243E3", "22F182"],
   },
   {
     id: "meter-read-variant",
     utilityId: "util-eps-sas-zero",
     srpPrefix: "MET",
-    titleRu: "Чтение вариантной конфигурации приборной панели и датчиков полубаков (readMetVariant / MET-001..010.srp)",
-    buttonLabelRu: "Считать вариант и калибровку приборки (783)",
+    titleRu: "Чтение вариантной таблицы A000..A028 и калибровки приборной панели (readMetVariant · MET-001 / MET-002 / MET-008.srp)",
+    buttonLabelRu: "Считать вариант A000..A028 приборки (783)",
     txHex: "783",
     rxHex: "78B",
-    serviceBadge: "UDS 22",
+    serviceBadge: "UDS 22 A0xx / 0250",
     warningRu:
-      "Зажигание IG ON. Считывает конфигурацию комбинации приборов (783 → 78B), диммер освещённости (1062) и калибровку обоих датчиков уровня топлива (1041/1042).",
-    candidatePayloads: ["220250", "220251", "22F190", "22F18E", "22F182", "221041", "221042", "221062", "221007"],
+      "Зажигание IG ON. Читает битовую карту поддержки A000/A020, регион A002 (02=U4, 03=C0, 05=U5, 06=C5), единицы A011 (FF=°F, 00=°C), X-Mode A007, 0250/0251 и датчики бака 1041/1042.",
+    candidatePayloads: ["22A000", "22A001", "22A002", "22A007", "22A011", "22A016", "22A020", "22A024", "220250", "220251", "2210C2", "221041", "221042"],
   },
   {
     id: "immo-key-count-check",
     utilityId: "util-keyless-starter-check",
     srpPrefix: "IMM / KEY / SMA",
-    titleRu: "Проверка количества зарегистрированных смарт-ключей, питания и реле запуска (imb_in_ReadKeyNumConfirm / KEY-001..016, SMA-001..021.srp)",
-    buttonLabelRu: "Проверить смарт-ключи и реле запуска (750)",
-    txHex: "750",
-    rxHex: "758",
-    serviceBadge: "UDS 22",
+    titleRu: "Проверка количества зарегистрированных смарт-ключей и истории (IMM-069 / IMM-073 / IMM-015.srp · 7B4 / 751)",
+    buttonLabelRu: "Считать кол-во смарт-ключей (7B4 / 751)",
+    txHex: "7B4",
+    rxHex: "7BC",
+    serviceBadge: "UDS 22 1378",
     warningRu:
-      "Зажигание IG ON, смарт-ключ внутри салона. Проверяет регистры блока бесключевого доступа и иммобилайзера без стирания ключей.",
-    candidatePayloads: ["22104E", "221052", "221057", "221058", "221059", "22F18E"],
+      "Зажигание IG ON, смарт-ключ внутри салона. Читает фактическое количество прописанных ключей (DID 1378), статус транспондера/защёлки (DID 1360/137A/1220) и номер детали (F18E).",
+    candidatePayloads: ["221378", "221360", "22137A", "221220", "22F18E"],
   },
   {
     id: "tpms-read-id-status",
     utilityId: "util-tpms-inspection",
     srpPrefix: "TPM",
-    titleRu: "Инспекция приёмника TPMS в боди-модуле BIU и опрос всех 4 колёсных датчиков (TPM-001..004.srp)",
+    titleRu: "Инспекция приёмника TPMS в BIU и запуск опроса датчиков (TPM-001 / TPM-003.srp · 752)",
     buttonLabelRu: "Опросить приёмник и датчики TPMS (752)",
     txHex: "752",
     rxHex: "75A",
-    serviceBadge: "UDS 22",
+    serviceBadge: "UDS 22 / 31 01 A000",
     warningRu:
-      "Зажигание IG ON. Опрашивает регистры давления колёс 1–4 (1021–1024), питание BIU (101B) и счётчик IG (101E).",
-    candidatePayloads: ["221021", "221022", "221023", "221024", "22101B"],
+      "Зажигание IG ON. Опрашивает регистры давления колёс 1–4 (1021–1024), питание BIU (101B) и штатную рутину TPM-001/003.srp (31 01 A0 00 → 31 03 A0 00).",
+    candidatePayloads: ["221021", "221022", "221023", "221024", "22101B", "3101A000"],
   },
   {
     id: "iss-battery-reset",
     utilityId: "util-tcm-eop-startstop",
     srpPrefix: "ISS",
-    titleRu: "Сброс адаптации и счётчиков деградации АКБ Auto Start-Stop после замены аккумулятора (ISS-001..009.srp)",
+    titleRu: "Инспекция и сброс адаптации АКБ Auto Start-Stop после замены аккумулятора (ISS-001..009.srp)",
     buttonLabelRu: "Сбросить адаптацию АКБ Start-Stop",
-    txHex: "7E1",
-    rxHex: "7E9",
-    serviceBadge: "UDS 31 01 / 22",
+    txHex: "7E0",
+    rxHex: "7E8",
+    serviceBadge: "UDS 31 01 2000 / 22",
     warningRu:
-      "Выполняется после установки нового аккумулятора EFB / AGM или полной зарядки АКБ. Зажигание IG ON, двигатель заглушен.",
-    candidatePayloads: ["31011401", "31010401", "31010501", "221472", "221473", "2214F8"],
+      "Выполняется после установки нового аккумулятора EFB / AGM или полной зарядки АКБ. В ISS-001..009.srp читаются DID 10F8, 14E0, 14F8, 1420 и запускается сброс 31 01 20 00 → 31 03 20 00.",
+    candidatePayloads: ["2210F8", "2214E0", "2214F8", "221420", "31012000"],
   },
   {
     id: "ac-flap-init",
     utilityId: "util-ac-hvac-actuators",
     srpPrefix: "AC",
-    titleRu: "Калибровка крайних положений сервоприводов заслонок климат-контроля (Auto A/C Actuator Reset · AC-001..009.srp)",
-    buttonLabelRu: "Калибровать заслонки климата (7C4)",
+    titleRu: "Калибровка сервоприводов заслонок и чтение настроек климат-контроля (AC-002..009.srp · 0x1008290C)",
+    buttonLabelRu: "Калибровать заслонки и опросить климат (7C4)",
     txHex: "7C4",
     rxHex: "7CC",
-    serviceBadge: "UDS 31 01 / 22",
+    serviceBadge: "UDS 31 01 02xx / 22",
     warningRu:
-      "Зажигание IG ON. Сервоприводы заслонок смешивания (Air Mix) и направления обдува (Mode) пройдут от упора до упора для записи крайних точек.",
-    candidatePayloads: ["31010101", "31010201", "31011201", "22122D", "22122E", "22122F"],
+      "Зажигание IG ON. В AC-002..009.srp читаются настройки климата (DID 10E1, 12BF, 12B1, 12B3, 13D2..13D6) и запускаются калибровки приводов 31 01 02 AC, 31 01 02 B4, 31 01 02 B5, 31 01 02 B6.",
+    candidatePayloads: ["2210E1", "2212BF", "2212B1", "2212B3", "2213D2", "2213D3", "310102AC", "310102B4", "310102B5", "310102B6"],
   },
   {
     id: "dms-seat-memory-read",
     utilityId: "util-dms-driverfocus",
     srpPrefix: "DMS / PSM / DMI",
-    titleRu: "Опрос профилей распознавания лица водителя DriverFocus и памяти сидений (saveDriverMonitoring · DMS-001..003, PSM-001..004.srp)",
-    buttonLabelRu: "Опросить камеру DriverFocus DMS (763)",
+    titleRu: "Опрос профилей камеры DriverFocus DMS и памяти сидений/зеркал PSM/DMI (DMS-001..003, PSM-001..004, DMI-001..004.srp · 0x10081624)",
+    buttonLabelRu: "Опросить профили DMS и память сидений (763)",
     txHex: "763",
     rxHex: "76B",
     serviceBadge: "UDS 22",
     warningRu:
-      "Зажигание IG ON. Проверяет текущий распознанный профиль водителя (1025) и паспортные калибровки блока DMS.",
-    candidatePayloads: ["221025", "22F18E", "22F197", "221000"],
+      "Зажигание IG ON. Читает регистры DMS-001.srp (1060, 1061) и таблицы DID памяти сидений/зеркал из FHIUtilityCtrlNK.dll (3201..3206, 350B..3510, 142A..142E, 145E..1466).",
+    candidatePayloads: ["221060", "221061", "223201", "223202", "22350B", "22350C", "22142A", "22145E", "22F18E"],
   },
   {
     id: "rab-sonar-history",
     utilityId: "util-rab-sonar-check",
     srpPrefix: "RAB / FCR / SRH",
-    titleRu: "Инспекция калибровки задних сонаров и выгрузка статуса автоторможения RAB (RABSave · RAB-001..003.srp)",
-    buttonLabelRu: "Проверить калибровку сонаров RAB (786)",
+    titleRu: "Инспекция калибровки задних сонаров и выгрузка истории автоторможения RAB (RABSave · RAB-001..003.srp)",
+    buttonLabelRu: "Проверить сонары и историю RAB (786)",
     txHex: "786",
     rxHex: "78E",
-    serviceBadge: "UDS 22 / 19 02",
+    serviceBadge: "UDS 22 10Ax",
     warningRu:
-      "Зажигание IG ON, датчики в заднем бампере чистые. Проверяет калибровочный ID (F182), ошибки и питание блока RAB.",
-    candidatePayloads: ["22F182", "22F18E", "22101B", "1902FF"],
+      "Зажигание IG ON, датчики в заднем бампере чистые. Читает точные DID из RAB-001..002.srp: 101E, 1033, 10A7, 10A8, 10A9, 10AA, 10AB и ошибки 19 02 FF.",
+    candidatePayloads: ["22101E", "221033", "2210A7", "2210A8", "2210A9", "2210AA", "2210AB", "22F18E", "1902FF"],
   },
   {
     id: "srh-headlight-zero",
@@ -377,23 +384,62 @@ export const SUBARU_SERVICE_ACTIONS: readonly SubaruServiceActionSpec[] = [
     buttonLabelRu: "Калибровать нуль фар SRH / ADB (74C)",
     txHex: "74C",
     rxHex: "754",
-    serviceBadge: "UDS 31 01 / 22",
+    serviceBadge: "UDS 31 01 020x / 22",
     warningRu:
-      "Автомобиль на ровной горизонтальной площадке без груза в багажнике, водитель за рулём, руль строго прямо (0.0°), зажигание IG ON.",
-    candidatePayloads: ["31010101", "31010201", "31011035", "221035", "221036"],
+      "Автомобиль на ровной площадке без груза, руль прямо (0.0°), IG ON. В LCT-001..003.srp читаются 22 10 A1, 10 A2, 10 1A, 10 1B и запускаются рутины 31 01 02 00, 31 01 02 01, 31 01 02 02.",
+    candidatePayloads: ["2210A1", "2210A2", "22101A", "22101B", "31010200", "31010201", "31010202"],
   },
   {
     id: "cgw-unlock-mac-check",
     utilityId: "util-keyless-starter-check",
     srpPrefix: "TLM / CGW / MAC",
-    titleRu: "Открытие сервисной сессии Центрального шлюза CGW и диагностика телематики DCM (cgwSidFilterRemove / TLM-001..051, CGW-001, MAC-001.srp)",
-    buttonLabelRu: "Разблокировать сессию шлюза CGW и проверить TLM",
+    titleRu: "Диагностика Центрального шлюза CGW и проверка MAC-синхронизации блоков (CGW-001 / MAC-001..002.srp)",
+    buttonLabelRu: "Опросить шлюз CGW и MAC-статус (750)",
     txHex: "750",
     rxHex: "758",
-    serviceBadge: "UDS 10 03 / 22",
+    serviceBadge: "UDS 22 / 31 01",
     warningRu:
-      "Зажигание IG ON. Открывает расширенную сессию на Центральном шлюзе (750 → 758) для снятия фильтра сервисных команд и проверяет статус питания.",
-    candidatePayloads: ["1003", "22F18E", "22104E", "221067"],
+      "Зажигание IG ON. Читает регистры CGW-001.srp и MAC-001..002.srp (0250, 0251, 1020, 102E, 102F, 1033, 103A, 103B) и проверяет рутину 31 01 02 0C.",
+    candidatePayloads: ["220250", "220251", "221020", "22102E", "22102F", "221033", "22103A", "22103B", "22F18E"],
+  },
+  {
+    id: "fcr-bsd-radar-cal",
+    utilityId: "util-rab-sonar-check",
+    srpPrefix: "RAB / FCR / SRH",
+    titleRu: "Калибровка и проверка углов боковых/передних радаров слепых зон BSD / RCTA / FCR (FCR-001..004, FSC-009..012.srp)",
+    buttonLabelRu: "Проверить / калибровать радары BSD / FCR (74C / 786)",
+    txHex: "74C",
+    rxHex: "754",
+    serviceBadge: "UDS 22 / 31 01 100x",
+    warningRu:
+      "Зажигание IG ON. Читает углы и статус радаров FCR-001..004.srp (22 10 A1, 10 A3, 10 A4, 10 A5) и FSC-009..012.srp (22 10 68, 10 69, 10 6D), запускает калибровку луча 31 01 10 01 / 10 02 / 10 03 / 10 0F.",
+    candidatePayloads: ["2210A1", "2210A3", "2210A4", "2210A5", "221068", "221069", "22106D", "31011001", "31011002", "31011003", "3101100F"],
+  },
+  {
+    id: "avn-headunit-diag",
+    utilityId: "util-dms-driverfocus",
+    srpPrefix: "AVN",
+    titleRu: "Диагностика мультимедиа и навигации Harman CP1 / AVN (AVN-001..003.srp)",
+    buttonLabelRu: "Опросить мультимедиа AVN (783 / 7C4)",
+    txHex: "783",
+    rxHex: "78B",
+    serviceBadge: "UDS 22 10Cx / 31 01",
+    warningRu:
+      "Зажигание IG ON. Читает регистры состояния и подключённых антенн AVN-001..003.srp (22 10 C0 .. 10 CA) и тест 31 01 00 50.",
+    candidatePayloads: ["2210C0", "2210C1", "2210C2", "2210C3", "2210C4", "2210C5", "2210C6", "2210C7", "2210C8", "2210CA", "31010050"],
+  },
+  {
+    id: "tlm-dcm-diag",
+    utilityId: "util-keyless-starter-check",
+    srpPrefix: "TLM / CGW / MAC",
+    titleRu: "Диагностика телематического блока Starlink DCM / eCall (TLM-001..051.srp · 765)",
+    buttonLabelRu: "Опросить блок телематики DCM (765)",
+    txHex: "765",
+    rxHex: "76D",
+    serviceBadge: "UDS 22 10Dx",
+    warningRu:
+      "Зажигание IG ON. Читает регистры состояния телематического модуля TLM-048..051.srp (22 10 32, 10 DD, 10 DE, 10 DF, F18E, F197).",
+    candidatePayloads: ["22F18E", "22F197", "221032", "2210DD", "2210DE", "2210DF"],
   },
 ];
 
@@ -539,6 +585,18 @@ export async function executeSubaruServiceAction(
         steps.push(`${spec.txHex}→${spec.rxHex}: Запрос ${label} → ${cleanRaw || "нет ответа"}`);
         if (actionPayloadResponseOk(raw, payloadHex)) {
           ok = true;
+          // Per SSM4 .srp scripts: after 31 01 <RID> returns 71 01 <RID>, automatically poll 31 03 <RID>
+          if (sid === 0x31 && payloadHex.startsWith("3101") && payloadHex.length >= 8) {
+            const rid = payloadHex.slice(4, 8);
+            try {
+              const rawPoll = await elm.sendPayload(`3103${rid}`, 5_000);
+              steps.push(
+                `${spec.txHex}→${spec.rxHex}: Опрос результата 31 03 ${rid.slice(0, 2)} ${rid.slice(2, 4)} → ${rawPoll.replace(/>/g, "").trim() || "нет ответа"}`,
+              );
+            } catch {
+              /* optional on some ECUs */
+            }
+          }
           // Stop on first accepted write/routine command (0x31, 0x2F, 0x14, 0x04); continue reading if 0x22/0x10
           if (sid === 0x31 || sid === 0x2f || sid === 0x14 || sid === 0x04) {
             break;
@@ -553,6 +611,30 @@ export async function executeSubaruServiceAction(
   } finally {
     await closeSubaruModuleSession(elm);
     steps.push(`${spec.txHex}→${spec.rxHex}: Сессия завершена (10 01)`);
+  }
+
+  // Fallback for immo-key-count-check: if 7B4 (H-type SGP) did not respond, probe 751 (D-type) and 752 (BIU)
+  if (!ok && actionId === "immo-key-count-check") {
+    for (const fallback of [
+      { tx: 0x751, rx: 0x759, name: "751→759 (D-type Keyless)", dids: ["221378", "221360", "22F18E"] },
+      { tx: 0x752, rx: 0x75a, name: "752→75A (BIU Key-Start)", dids: ["221158", "22F18E"] },
+    ]) {
+      try {
+        await openSubaruModuleSession(elm, fallback.tx, fallback.rx);
+        for (const payloadHex of fallback.dids) {
+          const raw = await elm.sendPayload(payloadHex, 3_000);
+          const cleanRaw = raw.replace(/>/g, "").trim();
+          steps.push(`${fallback.name}: Запрос ${payloadHex} → ${cleanRaw || "нет ответа"}`);
+          if (actionPayloadResponseOk(raw, payloadHex)) {
+            ok = true;
+          }
+        }
+        await closeSubaruModuleSession(elm);
+        if (ok) break;
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   if (!ok) {

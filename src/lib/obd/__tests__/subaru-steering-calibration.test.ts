@@ -35,6 +35,9 @@ describe("subaru-steering-calibration", () => {
       "rab-sonar-history",
       "srh-headlight-zero",
       "cgw-unlock-mac-check",
+      "fcr-bsd-radar-cal",
+      "avn-headunit-diag",
+      "tlm-dcm-diag",
     ]);
   });
 });

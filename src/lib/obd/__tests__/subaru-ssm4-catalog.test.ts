@@ -192,5 +192,24 @@ describe("subaru-ssm4-catalog", () => {
     expect(caDump.directOptionCode).toBe("C05D");
     expect(caDump.inferredRegion).toContain("CANADA");
     expect(SUBARU_METER_12COLUMN_READ_DIDS[0]).toBe("0250");
+
+    // Reconstructs 2024 MY Outback Wilderness (VIN 4S4BTGUD1R3270223 -> BTAEYR8 + U45L actual, C05L recommended)
+    const bitmask2024 = extractAppliedModelAndOptionCodeFromDump({
+      vin: "4S4BTGUD1R3270223",
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            { did: "0220", label: "DID 0220", hex: "00 00 00 01", decoded: "00 00 00 01" },
+          ],
+        },
+      ],
+    });
+    expect(bitmask2024.foundDirectAscii).toBe(false);
+    expect(bitmask2024.actualAppliedModel).toBe("BTAEYR8");
+    expect(bitmask2024.actualOptionCode).toBe("U45L");
+    expect(bitmask2024.actualRegion).toContain("USA");
+    expect(bitmask2024.recommendedCanadianOptionC0).toBe("C05L");
+    expect(bitmask2024.recommendedCanadianOptionC5).toBe("C55L");
   });
 });

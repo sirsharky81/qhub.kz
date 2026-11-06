@@ -415,17 +415,6 @@ export async function writeSubaruMeter12ColumnCode(
     input.currentDids ?? [],
   );
   const steps: string[] = [plan.reasonRu];
-  if (!plan.ok || plan.candidates.length === 0) {
-    return {
-      success: false,
-      steps,
-      plan,
-      writtenDid: null,
-      writtenHex: null,
-      securityAccessRequired: false,
-    };
-  }
-
   const preferredTx = input.txHex ? Number.parseInt(input.txHex, 16) : NaN;
   const preferredRx = input.rxHex ? Number.parseInt(input.rxHex, 16) : NaN;
   const targets =
@@ -435,6 +424,27 @@ export async function writeSubaruMeter12ColumnCode(
           ...METER_TARGETS.filter((t) => t.tx !== preferredTx),
         ]
       : METER_TARGETS;
+
+  const destPrefix = input.optionCode.trim().toUpperCase().slice(0, 2);
+  // Per MET-002.srp / cgdwPHBWHoZ.mLW: A002 = Destination (02=U4, 03=C0, 05=U5, 06=C5), A011 = Unit region (FF=US °F/MPH, 00=CA °C/km/h)
+  const a002TargetByte =
+    destPrefix === "C0" ? "03" : destPrefix === "C5" ? "06" : destPrefix === "U5" ? "05" : "02";
+  const a011TargetByte = destPrefix === "C0" || destPrefix === "C5" ? "00" : "FF";
+  const hasA002Snapshot = (input.currentDids ?? []).some(
+    (d) => d.did.toUpperCase() === "A002" || d.did.toUpperCase() === "A011",
+  );
+
+  // If 0250/0251 had non-ASCII bitmask AND A002/A011 is present, allow MET-002.srp A002/A011 write path
+  if (!plan.ok && !hasA002Snapshot) {
+    return {
+      success: false,
+      steps,
+      plan,
+      writtenDid: null,
+      writtenHex: null,
+      securityAccessRequired: false,
+    };
+  }
 
   try {
     await elm.sendCommand("ATSTFF");
@@ -487,6 +497,53 @@ export async function writeSubaruMeter12ColumnCode(
             `${txHex}→${rxHex}: NRC 33 SecurityAccess. Ключ приборки в QHub не подставляется — нужна дилерская SSM4.`,
           );
           break;
+        }
+      }
+
+      // If 0250/0251 was not accepted and A002/A011 variant DIDs are present, execute MET-002.srp Procedure B:
+      // 2E 10 C2 FF (gate open) -> 2E A0 02 <dest> -> 2E A0 11 <unit> -> 2E 10 C2 00 (gate close)
+      if (!writtenDid && !securityAccessRequired && hasA002Snapshot) {
+        steps.push(
+          `${txHex}→${rxHex}: запуск штатной цепочки MET-002.srp / cgdwPHBWHoZ.mLW (2E 10C2 FF → 2E A002 ${a002TargetByte} → 2E A011 ${a011TargetByte} → 2E 10C2 00)`,
+        );
+        const pGateOpen = await sendWriteWithRetry(
+          elm,
+          "2E10C2FF",
+          steps,
+          `${txHex}→${rxHex} 2E 10C2 FF (открытие вариантной записи MET-002 B06 C04)`,
+        );
+        if (pGateOpen.kind === "negative" && pGateOpen.nrc === 0x33) {
+          securityAccessRequired = true;
+          steps.push(`${txHex}→${rxHex}: 2E 10C2 FF вернул NRC 33 SecurityAccess (27 03/04).`);
+        } else {
+          const pA002 = await sendWriteWithRetry(
+            elm,
+            `2EA002${a002TargetByte}`,
+            steps,
+            `${txHex}→${rxHex} 2E A002 ${a002TargetByte} (Destination ${destPrefix})`,
+          );
+          const pA011 = await sendWriteWithRetry(
+            elm,
+            `2EA011${a011TargetByte}`,
+            steps,
+            `${txHex}→${rxHex} 2E A011 ${a011TargetByte} (${a011TargetByte === "00" ? "°C / км/ч" : "°F / MPH"})`,
+          );
+          await sendWriteWithRetry(
+            elm,
+            "2E10C200",
+            steps,
+            `${txHex}→${rxHex} 2E 10C2 00 (закрытие вариантной записи MET-002 B26 C01)`,
+          );
+          if (pA002.kind === "positive" || pA011.kind === "positive") {
+            writtenDid = "A002/A011";
+            writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
+            steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
+          } else if (
+            (pA002.kind === "negative" && pA002.nrc === 0x33) ||
+            (pA011.kind === "negative" && pA011.nrc === 0x33)
+          ) {
+            securityAccessRequired = true;
+          }
         }
       }
     } finally {

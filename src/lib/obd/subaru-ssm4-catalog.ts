@@ -408,11 +408,11 @@ export const SSM4_ECUS: readonly Ssm4EcuDef[] = [
   {
     ecuId: 164,
     code: "KEY",
-    nameEn: "Keyless Access / Push Start / Gateway",
-    nameRu: "Бесключевой доступ и запуск (Keyless / Push Start)",
+    nameEn: "Smart Key / Keyless Access (H-type 7B4 / D-type 751 / 750)",
+    nameRu: "Бесключевой доступ и запуск (Smart Key · 7B4 / 751 / 750)",
     group: "Body",
-    txHex: "750",
-    rxHex: "758",
+    txHex: "7B4",
+    rxHex: "7BC",
     canSafeClear: true,
     safetyCritical: false,
     functions: [1, 2, 20, 902, 909, 918],
@@ -4070,23 +4070,23 @@ export const SSM4_UTILITIES: readonly Ssm4UtilitySpec[] = [
   {
     id: "util-keyless-starter-check",
     ecuId: 164,
-    txHex: "750",
-    rxHex: "758",
-    titleRu: "Инспекция блока бесключевого доступа, реле стартера и DC/DC (KEY-001..016 / SMA-001..021)",
-    titleEn: "Smart Key / Push Start Relay & Power Supply Check",
-    ssmFunctionCode: "FunctionId = 902 (Utility · Keyless 750 · 12460 DB)",
+    txHex: "7B4",
+    rxHex: "7BC",
+    titleRu: "Инспекция блока Smart Key / Push Start, числа ключей и истории (IMM-069 / IMM-073 / IMM-015)",
+    titleEn: "Smart Key / Push Start Key Count & History Check",
+    ssmFunctionCode: "FunctionId = 40716 / 40720 (IMM-069 / IMM-073 · 7B4 / 751)",
     purposeRu:
-      "Контроль основного питания блока Smart Key (104E), АЦП диагностики реле стартера (1052), статусов реле стартера 1/2 (1057/1058), блокировки Starter Cut (1059) и конвертера DC/DC (1067).",
+      "Чтение фактического количества прописанных ключей (DID 1378), статуса системы и блокировки (DID 1360), кода последней ошибки регистрации (DID 137A), статуса защёлки/ECM (DID 1220/1233/201B) и версии ключа CGW (DID 0251).",
     conditionsRu: [
-      "Зажигание включено (IG ON), смарт-ключ находится в салоне.",
+      "Зажигание включено (IG ON), смарт-ключ находится в салоне, дверь водителя желательно открыть.",
     ],
     liveDids: [
-      { did: "104E", labelRu: "Основное напряжение питания Keyless (104E)" },
-      { did: "1052", labelRu: "АЦП диагностики реле стартера (1052)" },
-      { did: "1057", labelRu: "Статус реле стартера 1 (1057)" },
-      { did: "1058", labelRu: "Статус реле стартера 2 (1058)" },
-      { did: "1059", labelRu: "Реле блокировки стартера Starter Cut (1059)" },
-      { did: "1067", labelRu: "Статус конвертера DC/DC 1 (1067)" },
+      { did: "1378", labelRu: "Фактическое количество зарегистрированных смарт-ключей (DID 1378)" },
+      { did: "1360", labelRu: "Статус истории и флагов регистрации (DID 1360)" },
+      { did: "137A", labelRu: "Код последней причины отказа регистрации (DID 137A)" },
+      { did: "1220", labelRu: "Статус синхронизации иммобилайзера / защёлки (DID 1220)" },
+      { did: "0251", labelRu: "Версия криптографического ключа SGP (DID 0251)" },
+      { did: "F18E", labelRu: "Каталожный номер блока Smart Key (DID F18E)" },
     ],
     safetyNoteRu:
       "Безопасный режим чтения UDS 0x22 без входа в процедуру стирания/прописки ключей иммобилайзера.",
@@ -5174,16 +5174,19 @@ export const SSM4_SRP_UTILITY_CATALOG: readonly Ssm4SrpUtilityModule[] = [
     prefix: "IMM / KEY / SMA",
     scriptCount: 103,
     ecuCode: "KEY / IMMO",
-    txHex: "750",
-    rxHex: "758",
+    txHex: "7B4 / 751",
+    rxHex: "7BC / 759",
     group: "Body",
     titleRu: "Иммобилайзер, смарт-ключи и Push Start (IMM-000..073, KEY-001..016, SMA-001..021.srp)",
     proceduresRu: [
-      "Проверка количества зарегистрированных ключей и верификация смарт-ключа (imb_in_ReadKeyNumConfirm / keyVerificationAS1)",
-      "Регистрация новых смарт-ключей и удаление утерянных ключей (keyRegistAS1 / keyAddAS1 / keyDeleteAS1)",
-      "Синхронизация и привязка блоков при замене (ECM ↔ Immobilizer ↔ Steering Lock ↔ Meter: sysRegist / meterScuRegistAS1 / ImbTlmCuRegist)",
-      "US/NA F2: Remote Engine Start CM Registration — из расшифрованных IMM-071.srp (H-type 7B4→7BC) и IMM-017.srp (D-type 751→759) пишет 2E 11 B0 01 → 6E 11 B0; для замка с ключом IMM-005/064.srp (BIU 752→75A) запускает 31 01 40 05 → 31 03 40 05. Телематика — отдельный скрипт IMM-072/052 (2E 11 B2 01)",
-      "Криптографическая авторизация SecurityAccess 2018+ AES (SecurityAccess2018CY_AesKey / GetSecurityAccessImb) — ключ в продукт не выносится",
+      "4. Number of Registered Access Key(s) (IMM-069 / IMM-015): чтение DID 1378 на 7B4/751 (или DID 1158 на BIU 752 / DID 1044 на 750)",
+      "1. Keyless Access Immobilizer Registration (IMM-066 / IMM-012): дозапись нового смарт-ключа (2E 11 C1 01 → опрос катушки 22 13 69/136A → 2E 11 C1 00)",
+      "2. Steering Lock CM / ID Code Box Registration (IMM-067 / IMM-013): привязка защёлки руля (2E 11 E1 01 → 22 13 69/1362 → 2E 11 E1 00)",
+      "3. Engine Control Module Registration (IMM-068 / IMM-014): синхронизация ECM ↔ Keyless (22 12 20/1233/201B → 7E0 31 01 50 00)",
+      "5. Immobilizer Access Key ID Deletion (IMM-070 / IMM-016): удалить все утерянные ключи кроме того, что приложен к кнопке START/STOP (2E 11 C1 02 → 30 с опрос 22 13 69 = 00 → 22 13 78 = 01 → 2E 11 C1 00)",
+      "6. Remote Engine Start CM Registration (IMM-071 / IMM-017 / IMM-005 / IMM-064): 2E 11 B0 01 (Push-Start 7B4/751) или 31 01 40 05 (BIU 752)",
+      "7. Telematics CM Registration (IMM-072 / IMM-052): 2E 11 B2 01 (ImbTlmCuRegist)",
+      "8. Read Registration History (IMM-073 / IMM-018): чтение DID 1360 и DID 137A",
     ],
     dllFunctions: [
       "keyVerificationAS1",
@@ -5861,12 +5864,26 @@ export const SSM4_FULL_SYSTEMS: readonly Ssm4SystemEntry[] = [
 ];
 
 export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
-  // 1. Outback BT (2020–2024) — 2.4L Turbo (BTA) & 2.5L NA (BT9)
+  // 1. Outback BT (2020–2025) — 2.4L Turbo (BTA) & 2.5L NA (BT9)
+  {
+    id: "bt-outback-wilderness-24t-2024",
+    modelSeriesRu: "Outback VI (BT · 2024 MY)",
+    years: "2024–2025",
+    trimRu: "Wilderness 2.4T (ваш шильдик 4S4BTGUD1R3270223!)",
+    engineRu: "FA24FXZHMF 2.4L Turbo (CVT TR690R6MCB)",
+    appliedModel: "BTAEYR8",
+    usOptionCodeExamples: ["U45L", "U45D"],
+    canadianOptionCodeC0: "C05L",
+    canadianOptionCodeC5: "C55L",
+    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
+    featuresRu:
+      "2024 MY Revision E: BTAEYR8 + U45L → канадский C05L (°C, км/ч, л/100км, TPMS 315 МГц, Dual X-Mode)",
+  },
   {
     id: "bt-outback-wilderness-24t",
-    modelSeriesRu: "Outback VI (BT)",
-    years: "2022–2024",
-    trimRu: "Wilderness 2.4T (как на фото шильдика друга!)",
+    modelSeriesRu: "Outback VI (BT · 2022–2023 MY)",
+    years: "2022–2023",
+    trimRu: "Wilderness 2.4T (2022 MY Revision C)",
     engineRu: "FA24F 2.4L Turbo (CVT TR690)",
     appliedModel: "BTACYRB",
     usOptionCodeExamples: ["U45D", "U45C"],
@@ -6147,10 +6164,19 @@ export const SUBARU_METER_VARIANT_SAFE_PATH = {
   forbiddenInner: "scr_ext_in_writeCommonArea",
 } as const;
 
-/** Read-only UDS 22 DIDs that SSM4 uses for Combination Meter 12-column variant. */
+/** Read-only UDS 22 DIDs that SSM4 uses for Combination Meter 12-column variant (`cGZGBPHB-WmTWLZ.mHZ` + `0250`/`0251`). */
 export const SUBARU_METER_12COLUMN_READ_DIDS = [
   "0250",
   "0251",
+  "A000",
+  "A001",
+  "A002",
+  "A007",
+  "A011",
+  "A016",
+  "A024",
+  "A027",
+  "A028",
   "0240",
   "0200",
   "0220",
@@ -6276,6 +6302,16 @@ export interface SubaruDumpCodeMatch {
   directAppliedModel: string | null;
   directOptionCode: string | null;
   sourceDid: string | null;
+  /** Actual region currently active inside the meter (`USA` vs `CANADA`). */
+  actualRegion: "CANADA (C0 / C5 — °C, км/ч)" | "USA (U4 / U5 / U6 — °F, мили)" | "UNKNOWN";
+  /** Actual factory/current 7-char Applied Model (from DID ASCII or reconstructed from VIN + A0xx). */
+  actualAppliedModel: string;
+  /** Actual factory/current 4-char Option Code (from DID ASCII or reconstructed from VIN + A002/A011). */
+  actualOptionCode: string;
+  /** Recommended Canadian Option Code C0 (`°C, км/ч`, TPMS 315 MHz) for Procedure B. */
+  recommendedCanadianOptionC0: string;
+  /** Recommended Canadian Option Code C5 (`°C, км/ч`, PZEV) for Procedure B. */
+  recommendedCanadianOptionC5: string;
   inferredRegion: "CANADA (C0 / C5 — °C, км/ч)" | "USA (U4 / U5 / U6 — °F, мили)" | "UNKNOWN";
   inferredAppliedModel: string;
   inferredOptionCode: string;
@@ -6342,23 +6378,26 @@ export function extractAppliedModelAndOptionCodeFromDump(
       dids: { did: string; label: string; hex: string; decoded: string }[];
     }[];
   },
-  fallbackAppliedModel = "BTACYRB",
-  fallbackUsOptionCode = "U45D",
+  fallbackAppliedModel = "BTAEYR8",
+  fallbackUsOptionCode = "U45L",
 ): SubaruDumpCodeMatch {
   let directAppliedModel: string | null = null;
   let directOptionCode: string | null = null;
   let sourceDid: string | null = null;
 
   const preferredDidOrder = ["0250", "0251", "F1A0", "F1A1", "0200", "0240"];
-  const records: { txHex: string; did: string; text: string }[] = [];
+  const records: { txHex: string; did: string; text: string; hex: string }[] = [];
+  const didMap: Record<string, string> = {};
   for (const mod of dump.modules) {
     if (mod.txHex !== "783" && mod.txHex !== "7C0" && mod.txHex !== "752") continue;
     for (const d of mod.dids) {
+      didMap[d.did.toUpperCase()] = d.hex.trim().toUpperCase();
       const fromHex = asciiFromSubaruDidHex(d.hex);
       records.push({
         txHex: mod.txHex,
         did: d.did,
         text: `${d.decoded} ${fromHex}`,
+        hex: d.hex,
       });
     }
   }
@@ -6381,49 +6420,119 @@ export function extractAppliedModelAndOptionCodeFromDump(
     if (directAppliedModel && directOptionCode) break;
   }
 
-  // Also check VIN if available to refine series/year/trim
+  // Decode SSM4 cgdwPHBWHoZ.mLW / cGZGBPHB-WmTWLZ.mHZ DIDs A002 (Destination) & A011 (Unit region)
+  const a002Byte = didMap["A002"]?.split(/\s+/)[0] ?? null;
+  const a011Byte = didMap["A011"]?.split(/\s+/)[0] ?? null;
+  let destFromA002: "U4" | "U5" | "C0" | "C5" | null = null;
+  if (a002Byte === "02") destFromA002 = "U4";
+  else if (a002Byte === "03") destFromA002 = "C0";
+  else if (a002Byte === "05") destFromA002 = "U5";
+  else if (a002Byte === "06") destFromA002 = "C5";
+  else if (a011Byte === "FF") destFromA002 = "U4";
+  else if (a011Byte === "00") destFromA002 = "C0";
+
+  // Reconstruct exact 7-character Applied Model & 4-character Option Code from 17-char VIN
+  // Example from user's B-pillar: VIN 4S4BTGUD1R3270223 -> Applied Model BTAEYR8 + Option Code U45L
   let baseApp = directAppliedModel ?? fallbackAppliedModel.trim().toUpperCase();
+  let defaultUsDest: "U4" | "U5" = "U4";
+  let defaultEquipSuffix = fallbackUsOptionCode.trim().toUpperCase().slice(2, 4) || "5L";
+
   if (!directAppliedModel && dump.vin && dump.vin.length === 17) {
     const vin = dump.vin.toUpperCase();
-    // 4S4BTGUD2N3... -> pos 4-5 = BT, pos 10 = N (2022 -> C, M=2021->B, P=2023->D, R=2024->E)
-    const yearMap: Record<string, string> = { L: "A", M: "B", N: "C", P: "D", R: "E", S: "F" };
-    const rev = yearMap[vin[9] ?? ""] ?? baseApp[3] ?? "C";
-    if (vin.slice(3, 5) === "BT") {
-      const isTurbo = vin[5] === "G" || vin[5] === "A";
-      const isWilderness = vin.slice(5, 7) === "GU";
-      baseApp = `BT${isTurbo ? "A" : "9"}${rev}Y${isWilderness ? "R" : baseApp[5] ?? "R"}B`;
+    // 10th VIN char -> Subaru Revision letter: L=2020(A), M=2021(B), N=2022(C), P=2023(D), R=2024(E), S=2025(F), T=2026(G)
+    const yearMap: Record<string, string> = {
+      L: "A",
+      M: "B",
+      N: "C",
+      P: "D",
+      R: "E",
+      S: "F",
+      T: "G",
+    };
+    const rev = yearMap[vin[9] ?? ""] ?? baseApp[3] ?? "E";
+    if (vin.slice(3, 5) === "BT" || vin.slice(3, 5) === "BW") {
+      const series = vin.slice(3, 5);
+      const engineTrim = vin.slice(5, 7); // GU = Wilderness 2.4T, AN/GM/GL/GN = 2.4T XT, AA/AC/AD/AE = 2.5L
+      const isTurbo = vin[5] === "G" || engineTrim === "AN" || engineTrim === "AM";
+      defaultUsDest = isTurbo ? "U4" : "U5";
+      // 7th char of Applied Model in SSM4 cgdwPHBWHoZ.mLW: '8' for 2023+ (D/E/F) or '8' in BTAAY*8, 'B' on 2022 Wilderness, 'L'/'C' on 2.5L
+      const seventhChar =
+        rev === "E" || rev === "D" || rev === "F" || rev === "G"
+          ? isTurbo
+            ? "8"
+            : "L"
+          : isTurbo
+            ? "B"
+            : "C";
+      let gradeChar = "R";
+      if (engineTrim === "GU") {
+        gradeChar = "R"; // Wilderness (BTAEYR8 / BTACYRB)
+        defaultEquipSuffix = rev === "E" || rev === "D" ? "5L" : "5D";
+      } else if (engineTrim === "GN" || engineTrim === "AN") {
+        gradeChar = "H"; // Onyx XT
+        defaultEquipSuffix = "5B";
+      } else if (engineTrim === "GL") {
+        gradeChar = "J"; // Limited XT
+        defaultEquipSuffix = "7H";
+      } else if (engineTrim === "GM") {
+        gradeChar = "K"; // Touring XT
+        defaultEquipSuffix = "8Y";
+      } else if (engineTrim === "AD") {
+        gradeChar = "D"; // 2.5i Limited
+        defaultEquipSuffix = "7H";
+      } else if (engineTrim === "AE") {
+        gradeChar = "E"; // 2.5i Touring
+        defaultEquipSuffix = "8Y";
+      } else {
+        gradeChar = "C"; // 2.5i Premium
+        defaultEquipSuffix = "3D";
+      }
+      baseApp = `${series}${isTurbo ? "A" : "9"}${rev}Y${gradeChar}${seventhChar}`;
     }
   }
 
-  const cleanFallbackOpt = fallbackUsOptionCode.trim().toUpperCase();
-  const suffix = cleanFallbackOpt.length === 4 ? cleanFallbackOpt.slice(2, 4) : "5D";
-
   if (directAppliedModel || directOptionCode) {
-    const finalOpt = directOptionCode ?? `C0${suffix}`;
+    const actualOpt = directOptionCode ?? `${destFromA002 ?? defaultUsDest}${defaultEquipSuffix}`;
+    const suffix = actualOpt.slice(2, 4) || defaultEquipSuffix;
+    const actualRegion = regionFromOptionCode(actualOpt);
     return {
       foundDirectAscii: true,
       directAppliedModel,
       directOptionCode,
       sourceDid,
-      inferredRegion: regionFromOptionCode(finalOpt),
+      actualRegion,
+      actualAppliedModel: baseApp,
+      actualOptionCode: actualOpt,
+      recommendedCanadianOptionC0: `C0${suffix}`,
+      recommendedCanadianOptionC5: `C5${suffix}`,
+      inferredRegion: actualRegion,
       inferredAppliedModel: baseApp,
-      inferredOptionCode: finalOpt,
-      explanationRu: `Прямое совпадение ASCII-кода найдено в ответе блока (${sourceDid}): ${baseApp} + ${finalOpt}`,
+      inferredOptionCode: actualOpt,
+      explanationRu: `Прямое совпадение ASCII-кода в ответе приборки (${sourceDid}): фактический код ${baseApp} + ${actualOpt}. Рекомендуемый канадский код для °C и км/ч: ${baseApp} + C0${suffix}.`,
     };
   }
 
-  // Fallback reconstruction from known B-pillar input + Canadian C0 conversion
-  const inferredOpt = `C0${suffix}`;
+  // Reconstructed actual factory code vs recommended Canadian code
+  const activeDest = destFromA002 ?? defaultUsDest;
+  const actualOpt = `${activeDest}${defaultEquipSuffix}`;
+  const actualRegion = regionFromOptionCode(actualOpt);
+  const canC0 = `C0${defaultEquipSuffix}`;
+  const canC5 = `C5${defaultEquipSuffix}`;
+
   return {
     foundDirectAscii: false,
     directAppliedModel: null,
     directOptionCode: null,
-    sourceDid: null,
-    inferredRegion: "CANADA (C0 / C5 — °C, км/ч)",
+    sourceDid: a002Byte ? "783 DID A002" : null,
+    actualRegion,
+    actualAppliedModel: baseApp,
+    actualOptionCode: actualOpt,
+    recommendedCanadianOptionC0: canC0,
+    recommendedCanadianOptionC5: canC5,
+    inferredRegion: actualRegion,
     inferredAppliedModel: baseApp,
-    inferredOptionCode: inferredOpt,
-    explanationRu:
-      "Приборка хранит результат ввода 12 columns в виде битовой маски комплектации (без открытой ASCII-строки). По VIN и пакету опций восстановлен эквивалентный канадский код для ввода в SSM4.",
+    inferredOptionCode: actualOpt,
+    explanationRu: `Приборка хранит вариант в битовой маске (без открытой ASCII-строки). По VIN (${dump.vin ?? "стойка B"}) и регистрам приборки фактический код комплектации: ${baseApp} + ${actualOpt} (${actualRegion}). Для перевода в °C и км/ч рекомендуется канадский код: ${baseApp} + ${canC0}.`,
   };
 }
 

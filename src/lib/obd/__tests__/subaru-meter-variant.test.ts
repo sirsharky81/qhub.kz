@@ -150,4 +150,33 @@ describe("subaru-meter-variant", () => {
     expect(elm.sent.some((s) => s.startsWith("27"))).toBe(false);
     expect(result.steps.join(" ")).toMatch(/SecurityAccess/);
   });
+
+  it("writes MET-002.srp A002/A011 variant registers (2E 10C2 FF -> 2E A002 03 -> 2E A011 00 -> 2E 10C2 00) when meter uses A0xx table", async () => {
+    const elm = scriptedElm({
+      "2E10C2FF": "6E 10 C2",
+      "2EA00203": "6E A0 02",
+      "2EA01100": "6E A0 11",
+      "2E10C200": "6E 10 C2",
+    });
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C05L",
+      currentDids: [
+        { did: "0250", hex: "01 02 03 04" },
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+    });
+    expect(result.success).toBe(true);
+    expect(result.writtenDid).toBe("A002/A011");
+    expect(result.writtenHex).toBe("A002=03 A011=00");
+    expect(elm.sent.filter((s) => s.startsWith("2E"))).toEqual([
+      "2E10C2FF",
+      "2EA00203",
+      "2EA01100",
+      "2E10C200",
+    ]);
+  });
 });
