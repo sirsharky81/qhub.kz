@@ -23,6 +23,11 @@ import {
   type ObdConnectionPhase,
 } from "@/lib/obd/obd-session";
 import type { MitsubishiMeterReport, MitsubishiTcmTelemetry } from "@/lib/obd/mitsubishi-modules";
+import {
+  getMitsubishiProceduresForEcu,
+  type MitsubishiServiceExecutionResult,
+  type MitsubishiServiceProcedure,
+} from "@/lib/obd/mitsubishi-service-procedures";
 
 interface Props {
   session: ObdBleSession;
@@ -102,6 +107,8 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   const tcmLiveRef = useRef(false);
   const [tcmLive, setTcmLive] = useState(false);
   const [profileNote, setProfileNote] = useState<string | null>(null);
+  const [selectedSkey, setSelectedSkey] = useState<string | null>(null);
+  const [serviceResult, setServiceResult] = useState<MitsubishiServiceExecutionResult | null>(null);
 
   useEffect(() => {
     return () => {
@@ -115,6 +122,17 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   const pickedSignals = useMemo(
     () => signals.filter((signal) => picked.includes(signal.id)),
     [signals, picked],
+  );
+  const availableProcedures = useMemo(
+    () =>
+      selected && selectedSkey
+        ? getMitsubishiProceduresForEcu({
+            skey: selectedSkey,
+            txCanId: selected.txCanId,
+            rxCanId: selected.rxCanId,
+          })
+        : [],
+    [selected, selectedSkey],
   );
 
   const visibleSignals = useMemo(() => {
@@ -140,6 +158,8 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     setReports({});
     setTexts({});
     setSelectedKey(null);
+    setSelectedSkey(null);
+    setServiceResult(null);
     setSignals([]);
     setPicked([]);
     return body.vehicle ?? null;
@@ -308,6 +328,8 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     stopLive.current = true;
     setLive(false);
     setSelectedKey(ecu.sysKey);
+    setSelectedSkey(null);
+    setServiceResult(null);
     setSignalQuery("");
     setPicked([]);
     setSamples([]);
@@ -333,11 +355,13 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       const response = await fetch(`/api/etacs-coding/diag/signals?${query.toString()}`);
       const body = (await response.json()) as {
         error?: string;
+        skey?: string;
         signals?: CatalogSignal[];
         profileNoteRu?: string;
       };
       if (!response.ok) throw new Error(body.error || "Список параметров недоступен");
       const list = body.signals ?? [];
+      setSelectedSkey(body.skey ?? null);
       setSignals(list);
       setProfileNote(body.profileNoteRu ?? null);
       const serviceIds = serviceSet ? pickServiceSetSignals(list, serviceSet, MAX_LIVE) : [];
@@ -348,6 +372,37 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Список параметров недоступен");
+    }
+  };
+
+  const runServiceProcedure = async (proc: MitsubishiServiceProcedure) => {
+    if (!selected || !selectedSkey || phase !== "vehicle" || busy) return;
+    if (liveRunning.current) {
+      stopLive.current = true;
+      setLive(false);
+    }
+    const confirmed = window.confirm(
+      `${proc.nameRu}\n\nАвтомобиль: ${vehicle?.nameRu ?? "—"}\nБлок: ${selected.nameRu} (${proc.txCanId}→${proc.rxCanId}, SKEY ${selectedSkey}, fid=${proc.fid})\n\nНазначение:\n${proc.descriptionRu}\n\nОбязательные условия:\n${proc.preconditionsRu}\n\nВыполнить процедуру?`,
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    setServiceResult(null);
+    setStatus(`Выполняю «${proc.nameRu}»…`);
+    try {
+      const res = await session.runMitsubishiServiceProcedure({
+        procedureId: proc.id,
+        skey: selectedSkey,
+        txCanId: selected.txCanId,
+        rxCanId: selected.rxCanId,
+      });
+      setServiceResult(res);
+      setStatus(`Выполнено: ${proc.nameRu}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Сервисная процедура не выполнена");
+      setStatus(null);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -677,6 +732,65 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
             CSV ({samples.length})
           </button>
         </details>
+
+        {availableProcedures.length > 0 ? (
+          <details open className="rounded-lg border border-amber-300/80 bg-amber-50/40 p-2.5">
+            <summary className="cursor-pointer text-xs font-semibold text-gray-900">
+              Калибровки, сбросы адаптаций и тесты MUT-III SE ({availableProcedures.length}) · SKEY {selectedSkey}
+            </summary>
+            <p className="mt-1 text-[11px] leading-snug text-gray-600">
+              Доступны только процедуры, официально привязанные в базе MUT-III SE к блоку «{selected.nameRu}» ({selected.txCanId}→{selected.rxCanId}, SKEY {selectedSkey}) выбранного автомобиля {vehicle?.nameRu}.
+            </p>
+            <div className="mt-2 space-y-2">
+              {availableProcedures.map((proc) => (
+                <div
+                  key={proc.id}
+                  className="rounded-lg border border-gray-200 bg-white p-2.5 shadow-2xs"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-semibold text-gray-900">{proc.nameRu}</div>
+                      <div className="mt-0.5 font-mono text-[10px] text-gray-500">
+                        MUT-III fid={proc.fid} · {proc.txCanId}→{proc.rxCanId} · Команда {proc.startRequest}
+                        {proc.verifyReadRequest ? ` · Контроль ${proc.verifyReadRequest}` : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={phase !== "vehicle" || busy}
+                      onClick={() => void runServiceProcedure(proc)}
+                      className="shrink-0 rounded-lg border border-gray-900 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
+                    >
+                      Выполнить
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-gray-700">{proc.descriptionRu}</p>
+                  <p className="mt-1 text-[10px] font-medium text-amber-900">
+                    Условия: {proc.preconditionsRu}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {serviceResult ? (
+              <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-950">
+                <div className="font-semibold">
+                  Результат: {serviceResult.nameRu} (SKEY {serviceResult.skey})
+                </div>
+                {serviceResult.decodedSummary ? (
+                  <div className="mt-1 font-mono text-[11px] font-bold text-emerald-900">
+                    {serviceResult.decodedSummary}
+                  </div>
+                ) : null}
+                <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-gray-700">
+                  {serviceResult.steps.map((step, idx) => (
+                    <li key={idx}>{step}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </details>
+        ) : null}
+
         <LiveChart signals={pickedSignals} samples={samples} />
       </div>
     ) : null;

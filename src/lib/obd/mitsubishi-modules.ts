@@ -1,6 +1,12 @@
 import type { Elm327Client } from "./elm327";
 import { extractHexTokens, stripElmMultiline } from "./hex";
 import { parseMitsubishiModuleIdentity } from "./mitsubishi-mut-monitor";
+import {
+  assertMitsubishiProcedureForEcu,
+  decodeMitsubishiDieselInjectorIds21BF,
+  decodeMitsubishiServiceReminder21BC,
+  type MitsubishiServiceExecutionResult,
+} from "./mitsubishi-service-procedures";
 import { decodeSubaruTpmsBytes } from "./subaru-decode";
 import { parseUdsResponse } from "./uds";
 
@@ -1649,3 +1655,157 @@ export function diffCanBusSnapshots(
   }
   return out;
 }
+
+function summarizeVerifiedPayload(verifyCmd: string, dataAfterLid: number[]): string | null {
+  if (verifyCmd === "210E" && dataAfterLid.length >= 30) {
+    const deg =
+      ((dataAfterLid[26]! << 24) >>> 0) +
+      (dataAfterLid[27]! << 16) +
+      (dataAfterLid[28]! << 8) +
+      dataAfterLid[29]!;
+    return `Уровень деградации масла CVT (21 0E): ${deg}`;
+  }
+  if (verifyCmd === "210D" && dataAfterLid.length >= 4) {
+    const deg =
+      ((dataAfterLid[0]! << 24) >>> 0) +
+      (dataAfterLid[1]! << 16) +
+      (dataAfterLid[2]! << 8) +
+      dataAfterLid[3]!;
+    return `Уровень деградации масла CVT (21 0D): ${deg}`;
+  }
+  if (verifyCmd === "21BC") {
+    const rem = decodeMitsubishiServiceReminder21BC(dataAfterLid);
+    if (rem) return `Остаток до ТО (21 BC): ${rem.distanceRemaining} км / ${rem.monthsRemaining} мес.`;
+  }
+  if (verifyCmd === "2102" && dataAfterLid.length >= 2) {
+    const wordBe = (dataAfterLid[0]! << 8) | dataAfterLid[1]!;
+    const signedBe = wordBe >= 0x8000 ? wordBe - 0x10000 : wordBe;
+    return `Угол руля (21 02): ${(signedBe * 0.1).toFixed(1)}°`;
+  }
+  return null;
+}
+
+/**
+ * Executes a vehicle-bound Mitsubishi MUT-III SE service procedure (`fid` in `DiagCommon.exdf` / `Ecu/*.exdf`)
+ * after strictly verifying that `skey` and `txCanId -> rxCanId` belong to the diagnosed vehicle's ECU.
+ */
+export async function executeMitsubishiServiceProcedure(
+  elm: Elm327Client,
+  options: {
+    procedureId: string;
+    skey: string;
+    txCanId: string;
+    rxCanId: string;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): Promise<MitsubishiServiceExecutionResult> {
+  const proc = assertMitsubishiProcedureForEcu(options);
+  const tx = Number.parseInt(proc.txCanId, 16);
+  const rx = Number.parseInt(proc.rxCanId, 16);
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const steps: string[] = [];
+  let beforeHex: string | null = null;
+  let afterHex: string | null = null;
+  let decodedSummary: string | null = null;
+
+  await openMitsubishiKwpSession(elm, tx, rx, proc.sessionHex);
+  steps.push(`${proc.txCanId}→${proc.rxCanId}: Открыта диагностическая сессия (${proc.sessionHex}) [SKEY ${options.skey}]`);
+
+  try {
+    if (proc.verifyReadRequest && proc.verifyReadRequest.startsWith("21")) {
+      const lid = Number.parseInt(proc.verifyReadRequest.slice(2), 16);
+      try {
+        const rawBefore = await elm.sendPayload(proc.verifyReadRequest, 2_000);
+        const dataBefore = extractKwp21Data(rawBefore, lid);
+        if (dataBefore && dataBefore.length > 0) {
+          beforeHex = dataBefore.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          const beforeSummary = summarizeVerifiedPayload(proc.verifyReadRequest, dataBefore);
+          steps.push(
+            `До выполнения (${proc.verifyReadRequest}): ${beforeSummary ?? beforeHex}`,
+          );
+        }
+      } catch {
+        /* optional pre-read */
+      }
+    }
+
+    const reqSid = Number.parseInt(proc.startRequest.slice(0, 2), 16);
+    const rawStart = await elm.sendPayload(proc.startRequest, 3_000);
+    const parsedStart = parseUdsResponse(rawStart, reqSid);
+    const cleanRaw = rawStart.replace(/>/g, "").replace(/\s+/g, " ").trim();
+    steps.push(`Запрос ${proc.startRequest} → ${cleanRaw}`);
+
+    if (parsedStart.kind !== "positive") {
+      const reason =
+        parsedStart.kind === "negative"
+          ? `${parsedStart.nrcText ?? "отказ ЭБУ"} (NRC 0x${(parsedStart.nrc ?? 0).toString(16).toUpperCase()})`
+          : "нет положительного ответа от ЭБУ";
+      throw new Error(`Блок ${proc.txCanId}→${proc.rxCanId} отклонил команду ${proc.startRequest}: ${reason}`);
+    }
+
+    if (proc.kind === "injector_read" && proc.startRequest === "21BF") {
+      const dataBf = extractKwp21Data(rawStart, 0xbf) ?? parsedStart.payload.slice(1);
+      const codes = decodeMitsubishiDieselInjectorIds21BF(dataBf);
+      decodedSummary =
+        codes.length > 0
+          ? codes.map((code, idx) => `Цил. ${idx + 1}: ${code}`).join(" · ")
+          : "Коды форсунок прочитаны";
+      steps.push(`Коды форсунок (21 BF): ${decodedSummary}`);
+    }
+
+    if (proc.pollRequest) {
+      await sleep(400);
+      try {
+        const rawPoll = await elm.sendPayload(proc.pollRequest, 2_000);
+        steps.push(`Статус (${proc.pollRequest}) → ${rawPoll.replace(/>/g, "").replace(/\s+/g, " ").trim()}`);
+      } catch {
+        /* poll optional */
+      }
+    }
+
+    if (proc.stopRequest) {
+      await sleep(proc.holdMs ?? 3_000);
+      try {
+        const rawStop = await elm.sendPayload(proc.stopRequest, 2_000);
+        steps.push(`Завершение (${proc.stopRequest}) → ${rawStop.replace(/>/g, "").replace(/\s+/g, " ").trim()}`);
+      } catch {
+        /* stop optional */
+      }
+    }
+
+    if (proc.verifyReadRequest && proc.verifyReadRequest.startsWith("21")) {
+      const lid = Number.parseInt(proc.verifyReadRequest.slice(2), 16);
+      try {
+        const rawAfter = await elm.sendPayload(proc.verifyReadRequest, 2_000);
+        const dataAfter = extractKwp21Data(rawAfter, lid);
+        if (dataAfter && dataAfter.length > 0) {
+          afterHex = dataAfter.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          const afterSummary = summarizeVerifiedPayload(proc.verifyReadRequest, dataAfter);
+          if (afterSummary) decodedSummary = afterSummary;
+          steps.push(
+            `После выполнения (${proc.verifyReadRequest}): ${afterSummary ?? afterHex}`,
+          );
+        }
+      } catch {
+        /* optional post-read */
+      }
+    }
+
+    return {
+      procedureId: proc.id,
+      nameRu: proc.nameRu,
+      skey: options.skey,
+      txHex: proc.txCanId,
+      rxHex: proc.rxCanId,
+      success: true,
+      steps,
+      beforeHex,
+      afterHex,
+      decodedSummary,
+    };
+  } finally {
+    await closeMitsubishiKwpSession(elm);
+    steps.push(`${proc.txCanId}→${proc.rxCanId}: Сессия закрыта (10 81)`);
+  }
+}
+

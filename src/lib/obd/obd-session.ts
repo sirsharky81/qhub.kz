@@ -13,6 +13,7 @@ import {
 } from "./mitsubishi-etacs";
 import {
   calibrateMitsubishiSasZero,
+  executeMitsubishiServiceProcedure,
   readMitsubishiMeter,
   readMitsubishiSteeringAngle,
   readMitsubishiTransmission,
@@ -23,6 +24,7 @@ import {
   type SasCalibrationResult,
   type TpmsModuleReport,
 } from "./mitsubishi-modules";
+import type { MitsubishiServiceExecutionResult } from "./mitsubishi-service-procedures";
 import { parseMitsubishiModuleIdentity } from "./mitsubishi-mut-monitor";
 import {
   readMitsubishiTpmsDidIds,
@@ -1221,6 +1223,23 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед пропиской RES CM");
     await this.ensureUdsProfile(protocol);
     return executeSubaruResCmRegister(this.elm!, options);
+  }
+
+  /**
+   * Executes a vehicle-bound Mitsubishi MUT-III SE service procedure (reset, calibration, learning, actuator test)
+   * after verifying that `skey` and `txCanId -> rxCanId` belong to the diagnosed vehicle's ECU.
+   */
+  async runMitsubishiServiceProcedure(options: {
+    procedureId: string;
+    skey: string;
+    txCanId: string;
+    rxCanId: string;
+  }): Promise<MitsubishiServiceExecutionResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед выполнением сервисной процедуры");
+    await this.ensureUdsProfile("6");
+    return executeMitsubishiServiceProcedure(this.elm!, options);
   }
 
   /**
