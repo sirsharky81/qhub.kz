@@ -816,7 +816,10 @@ export class ObdBleSession {
       0xf1a0, 0xf1a1, 0xf1a2, 0xf1a3, 0xf1a4, 0xf1b0, 0xf1c0, 0xf1d0,
     ];
 
-    const meterVariantDids = [0x0250, 0x0251, 0x0240, 0x0200, 0x0220, 0x0100];
+    const meterVariantDids = [
+      0x0250, 0x0251, 0xa000, 0xa001, 0xa002, 0xa007, 0xa011, 0xa016, 0xa020, 0xa024, 0xa027, 0xa028,
+      0x0240, 0x0200, 0x0220, 0x0100,
+    ];
 
     const rootBitmaps = [0x1000, 0x1100, 0x1200, 0x2000, 0x2100, 0x3000, 0x3100, 0x3200, 0xd000];
 
@@ -1075,6 +1078,36 @@ export class ObdBleSession {
             /* ignore */
           }
           break;
+        }
+      }
+
+      if (!vin) {
+        for (const vinTarget of [
+          { tx: 0x7e0, rx: 0x7e8 },
+          { tx: 0x752, rx: 0x75a },
+        ]) {
+          try {
+            const rawVin = await this.udsExchange(vinTarget.tx, vinTarget.rx, "22F190", 900);
+            const parsedVin = parseUdsResponse(rawVin, 0x22);
+            if (parsedVin.kind === "positive") {
+              const body =
+                parsedVin.payload.length >= 2 &&
+                parsedVin.payload[0] === 0xf1 &&
+                parsedVin.payload[1] === 0x90
+                  ? parsedVin.payload.slice(2)
+                  : parsedVin.payload;
+              const ascii = body
+                .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
+                .join("")
+                .trim();
+              if (ascii.length >= 11) {
+                vin = ascii;
+                break;
+              }
+            }
+          } catch {
+            /* ignore */
+          }
         }
       }
     } finally {

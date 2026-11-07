@@ -6323,6 +6323,7 @@ const SUBARU_APPLIED_MODEL_RE =
 const SUBARU_OPTION_CODE_RE = /(U4|U5|U6|C0|C5|C4|C6|EC|EA|K0)[A-Z0-9]{2}/;
 const SUBARU_12COLUMN_PACKED_RE =
   /((?:BT[9A]|BW[9A]|SK[79]|GT[7A]|GU[7A]|GK[7A]|WMA)[A-Z][YLK5][A-Z0-9]{2})((?:U4|U5|U6|C0|C5|C4|C6|EC|EA|K0)[A-Z0-9]{2})/;
+const SUBARU_ASCII_12COLUMN_DIDS = new Set(["0250", "0251", "F1A0", "F1A1"]);
 
 export function asciiFromSubaruDidHex(hex: string): string {
   return hex
@@ -6341,14 +6342,21 @@ export function parseSubaru12ColumnFromAscii(text: string): {
   appliedModel: string | null;
   optionCode: string | null;
 } {
-  const compact = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const packed = compact.match(SUBARU_12COLUMN_PACKED_RE);
+  const upper = text.toUpperCase();
+  const spaceless = upper.replace(/\s+/g, "");
+  const packed = spaceless.match(SUBARU_12COLUMN_PACKED_RE);
   if (packed) {
     return { appliedModel: packed[1] ?? null, optionCode: packed[2] ?? null };
   }
+  const appliedBoundRe = new RegExp(
+    `(?<![A-Z0-9])${SUBARU_APPLIED_MODEL_RE.source}(?![A-Z0-9])`,
+  );
+  const optionBoundRe = new RegExp(
+    `(?<![A-Z0-9])${SUBARU_OPTION_CODE_RE.source}(?![A-Z0-9])`,
+  );
   return {
-    appliedModel: compact.match(SUBARU_APPLIED_MODEL_RE)?.[0] ?? null,
-    optionCode: compact.match(SUBARU_OPTION_CODE_RE)?.[0] ?? null,
+    appliedModel: upper.match(appliedBoundRe)?.[0] ?? null,
+    optionCode: upper.match(optionBoundRe)?.[0] ?? null,
   };
 }
 
@@ -6385,18 +6393,22 @@ export function extractAppliedModelAndOptionCodeFromDump(
   let directOptionCode: string | null = null;
   let sourceDid: string | null = null;
 
-  const preferredDidOrder = ["0250", "0251", "F1A0", "F1A1", "0200", "0240"];
+  const preferredDidOrder = ["0250", "0251", "F1A0", "F1A1"];
   const records: { txHex: string; did: string; text: string; hex: string }[] = [];
   const didMap: Record<string, string> = {};
   for (const mod of dump.modules) {
     if (mod.txHex !== "783" && mod.txHex !== "7C0" && mod.txHex !== "752") continue;
     for (const d of mod.dids) {
-      didMap[d.did.toUpperCase()] = d.hex.trim().toUpperCase();
+      const upperDid = d.did.toUpperCase();
+      didMap[upperDid] = d.hex.trim().toUpperCase();
+      if (!SUBARU_ASCII_12COLUMN_DIDS.has(upperDid)) continue;
+      // Never parse d.decoded here: numeric summary strings like "-38°C/-48°C"
+      // strip down to "38C48C" and falsely match Option Code "C48C".
       const fromHex = asciiFromSubaruDidHex(d.hex);
       records.push({
         txHex: mod.txHex,
-        did: d.did,
-        text: `${d.decoded} ${fromHex}`,
+        did: upperDid,
+        text: fromHex,
         hex: d.hex,
       });
     }
@@ -6433,9 +6445,16 @@ export function extractAppliedModelAndOptionCodeFromDump(
 
   // Reconstruct exact 7-character Applied Model & 4-character Option Code from 17-char VIN
   // Example from user's B-pillar: VIN 4S4BTGUD1R3270223 -> Applied Model BTAEYR8 + Option Code U45L
-  let baseApp = directAppliedModel ?? fallbackAppliedModel.trim().toUpperCase();
+  const cleanFallbackApp = fallbackAppliedModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const cleanFallbackOpt = fallbackUsOptionCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  let baseApp =
+    directAppliedModel ??
+    (SUBARU_APPLIED_MODEL_RE.test(cleanFallbackApp) ? cleanFallbackApp : "BTAEYR8");
   let defaultUsDest: "U4" | "U5" = "U4";
-  let defaultEquipSuffix = fallbackUsOptionCode.trim().toUpperCase().slice(2, 4) || "5L";
+  let defaultEquipSuffix =
+    cleanFallbackOpt.length === 4 && /^(U4|U5|U6|C0|C5)[A-Z0-9]{2}$/.test(cleanFallbackOpt)
+      ? cleanFallbackOpt.slice(2, 4)
+      : "5L";
 
   if (!directAppliedModel && dump.vin && dump.vin.length === 17) {
     const vin = dump.vin.toUpperCase();

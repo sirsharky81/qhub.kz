@@ -211,5 +211,46 @@ describe("subaru-ssm4-catalog", () => {
     expect(bitmask2024.actualRegion).toContain("USA");
     expect(bitmask2024.recommendedCanadianOptionC0).toBe("C05L");
     expect(bitmask2024.recommendedCanadianOptionC5).toBe("C55L");
+
+    // Regression: DID A002 = 02 with numeric temperature hint "-38°C/-48°C" must NEVER
+    // glue "38C" + "48C" into bogus Mexican Option Code "C48C" / "C08C"
+    expect(parseSubaru12ColumnFromAscii("02  [число=2 · темп=-38°C/-48°C · 1%]")).toEqual({
+      appliedModel: null,
+      optionCode: null,
+    });
+    const liveA002Dump = extractAppliedModelAndOptionCodeFromDump({
+      vin: "4S4BTGUD1R3270223",
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            {
+              did: "A000",
+              label: "DID A000",
+              hex: "4F 9B 94 81",
+              decoded: "Карта поддерживаемых DID (A000): 4F 9B 94 81 → открыты [A002, A005, A006, A007]",
+            },
+            {
+              did: "A002",
+              label: "DID A002",
+              hex: "02",
+              decoded: "02  [число=2 · темп=-38°C/-48°C · 1%]",
+            },
+            {
+              did: "A011",
+              label: "DID A011",
+              hex: "FF",
+              decoded: "FF  [число=255 · темп=215°C/205°C · 100%]",
+            },
+          ],
+        },
+      ],
+    });
+    expect(liveA002Dump.foundDirectAscii).toBe(false);
+    expect(liveA002Dump.actualAppliedModel).toBe("BTAEYR8");
+    expect(liveA002Dump.actualOptionCode).toBe("U45L");
+    expect(liveA002Dump.actualRegion).toBe("USA (U4 / U5 / U6 — °F, мили)");
+    expect(liveA002Dump.recommendedCanadianOptionC0).toBe("C05L");
+    expect(liveA002Dump.recommendedCanadianOptionC5).toBe("C55L");
   });
 });
