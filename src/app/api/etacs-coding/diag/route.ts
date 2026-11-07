@@ -1,5 +1,9 @@
 import { etacsError, etacsGuard, etacsJson } from "@/lib/etacs-coding/api-route";
-import { listCatalogVehicles, resolveCatalogVehicle } from "@/lib/etacs-coding/diag-catalog";
+import {
+  listCatalogVehicleMatches,
+  listCatalogVehicles,
+  resolveCatalogVehicle,
+} from "@/lib/etacs-coding/diag-catalog";
 
 export async function GET(request: Request) {
   const blocked = await etacsGuard(request);
@@ -12,9 +16,10 @@ export async function GET(request: Request) {
 
   try {
     const vehicles = listCatalogVehicles();
+    const vinMatches = vin || chassis ? listCatalogVehicleMatches({ vin, chassis }) : [];
     const vehicle =
       vin || chassis || vkey ? resolveCatalogVehicle({ vin, chassis, vkey }) : null;
-    return etacsJson(request, { vehicles, vehicle });
+    return etacsJson(request, { vehicles, vehicle, vinMatches });
   } catch (error) {
     return etacsError(request, error, 503);
   }

@@ -19,6 +19,8 @@ export interface CatalogEcu {
   dtcMasterId: string;
   coding: CodingLink;
   canSafeClear: boolean;
+  /** Valid MUT-III SKEYs listed for this ECU on this vehicle in DiagSystem.exdf. */
+  skeys?: string[];
 }
 
 export interface CatalogVehicle extends CatalogVehicleSummary {
@@ -212,6 +214,69 @@ function token(value: string | undefined): string {
   return (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function commonPrefixLength(left: string, right: string): number {
+  const n = Math.min(left.length, right.length);
+  let i = 0;
+  while (i < n && left[i] === right[i]) i += 1;
+  return i;
+}
+
+function toSummary(vehicle: RawVehicle): CatalogVehicleSummary {
+  return {
+    vkey: vehicle.vkey || "",
+    nameEn: vehicle.nameEn || "",
+    nameRu: vehicle.nameRu || vehicle.nameEn || "",
+    modelCodes: vehicle.modelCodes ?? [],
+  };
+}
+
+function scoreVehicleMatch(vehicle: RawVehicle, vin: string, chassis: string): number {
+  let score = 0;
+  const sample = token(vehicle.sampleVin);
+  if (vin && sample && sample === vin) score = Math.max(score, 1000);
+  if (chassis) {
+    for (const code of vehicle.modelCodes ?? []) {
+      const model = token(code);
+      if (!model) continue;
+      if (chassis === model || chassis.includes(model) || model.includes(chassis)) {
+        score = Math.max(score, 900);
+      }
+    }
+  }
+  if (vin) {
+    for (const code of vehicle.modelCodes ?? []) {
+      const model = token(code);
+      if (model.length >= 4 && vin.includes(model)) score = Math.max(score, 500 + model.length);
+    }
+    if (sample.length >= 8) {
+      const prefix = commonPrefixLength(sample, vin);
+      if (prefix >= 8) score = Math.max(score, 100 + prefix * 10);
+    }
+  }
+  return score;
+}
+
+export interface CatalogVehicleMatch extends CatalogVehicleSummary {
+  score: number;
+}
+
+export function listCatalogVehicleMatches(
+  query: { vin?: string; chassis?: string },
+  db = loadDiagDb(),
+): CatalogVehicleMatch[] {
+  const vin = token(query.vin);
+  const chassis = token(query.chassis);
+  if (!vin && !chassis) return [];
+  const matches: CatalogVehicleMatch[] = [];
+  for (const vehicle of vehiclesOf(db)) {
+    const score = scoreVehicleMatch(vehicle, vin, chassis);
+    if (score <= 0 || !vehicle.vkey) continue;
+    matches.push({ ...toSummary(vehicle), score });
+  }
+  matches.sort((left, right) => right.score - left.score || left.vkey.localeCompare(right.vkey));
+  return matches;
+}
+
 export function matchCatalogVehicle(
   query: { vin?: string; chassis?: string; vkey?: string },
   db = loadDiagDb(),
@@ -221,19 +286,11 @@ export function matchCatalogVehicle(
   if (vkey) {
     return vehicles.find((vehicle) => vehicle.vkey === vkey) ?? null;
   }
-  const vin = token(query.vin);
-  const chassis = token(query.chassis);
-  const haystack = chassis || vin;
-  if (!haystack) return null;
-  for (const vehicle of vehicles) {
-    if (vehicle.sampleVin && token(vehicle.sampleVin) === vin && vin) return vehicle;
-    for (const code of vehicle.modelCodes ?? []) {
-      const model = token(code);
-      if (!model) continue;
-      if (haystack === model || haystack.includes(model)) return vehicle;
-    }
-  }
-  return null;
+  const matches = listCatalogVehicleMatches(query, db);
+  const best = matches[0];
+  if (!best) return null;
+  if (matches[1] && matches[1].score === best.score) return null;
+  return vehicles.find((vehicle) => vehicle.vkey === best.vkey) ?? null;
 }
 
 function parseCanId(value: string | null | undefined): string | null {
@@ -256,6 +313,23 @@ function canSafeClear(nameEn: string, tx: string): boolean {
   return true;
 }
 
+function allSkeysOf(ecu: RawEcu): string[] {
+  const specific: string[] = [];
+  const fallback: string[] = [];
+  for (const variant of ecu.variants ?? []) {
+    for (const version of variant.diagVersions ?? []) {
+      const sk = version.skey?.trim();
+      if (!sk) continue;
+      if (version.diagVersionHex === "0xFFFF") {
+        if (!fallback.includes(sk)) fallback.push(sk);
+      } else if (!specific.includes(sk)) {
+        specific.push(sk);
+      }
+    }
+  }
+  return [...specific, ...fallback];
+}
+
 export function projectEcus(vehicle: RawVehicle): CatalogEcu[] {
   const ecus: CatalogEcu[] = [];
   for (const ecu of vehicle.ecus ?? []) {
@@ -265,6 +339,7 @@ export function projectEcus(vehicle: RawVehicle): CatalogEcu[] {
     const files = (ecu.variants ?? []).map((variant) => variant.exdfFile).filter(Boolean);
     if (files.length > 0 && files.every((file) => file === "OPLESS.exdf")) continue;
     const nameEn = ecu.nameEn || "";
+    const skeys = allSkeysOf(ecu);
     ecus.push({
       sysKey: ecu.sysKey,
       nameEn,
@@ -274,6 +349,7 @@ export function projectEcus(vehicle: RawVehicle): CatalogEcu[] {
       dtcMasterId: (ecu.dtcMasterId || "").padStart(2, "0"),
       coding: codingLink(nameEn),
       canSafeClear: canSafeClear(nameEn, tx),
+      ...(skeys.length > 0 ? { skeys } : {}),
     });
   }
   return ecus;

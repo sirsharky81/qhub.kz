@@ -697,6 +697,31 @@ export function getMitsubishiProceduresForEcu(options: {
 }
 
 /**
+ * Union of MUT-III SE procedures for every catalog SKEY of this vehicle's ECU.
+ * Execution still re-resolves the live SKEY and goes through `assertMitsubishiProcedureForEcu`.
+ */
+export function getMitsubishiProceduresForCatalogEcu(ecu: {
+  skeys?: readonly string[] | null;
+  txCanId: string;
+  rxCanId: string;
+}): MitsubishiServiceProcedure[] {
+  const seen = new Set<string>();
+  const out: MitsubishiServiceProcedure[] = [];
+  for (const skey of ecu.skeys ?? []) {
+    for (const proc of getMitsubishiProceduresForEcu({
+      skey,
+      txCanId: ecu.txCanId,
+      rxCanId: ecu.rxCanId,
+    })) {
+      if (seen.has(proc.id)) continue;
+      seen.add(proc.id);
+      out.push(proc);
+    }
+  }
+  return out;
+}
+
+/**
  * Strictly validates that a procedure ID is registered for the given ECU SKEY and CAN address before sending any frame.
  */
 export function assertMitsubishiProcedureForEcu(options: {

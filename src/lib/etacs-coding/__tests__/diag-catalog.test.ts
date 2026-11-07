@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   describeCatalogDtcs,
+  listCatalogVehicleMatches,
   matchCatalogVehicle,
   projectEcus,
   resolveCatalogVehicle,
@@ -237,6 +238,12 @@ describe("catalog resolve", () => {
     expect(matchCatalogVehicle({ vin: "MMEMCY1XXNH003447" })?.vkey).toBe("1108740010");
     expect(resolveCatalogVehicle({ vkey: "1107790064" })?.nameRu).toBe("Outlander III");
     expect(resolveCatalogVehicle({ chassis: "GF7W" })?.vkey).toBe("1107790064");
+  });
+
+  it("auto-selects a sibling VIN by sample prefix when the chassis code is not in the VIN", () => {
+    useDiagDb(db);
+    expect(matchCatalogVehicle({ vin: "MMEMCY1XXNH009999" })?.vkey).toBe("1108740010");
+    expect(listCatalogVehicleMatches({ vin: "MMEMCY1XXNH009999" })[0]?.vkey).toBe("1108740010");
   });
 });
 

@@ -7,7 +7,7 @@ import { MitsubishiTpmsPanel } from "./MitsubishiTpmsPanel";
 import { SubaruSsmPanel } from "./SubaruSsmPanel";
 
 export type BrandDiagBrand = "subaru" | "mitsubishi";
-export type MitsubishiDiagView = "faults" | "ecu" | "steering" | "tpms";
+export type MitsubishiDiagView = "faults" | "ecu" | "service" | "steering" | "tpms";
 
 interface Props {
   brand: BrandDiagBrand;
@@ -36,7 +36,7 @@ function SubTab({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded-lg px-2 py-2 text-xs font-semibold transition ${
+      className={`min-w-[4.6rem] flex-1 rounded-lg px-1.5 py-2 text-[11px] font-semibold leading-tight transition ${
         active ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-800"
       }`}
     >
@@ -80,12 +80,15 @@ export function BrandDiagPanel({
         />
       ) : (
         <>
-          <div className="flex min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-1">
+          <div className="flex min-w-0 flex-wrap rounded-xl border border-gray-200 bg-gray-50 p-1">
             <SubTab active={mitsuView === "faults"} onClick={() => onMitsuViewChange("faults")}>
               Ошибки
             </SubTab>
             <SubTab active={mitsuView === "ecu"} onClick={() => onMitsuViewChange("ecu")}>
               Блоки и live
+            </SubTab>
+            <SubTab active={mitsuView === "service"} onClick={() => onMitsuViewChange("service")}>
+              Сервис и тесты
             </SubTab>
             <SubTab active={mitsuView === "steering"} onClick={() => onMitsuViewChange("steering")}>
               Угол руля
@@ -108,8 +111,9 @@ export function BrandDiagPanel({
             <MutDiagPanel
               session={session}
               phase={phase}
-              section={mitsuView === "faults" ? "faults" : "live"}
+              section={mitsuView === "faults" ? "faults" : mitsuView === "service" ? "service" : "live"}
               onShowLive={() => onMitsuViewChange("ecu")}
+              vinHint={vinHint}
             />
           )}
         </>

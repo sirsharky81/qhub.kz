@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LiveMetricCards } from "./LiveMetricCards";
 import type { CatalogEcu, CatalogSignal, CatalogVehicle, CatalogVehicleSummary } from "@/lib/etacs-coding/diag-catalog";
-import { asciiFromKwpPayload, decodeCatalogSignal } from "@/lib/obd/mut-live";
+import { asciiFromKwpPayload, decodeCatalogSignal, extractMitsubishiVin } from "@/lib/obd/mut-live";
 import {
   buildMitsubishiVisitReport,
   ecuMatchesServiceSet,
@@ -24,17 +24,20 @@ import {
 } from "@/lib/obd/obd-session";
 import type { MitsubishiMeterReport, MitsubishiTcmTelemetry } from "@/lib/obd/mitsubishi-modules";
 import {
+  getMitsubishiProceduresForCatalogEcu,
   getMitsubishiProceduresForEcu,
   type MitsubishiServiceExecutionResult,
+  type MitsubishiServicePackageId,
   type MitsubishiServiceProcedure,
 } from "@/lib/obd/mitsubishi-service-procedures";
 
 interface Props {
   session: ObdBleSession;
   phase: ObdConnectionPhase;
-  /** «faults» — список блоков и чтение ошибок. «live» — топливо, масло и параметры блока. */
-  section?: "live" | "faults";
+  /** «faults» — список блоков. «live» — топливо и параметры. «service» — калибровки, сбросы и тесты MUT-III. */
+  section?: "live" | "faults" | "service";
   onShowLive?: () => void;
+  vinHint?: string | null;
 }
 
 interface Sample {
@@ -50,6 +53,20 @@ interface DtcText {
 const MAX_LIVE = 16;
 const MAX_POINTS = 48;
 
+const PACKAGE_ORDER: MitsubishiServicePackageId[] = [
+  "engine",
+  "transmission",
+  "brakes_chassis",
+  "meter_body",
+];
+
+const PACKAGE_LABEL: Record<MitsubishiServicePackageId, string> = {
+  engine: "Двигатель",
+  transmission: "Трансмиссия",
+  brakes_chassis: "Тормоза и шасси",
+  meter_body: "Приборка и кузов",
+};
+
 function csvCell(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
@@ -58,31 +75,40 @@ function addressKey(tx: string, rx: string): string {
   return `${tx.toUpperCase()}-${rx.toUpperCase()}`;
 }
 
-async function readDiagVin(session: ObdBleSession): Promise<string | null> {
+async function readDiagVin(session: ObdBleSession, hint?: string | null): Promise<string | null> {
+  const hinted = extractMitsubishiVin(hint);
   try {
     const identity = await session.readVehicleIdentity();
-    if (identity.vin && identity.vin.length >= 11) return identity.vin;
+    const fromObd = extractMitsubishiVin(identity.vin);
+    if (fromObd) return fromObd;
   } catch {
     /* Mitsubishi often has no Mode 09 VIN */
   }
-  for (const [tx, rx] of [
-    ["7E0", "7E8"],
-    ["620", "504"],
-  ]) {
+  const probes: Array<[string, string, string]> = [
+    ["7E0", "7E8", "1A 90"],
+    ["7E0", "7E8", "21 90"],
+    ["7E0", "7E8", "22 F1 90"],
+    ["620", "504", "1A 90"],
+    ["620", "504", "21 90"],
+    ["6A0", "514", "21 90"],
+    ["7E1", "7E9", "21 90"],
+  ];
+  for (const [tx, rx, request] of probes) {
     try {
-      const { parsed } = await session.sendUds("6", tx, rx, "21 90", false);
+      const { parsed } = await session.sendUds("6", tx, rx, request, false);
       if (parsed.kind !== "positive") continue;
-      const vin = asciiFromKwpPayload(parsed.payload);
+      const vin = extractMitsubishiVin(parsed.payload) ?? extractMitsubishiVin(asciiFromKwpPayload(parsed.payload));
       if (vin) return vin;
     } catch {
-      /* try the next module */
+      /* try the next module / service */
     }
   }
-  return null;
+  return hinted;
 }
 
-export default function MutDiagPanel({ session, phase, section = "live", onShowLive }: Props) {
+export default function MutDiagPanel({ session, phase, section = "live", onShowLive, vinHint }: Props) {
   const [vehicles, setVehicles] = useState<CatalogVehicleSummary[]>([]);
+  const [vinMatches, setVinMatches] = useState<CatalogVehicleSummary[]>([]);
   const [vehicle, setVehicle] = useState<CatalogVehicle | null>(null);
   const [vin, setVin] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -110,6 +136,10 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   const [selectedSkey, setSelectedSkey] = useState<string | null>(null);
   const [serviceResult, setServiceResult] = useState<MitsubishiServiceExecutionResult | null>(null);
 
+  const catalogStarted = useRef(false);
+  const vinAutoTried = useRef(false);
+  const vehiclePickedManually = useRef(false);
+
   useEffect(() => {
     return () => {
       stopScan.current = true;
@@ -134,6 +164,12 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         : [],
     [selected, selectedSkey],
   );
+  const vehicleProcedures = useMemo(() => {
+    if (!vehicle) return [];
+    return vehicle.ecus
+      .map((ecu) => ({ ecu, procedures: getMitsubishiProceduresForCatalogEcu(ecu) }))
+      .filter((group) => group.procedures.length > 0);
+  }, [vehicle]);
 
   const visibleSignals = useMemo(() => {
     const query = signalQuery.trim().toLowerCase();
@@ -151,9 +187,11 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       error?: string;
       vehicles?: CatalogVehicleSummary[];
       vehicle?: CatalogVehicle | null;
+      vinMatches?: CatalogVehicleSummary[];
     };
     if (!response.ok) throw new Error(body.error || "Каталог недоступен");
     setVehicles(body.vehicles ?? []);
+    setVinMatches(body.vinMatches ?? []);
     setVehicle(body.vehicle ?? null);
     setReports({});
     setTexts({});
@@ -162,24 +200,28 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     setServiceResult(null);
     setSignals([]);
     setPicked([]);
-    return body.vehicle ?? null;
+    return { vehicle: body.vehicle ?? null, vinMatches: body.vinMatches ?? [] };
   };
 
   const identify = async () => {
     setBusy(true);
     setError(null);
     try {
-      let found: string | null = null;
-      if (phase === "vehicle") found = await readDiagVin(session);
+      const found =
+        phase === "vehicle" ? await readDiagVin(session, vinHint) : extractMitsubishiVin(vinHint);
       setVin(found);
-      const matched = await loadVehicle(found ? `vin=${encodeURIComponent(found)}` : "");
-      setStatus(
-        matched
-          ? matched.nameRu
-          : found
-            ? "VIN не совпал с каталогом. Выберите машину."
-            : "Выберите машину из каталога.",
-      );
+      const result = await loadVehicle(found ? `vin=${encodeURIComponent(found)}` : "");
+      if (result.vehicle) {
+        setStatus(`Определено по VIN: ${result.vehicle.nameRu}`);
+      } else if (found && result.vinMatches.length > 1) {
+        setStatus(`По VIN ${found} подходит несколько моделей — выберите.`);
+      } else if (found) {
+        setStatus(`VIN ${found} прочитан, модель в каталоге не найдена — выберите вручную.`);
+      } else if (phase === "vehicle") {
+        setStatus("VIN не прочитан. Включите зажигание или выберите машину.");
+      } else {
+        setStatus("Подключите vLinker — модель определится по VIN автоматически.");
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось открыть каталог");
     } finally {
@@ -187,12 +229,28 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     }
   };
 
+  useEffect(() => {
+    if (phase !== "vehicle") {
+      vinAutoTried.current = false;
+      if (catalogStarted.current) return;
+      catalogStarted.current = true;
+      void identify();
+      return;
+    }
+    if (vinAutoTried.current || vehiclePickedManually.current) return;
+    vinAutoTried.current = true;
+    catalogStarted.current = true;
+    void identify();
+  }, [phase]);
+
   const chooseVehicle = async (vkey: string) => {
+    vehiclePickedManually.current = true;
     setBusy(true);
     setError(null);
     try {
-      const matched = await loadVehicle(`vkey=${encodeURIComponent(vkey)}`);
-      setStatus(matched?.nameRu ?? null);
+      const result = await loadVehicle(`vkey=${encodeURIComponent(vkey)}`);
+      setVinMatches([]);
+      setStatus(result.vehicle?.nameRu ?? null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось открыть каталог");
     } finally {
@@ -375,26 +433,55 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     }
   };
 
-  const runServiceProcedure = async (proc: MitsubishiServiceProcedure) => {
-    if (!selected || !selectedSkey || phase !== "vehicle" || busy) return;
+  const resolveSkeyForEcu = async (ecu: CatalogEcu): Promise<string> => {
+    if (selectedKey === ecu.sysKey && selectedSkey) return selectedSkey;
+    if (!vehicle) throw new Error("Сначала выберите автомобиль из каталога.");
+    let diagVersion: string | null = null;
+    let partNumber: string | null = null;
+    if (phase === "vehicle") {
+      setStatus("Читаю парт-номер и версию блока…");
+      const identity = await readModuleIdentity(ecu.txCanId, ecu.rxCanId);
+      diagVersion = identity.diagVersion;
+      partNumber = identity.partNumber;
+    }
+    const query = new URLSearchParams({
+      vkey: vehicle.vkey,
+      sysKey: String(ecu.sysKey),
+    });
+    if (diagVersion) query.set("diagVersion", diagVersion);
+    if (partNumber) query.set("partNumber", partNumber);
+    const response = await fetch(`/api/etacs-coding/diag/signals?${query.toString()}`);
+    const body = (await response.json()) as { error?: string; skey?: string };
+    if (!response.ok) throw new Error(body.error || "Не удалось определить профиль SKEY блока");
+    if (!body.skey) throw new Error("Каталог MUT-III не вернул SKEY для этого блока.");
+    return body.skey;
+  };
+
+  const runServiceProcedure = async (proc: MitsubishiServiceProcedure, ecu: CatalogEcu) => {
+    if (phase !== "vehicle" || busy) return;
     if (liveRunning.current) {
       stopLive.current = true;
       setLive(false);
     }
-    const confirmed = window.confirm(
-      `${proc.nameRu}\n\nАвтомобиль: ${vehicle?.nameRu ?? "—"}\nБлок: ${selected.nameRu} (${proc.txCanId}→${proc.rxCanId}, SKEY ${selectedSkey}, fid=${proc.fid})\n\nНазначение:\n${proc.descriptionRu}\n\nОбязательные условия:\n${proc.preconditionsRu}\n\nВыполнить процедуру?`,
-    );
-    if (!confirmed) return;
     setBusy(true);
     setError(null);
     setServiceResult(null);
-    setStatus(`Выполняю «${proc.nameRu}»…`);
     try {
+      setStatus("Определяю профиль SKEY блока…");
+      const skey = await resolveSkeyForEcu(ecu);
+      const confirmed = window.confirm(
+        `${proc.nameRu}\n\nАвтомобиль: ${vehicle?.nameRu ?? "—"}\nБлок: ${ecu.nameRu} (${proc.txCanId}→${proc.rxCanId}, SKEY ${skey}, fid=${proc.fid})\n\nНазначение:\n${proc.descriptionRu}\n\nОбязательные условия:\n${proc.preconditionsRu}\n\nВыполнить процедуру?`,
+      );
+      if (!confirmed) {
+        setStatus(null);
+        return;
+      }
+      setStatus(`Выполняю «${proc.nameRu}»…`);
       const res = await session.runMitsubishiServiceProcedure({
         procedureId: proc.id,
-        skey: selectedSkey,
-        txCanId: selected.txCanId,
-        rxCanId: selected.rxCanId,
+        skey,
+        txCanId: ecu.txCanId,
+        rxCanId: ecu.rxCanId,
       });
       setServiceResult(res);
       setStatus(`Выполнено: ${proc.nameRu}`);
@@ -739,7 +826,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               Калибровки, сбросы адаптаций и тесты MUT-III SE ({availableProcedures.length}) · SKEY {selectedSkey}
             </summary>
             <p className="mt-1 text-[11px] leading-snug text-gray-600">
-              Доступны только процедуры, официально привязанные в базе MUT-III SE к блоку «{selected.nameRu}» ({selected.txCanId}→{selected.rxCanId}, SKEY {selectedSkey}) выбранного автомобиля {vehicle?.nameRu}.
+              Доступны только процедуры, официально привязанные в базе MUT-III SE к блоку «{selected.nameRu}» ({selected.txCanId}→{selected.rxCanId}, SKEY {selectedSkey}) выбранного автомобиля {vehicle?.nameRu}. Полный список по всем блокам — вкладка «Сервис и тесты».
             </p>
             <div className="mt-2 space-y-2">
               {availableProcedures.map((proc) => (
@@ -758,7 +845,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
                     <button
                       type="button"
                       disabled={phase !== "vehicle" || busy}
-                      onClick={() => void runServiceProcedure(proc)}
+                      onClick={() => void runServiceProcedure(proc, selected)}
                       className="shrink-0 rounded-lg border border-gray-900 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
                     >
                       Выполнить
@@ -800,7 +887,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       <div className="flex flex-wrap items-end gap-2">
         {vehicles.length > 0 ? (
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-gray-500">
-            <span>Машина</span>
+            <span>{vinMatches.length > 1 && !vehicle ? "Модели по VIN" : "Машина"}</span>
             <select
               value={vehicle?.vkey ?? ""}
               onChange={(event) => {
@@ -809,7 +896,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               className="w-full min-w-0 rounded-lg border border-gray-300 bg-gray-50 px-2 py-2 text-sm text-gray-900"
             >
               <option value="">Выберите</option>
-              {vehicles.map((item) => (
+              {(vinMatches.length > 1 && !vehicle ? vinMatches : vehicles).map((item) => (
                 <option key={item.vkey} value={item.vkey}>
                   {item.nameRu}
                 </option>
@@ -820,10 +907,14 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         <button
           type="button"
           disabled={busy}
-          onClick={() => void identify()}
+          onClick={() => {
+            vinAutoTried.current = true;
+            vehiclePickedManually.current = false;
+            void identify();
+          }}
           className="rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
         >
-          По VIN
+          Определить по VIN
         </button>
       </div>
       {vin ? <p className="truncate font-mono text-[10px] text-gray-500">VIN {vin}</p> : null}
@@ -835,7 +926,79 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         <p className="text-xs text-gray-500">Подключите vLinker для опроса блоков.</p>
       ) : null}
 
-      {section === "live" ? (
+      {section === "service" ? (
+      <div className="rounded-xl border border-amber-300/80 bg-white p-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold text-gray-900">Сервис и тесты MUT-III SE</h3>
+          <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
+            {vehicle
+              ? `Показаны только калибровки, сбросы адаптаций и тесты, которые база MUT-III SE привязала к блокам «${vehicle.nameRu}» по SKEY и CAN-адресу. Чужие команды для этой машины скрыты.`
+              : "Подключите адаптер — VIN прочитается сам, и список процедур откроется для этой модели."}
+          </p>
+        </div>
+        {vehicle && vehicleProcedures.length === 0 ? (
+          <p className="mt-3 text-xs text-gray-500">
+            Для выбранного автомобиля в текущем справочнике нет сервисных процедур. Калибровка угла руля и датчики TPMS — на соседних вкладках.
+          </p>
+        ) : null}
+        {vehicleProcedures.length > 0 ? (
+          <div className="mt-3 flex flex-col gap-3">
+            {vehicleProcedures.map(({ ecu, procedures }) => (
+              <article key={ecu.sysKey} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h4 className="text-sm font-semibold text-gray-900">{ecu.nameRu}</h4>
+                  <span className="font-mono text-[10px] text-gray-500">
+                    {ecu.txCanId}→{ecu.rxCanId}
+                  </span>
+                </div>
+                {ecu.skeys && ecu.skeys.length > 0 ? (
+                  <p className="mt-0.5 font-mono text-[10px] text-gray-500">
+                    SKEY {ecu.skeys.slice(0, 4).join(", ")}
+                    {ecu.skeys.length > 4 ? ` · +${ecu.skeys.length - 4}` : ""}
+                  </p>
+                ) : null}
+                <div className="mt-2 space-y-3">
+                  {groupServiceProcedures(procedures).map((group) => (
+                    <div key={group.id}>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                        {group.label}
+                      </div>
+                      <div className="space-y-2">
+                        {group.procedures.map((proc) => (
+                          <ServiceProcedureCard
+                            key={proc.id}
+                            proc={proc}
+                            disabled={phase !== "vehicle" || busy}
+                            onRun={() => void runServiceProcedure(proc, ecu)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+        {serviceResult ? (
+          <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-950">
+            <div className="font-semibold">
+              Результат: {serviceResult.nameRu} (SKEY {serviceResult.skey})
+            </div>
+            {serviceResult.decodedSummary ? (
+              <div className="mt-1 font-mono text-[11px] font-bold text-emerald-900">
+                {serviceResult.decodedSummary}
+              </div>
+            ) : null}
+            <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-gray-700">
+              {serviceResult.steps.map((step, idx) => (
+                <li key={idx}>{step}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+      ) : section === "live" ? (
       <>
       <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -998,7 +1161,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
             <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
               {vehicle
                 ? "«Считать ошибки» опрашивает все блоки. «Параметры» открывает показания блока на вкладке «Блоки и live»."
-                : "Сначала выберите машину или нажмите «По VIN»."}
+                : "Подключите адаптер, чтобы определить модель по VIN, или выберите машину вручную."}
             </p>
           </div>
           <button
@@ -1094,6 +1257,54 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       </div>
       )}
     </section>
+  );
+}
+
+function groupServiceProcedures(procedures: MitsubishiServiceProcedure[]) {
+  const groups = new Map<MitsubishiServicePackageId, MitsubishiServiceProcedure[]>();
+  for (const proc of procedures) {
+    const list = groups.get(proc.packageId) ?? [];
+    list.push(proc);
+    groups.set(proc.packageId, list);
+  }
+  return PACKAGE_ORDER.filter((id) => groups.has(id)).map((id) => ({
+    id,
+    label: PACKAGE_LABEL[id],
+    procedures: groups.get(id)!,
+  }));
+}
+
+function ServiceProcedureCard({
+  proc,
+  disabled,
+  onRun,
+}: {
+  proc: MitsubishiServiceProcedure;
+  disabled: boolean;
+  onRun: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-2.5 shadow-2xs">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold text-gray-900">{proc.nameRu}</div>
+          <div className="mt-0.5 font-mono text-[10px] text-gray-500">
+            MUT-III fid={proc.fid} · {proc.txCanId}→{proc.rxCanId} · Команда {proc.startRequest}
+            {proc.verifyReadRequest ? ` · Контроль ${proc.verifyReadRequest}` : ""}
+          </div>
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onRun}
+          className="shrink-0 rounded-lg border border-gray-900 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
+        >
+          Выполнить
+        </button>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-snug text-gray-700">{proc.descriptionRu}</p>
+      <p className="mt-1 text-[10px] font-medium text-amber-900">Условия: {proc.preconditionsRu}</p>
+    </div>
   );
 }
 

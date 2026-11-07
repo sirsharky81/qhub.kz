@@ -7,6 +7,7 @@ import {
   assertMitsubishiProcedureForEcu,
   decodeMitsubishiDieselInjectorIds21BF,
   decodeMitsubishiServiceReminder21BC,
+  getMitsubishiProceduresForCatalogEcu,
   getMitsubishiProceduresForEcu,
 } from "../mitsubishi-service-procedures";
 
@@ -93,6 +94,35 @@ describe("Mitsubishi MUT-III SE vehicle-bound service procedures", () => {
     expect(gasProcs.map((p) => p.id)).toContain("gas_learned_value_reset");
     expect(gasProcs.map((p) => p.id)).toContain("gas_fuel_pump_drive");
     expect(gasProcs.some((p) => p.id.startsWith("diesel_"))).toBe(false);
+  });
+
+  it("lists catalog-ECU procedures from all vehicle SKEYs and never mixes CVT with 8AT", () => {
+    const cvtEcu = getMitsubishiProceduresForCatalogEcu({
+      skeys: ["30022101", "22100"],
+      txCanId: "7E1",
+      rxCanId: "7E9",
+    });
+    expect(cvtEcu.map((p) => p.id)).toEqual([
+      "cvt_oil_degradation_reset_jf016e",
+      "cvt_learning_reset_jf016e",
+      "cvt_eop_air_bleeding",
+    ]);
+
+    const at8Ecu = getMitsubishiProceduresForCatalogEcu({
+      skeys: ["30024501", "24500"],
+      txCanId: "7E1",
+      rxCanId: "7E9",
+    });
+    expect(at8Ecu.map((p) => p.id)).toEqual(["at_learned_value_reset"]);
+    expect(at8Ecu.some((p) => p.id.startsWith("cvt_"))).toBe(false);
+
+    expect(
+      getMitsubishiProceduresForCatalogEcu({
+        skeys: [],
+        txCanId: "7E1",
+        rxCanId: "7E9",
+      }),
+    ).toEqual([]);
   });
 
   it("blocks execution if the procedure does not match the vehicle's SKEY or CAN address", () => {

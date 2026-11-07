@@ -85,3 +85,20 @@ export function asciiFromKwpPayload(payload: number[]): string | null {
     .trim();
   return text.length >= 11 ? text : null;
 }
+
+/** ISO 3779 VIN: 17 chars, no I/O/Q. Also accepts 11+ Mitsubishi partials from KWP `21 90` / `1A 90`. */
+export function extractMitsubishiVin(source: string | number[] | null | undefined): string | null {
+  if (source == null) return null;
+  const ascii = Array.isArray(source)
+    ? source.map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " ")).join("")
+    : source;
+  const upper = ascii.toUpperCase();
+  const full = upper.match(/[A-HJ-NPR-Z0-9]{17}/);
+  if (full) return full[0]!;
+  const compact = upper.replace(/[^A-HJ-NPR-Z0-9]/g, "");
+  if (compact.length >= 17) {
+    const nested = compact.match(/[A-HJ-NPR-Z0-9]{17}/);
+    if (nested) return nested[0]!;
+  }
+  return compact.length >= 11 ? compact : null;
+}

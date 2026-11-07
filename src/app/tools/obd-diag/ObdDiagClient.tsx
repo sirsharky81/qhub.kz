@@ -96,6 +96,7 @@ export default function ObdDiagClient() {
     if (param === "mitsu-sas" || param === "steering-mitsu") return "steering";
     if (param === "tpms" || param === "mitsu-tpms" || searchParams.get("view") === "tpms") return "tpms";
     if (searchParams.get("view") === "steering") return "steering";
+    if (searchParams.get("view") === "service") return "service";
     return "ecu";
   });
   const [obdSubTab, setObdSubTab] = useState<ObdSubTab>("live");
