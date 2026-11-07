@@ -31,6 +31,15 @@ export interface CatalogSignalEnum {
   ru: string;
 }
 
+export interface CatalogSignalScale {
+  lowBound: number;
+  upBound: number;
+  factor: number;
+  offset: number;
+  textEn?: string;
+  textRu?: string;
+}
+
 export interface CatalogSignal {
   id: string;
   nameEn: string;
@@ -40,14 +49,19 @@ export interface CatalogSignal {
   localId: number;
   bytePos: number;
   byteLen: number;
+  /** MUT-III CstParamTypeH: 1 = LowHigh (Little-Endian), 2 = HighLow (Big-Endian). */
   byteOrder: number;
   bitPos: number;
   bitLen: number;
+  bitMask?: number;
+  /** MUT-III CstCodeType: 0 = BCD, 1 = Type_2C, 2 = SignNumber, 3 = UnsignNumber. */
+  codeType?: number;
   signed: boolean;
   factor: number;
   offset: number;
   decimals: number;
   enums?: CatalogSignalEnum[];
+  scales?: CatalogSignalScale[];
 }
 
 export interface CatalogSignalList {
@@ -82,11 +96,21 @@ interface RawSignal {
   byteOrder?: number;
   bitPos?: number;
   bitLen?: number;
+  bitMask?: number;
+  codeType?: number;
   signed?: boolean;
   factor?: number;
   offset?: number;
   decimals?: number;
   enums?: Array<{ value: number; en?: string; ru?: string }>;
+  scales?: Array<{
+    lowBound: number;
+    upBound: number;
+    factor?: number;
+    offset?: number;
+    textEn?: string;
+    textRu?: string;
+  }>;
   reqMsg?: string;
 }
 
@@ -304,6 +328,16 @@ function projectSignal(item: RawSignal, skey: string): CatalogSignal | null {
       en: entry.en || "",
       ru: entry.ru || entry.en || "",
     }));
+  const scales = (item.scales ?? [])
+    .filter((scale) => Number.isFinite(scale.lowBound) && Number.isFinite(scale.upBound))
+    .map((scale) => ({
+      lowBound: scale.lowBound,
+      upBound: scale.upBound,
+      factor: Number.isFinite(scale.factor) ? scale.factor! : 1,
+      offset: Number.isFinite(scale.offset) ? scale.offset! : 0,
+      textEn: scale.textEn,
+      textRu: scale.textRu || scale.textEn,
+    }));
   return {
     id: `${skey}-${item.itemNo}`,
     nameEn: item.nameEn || "",
@@ -316,11 +350,14 @@ function projectSignal(item: RawSignal, skey: string): CatalogSignal | null {
     byteOrder: item.byteOrder ?? 2,
     bitPos: item.bitPos ?? -1,
     bitLen: item.bitLen ?? -1,
+    ...(item.bitMask != null && item.bitMask >= 0 ? { bitMask: item.bitMask } : {}),
+    ...(item.codeType != null ? { codeType: item.codeType } : {}),
     signed: Boolean(item.signed),
     factor: Number.isFinite(item.factor) ? item.factor! : 1,
     offset: Number.isFinite(item.offset) ? item.offset! : 0,
     decimals: Number.isFinite(item.decimals) ? Math.max(0, item.decimals!) : 0,
     enums: enums.length > 0 ? enums : undefined,
+    scales: scales.length > 0 ? scales : undefined,
   };
 }
 

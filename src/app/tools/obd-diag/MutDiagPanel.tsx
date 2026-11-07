@@ -199,6 +199,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       safetyCritical: !ecu.canSafeClear,
       canSafeClear: ecu.canSafeClear,
       mode03Fallback: ecu.txCanId === "7E0" || ecu.txCanId === "7E1",
+      mitsubishiKwp: true,
     }));
     try {
       const found = await session.scanCatalogModules(
@@ -266,15 +267,20 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   };
 
   const readModuleIdentity = async (tx: string, rx: string) => {
+    const cachedReport = reports[addressKey(tx, rx)];
+    if (cachedReport?.partNumber && cachedReport?.diagVersion) {
+      return { partNumber: cachedReport.partNumber, diagVersion: cachedReport.diagVersion };
+    }
     const readOnce = async () => {
-      let partNumber: string | null = null;
-      let diagVersion: string | null = null;
-      for (const request of ["1A 9C", "1A 87", "21 87"]) {
+      let partNumber: string | null = cachedReport?.partNumber ?? null;
+      let diagVersion: string | null = cachedReport?.diagVersion ?? null;
+      for (const request of ["1A 87", "1A 9C", "21 87", "1A 86"]) {
+        if (partNumber && diagVersion) break;
         try {
           const { parsed } = await session.sendUds("6", tx, rx, request, false);
           if (parsed.kind !== "positive") continue;
           const identity = parseMitsubishiModuleIdentity(request, parsed.payload);
-          partNumber = partNumber ?? identity.partNumber;
+          partNumber = partNumber ?? identity.partNumber ?? identity.softwarePartNumber ?? null;
           diagVersion = diagVersion ?? identity.diagVersion;
         } catch {
           /* the next identification request */
@@ -287,7 +293,11 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       try {
         await session.sendUds("6", tx, rx, "10 92", false);
       } catch {
-        /* identification still falls back to the catalog profile */
+        try {
+          await session.sendUds("6", tx, rx, "10 C0", false);
+        } catch {
+          /* identification still falls back to the catalog profile */
+        }
       }
       identity = await readOnce();
     }

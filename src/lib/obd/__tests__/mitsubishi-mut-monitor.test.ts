@@ -56,19 +56,23 @@ describe("MUT-III Data List monitor picker", () => {
 });
 
 describe("module identity and service sets", () => {
-  it("reads diagnostic version 0104 from 1A 9C and the part number from 1A 87", () => {
+  it("reads diagnostic version 0017 and part number 1860D362 from 1A 87 and 1A 9C per MutComm.dll", () => {
     const version = parseMitsubishiModuleIdentity(
       "1A 9C",
       [0x9c, 0x01, 0x04, 0x82, 0x00, 0x17, 0xff, 0x3d, 0x00, 0x00, 0x31, 0x38, 0x36, 0x30, 0x44, 0x33, 0x36, 0x32],
     );
-    expect(version.diagVersion).toBe("0104");
+    expect(version.diagVersion).toBe("0017");
     expect(version.partNumber).toBeNull();
+    expect(version.softwarePartNumber).toBe("1860D362");
     const part = parseMitsubishiModuleIdentity(
       "1A 87",
       [0x87, 0x04, 0x82, 0x00, 0x17, 0xff, 0x20, 0x00, 0x3d, 0x00, 0x00, 0x31, 0x38, 0x36, 0x30, 0x44, 0x33, 0x36, 0x32],
     );
     expect(part.partNumber).toBe("1860D362");
-    expect(part.diagVersion).toBeNull();
+    expect(part.diagVersion).toBe("0017");
+    expect(part.supplierId).toBe(0x82);
+    expect(part.hardwareVersion).toBe("2000");
+    expect(part.softwareVersion).toBe("3D0000");
   });
 
   it("pins the engine service set and builds a visit CSV", () => {
@@ -129,11 +133,26 @@ describe("MUT-III AT8 / CVT temperature scales", () => {
     expect(decoded.atfFormula).toBe("a-50");
   });
 
-  it("uses A−55 for Outlander CVT oil temperature on 21 03", () => {
+  it("uses A−55 for Outlander CVT oil temperature on 21 03 and decodes speeds, manual gear 0xFF, and 21 0D / 21 0E degradation", () => {
     const decoded = decodeMitsubishiCvt({
-      data2103: [0x04, 0x00, 0x05, 0x00, 0x00, 0x02, 0, 0, 0, 0, 0, 0, 0, 130],
+      data2103: [25, 10, 25, 0xfe, 0, 0, 0, 0, 0, 0, 0, 0, 0, 130, 0, 60, 0],
+      data2106: [0x08, 0x00, 0xff], // 0xFF = normal D mode (not manual step 256)
+      data210D: [0x00, 0x00, 0x04, 0xd2], // 1234
     });
     expect(decoded.atfTempC).toBe(75);
     expect(decoded.atfFormula).toBe("a-55");
+    expect(decoded.inputShaftRpm).toBe(800);
+    expect(decoded.outputShaftRpm).toBe(640);
+    expect(decoded.torqueConverterSlipRpm).toBe(-2);
+    expect(decoded.vehicleSpeedKmh).toBe(60);
+    expect(decoded.gearNumber).toBeNull();
+    expect(decoded.currentGearText).toBe("D (Вариатор CVT)");
+    expect(decoded.cvtDegradationCount).toBe(1234);
+
+    // 15-byte JF011E frame (CVT_14880100: bytePos 14 = data2103[12])
+    const jf011 = decodeMitsubishiCvt({
+      data2103: [20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0],
+    });
+    expect(jf011.atfTempC).toBe(70);
   });
 });

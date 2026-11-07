@@ -1,5 +1,6 @@
 import type { Elm327Client } from "./elm327";
 import { extractHexTokens, stripElmMultiline } from "./hex";
+import { parseMitsubishiModuleIdentity } from "./mitsubishi-mut-monitor";
 import { decodeSubaruTpmsBytes } from "./subaru-decode";
 import { parseUdsResponse } from "./uds";
 
@@ -93,6 +94,10 @@ export interface MitsubishiMeterReport {
   partNumber: string | null;
   vin: string | null;
   fuelLiters: number | null;
+  /** Fuel gauge target in % (MUT-III `21 A3` / `21 C3` bytePos 4, `raw - 16`, `0..100%`). */
+  fuelPercent?: number | null;
+  /** Fuel gauge sensor resistance in Ohm (MUT-III `21 A3` / `21 C3` bytePos 2..3, little-endian, `×0.1 Ω`). */
+  fuelSensorOhm?: number | null;
   fuelRawByte: number | null;
   odometerKm: number | null;
   rawFuelHex: string | null;
@@ -281,35 +286,53 @@ export function decodeMitsubishiAt2102And2104(
 }
 
 /**
- * Decode Mitsubishi CVT (`7E1 -> 7E9`, Jatco JF011E / JF016E on Outlander / ASX / Lancer X)
- * responses from `21 03` (temps & speeds), `21 06` (gear), `21 07` (selector), and `21 10` (degradation).
+ * Decode Mitsubishi CVT (`7E1 -> 7E9`, Jatco JF011E / JF015E / JF016E / JF017E on Outlander / ASX / Lancer X / Eclipse Cross)
+ * verified against `CVT_14080300.exdf`, `CVT_14880100.exdf`, `CVT_14880110.exdf`:
+ * - `21 03`:
+ *   - `bytePos = 2` (`data2103[0]`, 1B, `×32`): `Primary speed (Control)` (Input shaft RPM)
+ *   - `bytePos = 3` (`data2103[1]`, 1B, `×64`): `Secondary speed (Control)` (Output shaft RPM)
+ *   - `bytePos = 4` (`data2103[2]`, 1B, `×32`): `Engine revolution` (RPM)
+ *   - `bytePos = 5` (`data2103[3]`, 1B signed 2's complement): `Slip revolution` (RPM)
+ *   - `CVT oil temperature` (`A − 55 °C`): `bytePos = 15` (`data2103[13]`) on 17-byte `CVT_14080300`, `bytePos = 14` (`data2103[12]`) on 15-byte `CVT_14880100`
+ *   - `Real vehicle speed` (`km/h`): `bytePos = 17` (`data2103[15]`) on 17-byte `CVT_14080300`, `bytePos = 16` (`data2103[14]`) on 15-byte `CVT_14880100`
+ * - `21 06`: `bytePos = 2` (`data2106[0]`) shift indicator bits (`P/R/N/D/Ds/L`), `bytePos = 4` (`data2106[2]`) manual gear (`0..7` = `1st..8th`, `0xFF` = `D`)
+ * - `21 07`: `bytePos = 2` (`data2107[0]`) selector switch bits (`0x10=P, 0x20=R, 0x40=N, 0x80=D`)
+ * - `21 0E` (`bytePos = 28..31`, `data210E[26..29]`) / `21 0D` (`bytePos = 2..5`, `data210D[0..3]`): 32-bit `CVT oil degradation level`
  */
 export function decodeMitsubishiCvt(options: {
   data2103?: number[] | null;
   data2106?: number[] | null;
   data2107?: number[] | null;
+  data210E?: number[] | null;
+  data210D?: number[] | null;
   data2110?: number[] | null;
 }): Omit<
   MitsubishiTcmTelemetry,
   "txHex" | "rxHex" | "partNumber" | "swVersion" | "raw2102" | "raw2104" | "raw2103"
 > {
-  const { data2103, data2106, data2107, data2110 } = options;
+  const { data2103, data2106, data2107, data210E, data210D, data2110 } = options;
   let atfTempC: number | null = null;
   let inputShaftRpm: number | null = null;
   let outputShaftRpm: number | null = null;
   let torqueConverterSlipRpm: number | null = null;
   let vehicleSpeedKmh: number | null = null;
 
-  if (data2103 && data2103.length >= 14) {
-    // MUT-III CVT_14080300 Data List item «CVT oil temperature»: 21 03, bytePos 15, A − 55.
-    atfTempC = data2103[13]! - 55;
-    if (data2103.length >= 6) {
-      outputShaftRpm = (data2103[0]! << 8) | data2103[1]!;
-      inputShaftRpm = (data2103[2]! << 8) | data2103[3]!;
-      torqueConverterSlipRpm = (data2103[4]! << 8) | data2103[5]!;
-    }
-    if (data2103.length >= 17) {
-      vehicleSpeedKmh = data2103[16]!;
+  if (data2103 && data2103.length >= 4) {
+    inputShaftRpm = data2103[0]! * 32;
+    outputShaftRpm = data2103[1]! * 64;
+    const rawSlip = data2103[3]!;
+    torqueConverterSlipRpm = rawSlip >= 0x80 ? rawSlip - 0x100 : rawSlip;
+
+    if (data2103.length === 15) {
+      // CVT_14880100 / CVT_14880110 (JF011E / JF015E, 15 data bytes): bytePos 14 = data2103[12], speed bytePos 16 = data2103[14]
+      atfTempC = data2103[12]! - 55;
+      vehicleSpeedKmh = data2103[14]!;
+    } else if (data2103.length >= 14) {
+      // CVT_14080300 (JF016E / JF017E, 17 data bytes): bytePos 15 = data2103[13], speed bytePos 17 = data2103[15]
+      atfTempC = data2103[13]! - 55;
+      if (data2103.length >= 17) {
+        vehicleSpeedKmh = data2103[15]!;
+      }
     }
   }
 
@@ -328,23 +351,58 @@ export function decodeMitsubishiCvt(options: {
     } else if ((a & 0x80) !== 0) {
       selectorPosition = "D (Движение)";
     }
+  } else if (data2106 && data2106.length >= 1) {
+    const ind = data2106[0]!;
+    if ((ind & 0x01) !== 0) {
+      selectorPosition = "P (Паркинг)";
+      isGearDisengaged = true;
+    } else if ((ind & 0x02) !== 0) {
+      selectorPosition = "R (Задний ход)";
+    } else if ((ind & 0x04) !== 0) {
+      selectorPosition = "N (Нейтраль)";
+      isGearDisengaged = true;
+    } else if ((ind & 0x08) !== 0) {
+      selectorPosition = "D (Движение)";
+    } else if ((ind & 0x10) !== 0) {
+      selectorPosition = "Ds (Спорт)";
+    } else if ((ind & 0x20) !== 0) {
+      selectorPosition = "L (Пониженный)";
+    }
   }
 
   let gearNumber: number | null = null;
   let currentGearText = "Вариатор (CVT)";
   if (data2106 && data2106.length >= 3) {
-    gearNumber = data2106[2]! + 1;
-    currentGearText = isGearDisengaged
-      ? `${selectorPosition} — Передача выключена`
-      : `Виртуальная ступень ${gearNumber}`;
+    const manualRaw = data2106[2]!;
+    if (isGearDisengaged) {
+      gearNumber = 0;
+      currentGearText = `${selectorPosition} — Передача выключена`;
+    } else if (manualRaw <= 7) {
+      gearNumber = manualRaw + 1;
+      currentGearText = `Виртуальная ступень ${gearNumber}`;
+    } else {
+      gearNumber = null;
+      currentGearText = selectorPosition.startsWith("R") ? "R (Задний ход)" : "D (Вариатор CVT)";
+    }
   } else if (isGearDisengaged) {
     gearNumber = 0;
     currentGearText = `${selectorPosition} — Передача выключена`;
   }
 
   let cvtDegradationCount: number | null = null;
-  if (data2110 && data2110.length >= 4) {
-    // 3-byte counter at the end or bytes 0..2
+  if (data210E && data210E.length >= 30) {
+    cvtDegradationCount =
+      ((data210E[26]! << 24) >>> 0) +
+      (data210E[27]! << 16) +
+      (data210E[28]! << 8) +
+      data210E[29]!;
+  } else if (data210D && data210D.length >= 4) {
+    cvtDegradationCount =
+      ((data210D[0]! << 24) >>> 0) +
+      (data210D[1]! << 16) +
+      (data210D[2]! << 8) +
+      data210D[3]!;
+  } else if (data2110 && data2110.length >= 4) {
     const b0 = data2110[data2110.length - 3]!;
     const b1 = data2110[data2110.length - 2]!;
     const b2 = data2110[data2110.length - 1]!;
@@ -431,26 +489,33 @@ export async function closeMitsubishiKwpSession(elm: Elm327Client): Promise<void
 }
 
 /**
- * Read KWP `1A 87` (Part Number) and `1A 90` (VIN) from any Mitsubishi KWP module.
+ * Read KWP `1A 87` (Hardware Part Number & DiagVersion), `1A 9C` (Software Part Number), and `1A 90` (VIN)
+ * according to `MutComm.dll` (`GetECUHardwareInfo` `[0x060012CE]` & `GetECUSoftwareInfo` `[0x060012CF]`).
  */
 export async function readMitsubishiKwpPassport(
   elm: Elm327Client,
-): Promise<{ partNumber: string | null; swVersion: string | null; vin: string | null }> {
+): Promise<{
+  partNumber: string | null;
+  swVersion: string | null;
+  vin: string | null;
+  diagVersion?: string | null;
+  supplierId?: number | null;
+}> {
   let partNumber: string | null = null;
   let swVersion: string | null = null;
   let vin: string | null = null;
+  let diagVersion: string | null = null;
+  let supplierId: number | null = null;
 
   try {
     const raw87 = await elm.sendPayload("1A87", 2_000);
     const bytes = extractHexTokens(raw87);
     const idx = bytes.findIndex((b, i) => b === 0x5a && bytes[i + 1] === 0x87);
     if (idx >= 0) {
-      const ascii = bytes
-        .slice(idx + 2)
-        .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
-        .join("");
-      const match = ascii.match(/\b([0-9]{4}[A-Z][0-9]{3}[A-Z0-9]{0,2})\b/);
-      if (match) partNumber = match[1]!;
+      const parsed = parseMitsubishiModuleIdentity("1A87", bytes.slice(idx + 1));
+      partNumber = parsed.partNumber;
+      diagVersion = parsed.diagVersion;
+      supplierId = parsed.supplierId ?? null;
     }
   } catch {
     /* ignore */
@@ -461,12 +526,18 @@ export async function readMitsubishiKwpPassport(
     const bytes = extractHexTokens(raw9c);
     const idx = bytes.findIndex((b, i) => b === 0x5a && bytes[i + 1] === 0x9c);
     if (idx >= 0) {
-      const ascii = bytes
-        .slice(idx + 2)
-        .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
-        .join("");
-      const match = ascii.match(/\b([0-9]{4}[A-Z][0-9]{3,5})\b/);
-      if (match) swVersion = match[1]!;
+      const parsed9c = parseMitsubishiModuleIdentity("1A9C", bytes.slice(idx + 1));
+      diagVersion = diagVersion ?? parsed9c.diagVersion;
+      if (parsed9c.softwarePartNumber) {
+        swVersion = parsed9c.softwarePartNumber;
+      } else {
+        const ascii = bytes
+          .slice(idx + 2)
+          .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+          .join("");
+        const match = ascii.match(/\b([0-9]{4}[A-Z][0-9]{3,5})\b/);
+        if (match) swVersion = match[1]!;
+      }
     }
   } catch {
     /* ignore */
@@ -487,7 +558,7 @@ export async function readMitsubishiKwpPassport(
     /* ignore */
   }
 
-  return { partNumber, swVersion, vin };
+  return { partNumber, swVersion, vin, diagVersion, supplierId };
 }
 
 /**
@@ -526,21 +597,29 @@ export async function readMitsubishiTransmission(elm: Elm327Client): Promise<Mit
       };
     }
 
-    // Fallback to Mitsubishi CVT (`21 03`, `21 06`, `21 07`, `21 10`)
+    // Fallback to Mitsubishi CVT (`21 03`, `21 06`, `21 07`, `21 0E` / `21 0D` / `21 10`)
     const raw2103 = await elm.sendPayload("2103", 2_500);
     const data2103 = extractKwp21Data(raw2103, 0x03);
     if (data2103 && data2103.length >= 6) {
       let data2106: number[] | null = null;
       let data2107: number[] | null = null;
+      let data210E: number[] | null = null;
+      let data210D: number[] | null = null;
       let data2110: number[] | null = null;
       try {
         data2106 = extractKwp21Data(await elm.sendPayload("2106", 1_800), 0x06);
         data2107 = extractKwp21Data(await elm.sendPayload("2107", 1_800), 0x07);
-        data2110 = extractKwp21Data(await elm.sendPayload("2110", 1_800), 0x10);
+        data210E = extractKwp21Data(await elm.sendPayload("210E", 1_800), 0x0e);
+        if (!data210E || data210E.length < 30) {
+          data210D = extractKwp21Data(await elm.sendPayload("210D", 1_800), 0x0d);
+        }
+        if (!data210E && !data210D) {
+          data2110 = extractKwp21Data(await elm.sendPayload("2110", 1_800), 0x10);
+        }
       } catch {
         /* ignore */
       }
-      const cvt = decodeMitsubishiCvt({ data2103, data2106, data2107, data2110 });
+      const cvt = decodeMitsubishiCvt({ data2103, data2106, data2107, data210E, data210D, data2110 });
       return {
         ...cvt,
         txHex: "7E1",
@@ -734,10 +813,10 @@ export function decodeMitsubishiTpmsPayload(options: {
 }): TpmsWheelReading[] {
   const { lid2101, lid2110, lid2128, individualWheels } = options;
 
-  // Extract up to 5 32-bit sensor IDs from 21 28 (`[statusByte, ID1(4B), ID2(4B), ID3(4B), ID4(4B), ID5(4B)]`)
+  // Extract up to 5 32-bit sensor IDs from 21 28 / 21 A6 (`[statusByte, ID1..ID5]`, 21B) or 21 AE / 21 A2 (`[statusByte, countByte, ID1..ID5]`, 22B)
   const sensorIds: (string | null)[] = [null, null, null, null, null];
-  if (lid2128 && lid2128.length >= 17) {
-    const startOffset = lid2128.length % 4 === 1 ? 1 : 0;
+  if (lid2128 && lid2128.length >= 16) {
+    const startOffset = lid2128.length >= 22 ? 2 : lid2128.length % 4 === 1 ? 1 : 0;
     for (let w = 0; w < 5; w++) {
       const pos = startOffset + w * 4;
       if (pos + 4 <= lid2128.length) {
@@ -750,7 +829,7 @@ export function decodeMitsubishiTpmsPayload(options: {
     }
   }
 
-  // Case 1: Individual wheel LIDs `21 10`..`21 14` or `21 11`..`21 15`
+  // Case 1: Individual wheel LIDs `21 03`..`21 07` (`TPMS_88800001` bytePos 8 = `data[6]`) or `21 10`..`21 14` / `21 11`..`21 15`
   if (individualWheels && individualWheels.some((w) => w != null && w.length >= 2)) {
     return ([1, 2, 3, 4, 5] as const).map((wheelIndex, idx) => {
       const data = individualWheels[idx];
@@ -766,9 +845,10 @@ export function decodeMitsubishiTpmsPayload(options: {
           statusText: "Нет данных",
         };
       }
-      // On Pajero Sport 3G (773 -> 774), pressure byte P and temp byte T:
-      // P in kPa = P * 1.373 (or P * 2.5 kPa) -> bar = kPa / 100; Temp = T - 50 °C (or T - 40 °C)
-      const decoded = decodeMitsubishiTpmsWheelBytes(data[0]!, data[1]!);
+      // In `TPMS_88800001.exdf` (`21 03`..`21 07`), bytePos 8 (`data[6]`, factor 1.724 kPa / 0.25 psi) is pressure
+      const pByte = data.length >= 7 && data[0]! <= 0x05 ? data[6]! : data[0]!;
+      const tByte = data.length >= 8 && data[0]! <= 0x05 ? data[7]! : data[1]!;
+      const decoded = decodeMitsubishiTpmsWheelBytes(pByte, tByte);
       return {
         wheelIndex,
         defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
@@ -1016,21 +1096,26 @@ export async function readTpmsSensors(
       }
 
       if (ossWheels) {
-        lid2128 = await readLid(0x28);
+        for (const idLid of [0x28, 0xa6, 0xae]) {
+          lid2128 = await readLid(idLid);
+          if (lid2128 && lid2128.length >= 16) break;
+        }
       } else {
-        for (const lid of [0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x28]) {
+        for (const lid of [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x28, 0xa6, 0xae]) {
           const data = await readLid(lid);
           if (!data) continue;
           if (lid === 0x01) lid2101 = data;
-          else if (lid >= 0x02 && lid <= 0x05 && data.length >= 2) {
+          else if (lid >= 0x03 && lid <= 0x07 && data.length >= 7) {
+            individualWheels[lid - 0x03] = data;
+          } else if (lid >= 0x02 && lid <= 0x05 && data.length >= 2) {
             individualWheels[lid - 0x02] = data;
           } else if (lid === 0x10) {
             lid2110 = data;
             if (data.length <= 6) individualWheels[0] = data;
           } else if (lid >= 0x11 && lid <= 0x15) {
             individualWheels[lid - 0x11] = data;
-          } else if (lid === 0x28) {
-            lid2128 = data;
+          } else if (lid === 0x28 || lid === 0xa6 || lid === 0xae) {
+            if (!lid2128 || lid2128.length < 16) lid2128 = data;
           }
         }
       }
@@ -1118,13 +1203,21 @@ function decodeSasSteeringWord(data: number[]): number | null {
   return Math.abs(angle) <= 720 ? angle : null;
 }
 
-/** ABS/ASC Data List «Steering angle»: `21 02`, little-endian, 0.1° per bit. */
+/**
+ * ABS/ASC Data List «Steering wheel angle sensor» (`ASC_42000018.exdf`..`ASC_42880012.exdf`):
+ * `21 02`, `byte_pos = 2, byte_len = 2, byte_order = 2` (Big-Endian), `code_type = 1` (signed 2's complement), `factor = 0.1°`.
+ * Falls back to Little-Endian only if the Big-Endian value exceeds ±720°.
+ */
 function decodeAbsSteeringWord(data: number[]): number | null {
   if (data.length < 2) return null;
-  const word = data[0]! | (data[1]! << 8);
-  const signed = word >= 0x8000 ? word - 0x10000 : word;
-  const angle = Number((signed * 0.1).toFixed(1));
-  return Math.abs(angle) <= 720 ? angle : null;
+  const wordBe = (data[0]! << 8) | data[1]!;
+  const signedBe = wordBe >= 0x8000 ? wordBe - 0x10000 : wordBe;
+  const angleBe = Number((signedBe * 0.1).toFixed(1));
+  if (Math.abs(angleBe) <= 720) return angleBe;
+  const wordLe = data[0]! | (data[1]! << 8);
+  const signedLe = wordLe >= 0x8000 ? wordLe - 0x10000 : wordLe;
+  const angleLe = Number((signedLe * 0.1).toFixed(1));
+  return Math.abs(angleLe) <= 720 ? angleLe : null;
 }
 
 /**
@@ -1265,33 +1358,50 @@ export async function readMitsubishiMeter(elm: Elm327Client): Promise<Mitsubishi
   try {
     const passport = await readMitsubishiKwpPassport(elm);
     let fuelLiters: number | null = null;
+    let fuelPercent: number | null = null;
+    let fuelSensorOhm: number | null = null;
     let fuelRawByte: number | null = null;
     let rawFuelHex: string | null = null;
     let odometerKm: number | null = null;
     let rawOdoHex: string | null = null;
 
-    try {
-      const rawA3 = await elm.sendPayload("21A3", 2_000);
-      const dataA3 = extractKwp21Data(rawA3, 0xa3);
-      if (dataA3 && dataA3.length >= 1) {
-        rawFuelHex = dataA3.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-        const cByte = dataA3.length >= 3 ? dataA3[2]! : dataA3[0]!;
-        fuelRawByte = cByte;
-        fuelLiters = Math.max(0, Number(((cByte - 16) * 0.7).toFixed(1)));
+    for (const fuelLid of [0xa3, 0xc3]) {
+      try {
+        const lidHex = fuelLid.toString(16).padStart(2, "0").toUpperCase();
+        const rawFuel = await elm.sendPayload(`21${lidHex}`, 2_000);
+        const dataFuel = extractKwp21Data(rawFuel, fuelLid);
+        if (dataFuel && dataFuel.length >= 1) {
+          rawFuelHex = dataFuel.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          if (dataFuel.length >= 3) {
+            const rawOhm = dataFuel[0]! + (dataFuel[1]! << 8);
+            if (rawOhm > 0 && rawOhm < 0xffff) {
+              fuelSensorOhm = Number((rawOhm * 0.1).toFixed(1));
+            }
+          }
+          const cByte = dataFuel.length >= 3 ? dataFuel[2]! : dataFuel[0]!;
+          fuelRawByte = cByte;
+          fuelPercent = Math.max(0, Math.min(100, cByte - 16));
+          fuelLiters = Math.max(0, Number(((cByte - 16) * 0.7).toFixed(1)));
+          break;
+        }
+      } catch {
+        /* try next fuel LID */
       }
-    } catch {
-      /* ignore */
     }
 
-    try {
-      const rawAD = await elm.sendPayload("21AD", 2_000);
-      const dataAD = extractKwp21Data(rawAD, 0xad);
-      if (dataAD && dataAD.length >= 3) {
-        rawOdoHex = dataAD.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-        odometerKm = decodeMitsubishiOdometerKm(dataAD);
+    for (const odoLid of [0xad, 0xcd]) {
+      try {
+        const lidHex = odoLid.toString(16).padStart(2, "0").toUpperCase();
+        const rawOdo = await elm.sendPayload(`21${lidHex}`, 2_000);
+        const dataOdo = extractKwp21Data(rawOdo, odoLid);
+        if (dataOdo && dataOdo.length >= 3) {
+          rawOdoHex = dataOdo.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          odometerKm = decodeMitsubishiOdometerKm(dataOdo);
+          if (odometerKm != null) break;
+        }
+      } catch {
+        /* try next odometer LID */
       }
-    } catch {
-      /* ignore */
     }
 
     return {
@@ -1300,6 +1410,8 @@ export async function readMitsubishiMeter(elm: Elm327Client): Promise<Mitsubishi
       partNumber: passport.partNumber,
       vin: passport.vin,
       fuelLiters,
+      fuelPercent,
+      fuelSensorOhm,
       fuelRawByte,
       odometerKm,
       rawFuelHex,

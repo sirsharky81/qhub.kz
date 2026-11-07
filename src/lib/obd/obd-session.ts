@@ -23,6 +23,7 @@ import {
   type SasCalibrationResult,
   type TpmsModuleReport,
 } from "./mitsubishi-modules";
+import { parseMitsubishiModuleIdentity } from "./mitsubishi-mut-monitor";
 import {
   readMitsubishiTpmsDidIds,
   runMitsubishiTpmsRoutine,
@@ -180,6 +181,7 @@ export interface ModuleDtcReport {
   responded: boolean;
   systemName: string | null;
   partNumber: string | null;
+  diagVersion?: string | null;
   dtcs: ModuleDtcItem[];
   rawStatus: string;
 }
@@ -191,6 +193,7 @@ export interface ModuleDtcTarget {
   safetyCritical: boolean;
   canSafeClear: boolean;
   mode03Fallback?: boolean;
+  mitsubishiKwp?: boolean;
 }
 
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
@@ -1385,7 +1388,6 @@ export class ObdBleSession {
     ];
 
     const out: ModuleDtcReport[] = [];
-    const allowMitsubishiKwp = !catalogTargets?.length;
     try {
       await this.elm!.sendCommand("ATST20");
     } catch {
@@ -1395,6 +1397,7 @@ export class ObdBleSession {
     try {
       for (const target of targets) {
         if (shouldStop?.()) break;
+        const allowMitsubishiKwp = target.mitsubishiKwp ?? !catalogTargets?.length;
         const txHex = target.tx.toString(16).toUpperCase();
         const rxHex = target.rx.toString(16).toUpperCase();
         onProgress?.(`Проверка ошибок ${target.title}…`, [...out]);
@@ -1403,6 +1406,7 @@ export class ObdBleSession {
         let sessionOpened = false;
         let systemName: string | null = null;
         let partNumber: string | null = null;
+        let diagVersion: string | null = null;
         const dtcs: ModuleDtcItem[] = [];
         let rawStatus = "Нет ответа";
 
@@ -1418,16 +1422,21 @@ export class ObdBleSession {
         }
 
         let kwpSessionOpened = false;
-        if (!responded && allowMitsubishiKwp) {
-          try {
-            const rawKwp10 = await this.udsExchange(target.tx, target.rx, "1092", 900);
-            const pKwp10 = parseUdsResponse(rawKwp10, 0x10);
-            if (pKwp10.kind !== "empty") {
-              responded = true;
-              if (pKwp10.kind === "positive") kwpSessionOpened = true;
+        if (!sessionOpened && allowMitsubishiKwp) {
+          for (const kwpSessionCmd of ["1092", "10C0"]) {
+            try {
+              const rawKwp10 = await this.udsExchange(target.tx, target.rx, kwpSessionCmd, 900);
+              const pKwp10 = parseUdsResponse(rawKwp10, 0x10);
+              if (pKwp10.kind !== "empty") {
+                responded = true;
+                if (pKwp10.kind === "positive") {
+                  kwpSessionOpened = true;
+                  break;
+                }
+              }
+            } catch {
+              /* ignore */
             }
-          } catch {
-            /* ignore */
           }
         }
 
@@ -1461,32 +1470,36 @@ export class ObdBleSession {
           /* ignore */
         }
 
-        // Fallback to KWP2000 18 00 FF 00 (ReadDTCByStatus) for Mitsubishi modules
+        // Fallback to KWP2000 18 00 FF 00 / 18 02 FF 00 (ReadDTCByStatus) for Mitsubishi modules
         if (allowMitsubishiKwp && (!responded || rawStatus.startsWith("UDS 19 02:") || kwpSessionOpened)) {
-          try {
-            const raw18 = await this.udsExchange(target.tx, target.rx, "1800FF00", 1_400);
-            const p18 = parseUdsResponse(raw18, 0x18);
-            if (p18.kind === "positive") {
-              responded = true;
-              const kwpDtcs = parseKwpDtcs18(p18.payload);
-              for (const d of kwpDtcs) {
-                if (!dtcs.some((existing) => existing.code === d.code)) {
-                  dtcs.push({
-                    code: d.code,
-                    active: d.active,
-                    description: d.description,
-                    remedy: d.remedy,
-                    statusByte: d.statusByte,
-                  });
+          const kwpDtcCmds = target.tx === 0x7e0 ? ["1800FF00", "1802FF00"] : ["1800FF00"];
+          for (const kwpCmd of kwpDtcCmds) {
+            try {
+              const raw18 = await this.udsExchange(target.tx, target.rx, kwpCmd, 1_400);
+              const p18 = parseUdsResponse(raw18, 0x18);
+              if (p18.kind === "positive") {
+                responded = true;
+                const kwpDtcs = parseKwpDtcs18(p18.payload);
+                for (const d of kwpDtcs) {
+                  if (!dtcs.some((existing) => existing.code === d.code)) {
+                    dtcs.push({
+                      code: d.code,
+                      active: d.active,
+                      description: d.description,
+                      remedy: d.remedy,
+                      statusByte: d.statusByte,
+                    });
+                  }
                 }
+                rawStatus =
+                  dtcs.length === 0
+                    ? "0 ошибок (KWP 18 00)"
+                    : `Найдено ошибок: ${dtcs.length} (KWP 18 00)`;
+                break;
               }
-              rawStatus =
-                dtcs.length === 0
-                  ? "0 ошибок (KWP 18 00)"
-                  : `Найдено ошибок: ${dtcs.length} (KWP 18 00)`;
+            } catch {
+              /* ignore */
             }
-          } catch {
-            /* ignore */
           }
         }
 
@@ -1550,18 +1563,23 @@ export class ObdBleSession {
           } catch {
             /* ignore */
           }
-          if (!partNumber && allowMitsubishiKwp) {
+          if ((!partNumber || !diagVersion) && allowMitsubishiKwp) {
             try {
               const raw87 = await this.udsExchange(target.tx, target.rx, "1A87", 800);
               const p87 = parseUdsResponse(raw87, 0x1a);
               if (p87.kind === "positive" && p87.payload.length > 2) {
-                const txt = p87.payload
-                  .slice(1)
-                  .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
-                  .join("")
-                  .replace(/\s+/g, " ")
-                  .trim();
-                if (txt.length >= 4) partNumber = txt;
+                const identity = parseMitsubishiModuleIdentity("1A87", p87.payload);
+                if (identity.partNumber) partNumber = partNumber ?? identity.partNumber;
+                if (identity.diagVersion) diagVersion = diagVersion ?? identity.diagVersion;
+                if (!partNumber) {
+                  const txt = p87.payload
+                    .slice(1)
+                    .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+                    .join("")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  if (txt.length >= 4) partNumber = txt;
+                }
               }
             } catch {
               /* ignore */
@@ -1592,6 +1610,7 @@ export class ObdBleSession {
           responded,
           systemName,
           partNumber,
+          diagVersion,
           dtcs,
           rawStatus,
         });

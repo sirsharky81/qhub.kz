@@ -620,8 +620,10 @@ export function parseUdsDtcs1902(payload: number[]): ParsedUdsDtc[] {
 }
 
 /**
- * Parses KWP2000 Service `18` (`18 00 FF 00`) response payload (`[count, hi, lo, status, ...]`)
- * used by Mitsubishi ETACS (`620`), Meter (`6A0`), TPMS (`773`/`600`), SAS (`622`), and ABS (`784`).
+ * Parses KWP2000 Service `18` (`18 00 FF 00` / `18 02 FF 00`) response payload (`[count, hi, lo, status, ...]`)
+ * according to `MutComm.dll` (`ConvertDTC` `[0x060012DB]`) and `MutEngine.dll` (`MutEngineDBGetDtcItemName` `[0x060001F2]`):
+ * - For `dtc_commethod = 1, 2`: `status & 0x60` is `0x60` (96) for Active DTC and `0x20` (32) for Stored / Memory DTC.
+ * - For `dtc_commethod = 3`: `status` in `1..39` is Active, `40` (`0x28`) is Stored / Memory.
  */
 export function parseKwpDtcs18(payload: number[]): ParsedUdsDtc[] {
   if (payload.length < 1) return [];
@@ -636,7 +638,13 @@ export function parseKwpDtcs18(payload: number[]): ParsedUdsDtc[] {
     if (b0 === 0 && b1 === 0) continue;
     const prefix = ["P", "C", "B", "U"][(b0 >> 6) & 0x03]!;
     const code = `${prefix}${(((b0 & 0x3f) << 8) | b1).toString(16).padStart(4, "0").toUpperCase()}`;
-    const active = (status & 0x20) !== 0 || (status & 0x01) !== 0 || (status & 0x40) !== 0;
+    const masked = status & 0x60;
+    const active =
+      status === 0x28
+        ? false
+        : masked !== 0
+          ? masked === 0x60
+          : status >= 1 && status <= 39;
     out.push({
       code,
       statusByte: status,

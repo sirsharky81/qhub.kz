@@ -150,12 +150,15 @@ async function pollOnce(
     }
   }
   let ids: (string | null)[] = [null, null, null, null, null];
-  try {
-    const request = assertRegistrationFrame(recipe, "2128");
-    const raw = await elm.sendPayload(request, 1_800);
-    ids = sensorIdsFrom2128(extractKwp21Data(raw, 0x28));
-  } catch {
-    /* the next poll reads the IDs again */
+  for (const idFrame of ["2128", "21A6"] as const) {
+    try {
+      const request = assertRegistrationFrame(recipe, idFrame);
+      const raw = await elm.sendPayload(request, 1_800);
+      ids = sensorIdsFrom2128(extractKwp21Data(raw, Number.parseInt(idFrame.slice(2), 16)));
+      if (ids.some((id) => id != null)) break;
+    } catch {
+      /* the next poll reads the IDs again */
+    }
   }
   // The routine poll is part of the MUT procedure. A missing poll answer does not cancel the wait.
   try {

@@ -279,7 +279,7 @@ describe("profile match by ECU version and part number", () => {
 });
 
 describe("decodeCatalogSignal", () => {
-  it("scales little-endian engine speed and maps enumerations", () => {
+  it("scales big-endian (byteOrder=2) and little-endian (byteOrder=1) words per MutComm.dll and maps enumerations", () => {
     const rpm: CatalogSignal = {
       id: "10022701-1",
       nameEn: "Engine speed",
@@ -297,7 +297,10 @@ describe("decodeCatalogSignal", () => {
       offset: 0,
       decimals: 0,
     };
-    expect(decodeCatalogSignal(rpm, [0x01, 0x10, 0x27])?.text).toBe("5000");
+    // byteOrder = 2 (CstParamTypeH.HighLow / Big-Endian): 0x2710 = 10000 -> * 0.5 = 5000
+    expect(decodeCatalogSignal(rpm, [0x01, 0x27, 0x10])?.text).toBe("5000");
+    // byteOrder = 1 (CstParamTypeH.LowHigh / Little-Endian): [0x10, 0x27] -> 0x2710 = 10000 -> * 0.5 = 5000
+    expect(decodeCatalogSignal({ ...rpm, byteOrder: 1 }, [0x01, 0x10, 0x27])?.text).toBe("5000");
     const ignition: CatalogSignal = {
       ...rpm,
       id: "220015009-1",

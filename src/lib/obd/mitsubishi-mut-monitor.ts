@@ -76,27 +76,115 @@ export function isTransmissionEcu(nameEn: string, nameRu: string): boolean {
   return /AT\/CVT|A-MT|TC-SST|АКП|вариатор|TCM/i.test(`${nameEn} ${nameRu}`);
 }
 
-const PART_NUMBER = /[0-9]{4}[A-Z][0-9]{3}/;
+const PART_NUMBER = /[0-9]{4}[A-Z][0-9]{3}[A-Z0-9]{0,2}/;
 
-/** Part number from `1A 87` / `21 87`, diagnostic version from the first two `1A 9C` data bytes. */
+export interface MitsubishiModuleIdentity {
+  partNumber: string | null;
+  diagVersion: string | null;
+  supplierId?: number | null;
+  hardwareVersion?: string | null;
+  softwareVersion?: string | null;
+  softwarePartNumber?: string | null;
+}
+
+function hexByte(value: number): string {
+  return (value & 0xff).toString(16).padStart(2, "0").toUpperCase();
+}
+
+function formatDiagVersionPair(hi: number | undefined, lo: number | undefined): string | null {
+  if (hi == null || lo == null) return null;
+  if ((hi === 0x00 && lo === 0x00) || (hi === 0xff && lo === 0xff)) return null;
+  return `${hexByte(hi)}${hexByte(lo)}`;
+}
+
+function extractAsciiSlice(bytes: number[]): string {
+  return bytes
+    .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
+    .join("")
+    .trim();
+}
+
+/**
+ * Parses ECU identification according to `MutComm.dll` (`GetECUHardwareInfo` `[0x060012CE]` & `GetECUSoftwareInfo` `[0x060012CF]`):
+ * - `1A 87` (`5A 87 ...`, 22 bytes total, `data` = bytes after `5A 87`):
+ *   - `byte[2]` (`data[0]`): `EcuOrigin`
+ *   - `byte[3]` (`data[1]`): `SupplierId`
+ *   - `byte[4..5]` (`data[2..3]`): `DiagVersion` (`EcuId` + `EcuDiagVer`, 4 hex chars)
+ *   - `byte[7..8]` (`data[5..6]`): `HardwareVersion`
+ *   - `byte[9..11]` (`data[7..9]`): `SoftwareVersion`
+ *   - `byte[12..21]` (`data[10..19]`, 10 bytes): `EcuHardwarePartNo` (ASCII)
+ * - `1A 86` (`5A 86 ...`, ZM Diesel, 18 bytes total):
+ *   - `byte[11]` (`data[9]`): `SupplierId`
+ *   - `byte[12..13]` (`data[10..11]`): `DiagVersion`
+ * - `1A 9C` (`5A 9C ...`, 21 bytes total, `data` = bytes after `5A 9C`):
+ *   - `byte[2]` (`data[0]`): `ModuleNum`
+ *   - `byte[4]` (`data[2]`): `SupplierId`
+ *   - `byte[5..6]` (`data[3..4]`): `DiagVersion`
+ *   - `byte[8..10]` (`data[6..8]`): `SoftwareVersion`
+ *   - `byte[11..20]` (`data[9..18]`, 10 bytes): `ECUSoftwarePartNo` (ASCII)
+ */
 export function parseMitsubishiModuleIdentity(
   request: string,
   payload: number[],
-): { partNumber: string | null; diagVersion: string | null } {
+): MitsubishiModuleIdentity {
   const compact = request.replace(/\s+/g, "").toUpperCase();
   const lid = payload[0] ?? -1;
   const data = payload.slice(1);
-  const isVersion = compact.endsWith("9C") || lid === 0x9c;
-  const isPart = compact.endsWith("87") || lid === 0x87;
-  let diagVersion: string | null = null;
-  if (isVersion && data.length >= 2 && data[0]! <= 0x0f) {
-    diagVersion = `${data[0]!.toString(16).padStart(2, "0")}${data[1]!.toString(16).padStart(2, "0")}`.toUpperCase();
+  const is9C = compact.endsWith("9C") || lid === 0x9c;
+  const is87 = compact.endsWith("87") || lid === 0x87;
+  const is86 = compact.endsWith("86") || lid === 0x86;
+
+  if (is87) {
+    const supplierId = data.length >= 2 ? data[1]! : null;
+    const diagVersion = formatDiagVersionPair(data[2], data[3]);
+    const hardwareVersion =
+      data.length >= 7 ? `${hexByte(data[5]!)}${hexByte(data[6]!)}` : null;
+    const softwareVersion =
+      data.length >= 10 ? `${hexByte(data[7]!)}${hexByte(data[8]!)}${hexByte(data[9]!)}` : null;
+    const hwSlice = data.length >= 14 ? extractAsciiSlice(data.slice(10, 20)) : "";
+    const fullAscii = extractAsciiSlice(data);
+    const partNumber =
+      hwSlice.match(PART_NUMBER)?.[0] ?? fullAscii.match(PART_NUMBER)?.[0] ?? null;
+    return {
+      partNumber,
+      diagVersion,
+      supplierId,
+      hardwareVersion,
+      softwareVersion,
+    };
   }
-  if (!isPart) return { partNumber: null, diagVersion };
-  const ascii = data
-    .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))
-    .join("");
-  return { partNumber: ascii.match(PART_NUMBER)?.[0] ?? null, diagVersion };
+
+  if (is86) {
+    const supplierId = data.length >= 10 ? data[9]! : null;
+    const diagVersion = formatDiagVersionPair(data[10], data[11]);
+    const hardwareVersion =
+      data.length >= 7 ? `${hexByte(data[5]!)}${hexByte(data[6]!)}` : null;
+    const fullAscii = extractAsciiSlice(data);
+    return {
+      partNumber: fullAscii.match(PART_NUMBER)?.[0] ?? null,
+      diagVersion,
+      supplierId,
+      hardwareVersion,
+    };
+  }
+
+  if (is9C) {
+    const supplierId = data.length >= 3 ? data[2]! : null;
+    const diagVersion =
+      formatDiagVersionPair(data[3], data[4]) ?? formatDiagVersionPair(data[0], data[1]);
+    const softwareVersion =
+      data.length >= 9 ? `${hexByte(data[6]!)}${hexByte(data[7]!)}${hexByte(data[8]!)}` : null;
+    const swSlice = data.length >= 13 ? extractAsciiSlice(data.slice(9, 19)) : "";
+    return {
+      partNumber: null,
+      diagVersion,
+      supplierId,
+      softwareVersion,
+      softwarePartNumber: swSlice || null,
+    };
+  }
+
+  return { partNumber: null, diagVersion: null };
 }
 
 export type MitsubishiServiceSet = "engine" | "gearbox" | "4wd" | "body";

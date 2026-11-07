@@ -1014,11 +1014,14 @@ describe("sendUds gate", () => {
     ]);
     expect(sasAngle?.angleDeg).toBe(0);
 
-    // KWP2000 Service 18 (18 00 FF 00) DTC parser: [count=1, 0xC1, 0x21, 0x20] -> U0121
-    const kwpDtcs = parseKwpDtcs18([0x01, 0xc1, 0x21, 0x20]);
-    expect(kwpDtcs).toHaveLength(1);
+    // KWP2000 Service 18 (18 00 FF 00) DTC parser per MutComm.dll + MutEngine.dll:
+    // status & 0x60 === 0x20 -> Stored (memory), status & 0x60 === 0x60 -> Active
+    const kwpDtcs = parseKwpDtcs18([0x02, 0xc1, 0x21, 0x20, 0xc1, 0x00, 0x60]);
+    expect(kwpDtcs).toHaveLength(2);
     expect(kwpDtcs[0]?.code).toBe("U0121");
-    expect(kwpDtcs[0]?.active).toBe(true);
+    expect(kwpDtcs[0]?.active).toBe(false);
+    expect(kwpDtcs[1]?.code).toBe("U0100");
+    expect(kwpDtcs[1]?.active).toBe(true);
 
     // Passive CAN broadcast decoder (0x236 steering, 0x318 AT gear, 0x154 fuel, 0x608 coolant)
     const sig236 = decodeCanBroadcastFrame("236", [0x10, 0x00, 0x05]); // 4096 = 0.0°

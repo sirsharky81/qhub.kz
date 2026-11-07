@@ -7,7 +7,7 @@ const REGISTRATION_TX = new Set([0x773, 0x600, 0x620, 0x7a1]);
 /** Start bytes verified from MUT fid 1908 / 11108 after qualifiers were read inside each skey. */
 const ROUTINE_START = /^31(?:2B|2C|A2|AD|AE)(?:00|01|06|07)$/;
 const ROUTINE_POLL = /^32(?:2B|2C|A2|AD|AE)$/;
-const RECEPTION_READ = /^21(?:2[3-7]|3[6-9A]|A[1-5]|28)$/;
+const RECEPTION_READ = /^21(?:2[3-7]|3[6-9A]|A[1-6]|AE|28)$/;
 const DID_READ = /^22104[1-4]$/;
 const DID_WRITE = /^2E104[1-4][0-9A-F]{8}$/;
 const BLANK_ID = /^(?:00000000|FFFFFFFF)$/;
@@ -102,7 +102,7 @@ function belongsToRecipe(recipe: TpmsRegistrationRecipe, hex: string): boolean {
     for (const mode of recipe.modes) {
       if (hex === mode.startRequest || hex === mode.pollRequest) return true;
     }
-    if (hex === "2128") return true;
+    if (hex === "2128" || hex === "21A6" || hex === "21AE") return true;
     return recipe.receptionLids.some((lid) => hex === `21${lid}`);
   }
   for (const wheel of recipe.wheels) {
@@ -142,11 +142,15 @@ export function tpmsReceptionState(dataAfterLid: number[] | null | undefined): T
   return "received";
 }
 
-/** Up to five IDs from KWP `21 28`. Blank `00000000` / `FFFFFFFF` stay empty. */
+/**
+ * Up to five 4-byte sensor IDs from KWP `21 28` / `21 A6` (`bytePos = 3, 7, 11, 15, 19`, 21 bytes after LID)
+ * or `21 AE` / `21 A2` (`bytePos = 4, 8, 12, 16, 20`, 22 bytes after LID).
+ * Blank `00000000` / `FFFFFFFF` stay empty.
+ */
 export function sensorIdsFrom2128(data: number[] | null | undefined): (string | null)[] {
   const ids: (string | null)[] = [null, null, null, null, null];
-  if (!data || data.length < 17) return ids;
-  const start = data.length % 4 === 1 ? 1 : 0;
+  if (!data || data.length < 16) return ids;
+  const start = data.length >= 22 ? 2 : data.length % 4 === 1 ? 1 : 0;
   for (let wheel = 0; wheel < 5; wheel++) {
     const pos = start + wheel * 4;
     if (pos + 4 > data.length) break;
