@@ -1036,7 +1036,12 @@ export class ObdBleSession {
         }
 
         let gotPositive = false;
-        for (const didHex of SUBARU_METER_12COLUMN_READ_DIDS) {
+        const queue: string[] = [...SUBARU_METER_12COLUMN_READ_DIDS];
+        const visited = new Set<string>();
+        while (queue.length > 0) {
+          const didHex = queue.shift()!.toUpperCase();
+          if (visited.has(didHex)) continue;
+          visited.add(didHex);
           try {
             const raw22 = await this.udsExchange(target.tx, target.rx, `22${didHex}`, 900);
             const parsed = parseUdsResponse(raw22, 0x22);
@@ -1057,6 +1062,13 @@ export class ObdBleSession {
               hex,
               decoded,
             });
+            if ((didNum === 0xa000 || didNum === 0xa020) && body.length === 4) {
+              const supported = decodeUdsDidSupportBitmap(didNum, body);
+              for (const childDid of supported) {
+                const childHex = childDid.toString(16).padStart(4, "0").toUpperCase();
+                if (!visited.has(childHex)) queue.push(childHex);
+              }
+            }
             if (didHex === "F190") {
               const ascii = body
                 .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
@@ -1084,6 +1096,7 @@ export class ObdBleSession {
       if (!vin) {
         for (const vinTarget of [
           { tx: 0x7e0, rx: 0x7e8 },
+          { tx: 0x7a2, rx: 0x7aa },
           { tx: 0x752, rx: 0x75a },
         ]) {
           try {
@@ -1108,6 +1121,17 @@ export class ObdBleSession {
           } catch {
             /* ignore */
           }
+        }
+      }
+      if (!vin) {
+        try {
+          const raw0902 = await this.udsExchange(0x7e0, 0x7e8, "0902", 1_100);
+          const parsed0902 = parseMode09Ascii(raw0902, 0x02);
+          if (parsed0902 && parsed0902.length >= 11) {
+            vin = parsed0902;
+          }
+        } catch {
+          /* ignore */
         }
       }
     } finally {

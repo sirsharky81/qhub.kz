@@ -6469,12 +6469,18 @@ export function extractAppliedModelAndOptionCodeFromDump(
       T: "G",
     };
     const rev = yearMap[vin[9] ?? ""] ?? baseApp[3] ?? "E";
-    if (vin.slice(3, 5) === "BT" || vin.slice(3, 5) === "BW") {
-      const series = vin.slice(3, 5);
-      const engineTrim = vin.slice(5, 7); // GU = Wilderness 2.4T, AN/GM/GL/GN = 2.4T XT, AA/AC/AD/AE = 2.5L
-      const isTurbo = vin[5] === "G" || engineTrim === "AN" || engineTrim === "AM";
+    const series = vin.slice(3, 5);
+    const engineTrim = vin.slice(5, 7);
+    if (series === "BT" || series === "BW") {
+      // GU/AU = Wilderness 2.4T, AN/GN/AL/GL/AM/GM = 2.4T XT, AA/AB/AC/AD/AE/AF/AT = 2.5L
+      const isTurbo =
+        vin[5] === "G" ||
+        engineTrim === "AN" ||
+        engineTrim === "AL" ||
+        engineTrim === "AM" ||
+        engineTrim === "AU";
       defaultUsDest = isTurbo ? "U4" : "U5";
-      // 7th char of Applied Model in SSM4 cgdwPHBWHoZ.mLW: '8' for 2023+ (D/E/F) or '8' in BTAAY*8, 'B' on 2022 Wilderness, 'L'/'C' on 2.5L
+      // 7th char of Applied Model in SSM4 cgdwPHBWHoZ.mLW: '8' for 2023+ (D/E/F) or '8' in BTAAY*8, 'B' on 2020-2022 2.4T, 'L'/'C' on 2.5L
       const seventhChar =
         rev === "E" || rev === "D" || rev === "F" || rev === "G"
           ? isTurbo
@@ -6484,29 +6490,50 @@ export function extractAppliedModelAndOptionCodeFromDump(
             ? "B"
             : "C";
       let gradeChar = "R";
-      if (engineTrim === "GU") {
+      if (engineTrim === "GU" || engineTrim === "AU") {
         gradeChar = "R"; // Wilderness (BTAEYR8 / BTACYRB)
-        defaultEquipSuffix = rev === "E" || rev === "D" ? "5L" : "5D";
+        defaultEquipSuffix = rev === "E" || rev === "D" || rev === "F" || rev === "G" ? "5L" : "5D";
       } else if (engineTrim === "GN" || engineTrim === "AN") {
         gradeChar = "H"; // Onyx XT
         defaultEquipSuffix = "5B";
-      } else if (engineTrim === "GL") {
+      } else if (engineTrim === "GL" || engineTrim === "AL") {
         gradeChar = "J"; // Limited XT
         defaultEquipSuffix = "7H";
-      } else if (engineTrim === "GM") {
+      } else if (engineTrim === "GM" || engineTrim === "AM") {
         gradeChar = "K"; // Touring XT
         defaultEquipSuffix = "8Y";
+      } else if (engineTrim === "AF" || engineTrim === "AT") {
+        gradeChar = "T"; // 2.5i Onyx Edition (Dual X-Mode)
+        defaultEquipSuffix = "5D";
       } else if (engineTrim === "AD") {
         gradeChar = "D"; // 2.5i Limited
         defaultEquipSuffix = "7H";
       } else if (engineTrim === "AE") {
         gradeChar = "E"; // 2.5i Touring
         defaultEquipSuffix = "8Y";
+      } else if (engineTrim === "AA" || engineTrim === "AB") {
+        gradeChar = "B"; // 2.5i Base
+        defaultEquipSuffix = "1B";
       } else {
         gradeChar = "C"; // 2.5i Premium
         defaultEquipSuffix = "3D";
       }
       baseApp = `${series}${isTurbo ? "A" : "9"}${rev}Y${gradeChar}${seventhChar}`;
+    } else if (series === "SK") {
+      defaultUsDest = "U5";
+      const isWilderness = engineTrim === "AU" || engineTrim === "GU" || vin[6] === "U";
+      const gradeChar = isWilderness ? "R" : "5";
+      defaultEquipSuffix = isWilderness ? "5D" : "4D";
+      baseApp = `SK9${rev}Y${gradeChar}C`;
+    } else if (series === "GT" || series === "GU") {
+      const is25 = vin[5] === "A" || vin[5] === "G" || rev >= "B";
+      defaultUsDest = "U5";
+      defaultEquipSuffix = "4D";
+      baseApp = `${series}${is25 ? "A" : "7"}${rev}Y7C`;
+    } else if (series === "WM") {
+      defaultUsDest = "U4";
+      defaultEquipSuffix = "7H";
+      baseApp = `WMA${rev}Y7B`;
     }
   }
 
@@ -6538,11 +6565,20 @@ export function extractAppliedModelAndOptionCodeFromDump(
   const canC0 = `C0${defaultEquipSuffix}`;
   const canC5 = `C5${defaultEquipSuffix}`;
 
+  const regSourceText =
+    a002Byte || a011Byte
+      ? `Из регистров приборки 783 (A002=${a002Byte ?? "—"}, A011=${a011Byte ?? "—"}) считан активный регион ${activeDest} (${actualRegion}).`
+      : `Приборка хранит вариант в битовой маске (без открытой ASCII-строки).`;
+  const vinSourceText =
+    dump.vin && dump.vin.length === 17
+      ? `По VIN ${dump.vin} определена модель ${baseApp} и типовой пакет ${actualOpt} (хвост пакета опций ${defaultEquipSuffix} при необходимости сверьте с табличкой на стойке B).`
+      : `VIN из ЭБУ не получен — использован введённый шаблон ${baseApp} + ${actualOpt} (проверьте 7+4 знака по табличке на стойке B).`;
+
   return {
     foundDirectAscii: false,
     directAppliedModel: null,
     directOptionCode: null,
-    sourceDid: a002Byte ? "783 DID A002" : null,
+    sourceDid: a002Byte ? "783 DID A002" : a011Byte ? "783 DID A011" : null,
     actualRegion,
     actualAppliedModel: baseApp,
     actualOptionCode: actualOpt,
@@ -6551,7 +6587,7 @@ export function extractAppliedModelAndOptionCodeFromDump(
     inferredRegion: actualRegion,
     inferredAppliedModel: baseApp,
     inferredOptionCode: actualOpt,
-    explanationRu: `Приборка хранит вариант в битовой маске (без открытой ASCII-строки). По VIN (${dump.vin ?? "стойка B"}) и регистрам приборки фактический код комплектации: ${baseApp} + ${actualOpt} (${actualRegion}). Для перевода в °C и км/ч рекомендуется канадский код: ${baseApp} + ${canC0}.`,
+    explanationRu: `${regSourceText} ${vinSourceText} Для перевода в °C и км/ч рекомендуется канадский код: ${baseApp} + ${canC0}.`,
   };
 }
 

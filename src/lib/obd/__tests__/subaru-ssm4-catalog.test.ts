@@ -252,5 +252,41 @@ describe("subaru-ssm4-catalog", () => {
     expect(liveA002Dump.actualRegion).toBe("USA (U4 / U5 / U6 — °F, мили)");
     expect(liveA002Dump.recommendedCanadianOptionC0).toBe("C05L");
     expect(liveA002Dump.recommendedCanadianOptionC5).toBe("C55L");
+
+    // Different Outback: 2021 Outback 2.5i Limited (VIN 4S4BTADC5M3123456) with A002 = 05 (U5 PZEV)
+    const outback2021Lim = extractAppliedModelAndOptionCodeFromDump({
+      vin: "4S4BTADC5M3123456",
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            { did: "A002", label: "DID A002", hex: "05", decoded: "05" },
+            { did: "A011", label: "DID A011", hex: "FF", decoded: "FF" },
+          ],
+        },
+      ],
+    });
+    expect(outback2021Lim.actualAppliedModel).toBe("BT9BYDC");
+    expect(outback2021Lim.actualOptionCode).toBe("U57H");
+    expect(outback2021Lim.actualRegion).toBe("USA (U4 / U5 / U6 — °F, мили)");
+    expect(outback2021Lim.recommendedCanadianOptionC0).toBe("C07H");
+    expect(outback2021Lim.recommendedCanadianOptionC5).toBe("C57H");
+
+    // Different Outback: 2023 Outback Onyx XT 2.4T (VIN 4S4BTGND8P3123456) already converted to Canada (A002 = 03, A011 = 00)
+    const outback2023OnyxCa = extractAppliedModelAndOptionCodeFromDump({
+      vin: "4S4BTGND8P3123456",
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            { did: "A002", label: "DID A002", hex: "03", decoded: "03" },
+            { did: "A011", label: "DID A011", hex: "00", decoded: "00" },
+          ],
+        },
+      ],
+    });
+    expect(outback2023OnyxCa.actualAppliedModel).toBe("BTADYH8");
+    expect(outback2023OnyxCa.actualOptionCode).toBe("C05B");
+    expect(outback2023OnyxCa.actualRegion).toBe("CANADA (C0 / C5 — °C, км/ч)");
   });
 });
