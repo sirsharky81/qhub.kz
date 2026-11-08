@@ -8,7 +8,7 @@ import {
   type MitsubishiServiceExecutionResult,
 } from "./mitsubishi-service-procedures";
 import { decodeSubaruTpmsBytes } from "./subaru-decode";
-import { parseUdsResponse } from "./uds";
+import { parseKwpDtcs18, parseUdsResponse } from "./uds";
 
 export interface MitsubishiTcmTelemetry {
   transmissionType: "8AT" | "5AT" | "CVT";
@@ -60,6 +60,9 @@ export interface TpmsWheelReading {
   pressureKpa: number | null;
   pressurePsi: number | null;
   temperatureC: number | null;
+  /** Discrete transmitter battery state from MUT-III TPMS (`C1910..C1950` / `C1915..C1955` + ID reception). */
+  batteryStatus?: "ok" | "low" | "off" | "unknown";
+  batteryText?: string | null;
   statusText: string;
 }
 
@@ -911,20 +914,23 @@ export function decodeMitsubishiTpmsPayload(options: {
  * `extractKwp21Data` already drops `61` and the LID, so those positions are indexes 8 and 9.
  */
 export function decodeMitsubishiOssTyreData(data: number[] | null | undefined): {
+  idReceived: boolean;
   pressureBar: number | null;
   pressureKpa: number | null;
   pressurePsi: number | null;
   temperatureC: number | null;
 } | null {
   if (!data || data.length < 9) return null;
+  const idReceived = data[0] === 0x01;
   const rawP = data[8]!;
   const rawT = data[9];
-  const temperatureC = rawT == null ? null : rawT - 50;
+  const temperatureC = rawT == null || rawT === 0xff ? null : rawT - 50;
   if (rawP === 0x00 || rawP === 0xff) {
-    return { pressureBar: null, pressureKpa: null, pressurePsi: null, temperatureC };
+    return { idReceived, pressureBar: null, pressureKpa: null, pressurePsi: null, temperatureC };
   }
   const pressureKpa = Math.round(rawP * 1.379);
   return {
+    idReceived,
     pressureKpa,
     pressureBar: Number((pressureKpa / 100).toFixed(2)),
     pressurePsi: Number((pressureKpa * 0.145038).toFixed(1)),
@@ -937,6 +943,7 @@ export function decodeMitsubishiOssTyreSet(frames: (number[] | null | undefined)
   if (!frames.some((frame) => frame != null && frame.length >= 9)) return null;
   return ([1, 2, 3, 4, 5] as const).map((wheelIndex, index) => {
     const decoded = decodeMitsubishiOssTyreData(frames[index]);
+    const active = decoded?.pressureBar != null || Boolean(decoded?.idReceived);
     return {
       wheelIndex,
       defaultLabel: DEFAULT_WHEEL_NAMES[wheelIndex],
@@ -945,8 +952,58 @@ export function decodeMitsubishiOssTyreSet(frames: (number[] | null | undefined)
       pressureKpa: decoded?.pressureKpa ?? null,
       pressurePsi: decoded?.pressurePsi ?? null,
       temperatureC: decoded?.temperatureC ?? null,
+      batteryStatus: active ? "ok" : "unknown",
+      batteryText: active ? "Батарея: ОК" : null,
       statusText: decoded?.pressureBar != null ? "OK" : frames[index] ? "Нет давления" : "Нет данных",
     };
+  });
+}
+
+/**
+ * Applies MUT-III SE transmitter battery & mode DTCs (`C1910..C1950` Battery voltage, `C1915..C1955` OFF mode, `C1911..C1951` ID reception fail)
+ * from `18 00 FF 00` to the 5 TPMS wheel readings.
+ */
+export function applyMitsubishiTpmsDtcStatus(
+  wheels: TpmsWheelReading[],
+  dtcCodes: readonly string[],
+  dtcReadSucceeded = true,
+): TpmsWheelReading[] {
+  const codeSet = new Set(dtcCodes.map((c) => c.trim().toUpperCase()));
+  return wheels.map((wheel) => {
+    const i = wheel.wheelIndex;
+    const lowBattCode = `C19${i}0`;
+    const noRxCode = `C19${i}1`;
+    const offModeCode = `C19${i}5`;
+
+    if (codeSet.has(lowBattCode)) {
+      return {
+        ...wheel,
+        batteryStatus: "low",
+        batteryText: `Батарея разряжена (${lowBattCode})`,
+      };
+    }
+    if (codeSet.has(offModeCode)) {
+      return {
+        ...wheel,
+        batteryStatus: "off",
+        batteryText: `Спящий режим OFF (${offModeCode})`,
+      };
+    }
+    if (codeSet.has(noRxCode) && wheel.pressureBar == null) {
+      return {
+        ...wheel,
+        batteryStatus: "unknown",
+        batteryText: `Нет связи (${noRxCode})`,
+      };
+    }
+    if (wheel.pressureBar != null || (dtcReadSucceeded && wheel.batteryStatus === "ok")) {
+      return {
+        ...wheel,
+        batteryStatus: "ok",
+        batteryText: "Батарея: ОК",
+      };
+    }
+    return wheel;
   });
 }
 
@@ -1126,16 +1183,33 @@ export async function readTpmsSensors(
         }
       }
 
+      let tpmsDtcCodes: string[] = [];
+      let tpmsDtcReadOk = false;
+      try {
+        const raw18 = await elm.sendPayload("1800FF00", 1_400);
+        const p18 = parseUdsResponse(raw18, 0x18);
+        if (p18.kind === "positive") {
+          tpmsDtcReadOk = true;
+          tpmsDtcCodes = parseKwpDtcs18(p18.payload).map((d) => d.code);
+          if (tpmsDtcCodes.length > 0) {
+            rawLogs.push(`1800FF00: ${tpmsDtcCodes.join(",")}`);
+          }
+        }
+      } catch {
+        /* optional DTC read for transmitter battery status */
+      }
+
       const legacy = decodeMitsubishiTpmsPayload({
         lid2101,
         lid2110,
         lid2128,
         individualWheels: individualWheels.some(Boolean) ? individualWheels : undefined,
       });
-      const wheels = (ossWheels ?? legacy).map((wheel, index) => ({
+      const mergedWheels = (ossWheels ?? legacy).map((wheel, index) => ({
         ...wheel,
         sensorIdHex: wheel.sensorIdHex ?? legacy[index]?.sensorIdHex ?? null,
       }));
+      const wheels = applyMitsubishiTpmsDtcStatus(mergedWheels, tpmsDtcCodes, tpmsDtcReadOk);
       const hasReading = wheels.some((wheel) => wheel.pressureBar != null || wheel.sensorIdHex);
       if (hasReading) {
         return {

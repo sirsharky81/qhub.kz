@@ -18,6 +18,7 @@ import {
   writeEtacsSingleBlock,
 } from "../mitsubishi-etacs";
 import {
+  applyMitsubishiTpmsDtcStatus,
   calibrateMitsubishiSasZero,
   decodeCanBroadcastFrame,
   decodeMitsubishiAt2102And2104,
@@ -989,6 +990,14 @@ describe("sendUds gate", () => {
     expect(tpmsWheels[0]?.temperatureC).toBe(25);
     expect(tpmsWheels[4]?.wheelIndex).toBe(5);
     expect(tpmsWheels[4]?.sensorIdHex).toBe("11223305");
+
+    const withBattery = applyMitsubishiTpmsDtcStatus(tpmsWheels, ["C1920", "C1955"], true);
+    expect(withBattery[0]?.batteryStatus).toBe("ok");
+    expect(withBattery[0]?.batteryText).toBe("Батарея: ОК");
+    expect(withBattery[1]?.batteryStatus).toBe("low");
+    expect(withBattery[1]?.batteryText).toContain("C1920");
+    expect(withBattery[4]?.batteryStatus).toBe("off");
+    expect(withBattery[4]?.batteryText).toContain("C1955");
 
     const oss = Array.from({ length: 10 }, () => 0);
     oss[8] = 160;

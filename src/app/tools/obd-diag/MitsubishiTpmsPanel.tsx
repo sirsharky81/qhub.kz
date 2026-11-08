@@ -139,9 +139,9 @@ export function MitsubishiTpmsPanel({ session, phase, busy }: Props) {
 
       <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-3">
         <div>
-          <h3 className="text-sm font-bold text-gray-900">Давление шин</h3>
+          <h3 className="text-sm font-bold text-gray-900">Давление шин и батарейки датчиков</h3>
           <p className="mt-1 text-[11px] text-gray-500">
-            Чтение с блока TPMS: Pajero Sport 773, Outlander и ASX 600, кузов 620 или 7A1.
+            Чтение с блока TPMS: Pajero Sport 773, Outlander и ASX 600, кузов 620 или 7A1. Заряд батареек передатчиков проверяется по статусу приёма и флагам MUT-III C1910–C1950 (ОК / Разряжена).
           </p>
         </div>
 
@@ -198,8 +198,25 @@ export function MitsubishiTpmsPanel({ session, phase, busy }: Props) {
               const kpa = wheel.pressureKpa ?? (bar != null ? Math.round(bar * 100) : null);
               return (
                 <div key={wheel.wheelIndex} className="rounded-lg border border-gray-200 p-2.5">
-                  <div className="text-[10px] font-semibold text-gray-700">
-                    {WHEEL_LABELS[wheel.wheelIndex - 1] ?? wheel.defaultLabel}
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="text-[10px] font-semibold text-gray-700">
+                      {WHEEL_LABELS[wheel.wheelIndex - 1] ?? wheel.defaultLabel}
+                    </div>
+                    {wheel.batteryText ? (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                          wheel.batteryStatus === "low"
+                            ? "bg-red-100 text-red-800"
+                            : wheel.batteryStatus === "off"
+                              ? "bg-amber-100 text-amber-800"
+                              : wheel.batteryStatus === "ok"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {wheel.batteryText}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="mt-0.5 font-mono text-sm font-bold text-gray-900">
                     {bar != null ? `${bar.toFixed(2)} бар` : "—"}
