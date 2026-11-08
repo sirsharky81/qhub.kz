@@ -158,8 +158,8 @@ interface RawDb {
   dtcMasters?: Record<string, Record<string, { en?: string; ru?: string }>>;
 }
 
-const UNSAFE_NAME = /SRS|AIR\s*BAG|ABS|ASC|ASTC|WSS|SAS|STEERING ANGLE|EPS|POWER STEERING|EPB/i;
-const FORBIDDEN_CLEAR_TX = new Set(["780", "7B0", "746", "787", "784", "622", "6E0", "796", "7E2", "7E5", "610"]);
+const UNSAFE_NAME = /SAS|STEERING ANGLE|EPS|POWER STEERING|EPB/i;
+const FORBIDDEN_CLEAR_TX = new Set(["746", "787", "622", "796", "7E2", "7E5", "610"]);
 
 let cached: RawDb | null = null;
 
@@ -313,6 +313,50 @@ function canSafeClear(nameEn: string, tx: string): boolean {
   return true;
 }
 
+function formatCatalogEcuNameRu(nameEn: string, rawNameRu?: string): string {
+  const ru = (rawNameRu || nameEn || "").trim();
+  const en = nameEn.trim().toUpperCase();
+  if (en === "MPI/GDI/DIESEL" || en.startsWith("MPI/")) {
+    return /двигател/i.test(ru) ? ru : `Двигатель (${ru || nameEn})`;
+  }
+  if (en === "AT/CVT/A-MT/TC-SST") {
+    return /акпп|вариатор|кпп/i.test(ru) ? ru : `АКПП / CVT (${ru || nameEn})`;
+  }
+  if (en === "POWER GATE" || en === "PTG") {
+    return `Электропривод багажника (${nameEn})`;
+  }
+  if (en === "SRS-AIR BAG") {
+    return /подушк/i.test(ru) && ru.length <= 24 ? ru : "Подушки безопасности (SRS-AIR BAG)";
+  }
+  if (en === "ABS/ASC/ASTC/WSS") {
+    return "Тормоза ABS / ASC / ASTC";
+  }
+  if (en === "METER") {
+    return "Приборка (Meter)";
+  }
+  if (en === "AIR CONDITIONER") {
+    return "Климат-контроль (A/C)";
+  }
+  if (en === "STEERING ANGLE SENSOR") {
+    return "Датчик угла руля (SAS)";
+  }
+  return ru || nameEn;
+}
+
+function ecuSortPriority(ecu: CatalogEcu): number {
+  const en = ecu.nameEn.trim().toUpperCase();
+  if (ecu.coding === "engine" || en === "MPI/GDI/DIESEL" || (ecu.txCanId === "7E0" && en !== "AUTO CRUISE")) {
+    return 1;
+  }
+  if (ecu.txCanId === "7E1" || en.includes("AT/CVT")) return 2;
+  if (ecu.txCanId === "7B6" || en.includes("SS4") || en.includes("AWC") || en.includes("4WD")) return 3;
+  if (ecu.txCanId === "784" || en.includes("ABS") || en.includes("ASC")) return 4;
+  if (ecu.txCanId === "6E0" || en.includes("SRS")) return 5;
+  if (ecu.coding === "etacs" || en === "ETACS") return 6;
+  if (ecu.txCanId === "6A0" || en === "METER") return 7;
+  return 10;
+}
+
 function allSkeysOf(ecu: RawEcu): string[] {
   const specific: string[] = [];
   const fallback: string[] = [];
@@ -343,7 +387,7 @@ export function projectEcus(vehicle: RawVehicle): CatalogEcu[] {
     ecus.push({
       sysKey: ecu.sysKey,
       nameEn,
-      nameRu: ecu.nameRu || nameEn,
+      nameRu: formatCatalogEcuNameRu(nameEn, ecu.nameRu),
       txCanId: tx,
       rxCanId: rx,
       dtcMasterId: (ecu.dtcMasterId || "").padStart(2, "0"),
@@ -352,6 +396,7 @@ export function projectEcus(vehicle: RawVehicle): CatalogEcu[] {
       ...(skeys.length > 0 ? { skeys } : {}),
     });
   }
+  ecus.sort((a, b) => ecuSortPriority(a) - ecuSortPriority(b) || a.sysKey - b.sysKey);
   return ecus;
 }
 

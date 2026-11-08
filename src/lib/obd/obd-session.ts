@@ -1345,15 +1345,15 @@ export class ObdBleSession {
         tx: 0x7b0,
         rx: 0x7b8,
         title: "Тормоза ABS / VDC / Электроручник EPB (7B0 → 7B8)",
-        safetyCritical: true,
-        canSafeClear: false,
+        safetyCritical: false,
+        canSafeClear: true,
       },
       {
         tx: 0x780,
         rx: 0x788,
         title: "Подушки безопасности SRS Airbag (780 → 788)",
-        safetyCritical: true,
-        canSafeClear: false,
+        safetyCritical: false,
+        canSafeClear: true,
       },
       {
         tx: 0x620,
@@ -1394,8 +1394,15 @@ export class ObdBleSession {
         tx: 0x784,
         rx: 0x785,
         title: "Mitsubishi Тормоза ABS / ASC (784 → 785)",
-        safetyCritical: true,
-        canSafeClear: false,
+        safetyCritical: false,
+        canSafeClear: true,
+      },
+      {
+        tx: 0x6e0,
+        rx: 0x51c,
+        title: "Mitsubishi Подушки безопасности SRS (6E0 → 51C)",
+        safetyCritical: false,
+        canSafeClear: true,
       },
       {
         tx: 0x688,
@@ -1408,7 +1415,7 @@ export class ObdBleSession {
 
     const out: ModuleDtcReport[] = [];
     try {
-      await this.elm!.sendCommand("ATST20");
+      await this.elm!.sendCommand("ATST64");
     } catch {
       /* ignore */
     }
@@ -1423,25 +1430,14 @@ export class ObdBleSession {
 
         let responded = false;
         let sessionOpened = false;
+        let kwpSessionOpened = false;
         let systemName: string | null = null;
         let partNumber: string | null = null;
         let diagVersion: string | null = null;
         const dtcs: ModuleDtcItem[] = [];
         let rawStatus = "Нет ответа";
 
-        try {
-          const raw10 = await this.udsExchange(target.tx, target.rx, "1003", 900);
-          const p10 = parseUdsResponse(raw10, 0x10);
-          if (p10.kind !== "empty") {
-            responded = true;
-            if (p10.kind === "positive") sessionOpened = true;
-          }
-        } catch {
-          /* ignore */
-        }
-
-        let kwpSessionOpened = false;
-        if (!sessionOpened && allowMitsubishiKwp) {
+        if (allowMitsubishiKwp) {
           for (const kwpSessionCmd of ["1092", "10C0"]) {
             try {
               const rawKwp10 = await this.udsExchange(target.tx, target.rx, kwpSessionCmd, 900);
@@ -1459,38 +1455,21 @@ export class ObdBleSession {
           }
         }
 
-        // Try reading UDS 19 02 FF (ReadDTCInformation: reportDTCByStatusMask)
-        try {
-          const raw19 = await this.udsExchange(target.tx, target.rx, "1902FF", 1_400);
-          const p19 = parseUdsResponse(raw19, 0x19);
-          if (p19.kind === "positive") {
-            responded = true;
-            const parsedDtcs: ParsedUdsDtc[] = parseUdsDtcs1902(p19.payload);
-            for (const d of parsedDtcs) {
-              if (!dtcs.some((existing) => existing.code === d.code)) {
-                dtcs.push({
-                  code: d.code,
-                  active: d.active,
-                  description: d.description,
-                  remedy: d.remedy,
-                  statusByte: d.statusByte,
-                });
-              }
+        if (!kwpSessionOpened) {
+          try {
+            const raw10 = await this.udsExchange(target.tx, target.rx, "1003", 900);
+            const p10 = parseUdsResponse(raw10, 0x10);
+            if (p10.kind !== "empty") {
+              responded = true;
+              if (p10.kind === "positive") sessionOpened = true;
             }
-            rawStatus =
-              dtcs.length === 0
-                ? "0 ошибок (UDS 19 02)"
-                : `Найдено ошибок: ${dtcs.length} (UDS 19 02)`;
-          } else if (p19.kind === "negative") {
-            responded = true;
-            rawStatus = `UDS 19 02: ${p19.nrcText ?? "не поддерживается"}`;
+          } catch {
+            /* ignore */
           }
-        } catch {
-          /* ignore */
         }
 
-        // Fallback to KWP2000 18 00 FF 00 / 18 02 FF 00 (ReadDTCByStatus) for Mitsubishi modules
-        if (allowMitsubishiKwp && (!responded || rawStatus.startsWith("UDS 19 02:") || kwpSessionOpened)) {
+        let kwpReadPositive = false;
+        if (allowMitsubishiKwp && (kwpSessionOpened || target.mode03Fallback)) {
           const kwpDtcCmds = target.tx === 0x7e0 ? ["1800FF00", "1802FF00"] : ["1800FF00"];
           for (const kwpCmd of kwpDtcCmds) {
             try {
@@ -1498,6 +1477,7 @@ export class ObdBleSession {
               const p18 = parseUdsResponse(raw18, 0x18);
               if (p18.kind === "positive") {
                 responded = true;
+                kwpReadPositive = true;
                 const kwpDtcs = parseKwpDtcs18(p18.payload);
                 for (const d of kwpDtcs) {
                   if (!dtcs.some((existing) => existing.code === d.code)) {
@@ -1522,8 +1502,75 @@ export class ObdBleSession {
           }
         }
 
-        // Fallback or supplement with OBD Mode 03 on ECM/TCM (7E0/7E1) or when 19 02 was unsupported
-        if (target.mode03Fallback || !responded || rawStatus.startsWith("UDS 19 02:")) {
+        // Try reading UDS 19 02 FF when the module answered in UDS or when KWP 18 00 was not supported
+        if (!kwpReadPositive && (responded || target.mode03Fallback || !allowMitsubishiKwp)) {
+          try {
+            const raw19 = await this.udsExchange(target.tx, target.rx, "1902FF", 1_400);
+            const p19 = parseUdsResponse(raw19, 0x19);
+            if (p19.kind === "positive") {
+              responded = true;
+              const parsedDtcs: ParsedUdsDtc[] = parseUdsDtcs1902(p19.payload);
+              for (const d of parsedDtcs) {
+                if (!dtcs.some((existing) => existing.code === d.code)) {
+                  dtcs.push({
+                    code: d.code,
+                    active: d.active,
+                    description: d.description,
+                    remedy: d.remedy,
+                    statusByte: d.statusByte,
+                  });
+                }
+              }
+              rawStatus =
+                dtcs.length === 0
+                  ? "0 ошибок (UDS 19 02)"
+                  : `Найдено ошибок: ${dtcs.length} (UDS 19 02)`;
+            } else if (p19.kind === "negative") {
+              responded = true;
+              rawStatus = `UDS 19 02: ${p19.nrcText ?? "не поддерживается"}`;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        // Fallback to KWP 18 00 if UDS 19 02 returned negative and KWP was not tried yet
+        if (allowMitsubishiKwp && !kwpReadPositive && responded && rawStatus.startsWith("UDS 19 02:")) {
+          const kwpDtcCmds = target.tx === 0x7e0 ? ["1800FF00", "1802FF00"] : ["1800FF00"];
+          for (const kwpCmd of kwpDtcCmds) {
+            try {
+              const raw18 = await this.udsExchange(target.tx, target.rx, kwpCmd, 1_400);
+              const p18 = parseUdsResponse(raw18, 0x18);
+              if (p18.kind === "positive") {
+                responded = true;
+                kwpReadPositive = true;
+                const kwpDtcs = parseKwpDtcs18(p18.payload);
+                for (const d of kwpDtcs) {
+                  if (!dtcs.some((existing) => existing.code === d.code)) {
+                    dtcs.push({
+                      code: d.code,
+                      active: d.active,
+                      description: d.description,
+                      remedy: d.remedy,
+                      statusByte: d.statusByte,
+                    });
+                  }
+                }
+                rawStatus =
+                  dtcs.length === 0
+                    ? "0 ошибок (KWP 18 00)"
+                    : `Найдено ошибок: ${dtcs.length} (KWP 18 00)`;
+                break;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+
+        // Supplement with OBD Mode 03 (stored) and Mode 07 (pending) on ECM/TCM (7E0/7E1)
+        const isObdPowertrain = Boolean(target.mode03Fallback) || target.tx === 0x7e0 || target.tx === 0x7e1;
+        if (isObdPowertrain || (responded && rawStatus.startsWith("UDS 19 02:"))) {
           try {
             const raw03 = await this.udsExchange(target.tx, target.rx, "03", 1_400);
             const p03 = parseUdsResponse(raw03, 0x03);
@@ -1540,13 +1587,40 @@ export class ObdBleSession {
                   });
                 }
               }
-              rawStatus =
-                dtcs.length === 0
-                  ? "0 ошибок (Mode 03)"
-                  : `Найдено ошибок: ${dtcs.length} (Mode 03)`;
+              if (!kwpReadPositive || dtcs.length > 0) {
+                rawStatus =
+                  dtcs.length === 0
+                    ? "0 ошибок (Mode 03)"
+                    : `Найдено ошибок: ${dtcs.length}`;
+              }
             }
           } catch {
             /* ignore */
+          }
+          if (isObdPowertrain) {
+            try {
+              const raw07 = await this.udsExchange(target.tx, target.rx, "07", 1_200);
+              const p07 = parseUdsResponse(raw07, 0x07);
+              if (p07.kind === "positive") {
+                responded = true;
+                const pendingList = parseDtcsFromElmResponse(raw07);
+                for (const d of pendingList) {
+                  if (!dtcs.some((existing) => existing.code === d.code)) {
+                    dtcs.push({
+                      code: d.code,
+                      active: false,
+                      description: d.description,
+                      remedy: remedyForDtcCode(d.code),
+                    });
+                  }
+                }
+                if (dtcs.length > 0) {
+                  rawStatus = `Найдено ошибок: ${dtcs.length}`;
+                }
+              }
+            } catch {
+              /* ignore */
+            }
           }
         }
 
@@ -1647,8 +1721,8 @@ export class ObdBleSession {
   }
 
   /**
-   * Safely clears DTCs on non-safety-critical modules only (ECM, TCM, Meter, BIU, Climate, Sonar).
-   * Explicitly refuses SRS Airbag (780), ABS/VDC/EPB (7B0), EPS (746), and EyeSight (787).
+   * Safely clears DTCs on modules (ECM, TCM, SRS, ABS/ASC, Meter, BIU/ETACS, Climate, Sonar).
+   * Explicitly refuses EPS (746/796), SAS (622), EPB (610), and EyeSight (787) to protect steering/brake-pad/camera calibrations.
    */
   async clearModuleDtcsSafe(
     protocol: CanProtocol,
@@ -1657,10 +1731,10 @@ export class ObdBleSession {
   ): Promise<string> {
     const cleanTx = txHex.trim().toUpperCase();
     const cleanRx = rxHex.trim().toUpperCase();
-    const FORBIDDEN_CLEAR_TX = new Set(["780", "7B0", "746", "787", "784", "622", "6E0", "796", "7E2", "7E5", "610"]);
+    const FORBIDDEN_CLEAR_TX = new Set(["746", "787", "622", "796", "7E2", "7E5", "610"]);
     if (FORBIDDEN_CLEAR_TX.has(cleanTx)) {
       throw new Error(
-        `Сброс ошибок в блоке безопасности (${cleanTx}) заблокирован для защиты калибровок SRS / ABS / SAS / EPS / EyeSight. Доступно только чтение.`,
+        `Сброс ошибок в блоке (${cleanTx}) заблокирован для защиты калибровок SAS / EPS / EPB / EyeSight. Доступно только чтение.`,
       );
     }
     this.requireAdapter();
@@ -1670,12 +1744,15 @@ export class ObdBleSession {
 
     const txNum = Number.parseInt(cleanTx, 16);
     const rxNum = cleanRx ? Number.parseInt(cleanRx, 16) : undefined;
+    let mode04Cleared = false;
 
     if (cleanTx === "7E0" || cleanTx === "7E1") {
-      const raw04 = await this.udsExchange(txNum, rxNum, "04", 3_000);
-      const p04 = parseUdsResponse(raw04, 0x04);
-      if (p04.kind === "positive") {
-        return `Коды ошибок блока ${cleanTx} сброшены (Mode 04 OK)`;
+      try {
+        const raw04 = await this.udsExchange(txNum, rxNum, "04", 3_000);
+        const p04 = parseUdsResponse(raw04, 0x04);
+        if (p04.kind === "positive") mode04Cleared = true;
+      } catch {
+        /* try KWP / UDS clear below */
       }
     }
 
@@ -1690,12 +1767,15 @@ export class ObdBleSession {
       if (p14.kind === "positive") {
         return `Коды ошибок блока ${cleanTx} сброшены (UDS 14 FF FF FF OK)`;
       }
-      // Fallback to KWP2000 10 92 + 14 FF 00 for Mitsubishi modules
+      // Fallback to KWP2000 10 92 + 14 FF 00 for Mitsubishi modules (including SRS 6E0, ABS/ASC 784, ECM 7E0, TCM 7E1, ETACS 620)
       await this.udsExchange(txNum, rxNum, "1092", 1_000);
       const rawKwp14 = await this.udsExchange(txNum, rxNum, "14FF00", 3_000);
       const pKwp14 = parseUdsResponse(rawKwp14, 0x14);
       if (pKwp14.kind === "positive") {
         return `Коды ошибок блока ${cleanTx} сброшены (KWP 14 FF 00 OK)`;
+      }
+      if (mode04Cleared) {
+        return `Коды ошибок блока ${cleanTx} сброшены (Mode 04 OK)`;
       }
       if (p14.kind === "negative") {
         throw new Error(`Отказ блока ${cleanTx} при сбросе (7F 14): ${p14.nrcText ?? ""}`);
@@ -1967,10 +2047,9 @@ export class ObdBleSession {
     timeoutMs = 5_000,
   ): Promise<string> {
     const send = async () => {
-      const standardObdPair = tx >= 0x7e0 && tx <= 0x7e7 && (rx == null || rx === tx + 8);
-      if (standardObdPair) {
-        await this.elm!.clearRxFilter();
+      if (rx == null && tx >= 0x7e0 && tx <= 0x7e7) {
         await this.elm!.setCanHeader(tx, undefined);
+        await this.elm!.clearRxFilter();
       } else {
         const effectiveRx = rx ?? ((tx + 8) & 0x7ff);
         await this.elm!.setCanHeader(tx, effectiveRx);

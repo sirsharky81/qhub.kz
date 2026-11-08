@@ -1143,9 +1143,9 @@ export default function CanUdsPanel({
   };
 
   const handleSafeClearModuleDtc = async (mod: ModuleDtcReport) => {
-    if (!mod.canSafeClear || mod.safetyCritical) {
+    if (!mod.canSafeClear) {
       setLocalError(
-        `Блок ${mod.title} относится к системам безопасности (SRS / ABS / EPS / EyeSight) — сброс заблокирован, разрешено только чтение.`,
+        `Блок ${mod.title} относится к калибровочным системам (SAS / EPS / EPB / EyeSight) — сброс заблокирован, разрешено только чтение.`,
       );
       return;
     }
@@ -1824,7 +1824,7 @@ export default function CanUdsPanel({
                       </ul>
                     ) : null}
 
-                    {mod.responded && mod.canSafeClear && !mod.safetyCritical ? (
+                    {mod.responded && mod.canSafeClear ? (
                       <div className="mt-2 flex justify-end">
                         <button
                           type="button"

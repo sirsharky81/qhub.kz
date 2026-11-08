@@ -142,12 +142,19 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
     if (frameType === 0 && pci0 >= 2 && pci0 <= 7 && frameBytes.length >= 1 + pci0) {
       const nextSid = frameBytes[1]!;
       if (
+        nextSid === 0x43 ||
+        nextSid === 0x47 ||
+        nextSid === 0x4a ||
         nextSid === 0x50 ||
+        nextSid === 0x54 ||
+        nextSid === 0x58 ||
+        nextSid === 0x59 ||
         nextSid === 0x5a ||
         nextSid === 0x61 ||
         nextSid === 0x62 ||
-        nextSid === 0x7b ||
         nextSid === 0x6e ||
+        nextSid === 0x71 ||
+        nextSid === 0x7b ||
         nextSid === 0x7f
       ) {
         rawIsoLines.push({
@@ -163,7 +170,18 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
       const pci1 = frameBytes[1]!;
       const totalLen = ((pci0 & 0x0f) << 8) | pci1;
       const nextSid = frameBytes[2]!;
-      if (totalLen >= 6 && (nextSid === 0x5a || nextSid === 0x61 || nextSid === 0x62 || nextSid === 0x49)) {
+      if (
+        totalLen >= 6 &&
+        (nextSid === 0x43 ||
+          nextSid === 0x47 ||
+          nextSid === 0x49 ||
+          nextSid === 0x4a ||
+          nextSid === 0x58 ||
+          nextSid === 0x59 ||
+          nextSid === 0x5a ||
+          nextSid === 0x61 ||
+          nextSid === 0x62)
+      ) {
         rawIsoLines.push({
           pciType: 1,
           len: totalLen,

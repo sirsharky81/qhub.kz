@@ -328,14 +328,65 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     setTexts(next);
   };
 
+  const scanSingleEcu = async (ecu: CatalogEcu) => {
+    if (phase !== "vehicle" || busy) return;
+    stopLive.current = true;
+    setLive(false);
+    stopScan.current = false;
+    setBusy(true);
+    setError(null);
+    const target: ModuleDtcTarget = {
+      tx: Number.parseInt(ecu.txCanId, 16),
+      rx: Number.parseInt(ecu.rxCanId, 16),
+      title: ecu.nameRu || ecu.nameEn,
+      safetyCritical: !ecu.canSafeClear,
+      canSafeClear: ecu.canSafeClear,
+      mode03Fallback: ecu.txCanId === "7E0" || ecu.txCanId === "7E1",
+      mitsubishiKwp: true,
+    };
+    try {
+      setStatus(`Опрос «${ecu.nameRu}» (${ecu.txCanId}→${ecu.rxCanId})…`);
+      const found = await session.scanCatalogModules("6", [target]);
+      const report = found[0];
+      if (report) {
+        const key = addressKey(report.txHex, report.rxHex);
+        const merged = { ...reports, [key]: report };
+        setReports(merged);
+        if (vehicle) await describe(vehicle.ecus, merged);
+        setStatus(
+          report.responded
+            ? `${ecu.nameRu}: ${report.dtcs.length} ошибок`
+            : `${ecu.nameRu}: нет ответа (блок не установлен или зажигание выключено)`,
+        );
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Опрос блока не выполнен");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const clearEcu = async (ecu: CatalogEcu) => {
     if (!ecu.canSafeClear) return;
-    const confirmed = window.confirm(`Сбросить ошибки блока «${ecu.nameRu}»?`);
+    const confirmed = window.confirm(`Сбросить ошибки блока «${ecu.nameRu}» (${ecu.txCanId}→${ecu.rxCanId})?`);
     if (!confirmed) return;
     setBusy(true);
     setError(null);
     try {
       const message = await session.clearModuleDtcsSafe("6", ecu.txCanId, ecu.rxCanId);
+      const key = addressKey(ecu.txCanId, ecu.rxCanId);
+      setReports((prev) => {
+        const existing = prev[key];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [key]: {
+            ...existing,
+            dtcs: [],
+            rawStatus: "0 ошибок (после сброса)",
+          },
+        };
+      });
       setStatus(message);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Сброс не выполнен");
@@ -1175,14 +1226,26 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         </div>
       {vehicle ? (
       <div className="mt-3 flex flex-col gap-2">
-        {vehicle.ecus.map((ecu) => {
+        {[...vehicle.ecus]
+          .sort((a, b) => {
+            const ra = reports[addressKey(a.txCanId, a.rxCanId)];
+            const rb = reports[addressKey(b.txCanId, b.rxCanId)];
+            const score = (r: ModuleDtcReport | undefined) => {
+              if (!r) return 1;
+              if (r.responded && r.dtcs.length > 0) return 0;
+              if (r.responded) return 1;
+              return 2;
+            };
+            return score(ra) - score(rb);
+          })
+          .map((ecu) => {
           const report = reports[addressKey(ecu.txCanId, ecu.rxCanId)];
           const master = texts[ecu.dtcMasterId] ?? {};
           const active = selectedKey === ecu.sysKey;
           return (
             <article
               key={ecu.sysKey}
-              className={`rounded-xl border p-3 ${active ? "border-emerald-600 bg-white" : "border-gray-200 bg-gray-50"}`}
+              className={`rounded-xl border p-3 ${active ? "border-emerald-600 bg-white" : report && !report.responded ? "border-gray-200 bg-gray-50/60 opacity-75" : "border-gray-200 bg-gray-50"}`}
             >
               <div className="w-full text-left">
                 <div className="flex items-baseline justify-between gap-2">
@@ -1195,7 +1258,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
                   {report
                     ? report.responded
                       ? `${report.dtcs.length} ошибок${report.partNumber ? ` · ${report.partNumber}` : ""}`
-                      : "нет ответа"
+                      : "не установлен в этой комплектации (нет ответа)"
                     : "ошибки ещё не считаны"}
                 </p>
               </div>
@@ -1218,6 +1281,14 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
                 <button
                   type="button"
+                  disabled={busy || phase !== "vehicle"}
+                  onClick={() => void scanSingleEcu(ecu)}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 font-medium text-gray-800 disabled:opacity-40"
+                >
+                  Считать
+                </button>
+                <button
+                  type="button"
                   disabled={busy}
                   onClick={() => {
                     void openEcu(ecu);
@@ -1227,14 +1298,14 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
                 >
                   Параметры
                 </button>
-                {ecu.canSafeClear && report?.responded ? (
+                {ecu.canSafeClear && (report?.responded || (report?.dtcs.length ?? 0) > 0) ? (
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => void clearEcu(ecu)}
-                    className="rounded border border-gray-300 px-2 py-1 text-gray-800 disabled:opacity-40"
+                    className="rounded border border-red-300 bg-red-50 px-2 py-1 font-medium text-red-900 hover:bg-red-100 disabled:opacity-40"
                   >
-                    Сбросить ошибки
+                    Стереть ошибки
                   </button>
                 ) : null}
                 {ecu.coding ? (

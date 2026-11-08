@@ -220,17 +220,19 @@ const db = {
 };
 
 describe("catalog resolve", () => {
-  it("matches a chassis code inside the VIN and skips empty addresses", () => {
+  it("matches a chassis code inside the VIN, sorts Engine first, allows SRS/ABS clear, and skips empty addresses", () => {
     useDiagDb(db);
     const vehicle = resolveCatalogVehicle({ vin: "JMBXKR1WHEZ000001" });
     expect(vehicle?.vkey).toBe("1108740010");
-    expect(vehicle?.ecus.map((ecu) => ecu.sysKey)).toEqual([1, 2, 3]);
-    const etacs = vehicle?.ecus[0];
-    const airbag = vehicle?.ecus[2];
+    // Engine (sysKey 2, 7E0) is sorted first, then SRS (sysKey 3, 6E0), then ETACS (sysKey 1, 620)
+    expect(vehicle?.ecus.map((ecu) => ecu.sysKey)).toEqual([2, 3, 1]);
+    const engine = vehicle?.ecus.find((ecu) => ecu.sysKey === 2);
+    const etacs = vehicle?.ecus.find((ecu) => ecu.sysKey === 1);
+    const airbag = vehicle?.ecus.find((ecu) => ecu.sysKey === 3);
+    expect(engine?.coding).toBe("engine");
     expect(etacs?.coding).toBe("etacs");
     expect(etacs?.canSafeClear).toBe(true);
-    expect(airbag?.canSafeClear).toBe(false);
-    expect(vehicle?.ecus[1]?.coding).toBe("engine");
+    expect(airbag?.canSafeClear).toBe(true);
   });
 
   it("matches the sample VIN and an explicit vkey", () => {

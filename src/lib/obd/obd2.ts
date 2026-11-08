@@ -1,5 +1,5 @@
 import { describeDtcCode } from "./dtc-descriptions";
-import { extractHexTokens, withoutElmLineNumbers } from "./hex";
+import { extractHexTokens, stripElmMultiline, withoutElmLineNumbers } from "./hex";
 
 export interface ObdDtc {
   code: string;
@@ -226,16 +226,37 @@ function dtcFromTwoBytes(a: number, b: number): string {
   return `${type}${d1}${d2}${d3}${d4}`;
 }
 
-/** Parse mode 03 / 07 style response embedded in ELM text. */
+/** Parse mode 03 / 07 / 0A style response embedded in ELM text. */
 export function parseDtcsFromElmResponse(raw: string): ObdDtc[] {
+  const { declaredLength } = stripElmMultiline(raw);
   const bytes = extractHexTokens(raw);
   const idx = bytes.findIndex((b) => b === 0x43 || b === 0x47 || b === 0x4a);
   if (idx < 0) {
     if (/NO DATA|UNABLE TO CONNECT|CAN ERROR/i.test(raw)) return [];
     return [];
   }
-  const count = bytes[idx + 1] ?? 0;
-  const payload = bytes.slice(idx + 2, idx + 2 + count * 2);
+  let rest = bytes.slice(idx + 1);
+  if (declaredLength != null && declaredLength > 1 && rest.length >= declaredLength - 1) {
+    rest = rest.slice(0, declaredLength - 1);
+  }
+  if (rest.length === 0) return [];
+
+  let payload: number[];
+  // ISO 15765-4 CAN includes a 1-byte DTC count after 0x43/0x47/0x4A, whereas raw 2-byte or 6-byte K-Line frames may omit it
+  if (rest.length === 2) {
+    payload = rest;
+  } else {
+    const count = rest[0] ?? 0;
+    if (count === 0) return [];
+    if (rest.length >= 1 + count * 2 && (rest[1] !== 0 || rest[2] !== 0)) {
+      payload = rest.slice(1, 1 + count * 2);
+    } else if (rest.length % 2 === 0) {
+      payload = rest;
+    } else {
+      payload = rest.slice(1, 1 + count * 2);
+    }
+  }
+
   const out: ObdDtc[] = [];
   for (let i = 0; i + 1 < payload.length; i += 2) {
     const a = payload[i]!;

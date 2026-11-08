@@ -192,20 +192,30 @@ export function MitsubishiTpmsPanel({ session, phase, busy }: Props) {
         )}
         {wheels.length > 0 ? (
           <div className="grid grid-cols-2 gap-2">
-            {wheels.map((wheel) => (
-              <div key={wheel.wheelIndex} className="rounded-lg border border-gray-200 p-2">
-                <div className="text-[10px] font-semibold text-gray-700">
-                  {WHEEL_LABELS[wheel.wheelIndex - 1] ?? wheel.defaultLabel}
+            {wheels.map((wheel) => {
+              const bar = wheel.pressureBar;
+              const psi = wheel.pressurePsi ?? (bar != null ? Number((bar * 14.5037738).toFixed(1)) : null);
+              const kpa = wheel.pressureKpa ?? (bar != null ? Math.round(bar * 100) : null);
+              return (
+                <div key={wheel.wheelIndex} className="rounded-lg border border-gray-200 p-2.5">
+                  <div className="text-[10px] font-semibold text-gray-700">
+                    {WHEEL_LABELS[wheel.wheelIndex - 1] ?? wheel.defaultLabel}
+                  </div>
+                  <div className="mt-0.5 font-mono text-sm font-bold text-gray-900">
+                    {bar != null ? `${bar.toFixed(2)} бар` : "—"}
+                  </div>
+                  {bar != null ? (
+                    <div className="font-mono text-[11px] font-medium text-gray-700">
+                      {psi != null ? `${psi.toFixed(1)} PSI` : "—"} · {kpa != null ? `${kpa} кПа` : "—"}
+                    </div>
+                  ) : null}
+                  <div className="mt-0.5 text-[10px] text-gray-500">
+                    {wheel.temperatureC != null ? `${wheel.temperatureC} °C · ` : ""}
+                    {wheel.sensorIdHex ? `ID ${wheel.sensorIdHex}` : wheel.statusText}
+                  </div>
                 </div>
-                <div className="font-mono text-sm text-gray-900">
-                  {wheel.pressureBar != null ? `${wheel.pressureBar.toFixed(2)} бар` : "—"}
-                </div>
-                <div className="text-[10px] text-gray-500">
-                  {wheel.temperatureC != null ? `${wheel.temperatureC} °C · ` : ""}
-                  {wheel.sensorIdHex ? `ID ${wheel.sensorIdHex}` : wheel.statusText}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : null}
         {error ? <p className="text-xs text-red-700">{error}</p> : null}

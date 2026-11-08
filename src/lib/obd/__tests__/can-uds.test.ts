@@ -919,9 +919,9 @@ describe("sendUds gate", () => {
     expect(dtcs[0]?.statusByte).toBe(0x2f);
     expect(dtcs[0]?.active).toBe(true);
 
-    // Safety modules (SRS 780, ABS/VDC 7B0, EPS 746, EyeSight 787, Mitsubishi SAS 622, ABS 784) must refuse DTC clearing
+    // Calibration-sensitive steering/EPB/camera modules (EPS 746, EyeSight 787, SAS 622, EPB 610) must refuse DTC clearing
     const session = new ObdBleSession();
-    for (const blockedTx of ["780", "7B0", "746", "787", "622", "784"]) {
+    for (const blockedTx of ["746", "787", "622", "610"]) {
       await expect(session.clearModuleDtcsSafe("6", blockedTx, "788")).rejects.toThrow(/заблокирован/i);
     }
   });
