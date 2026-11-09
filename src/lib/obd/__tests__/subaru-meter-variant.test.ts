@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  SUBARU_METER_SECURITY_KEY_TABLES,
   SUBARU_METER_WRITE_ALLOWED_DESTINATIONS,
   SUBARU_METER_WRITE_DIDS,
   buildSubaruMeter12ColumnWritePlan,
+  computeSubaruSecurityKey16ByteAesEcb,
+  computeSubaruSecurityKey4Byte,
   writeSubaruMeter12ColumnCode,
   type SubaruMeterWriteLink,
 } from "../subaru-meter-variant";
@@ -178,5 +181,61 @@ describe("subaru-meter-variant", () => {
       "2EA01100",
       "2E10C200",
     ]);
+  });
+
+  it("unlocks 27 03 -> 27 04 using SSM4 VsmDatabase 12445_API_309D when 2E 10C2 FF returns NRC 33, then writes U45D (A002=02, A011=FF)", async () => {
+    const seed = [0x12, 0x34, 0x56, 0x78];
+    const expectedKey = computeSubaruSecurityKey4Byte(
+      seed,
+      SUBARU_METER_SECURITY_KEY_TABLES[0]!.words,
+      "standard-l3",
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    const elm = scriptedElm({
+      "2E02504254414359523855343544": "7F 2E 31",
+      "2E0250425441435952385534354400": "7F 2E 31",
+      "2E02514254414359523855343544": "7F 2E 31",
+      "2E10C2FF": ["7F 2E 33", "6E 10 C2"],
+      "2703": "67 03 12 34 56 78",
+      [`2704${expectedKey}`]: "67 04",
+      "2EA00202": "6E A0 02",
+      "2EA011FF": "6E A0 11",
+      "2E10C200": "6E 10 C2",
+    });
+
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTACYR8",
+      optionCode: "U45D",
+      currentDids: [
+        { did: "A002", hex: "03" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.securityAccessRequired).toBe(false);
+    expect(result.writtenDid).toBe("A002/A011");
+    expect(result.writtenHex).toBe("A002=02 A011=FF");
+    expect(result.seedHex).toBe("12 34 56 78");
+    expect(elm.sent).toContain("2703");
+    expect(elm.sent).toContain(`2704${expectedKey}`);
+
+    // Verify AES-128-ECB vector from SSM4 CMD_SecurityAccess2018CY1
+    const aesSeed = [
+      0xf8, 0xee, 0x16, 0x09, 0xec, 0x9a, 0xb9, 0x1c,
+      0x83, 0x58, 0x06, 0x0f, 0xde, 0xbc, 0x3e, 0x06,
+    ];
+    const aesKey = [
+      0x33, 0xe6, 0x3c, 0xa0, 0x43, 0x11, 0x53, 0x46,
+      0x0c, 0x18, 0xf1, 0x06, 0x4c, 0x70, 0xfe, 0x41,
+    ];
+    const aesOut = computeSubaruSecurityKey16ByteAesEcb(aesSeed, aesKey)
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+    expect(aesOut).toBe("AA21C0117CF3DCB6BC1F7A7F90EE78CA");
   });
 });

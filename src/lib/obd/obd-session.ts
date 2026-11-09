@@ -1175,6 +1175,7 @@ export class ObdBleSession {
     appliedModel: string,
     optionCode: string,
     protocol: CanProtocol = "6",
+    securityKeyHex?: string,
   ): Promise<SubaruMeter12ColumnWriteSessionResult> {
     this.requireAdapter();
     await this.waitLeave();
@@ -1188,6 +1189,7 @@ export class ObdBleSession {
       currentDids: before.dids,
       txHex: before.txHex,
       rxHex: before.rxHex,
+      securityKeyHex,
     });
 
     let after: SubaruMeter12ColumnRead | null = null;

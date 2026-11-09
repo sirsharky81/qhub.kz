@@ -239,6 +239,7 @@ export function SubaruSsmPanel({
     optionCode: string;
   } | null>(null);
   const [meter12WriteConfirmTyped, setMeter12WriteConfirmTyped] = useState("");
+  const [meter12SecurityKeyInput, setMeter12SecurityKeyInput] = useState("");
   const [meter12WriteResult, setMeter12WriteResult] =
     useState<SubaruMeter12ColumnWriteSessionResult | null>(null);
 
@@ -966,6 +967,7 @@ export function SubaruSsmPanel({
         pending.appliedModel,
         pending.optionCode,
         "6",
+        meter12SecurityKeyInput.trim() || undefined,
       );
       setMeter12WriteResult(result);
       if (result.after) setMeter12Read(result.after);
@@ -973,7 +975,7 @@ export function SubaruSsmPanel({
       if (!result.success) {
         setError(
           result.securityAccessRequired
-            ? "Приборка запросила SecurityAccess (NRC 33). Ключ не подставляется — нужна дилерская SSM4."
+            ? `Приборка запросила SecurityAccess (NRC 33)${result.seedHex ? ` · Seed: ${result.seedHex}` : ""}. Проверьте лог 27 03 / 27 04 ниже или введите дилерский Key.`
             : result.steps.at(-1) ?? "Приборка не подтвердила запись DID 0250/0251.",
         );
       }
@@ -983,7 +985,7 @@ export function SubaruSsmPanel({
       setConfigProgress(null);
       setBusy(false);
     }
-  }, [ready, busy, meter12WritePending, meter12WriteConfirmTyped, session, setBusy, setError]);
+  }, [ready, busy, meter12WritePending, meter12WriteConfirmTyped, meter12SecurityKeyInput, session, setBusy, setError]);
 
   const handleExportDumpJson = useCallback((dump: SubaruRegionConfigDump, slot: "A" | "B", onlyMeter = false) => {
     const payload = onlyMeter
@@ -5542,9 +5544,20 @@ export function SubaruSsmPanel({
                 </button>
               </div>
               <p className="text-[11px] text-amber-900">
-                Сначала читается текущий DID 0250, код вшивается в ту же длину/паддинг, затем 2E. EC/EA (433 МГц) заблокированы.
-                Для подтверждения нужно ввести 4-значный Option Code.
+                Сначала читаются регистры приборки (`0250`/`0251` и `A002`/`A011`). На приборках SGP (`A002`/`A011`) при запросе `NRC 33` автоматически выполняется разблокировка `SecurityAccess (27 03 → 27 04)` по ключам SSM4 `VsmDatabase.dll` (`12445_API_309D/30A0`) перед открытием `2E 10C2 FF → 2E A002 → 2E A011 → 2E 10C2 00`. EC/EA (433 МГц) заблокированы.
               </p>
+              <div className="pt-1">
+                <label className="block text-[11px] font-medium text-amber-950">
+                  Опционально: собственный ответный Key для `27 04` / `27 02` (8 или 32 HEX-символа, если требуется внешний расчёт по Seed):
+                </label>
+                <input
+                  type="text"
+                  value={meter12SecurityKeyInput}
+                  onChange={(e) => setMeter12SecurityKeyInput(e.target.value.toUpperCase())}
+                  placeholder="Оставьте пустым для авто-расчёта ключа SSM4 (12445_API_309D)"
+                  className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2.5 py-1 font-mono text-xs uppercase text-gray-900"
+                />
+              </div>
             </div>
 
             {meter12WriteResult && (
@@ -5679,8 +5692,8 @@ export function SubaruSsmPanel({
                     </code>
                   </div>
                   <p className="leading-relaxed">
-                    Только Procedure B (`sendMetVariByApplied`). Не выполняется `writeCommonArea`, не пишется одометр,
-                    не подбирается SecurityAccess. IG ON, двигатель заглушен.
+                    Только Procedure B (`sendMetVariByApplied` / `MET-002.srp`). Не выполняется `writeCommonArea` и не трогается одометр.
+                    При запросе `NRC 33` на `2E 10C2 FF` автоматически рассчитывается ключ `27 03 → 27 04` по таблице SSM4 `12445_API_309D`. IG ON, двигатель заглушен.
                   </p>
                 </div>
                 <label className="mt-4 block space-y-1">
