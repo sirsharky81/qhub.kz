@@ -5387,7 +5387,7 @@ export function SubaruSsmPanel({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold text-gray-700">
-                  7-значный Applied Model (со стойки B, например BTAEYR8 или BTACYRB):
+                  7-значный Applied Model (со стойки B, например BTAEYR8 или BTACYR8):
                 </label>
                 <input
                   type="text"

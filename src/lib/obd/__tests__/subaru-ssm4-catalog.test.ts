@@ -112,12 +112,13 @@ describe("subaru-ssm4-catalog", () => {
     expect(SSM4_SIGNALS.length).toBeGreaterThanOrEqual(120);
   });
 
-  it("decodes TSB 07-183-20 (MC-10182242-0001.pdf) 7-digit Applied Model + 4-digit Option Code (e.g. BTACYRB + U45D -> C05D)", () => {
-    const res = decodeSubaruAppliedModel12Columns("BTACYRB", "U45D");
+  it("decodes TSB 07-183-20 (MC-10182242-0001.pdf) 7-digit Applied Model + 4-digit Option Code (e.g. BTACYR8 + U45D -> C05D)", () => {
+    const res = decodeSubaruAppliedModel12Columns("BTACYR8", "U45D");
     expect(res.valid).toBe(true);
     expect(res.seriesCode).toBe("BTA");
     expect(res.modelYearChar).toBe("C");
     expect(res.gradeChar).toBe("R");
+    expect(res.drivetrainChar).toBe("8");
     expect(res.optionDestinationPrefix).toBe("U4");
     expect(res.canadianOptionCodeC0).toBe("C05D");
     expect(res.canadianOptionCodeC5).toBe("C55D");
@@ -271,6 +272,24 @@ describe("subaru-ssm4-catalog", () => {
     expect(outback2021Lim.actualRegion).toBe("USA (U4 / U5 / U6 — °F, мили)");
     expect(outback2021Lim.recommendedCanadianOptionC0).toBe("C07H");
     expect(outback2021Lim.recommendedCanadianOptionC5).toBe("C57H");
+
+    // 2022 Outback Wilderness (B-pillar photo VIN 4S4BTGUD2N3149226 -> BTACYR8 + U45D / C05D)
+    const outback2022Wilderness = extractAppliedModelAndOptionCodeFromDump({
+      vin: "4S4BTGUD2N3149226",
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            { did: "A002", label: "DID A002", hex: "03", decoded: "03" },
+            { did: "A011", label: "DID A011", hex: "FF", decoded: "FF" },
+          ],
+        },
+      ],
+    });
+    expect(outback2022Wilderness.actualAppliedModel).toBe("BTACYR8");
+    expect(outback2022Wilderness.actualOptionCode).toBe("C05D");
+    expect(outback2022Wilderness.recommendedCanadianOptionC0).toBe("C05D");
+    expect(outback2022Wilderness.recommendedCanadianOptionC5).toBe("C55D");
 
     // Different Outback: 2023 Outback Onyx XT 2.4T (VIN 4S4BTGND8P3123456) already converted to Canada (A002 = 03, A011 = 00)
     const outback2023OnyxCa = extractAppliedModelAndOptionCodeFromDump({

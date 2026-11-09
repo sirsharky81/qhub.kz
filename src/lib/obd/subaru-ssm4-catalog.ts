@@ -5883,9 +5883,9 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     id: "bt-outback-wilderness-24t",
     modelSeriesRu: "Outback VI (BT · 2022–2023 MY)",
     years: "2022–2023",
-    trimRu: "Wilderness 2.4T (2022 MY Revision C)",
-    engineRu: "FA24F 2.4L Turbo (CVT TR690)",
-    appliedModel: "BTACYRB",
+    trimRu: "Wilderness 2.4T (2022 MY Revision C · шильдик 4S4BTGUD2N3149226)",
+    engineRu: "FA24FXZHKA 2.4L Turbo (CVT TR690R6KDA)",
+    appliedModel: "BTACYR8",
     usOptionCodeExamples: ["U45D", "U45C"],
     canadianOptionCodeC0: "C05D",
     canadianOptionCodeC5: "C55D",
@@ -5899,7 +5899,7 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     years: "2020–2024",
     trimRu: "Onyx Edition XT / Outdoor XT 2.4T",
     engineRu: "FA24F 2.4L Turbo (CVT TR690)",
-    appliedModel: "BTACYHB",
+    appliedModel: "BTACYH8",
     usOptionCodeExamples: ["U45B", "U45D"],
     canadianOptionCodeC0: "C05B",
     canadianOptionCodeC5: "C55B",
@@ -5913,7 +5913,7 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     years: "2020–2024",
     trimRu: "Limited XT 2.4T",
     engineRu: "FA24F 2.4L Turbo (CVT TR690)",
-    appliedModel: "BTACYJB",
+    appliedModel: "BTACYJ8",
     usOptionCodeExamples: ["U47H", "U47Y"],
     canadianOptionCodeC0: "C07H",
     canadianOptionCodeC5: "C57H",
@@ -5927,7 +5927,7 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     years: "2020–2024",
     trimRu: "Touring XT / Premier XT 2.4T",
     engineRu: "FA24F 2.4L Turbo (CVT TR690)",
-    appliedModel: "BTACYKB",
+    appliedModel: "BTACYK8",
     usOptionCodeExamples: ["U48Y", "U49Y"],
     canadianOptionCodeC0: "C08Y",
     canadianOptionCodeC5: "C58Y",
@@ -6085,7 +6085,7 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     years: "2020–2024",
     trimRu: "2.5i / 2.4T Limited / Touring XT (Premier CA)",
     engineRu: "FB25D 2.5L / FA24F 2.4T",
-    appliedModel: "BWACY9B",
+    appliedModel: "BWACY98",
     usOptionCodeExamples: ["U47H", "U57H"],
     canadianOptionCodeC0: "C07H",
     canadianOptionCodeC5: "C57H",
@@ -6229,8 +6229,8 @@ const SUBARU_MY_CHAR_MAP: Record<string, string> = {
  * Decodes the 7-character Applied Model + 4-character Option Code ("12 columns of models")
  * used by SSM4 Combination Meter Variant Work (TSB 07-183-20 / MC-10182242-0001.pdf, Operation Procedure B).
  *
- * Example from user's photo (2022 Outback Wilderness):
- * - Applied Model: BTACYRB (BTA = Outback 2.4T, C = 2022MY, Y = US/Canada SIA, R = Wilderness, B = TR690 CVT)
+ * Example from user's photo (2022 Outback Wilderness, VIN 4S4BTGUD2N3149226):
+ * - Applied Model: BTACYR8 (BTA = Outback 2.4T, C = 2022MY, Y = US/Canada SIA, R = Wilderness, 8 = TR690 8-speed CVT + EyeSight)
  * - Option Code:   U45D    (U4 = USA Federal -> replace with C05D or C55D for Canada Metric °C & km/h)
  */
 export function decodeSubaruAppliedModel12Columns(
@@ -6375,7 +6375,7 @@ function regionFromOptionCode(
 
 /**
  * Inspects a captured Subaru Meter (783/7C0) & BIU (752) dump and extracts or reconstructs
- * the exact 7-character Applied Model + 4-character Option Code (e.g. BTACYRB + C05D),
+ * the exact 7-character Applied Model + 4-character Option Code (e.g. BTACYR8 + C05D),
  * so the user sees the human-readable code instead of raw hex bytes.
  */
 export function extractAppliedModelAndOptionCodeFromDump(
@@ -6480,18 +6480,17 @@ export function extractAppliedModelAndOptionCodeFromDump(
         engineTrim === "AM" ||
         engineTrim === "AU";
       defaultUsDest = isTurbo ? "U4" : "U5";
-      // 7th char of Applied Model in SSM4 cgdwPHBWHoZ.mLW: '8' for 2023+ (D/E/F) or '8' in BTAAY*8, 'B' on 2020-2022 2.4T, 'L'/'C' on 2.5L
-      const seventhChar =
-        rev === "E" || rev === "D" || rev === "F" || rev === "G"
-          ? isTurbo
-            ? "8"
-            : "L"
-          : isTurbo
-            ? "B"
-            : "C";
+      // 7th char of Applied Model in SSM4 cgdwPHBWHoZ.mLW & B-pillar plates:
+      // '8' on all BTA/BWA 2.4T (TR690 8-speed CVT + EyeSight: BTAAY*8, BTACYR8, BTADYH8, BTAEYR8),
+      // 'L'/'C' on 2.5L NA (BT9/BW9).
+      const seventhChar = isTurbo
+        ? "8"
+        : rev === "E" || rev === "D" || rev === "F" || rev === "G"
+          ? "L"
+          : "C";
       let gradeChar = "R";
       if (engineTrim === "GU" || engineTrim === "AU") {
-        gradeChar = "R"; // Wilderness (BTAEYR8 / BTACYRB)
+        gradeChar = "R"; // Wilderness (BTAEYR8 / BTACYR8)
         defaultEquipSuffix = rev === "E" || rev === "D" || rev === "F" || rev === "G" ? "5L" : "5D";
       } else if (engineTrim === "GN" || engineTrim === "AN") {
         gradeChar = "H"; // Onyx XT
