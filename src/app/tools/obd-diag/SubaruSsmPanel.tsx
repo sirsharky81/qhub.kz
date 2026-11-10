@@ -5546,6 +5546,20 @@ export function SubaruSsmPanel({
               <p className="text-[11px] text-amber-900">
                 Сначала читаются регистры приборки (`0250`/`0251` и `A002`/`A011`). На приборках SGP (`A002`/`A011`) при запросе `NRC 33` автоматически выполняется разблокировка `SecurityAccess (27 03 → 27 04)` по ключам SSM4 `VsmDatabase.dll` (`12445_API_309D/30A0`) перед открытием `2E 10C2 FF → 2E A002 → 2E A011 → 2E 10C2 00`. EC/EA (433 МГц) заблокированы.
               </p>
+              <div className="rounded border border-emerald-300 bg-emerald-50/90 px-2.5 py-1.5 text-[11px] text-emerald-950">
+                <strong>Подсказка для дилерской SSM4 (если делаете через ноутбук):</strong> когда при выборе{" "}
+                <code className="font-mono font-bold">Write Control module setting information</code> всплывает окно{" "}
+                <code className="font-mono font-bold">Input code number</code> (а без кода выдаёт{" "}
+                <code className="font-mono">Cannot write the Internal Data of the Combination Meter</code>) — нажмите кнопку{" "}
+                <strong>Input</strong>, введите сервисный пин-код{" "}
+                <code className="rounded bg-white px-1.5 py-0.5 font-mono text-xs font-bold text-emerald-900 shadow-sm">
+                  0205
+                </code>
+                , нажмите <strong>OK</strong> во внутреннем окне и <strong>OK</strong> во внешнем (бюллетень Subaru{" "}
+                <code className="font-mono">MC-10169846-0001</code>). После ввода <code className="font-mono font-bold">0205</code> приборка перейдёт в режим повторной записи и откроется список{" "}
+                <code className="font-mono font-bold">Write ECU setting 12 columns of models</code>, куда вводится{" "}
+                <code className="font-mono font-bold">BTACYR8</code> + <code className="font-mono font-bold">U45D</code> (США) или <code className="font-mono font-bold">C05D</code> (Канада).
+              </div>
               <div className="pt-1">
                 <label className="block text-[11px] font-medium text-amber-950">
                   Опционально: собственный ответный Key для `27 04` / `27 02` (8 или 32 HEX-символа, если требуется внешний расчёт по Seed):

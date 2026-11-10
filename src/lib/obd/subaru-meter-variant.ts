@@ -598,21 +598,26 @@ export async function unlockSubaruMeterSecurityAccess(
     { seedSub: "2703", keySub: "2704", level: 3 as const },
     { seedSub: "2701", keySub: "2702", level: 1 as const },
     { seedSub: "2705", keySub: "2706", level: 5 as const },
+    { seedSub: "2707", keySub: "2708", level: 7 as const },
+    { seedSub: "2709", keySub: "270A", level: 9 as const },
+    { seedSub: "2761", keySub: "2762", level: 0x61 as const },
   ]) {
     let rawSeed = "";
     try {
       rawSeed = await elm.sendPayload(pair.seedSub, 2_500);
-    } catch {
+    } catch (err) {
+      steps.push(
+        `${txHex}→${rxHex}: ${pair.seedSub} ошибка отправки (${err instanceof Error ? err.message : String(err)})`,
+      );
       continue;
     }
     const pSeed = parseUdsResponse(rawSeed, 0x27);
     const cleanSeed = rawSeed.replace(/>/g, "").trim();
     if (pSeed.kind !== "positive" || pSeed.payload.length < 2) {
-      if (pSeed.kind === "negative" && pSeed.nrc === 0x37) {
-        steps.push(
-          `${txHex}→${rxHex}: ${pair.seedSub} → ${cleanSeed} (NRC 37: активна задержка блокировки, подождите 10 с с включённым зажиганием IG ON)`,
-        );
-      }
+      steps.push(
+        `${txHex}→${rxHex}: запрос Seed ${pair.seedSub.slice(0, 2)} ${pair.seedSub.slice(2)} → ${cleanSeed || "нет ответа"}` +
+          (pSeed.kind === "negative" ? ` (${pSeed.nrcText ?? "NRC"})` : ""),
+      );
       continue;
     }
 
