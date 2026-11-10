@@ -271,7 +271,7 @@ export const apps: App[] = [
     id: "subaru-coding",
     title: "Subaru Coding & Immobilizer",
     description:
-      "Перевод показаний Subaru с °F на °C и иммобилайзер: чтение ключей, прописка ключей и регистрация RES.",
+      "Перевод показаний Subaru из градусов Фаренгейта в градусы Цельсия. Иммобилайзер: чтение ключей, прописка ключей и регистрация RES.",
     longDescription:
       "Сервис по номеру телефона. Перевод единиц Subaru с °F на °C. Иммобилайзер: считать ключи, прописать ключ, прописать автозапуск RES.",
     href: "/tools/subaru-coding",
@@ -286,7 +286,7 @@ export const apps: App[] = [
     id: "mitsubishi-diag",
     title: "Mitsubishi Diagnostics",
     description:
-      "Диагностика блоков Mitsubishi (Outlander III, Pajero Sport III, ASX, Lancer X, L200 и т.п.), чтение и сброс ошибок, мониторинг параметров OBD2 Live, сервисные калибровки и тесты, мониторинг и прописка датчиков TPMS.",
+      "Диагностика блоков Mitsubishi: чтение и сброс ошибок, OBD2 DATA Live, калибровки и тесты, датчики TPMS.",
     longDescription:
       "Отдельный сервис диагностики Mitsubishi через vLinker BLE: ошибки и live-параметры блоков MUT-III, сервисные тесты, калибровка датчика угла руля SAS, чтение и прописка датчиков TPMS, вкладка OBD2 Live и выгрузка/запись кодировок Mitsubishi ETACS (.kon / .cuf).",
     href: "/tools/mitsubishi-diag",
