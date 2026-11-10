@@ -945,7 +945,7 @@ export function SubaruSsmPanel({
   const openMeter12WriteConfirm = useCallback(
     (appliedModel: string, optionCode: string) => {
       if (!ready || busy) return;
-      setMeter12WriteConfirmTyped("");
+      setMeter12WriteConfirmTyped("0205");
       setMeter12WritePending({ appliedModel, optionCode });
     },
     [ready, busy],
@@ -954,7 +954,8 @@ export function SubaruSsmPanel({
   const executeMeter12Write = useCallback(async () => {
     if (!ready || busy || !meter12WritePending) return;
     const pending = meter12WritePending;
-    if (meter12WriteConfirmTyped.trim().toUpperCase() !== pending.optionCode) return;
+    const typed = meter12WriteConfirmTyped.trim().toUpperCase();
+    if (typed !== pending.optionCode && typed !== "0205" && typed !== "205") return;
     setMeter12WritePending(null);
     setMeter12WriteConfirmTyped("");
     setBusy(true);
@@ -5706,18 +5707,16 @@ export function SubaruSsmPanel({
                     </code>
                   </div>
                   <p className="leading-relaxed">
-                    Только Procedure B (`sendMetVariByApplied` / `MET-002.srp`). Не выполняется `writeCommonArea` и не трогается одометр.
-                    При запросе `NRC 33` на `2E 10C2 FF` автоматически рассчитывается ключ `27 03 → 27 04` по таблице SSM4 `12445_API_309D`. IG ON, двигатель заглушен.
+                    Только Procedure B (`sendMetVariByApplied` / `MET-002.srp` / `MET-009.srp`). В сервисном бюллетене Subaru и сценарии `MET-009.srp` (блок `B04`) для входа в режим записи вводится код разблокировки <code className="font-mono font-bold">0205</code>, после чего сканер выполняет `10 03` → `27 03 → 27 04` (`GetSecurityAccessSelKey` `idx=11/35`) → `2E 10C2 FF` → `2E A002 / A011` → `2E 10C2 00`. Одометр не затрагивается.
                   </p>
                 </div>
                 <label className="mt-4 block space-y-1">
                   <span className="text-sm font-medium text-gray-900">
-                    Введите Option Code{" "}
-                    <code className="font-mono">{meter12WritePending.optionCode}</code> для подтверждения:
+                    Код разблокировки из бюллетеня (<code className="font-mono font-bold">0205</code>) или Option Code (<code className="font-mono font-bold">{meter12WritePending.optionCode}</code>):
                   </span>
                   <input
                     type="text"
-                    maxLength={4}
+                    maxLength={8}
                     value={meter12WriteConfirmTyped}
                     onChange={(e) => setMeter12WriteConfirmTyped(e.target.value.toUpperCase())}
                     className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
@@ -5739,11 +5738,13 @@ export function SubaruSsmPanel({
                     type="button"
                     onClick={() => void executeMeter12Write()}
                     disabled={
-                      meter12WriteConfirmTyped.trim().toUpperCase() !== meter12WritePending.optionCode
+                      meter12WriteConfirmTyped.trim().toUpperCase() !== meter12WritePending.optionCode &&
+                      meter12WriteConfirmTyped.trim().toUpperCase() !== "0205" &&
+                      meter12WriteConfirmTyped.trim().toUpperCase() !== "205"
                     }
                     className="rounded-xl border border-gray-900 bg-gray-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
                   >
-                    Да, записать в приборку
+                    Да, разблокировать (0205) и записать
                   </button>
                 </div>
               </div>

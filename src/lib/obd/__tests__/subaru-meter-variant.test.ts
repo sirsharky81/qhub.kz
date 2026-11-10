@@ -183,12 +183,12 @@ describe("subaru-meter-variant", () => {
     ]);
   });
 
-  it("unlocks 27 03 -> 27 04 using SSM4 VsmDatabase 12445_API_309D when 2E 10C2 FF returns NRC 33, then writes U45D (A002=02, A011=FF)", async () => {
+  it("unlocks 27 03 -> 27 04 using FHIUtilityCtrlNK GetSecurityAccessSelKey(idx=11 LE, ctrl-mode1) after passcode 0205 when 2E 0250 returns NRC 31 or 2E 10C2 FF returns NRC 33", async () => {
     const seed = [0x12, 0x34, 0x56, 0x78];
     const expectedKey = computeSubaruSecurityKey4Byte(
       seed,
       SUBARU_METER_SECURITY_KEY_TABLES[0]!.words,
-      "standard-l3",
+      "ctrl-mode1",
     )
       .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
       .join("");
@@ -197,9 +197,10 @@ describe("subaru-meter-variant", () => {
       "2E02504254414359523855343544": "7F 2E 31",
       "2E0250425441435952385534354400": "7F 2E 31",
       "2E02514254414359523855343544": "7F 2E 31",
-      "2E10C2FF": ["7F 2E 33", "6E 10 C2"],
+      "2210C2": "62 10 C2 00",
       "2703": "67 03 12 34 56 78",
       [`2704${expectedKey}`]: "67 04",
+      "2E10C2FF": "6E 10 C2",
       "2EA00202": "6E A0 02",
       "2EA011FF": "6E A0 11",
       "2E10C200": "6E 10 C2",
@@ -208,10 +209,7 @@ describe("subaru-meter-variant", () => {
     const result = await writeSubaruMeter12ColumnCode(elm, {
       appliedModel: "BTACYR8",
       optionCode: "U45D",
-      currentDids: [
-        { did: "A002", hex: "03" },
-        { did: "A011", hex: "FF" },
-      ],
+      currentDids: [],
       txHex: "783",
       rxHex: "78B",
     });

@@ -32,8 +32,24 @@ export const SUBARU_METER_SECURITY_KEY_TABLES: readonly {
   words: readonly number[];
 }[] = [
   {
+    id: "CTRL_IDX11_LE",
+    label: "FHIUtilityCtrlNK GetSecAccess idx=11 (MET-002/009 0205 standard)",
+    words: [
+      0x0276, 0x2631, 0x8102, 0x7626, 0x3181, 0x2762, 0x6318, 0x1027,
+      0x6263, 0x1812, 0x1813, 0x6267, 0x2018, 0x1362, 0x6720, 0xa276,
+    ],
+  },
+  {
+    id: "CTRL_IDX35_LE",
+    label: "FHIUtilityCtrlNK GetSecAccess idx=35 (MET-009/010 0205 SSMID 4E*)",
+    words: [
+      0x0566, 0x3536, 0x2503, 0x9997, 0x2988, 0x0276, 0x1027, 0x0922,
+      0x5963, 0x1518, 0x1792, 0x2019, 0x1453, 0x0573, 0x7830, 0xa277,
+    ],
+  },
+  {
     id: "12445_L3",
-    label: "12445_API_309D/30A0 L3 (SGP Meter)",
+    label: "12445_API_309D/30A0 L3 (SGP Meter BE)",
     words: [
       0x7602, 0x3126, 0x0281, 0x2676, 0x8131, 0x6227, 0x1863, 0x2710,
       0x6362, 0x1218, 0x1318, 0x6762, 0x1820, 0x6213, 0x2067, 0x76a2,
@@ -41,7 +57,7 @@ export const SUBARU_METER_SECURITY_KEY_TABLES: readonly {
   },
   {
     id: "12445_L5",
-    label: "12445_API_309D/30A0 L5 (SGP Meter)",
+    label: "12445_API_309D/30A0 L5 (SGP Meter BE)",
     words: [
       0x6605, 0x3635, 0x0325, 0x9799, 0x8829, 0x7602, 0x2710, 0x2209,
       0x6359, 0x1815, 0x9217, 0x1920, 0x5314, 0x7305, 0x3078, 0x77a2,
@@ -65,11 +81,18 @@ export const SUBARU_SGP_AES128_KEYS: readonly {
   id: string;
   keyHex: string;
 }[] = [
+  // Combination Meter SGP (ecuKind=0x0012 in FHIUtilityCtrlNK.dll 0x10082228 & VsmDatabase)
+  { id: "CTRL_MET_0251_1", keyHex: "00F17B760F53C30CBFFB54AD808F497A" },
+  { id: "CTRL_MET_0251_3", keyHex: "76E19EDB3027B6C51C8E90CED15E59BA" },
   // KeyVersion 0251=01/02/03/129/130 across SGP Body/Meter/Gateway/Chassis ECUs
   { id: "12234_0251_1", keyHex: "8C15AC1E0EDFB84D8A1C1526CDFF0850" },
   { id: "12234_0251_2", keyHex: "0F84E1C95C8277A370E6CE71BFA6831D" },
   { id: "12234_0251_129", keyHex: "1615239AB78925A41F18E6AA07673581" },
   { id: "12236_0251_130", keyHex: "6A673120695FD8431286925F8601F955" },
+  { id: "CTRL_CGW_0251_1", keyHex: "7D89DDE1C95A224ED723E04496F4C0AE" },
+  { id: "CTRL_CGW_0251_2", keyHex: "C92270E66463395407F6C3014DC890B0" },
+  { id: "CTRL_CGW_0251_193", keyHex: "66D5364A0D2D45C67E8DB120ED471438" },
+  { id: "CTRL_CGW_0251_194", keyHex: "37490E2C46C57F8CB22FEC48133965D6" },
   { id: "12555_0251_1", keyHex: "35371DE1F774FC0123A8AE67A725D1BB" },
   { id: "12625_0251_1", keyHex: "7168633A55270B3BA4E873BBBC248EC6" },
   { id: "12627_0251_1", keyHex: "18852C9509C8610F3E894CD8F23EB30D" },
@@ -96,13 +119,15 @@ function subaruFeistelRound16(ax: number): number {
 }
 
 /**
- * Computes the 4-byte SecurityAccess key from a 4-byte seed using SSM4 `CMD_SecurityAccess` (`0x10007fa0`)
- * or `CMD_SecurityAccess_Ocpt` (`0x100086f0`).
+ * Computes the 4-byte SecurityAccess key from a 4-byte seed using:
+ * - `"ctrl-mode1"`: exact `GetSecAccess(seed, mode=1)` from `FHIUtilityCtrlNK.dll` (`0x1004DED0`),
+ *   invoked by `MET-002.srp` / `MET-009.srp` (`GetSecurityAccessSelKey("11" | "35")`) after passcode `0205`.
+ * - `"standard-l3"` / `"standard-l5"` / `"ocpt"`: `CMD_SecurityAccess` (`0x10007fa0`) in `CMD_FhiCan.dll`.
  */
 export function computeSubaruSecurityKey4Byte(
   seedBytes: readonly number[],
   roundWords: readonly number[],
-  mode: "standard-l3" | "standard-l5" | "ocpt" = "standard-l3",
+  mode: "ctrl-mode1" | "standard-l3" | "standard-l5" | "ocpt" = "ctrl-mode1",
 ): number[] {
   if (seedBytes.length < 4 || roundWords.length < 16) return [];
   const s0 = seedBytes[0]! & 0xff;
@@ -119,6 +144,8 @@ export function computeSubaruSecurityKey4Byte(
     esp10 = ((s2 << 8) | s1) & 0xffff;
     ebx = ((s3 << 8) | s0) & 0xffff;
   } else {
+    // Both "ctrl-mode1" (GetSecAccess mode=1) and "standard-l3" pack:
+    // high16 = (s2 << 8) | s0, low16 = (s1 << 8) | s3
     esp10 = ((s2 << 8) | s0) & 0xffff;
     ebx = ((s1 << 8) | s3) & 0xffff;
   }
@@ -129,6 +156,11 @@ export function computeSubaruSecurityKey4Byte(
     ebx = ecx;
   }
 
+  if (mode === "ctrl-mode1") {
+    // Exact byte output of GetSecAccess (0x1004DED0..0x1004DF76) for mode=1 (idx 11 and idx 35):
+    // after swap: ebx32 = (ebx << 16) | esp10 -> out[0]=esp10_lo, out[1]=ebx_lo, out[2]=esp10_hi, out[3]=ebx_hi
+    return [esp10 & 0xff, ebx & 0xff, (esp10 >>> 8) & 0xff, (ebx >>> 8) & 0xff];
+  }
   if (mode === "ocpt") {
     return [(ebx >>> 8) & 0xff, ebx & 0xff, (esp10 >>> 8) & 0xff, esp10 & 0xff];
   }
@@ -640,10 +672,10 @@ export async function unlockSubaruMeterSecurityAccess(
     }
 
     if (seedBytes.length === 4) {
-      const modeOrder: ("standard-l3" | "standard-l5" | "ocpt")[] =
+      const modeOrder: ("ctrl-mode1" | "standard-l3" | "standard-l5" | "ocpt")[] =
         pair.level === 5
-          ? ["standard-l5", "standard-l3", "ocpt"]
-          : ["standard-l3", "ocpt"];
+          ? ["ctrl-mode1", "standard-l5", "standard-l3", "ocpt"]
+          : ["ctrl-mode1", "standard-l3", "ocpt"];
       for (const tbl of SUBARU_METER_SECURITY_KEY_TABLES) {
         for (const mode of modeOrder) {
           const kBytes = computeSubaruSecurityKey4Byte(seedBytes, tbl.words, mode);
@@ -690,11 +722,13 @@ export async function unlockSubaruMeterSecurityAccess(
               lastSeedHex = spacedHex(sb2);
               if (sb2.length === 4) {
                 const tbl = SUBARU_METER_SECURITY_KEY_TABLES.find((t) => cand.label.startsWith(t.id));
-                const mode: "standard-l3" | "standard-l5" | "ocpt" = cand.label.includes("ocpt")
+                const mode: "ctrl-mode1" | "standard-l3" | "standard-l5" | "ocpt" = cand.label.includes("ocpt")
                   ? "ocpt"
                   : cand.label.includes("standard-l5")
                     ? "standard-l5"
-                    : "standard-l3";
+                    : cand.label.includes("standard-l3")
+                      ? "standard-l3"
+                      : "ctrl-mode1";
                 if (tbl) {
                   activeKeyHex = compactHex(computeSubaruSecurityKey4Byte(sb2, tbl.words, mode));
                 }
@@ -862,6 +896,7 @@ export async function writeSubaruMeter12ColumnCode(
     }
 
     try {
+      let did0250OutOfRange = false;
       for (const item of plan.candidates) {
         assertWriteCandidate(item);
         const parsed = await sendWriteWithRetry(
@@ -876,6 +911,9 @@ export async function writeSubaruMeter12ColumnCode(
           steps.push(`${txHex}→${rxHex}: DID ${item.did} записан (6E)`);
           break;
         }
+        if (parsed.kind === "negative" && parsed.nrc === 0x31) {
+          did0250OutOfRange = true;
+        }
         if (parsed.kind === "negative" && parsed.nrc === 0x33) {
           securityAccessRequired = true;
           steps.push(
@@ -885,22 +923,53 @@ export async function writeSubaruMeter12ColumnCode(
         }
       }
 
-      // If 0250/0251 was not accepted and A002/A011 variant DIDs are present, execute MET-002.srp Procedure B:
-      // 2E 10 C2 FF (gate open) -> 2E A0 02 <dest> -> 2E A0 11 <unit> -> 2E 10 C2 00 (gate close)
-      if (!writtenDid && !securityAccessRequired && hasA002Snapshot) {
+      // If 0250/0251 returned NRC 31 (requestOutOfRange) or A002/A011 variant DIDs are present,
+      // execute exact SSM4 MET-002.srp / MET-009.srp Procedure B (service bulletin passcode 0205):
+      // B01: 22 10C2 -> B04 (0205) -> B06: 10 03 -> 27 03 -> GetSecurityAccessSelKey(11/35) -> 27 04 -> 2E 10C2 FF -> 2E A002 -> 2E A011 -> 2E 10C2 00
+      if (!writtenDid && !securityAccessRequired && (hasA002Snapshot || did0250OutOfRange)) {
         steps.push(
-          `${txHex}→${rxHex}: запуск штатной цепочки MET-002.srp / cgdwPHBWHoZ.mLW (2E 10C2 FF → 2E A002 ${a002TargetByte} → 2E A011 ${a011TargetByte} → 2E 10C2 00)`,
+          `${txHex}→${rxHex}: код бюллетеня 0205 принят (MET-009.srp B04→B06) — запуск штатной цепочки MET-002/009.srp (22 10C2 → 27 03/04 → 2E 10C2 FF → 2E A002 ${a002TargetByte} → 2E A011 ${a011TargetByte} → 2E 10C2 00)`,
         );
+
+        // Step B01: Check if gate 10C2 is already 0xFF; if not, unlock 27 03 -> 27 04 BEFORE sending 2E 10C2 FF (exact MET-009.srp B06 C01..C04 order!)
+        let gateAlreadyOpen = false;
+        try {
+          const raw10c2 = await elm.sendPayload("2210C2", 1_500);
+          const p10c2 = parseUdsResponse(raw10c2, 0x22);
+          steps.push(`${txHex}→${rxHex}: проверка ворот 22 10C2 (MET-009 B01) → ${raw10c2.replace(/>/g, "").trim() || "нет ответа"}`);
+          if (p10c2.kind === "positive") {
+            const val = p10c2.payload[p10c2.payload.length - 1];
+            if (val === 0xff) gateAlreadyOpen = true;
+          }
+        } catch {
+          /* ignore */
+        }
+
+        if (!gateAlreadyOpen && hasA002Snapshot) {
+          // Try 2E 10C2 FF first if ECU is already unlocked in session; if NRC 33, run 27 03 -> 27 04 with exact FHIUtilityCtrlNK idx=11/35 LE mode=1
+        } else if (!gateAlreadyOpen && did0250OutOfRange) {
+          steps.push(
+            `${txHex}→${rxHex}: MET-009.srp B06 C02/C03 (после кода 0205) — выполняем разблокировку 27 03 → 27 04 (GetSecurityAccessSelKey idx=11/35)…`,
+          );
+          await openMeterSession(elm, target.tx, target.rx);
+          const preUnlock = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+            userKeyHex: input.securityKeyHex,
+            keyVersionByte,
+          });
+          if (preUnlock.seedHex) lastSeedHex = preUnlock.seedHex;
+        }
+
         let pGateOpen = await sendWriteWithRetry(
           elm,
           "2E10C2FF",
           steps,
-          `${txHex}→${rxHex} 2E 10C2 FF (открытие вариантной записи MET-002 B06 C04)`,
+          `${txHex}→${rxHex} 2E 10C2 FF (открытие вариантной записи MET-002/009 B06 C04)`,
         );
         if (pGateOpen.kind === "negative" && pGateOpen.nrc === 0x33) {
           steps.push(
-            `${txHex}→${rxHex}: 2E 10C2 FF запросил SecurityAccess (NRC 33) — выполняем разблокировку 27 03 / 27 04 по таблице SSM4 VsmDatabase…`,
+            `${txHex}→${rxHex}: 2E 10C2 FF запросил SecurityAccess (NRC 33) — выполняем разблокировку 27 03 / 27 04 (FHIUtilityCtrlNK GetSecAccess idx=11/35)…`,
           );
+          await openMeterSession(elm, target.tx, target.rx);
           const unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
             userKeyHex: input.securityKeyHex,
             keyVersionByte,
