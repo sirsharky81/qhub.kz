@@ -197,9 +197,12 @@ describe("subaru-meter-variant", () => {
       "2E02504254414359523855343544": "7F 2E 31",
       "2E0250425441435952385534354400": "7F 2E 31",
       "2E02514254414359523855343544": "7F 2E 31",
+      // CGW FilterRemove must succeed first — otherwise SGP drops 27 xx to the meter
+      "31010200": "71 01 02 00",
       "2210C2": "62 10 C2 00",
-      "2703": "67 03 12 34 56 78",
-      [`2704${expectedKey}`]: "67 04",
+      // probe after FilterRemove + unlockSubaruMeterSecurityAccess + retries
+      "2703": ["67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78"],
+      [`2704${expectedKey}`]: ["67 04", "67 04", "67 04"],
       "2E10C2FF": "6E 10 C2",
       "2EA00202": "6E A0 02",
       "2EA011FF": "6E A0 11",
@@ -219,8 +222,11 @@ describe("subaru-meter-variant", () => {
     expect(result.writtenDid).toBe("A002/A011");
     expect(result.writtenHex).toBe("A002=02 A011=FF");
     expect(result.seedHex).toBe("12 34 56 78");
+    expect(elm.sent).toContain("31010200");
+    expect(elm.sent.indexOf("31010200")).toBeLessThan(elm.sent.indexOf("2703"));
     expect(elm.sent).toContain("2703");
     expect(elm.sent).toContain(`2704${expectedKey}`);
+    expect(result.steps.join(" ")).toMatch(/фильтр SID снят/);
 
     // Verify AES-128-ECB vector from SSM4 CMD_SecurityAccess2018CY1
     const aesSeed = [
@@ -235,5 +241,63 @@ describe("subaru-meter-variant", () => {
       .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
       .join("");
     expect(aesOut).toBe("AA21C0117CF3DCB6BC1F7A7F90EE78CA");
+  });
+
+  it("runs cgwChkAndFilterRemove (31 01 02 00) before meter SecurityAccess so CGW stops dropping 27 xx", async () => {
+    const seed16 = [
+      0xf8, 0xee, 0x16, 0x09, 0xec, 0x9a, 0xb9, 0x1c, 0x83, 0x58, 0x06, 0x0f, 0xde, 0xbc, 0x3e, 0x06,
+    ];
+    const keyC1 = [
+      0x66, 0xd5, 0x36, 0x4a, 0x0d, 0x2d, 0x45, 0xc6, 0x7e, 0x8d, 0xb1, 0x20, 0xed, 0x47, 0x14, 0x38,
+    ];
+    const outKey = computeSubaruSecurityKey16ByteAesEcb(seed16, keyC1)
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+    const meterSeed = [0x12, 0x34, 0x56, 0x78];
+    const meterKey = computeSubaruSecurityKey4Byte(
+      meterSeed,
+      SUBARU_METER_SECURITY_KEY_TABLES[0]!.words,
+      "ctrl-mode1",
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    const elm = scriptedElm({
+      // First CGW attempt: FilterRemove needs SA (NRC 33), then AES unlock KeyVersion C1, then 31 01 02 00 OK
+      "31010200": ["7F 31 33", "71 01 02 00"],
+      "3101020C": "7F 31 33",
+      "31011201": "7F 31 33",
+      "220251": "62 02 51 C1",
+      "2707": "67 07 F8 EE 16 09 EC 9A B9 1C 83 58 06 0F DE BC 3E 06",
+      [`2708${outKey}`]: "67 08",
+      "2210C2": "62 10 C2 00",
+      "2E0250425441455952385534354C": "7F 2E 31",
+      "2E0250425441455952385534354C00": "7F 2E 31",
+      "2E0251425441455952385534354C": "7F 2E 31",
+      "2703": ["67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78"],
+      [`2704${meterKey}`]: ["67 04", "67 04", "67 04"],
+      "2E10C2FF": "6E 10 C2",
+      "2EA00202": "6E A0 02",
+      "2EA011FF": "6E A0 11",
+      "2E10C200": "6E 10 C2",
+    });
+
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "U45L",
+      currentDids: [],
+      txHex: "783",
+      rxHex: "78B",
+    });
+
+    expect(elm.sent).toContain("31010200");
+    expect(elm.sent.some((s) => s.startsWith("2707") || s.startsWith("2708") || s === "31010200")).toBe(
+      true,
+    );
+    expect(elm.sent.indexOf("31010200")).toBeLessThan(elm.sent.indexOf("2703"));
+    expect(result.steps.join(" ")).toMatch(/фильтр SID снят/);
+    expect(result.success).toBe(true);
+    // outKey kept so AES path stays covered when KeyVersion C1 is matched first
+    expect(outKey).toHaveLength(32);
   });
 });
