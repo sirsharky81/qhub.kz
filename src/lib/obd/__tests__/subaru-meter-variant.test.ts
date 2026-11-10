@@ -154,14 +154,13 @@ describe("subaru-meter-variant", () => {
     expect(result.steps.join(" ")).toMatch(/SecurityAccess/);
   });
 
-  it("writes MET-002.srp A002/A011 variant registers (2E 10C2 FF -> 2E A002 03 -> 2E A011 00 -> 2E 10C2 00) when meter uses A0xx table", async () => {
+  it("writes MET-002.srp A002/A011 variant registers (2E 10C2 FF -> 2E A002 03 -> 2E A011 00) when meter uses A0xx table", async () => {
     const elm = scriptedElm({
       "3101020C": "71 01 02 0C",
       "2210C2": "62 10 C2 FF",
       "2E10C2FF": "6E 10 C2",
       "2EA00203": "6E A0 02",
       "2EA01100": "6E A0 11",
-      "2E10C200": "6E 10 C2",
     });
     const result = await writeSubaruMeter12ColumnCode(elm, {
       appliedModel: "BTAEYR8",
@@ -181,11 +180,10 @@ describe("subaru-meter-variant", () => {
       "2E10C2FF",
       "2EA00203",
       "2EA01100",
-      "2E10C200",
     ]);
   });
 
-  it("unlocks 27 03 -> 27 04 using FHIUtilityCtrlNK GetSecurityAccessSelKey(idx=11 LE, ctrl-mode1) after passcode 0205 when 2E 0250 returns NRC 31 or 2E 10C2 FF returns NRC 33", async () => {
+  it("unlocks 27 03 -> 27 04 using FHIUtilityCtrlNK GetSecurityAccessSelKey(idx=11 LE, ctrl-mode1) when 2E 0250 returns NRC 31 and 10C2 stays 00", async () => {
     const seed = [0x12, 0x34, 0x56, 0x78];
     const expectedKey = computeSubaruSecurityKey4Byte(
       seed,
@@ -200,14 +198,13 @@ describe("subaru-meter-variant", () => {
       "2E0250425441435952385534354400": "7F 2E 31",
       "2E02514254414359523855343544": "7F 2E 31",
       // Live BT 2024: 763 31 01 02 0C first (may include 7F 31 78 pending)
-      "3101020C": "7F 31 78 71 01 02 0C",
-      "2210C2": "62 10 C2 00",
+      "3101020C": ["7F 31 78 71 01 02 0C", "7F 31 78 71 01 02 0C"],
+      "2210C2": ["62 10 C2 00", "62 10 C2 00"],
       "2703": ["67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78"],
       [`2704${expectedKey}`]: ["67 04", "67 04"],
       "2E10C2FF": "6E 10 C2",
       "2EA00202": "6E A0 02",
       "2EA011FF": "6E A0 11",
-      "2E10C200": "6E 10 C2",
     });
 
     const result = await writeSubaruMeter12ColumnCode(elm, {
