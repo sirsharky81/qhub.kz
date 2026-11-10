@@ -97,7 +97,7 @@ interface Props {
   vinHint?: string | null;
 }
 
-type Ssm4StartMode = "f1-diag" | "f2-immo" | "f3-repro" | "f4-obd" | "f5-recorder";
+type Ssm4StartMode = "f1-diag" | "f3-repro" | "f4-obd" | "f5-recorder";
 
 type Ssm4TopView =
   | "all-dtc"
@@ -1337,11 +1337,6 @@ export function SubaruSsmPanel({
         return;
       }
 
-      if (funcId === 20 && activeSubId === "cust-open-tab") {
-        setTopView("customize");
-        return;
-      }
-
       if (funcId === 918 && activeSubId === "alldtc-open-table") {
         setTopView("all-dtc");
         return;
@@ -2327,15 +2322,6 @@ export function SubaruSsmPanel({
             {(
               [
                 { id: "f1-diag", label: "F1 Diagnosis", action: () => setTopView("all-dtc") },
-                {
-                  id: "f2-immo",
-                  label: "F2 Immobilizer / Ключи / RES →",
-                  action: () => {
-                    if (typeof window !== "undefined") {
-                      window.location.href = "/tools/subaru-coding?tab=immo";
-                    }
-                  },
-                },
                 {
                   id: "f3-repro",
                   label: "F3 Reprogram / ROM",
@@ -4558,7 +4544,7 @@ export function SubaruSsmPanel({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-bold text-gray-900">
-                Адаптации, калибровки и сервисные инспекции SSM4 (FunctionId = 902 · {SERVICE_UTILITIES.length} процедур)
+                Адаптации, калибровки и сервисные инспекции SSM4 (FunctionId = 902 · {SERVICE_UTILITIES.filter((u) => u.id !== "util-keyless-starter-check").length} процедур)
               </h3>
               <p className="text-xs text-gray-500">
                 Все найденные в базе SSM4 адаптации и калибровки по блокам: угол руля EPS/VDC, вариатор Lineartronic CVT (AT Learning, давления шкивов, насос EOP), электроручник EPB и суппорты, электронный вестгейт EWG и термостат TCV, герметичность EVAP ELCM, камера EyeSight, сонары RAB, фары SRH/ADB, камера DriverFocus DMS, климат Auto A/C, TPMS и Smart Key.
@@ -4567,7 +4553,7 @@ export function SubaruSsmPanel({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {SERVICE_UTILITIES.map((u) => {
+            {SERVICE_UTILITIES.filter((u) => u.id !== "util-keyless-starter-check").map((u) => {
               const active = u.id === selectedUtility.id;
               return (
                 <button
@@ -4696,7 +4682,7 @@ export function SubaruSsmPanel({
 
             {(() => {
               const actionsForUtility = SUBARU_SERVICE_ACTIONS.filter(
-                (a) => a.utilityId === selectedUtility.id,
+                (a) => a.utilityId === selectedUtility.id && a.srpPrefix !== "MET",
               );
               if (actionsForUtility.length === 0) return null;
               return (
@@ -4837,9 +4823,11 @@ export function SubaruSsmPanel({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {SSM4_SRP_UTILITY_CATALOG.map((mod) => {
+              {SSM4_SRP_UTILITY_CATALOG.filter(
+                (mod) => mod.prefix !== "MET" && mod.prefix !== "IMM / KEY / SMA",
+              ).map((mod) => {
                 const modActions = SUBARU_SERVICE_ACTIONS.filter(
-                  (a) => a.srpPrefix === mod.prefix,
+                  (a) => a.srpPrefix === mod.prefix && a.srpPrefix !== "MET",
                 );
                 return (
                   <div
@@ -4920,15 +4908,6 @@ export function SubaruSsmPanel({
                             </div>
                           );
                         })}
-                        {mod.prefix === "MET" && (
-                          <button
-                            type="button"
-                            onClick={() => setTopView("customize")}
-                            className="rounded-lg border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
-                          >
-                            Открыть калькулятор 12 Columns (C0/C5) и слепки приборки →
-                          </button>
-                        )}
                       </div>
 
                       <div className="flex flex-wrap gap-1 pt-1">

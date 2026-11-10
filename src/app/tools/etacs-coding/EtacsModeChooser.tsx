@@ -56,10 +56,10 @@ export function EtacsModeChooser({
       </div>
 
       <Link
-        href="/tools/obd-diag"
+        href="/tools/mitsubishi-diag?tab=etacs"
         className="mt-6 block text-center text-xs text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
       >
-        Выгрузка .kon / .cuf через OBD Scanner
+        Выгрузка .kon / .cuf в Mitsubishi Diagnostics
       </Link>
     </div>
   );

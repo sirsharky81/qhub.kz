@@ -23,7 +23,7 @@ export const UDS_TEMPLATES: UdsTemplate[] = [
   { id: "03", label: "Ошибки блока (03)", hex: "03" },
   { id: "1902", label: "Коды DTC (UDS)", hex: "19 02 FF" },
   { id: "190a", label: "Поддержанные DTC", hex: "19 0A" },
-  { id: "f18e", label: "Каталожный № Subaru (22 F18E)", hex: "22 F18E" },
+  { id: "f18e", label: "Каталожный номер (22 F18E)", hex: "22 F18E" },
   { id: "f197", label: "Имя системы (22 F197)", hex: "22 F197" },
   { id: "f190", label: "VIN (UDS)", hex: "22 F190" },
   { id: "f187", label: "Номер детали (F187)", hex: "22 F187" },

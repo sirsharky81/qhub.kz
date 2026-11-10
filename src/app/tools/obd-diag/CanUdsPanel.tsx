@@ -66,12 +66,17 @@ export default function CanUdsPanel({
   enabled,
   linkLostTick,
   onLog,
+  brand,
 }: {
   session: ObdBleSession;
   enabled: boolean;
   linkLostTick: number;
   onLog: (line: string) => void;
+  brand: "subaru" | "mitsubishi";
 }) {
+  const brandModules = KNOWN_MODULE_TARGETS.filter(
+    (target) => target.rx != null && (target.brand === "common" || target.brand === brand || target.brand == null),
+  );
   const obdScroll = useObdScroll();
   const deferUiRef = useRef<(apply: () => void) => void>((apply) => apply());
   useEffect(() => {
@@ -130,31 +135,28 @@ export default function CanUdsPanel({
   const stopMitsuTcmRef = useRef(false);
 
   // TPMS (773 / 600 / 752) state + wheel order persistence
-  const [tpmsTarget, setTpmsTarget] = useState<"mitsubishi-773" | "mitsubishi-600" | "subaru-752">("mitsubishi-773");
+  const [tpmsTarget, setTpmsTarget] = useState<"mitsubishi-773" | "mitsubishi-600" | "subaru-752">(
+    brand === "subaru" ? "subaru-752" : "mitsubishi-773",
+  );
   const [tpmsReport, setTpmsReport] = useState<TpmsModuleReport | null>(null);
   const [tpmsUnit, setTpmsUnit] = useState<"bar" | "kpa" | "psi">("bar");
-  const [tpmsWheelMap, setTpmsWheelMap] = useState<Record<TpmsWheelPosition, number>>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const savedMap = localStorage.getItem("qhub.obd.tpms-wheel-map");
-        if (savedMap) {
-          const parsed = JSON.parse(savedMap) as Record<TpmsWheelPosition, number>;
-          if (parsed && typeof parsed.FL === "number") {
-            return parsed;
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    return {
-      FL: 0,
-      FR: 1,
-      RR: 2,
-      RL: 3,
-      SPARE: 4,
-    };
+  const [tpmsWheelMap, setTpmsWheelMap] = useState<Record<TpmsWheelPosition, number>>({
+    FL: 0,
+    FR: 1,
+    RR: 2,
+    RL: 3,
+    SPARE: 4,
   });
+  useEffect(() => {
+    try {
+      const savedMap = localStorage.getItem("qhub.obd.tpms-wheel-map");
+      if (!savedMap) return;
+      const parsed = JSON.parse(savedMap) as Record<TpmsWheelPosition, number>;
+      if (parsed && typeof parsed.FL === "number") setTpmsWheelMap(parsed);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   // Mitsubishi Combination Meter (6A0 -> 514) state
   const [mitsuMeter, setMitsuMeter] = useState<MitsubishiMeterReport | null>(null);
@@ -1129,6 +1131,8 @@ export default function CanUdsPanel({
           });
         },
         () => stopScanRef.current,
+        undefined,
+        brand,
       );
       setDtcReports(list);
       setDtcProgress("");
@@ -1161,7 +1165,7 @@ export default function CanUdsPanel({
       setDtcBanner(msg);
       onLog(msg);
       // Re-scan to confirm cleared status
-      const updated = await session.scanAllModuleDtcs(protocol);
+      const updated = await session.scanAllModuleDtcs(protocol, undefined, undefined, undefined, brand);
       setDtcReports(updated);
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Ошибка сброса DTC");
@@ -1210,9 +1214,11 @@ export default function CanUdsPanel({
         <ProtocolButton active={view === "dashboard"} onClick={() => switchCanSubView("dashboard")}>
           Показатели UDS
         </ProtocolButton>
-<ProtocolButton active={view === "safety"} onClick={() => switchCanSubView("safety")}>
-          Подушки / Тормоза
-        </ProtocolButton>
+        {brand === "subaru" ? (
+          <ProtocolButton active={view === "safety"} onClick={() => switchCanSubView("safety")}>
+            Подушки / Тормоза
+          </ProtocolButton>
+        ) : null}
         <ProtocolButton active={view === "dtcs"} onClick={() => switchCanSubView("dtcs")}>
           Ошибки блоков
         </ProtocolButton>
@@ -1245,7 +1251,7 @@ export default function CanUdsPanel({
 
       {view === "dashboard" ? (
         <div className="flex flex-col gap-3">
-          {/* Card 1: Mitsubishi AT / CVT Telemetry (7E1 -> 7E9) */}
+          {brand === "mitsubishi" ? (
           <div className="rounded-xl border border-emerald-300 bg-white p-3.5">
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -1425,8 +1431,9 @@ export default function CanUdsPanel({
               </div>
             ) : null}
           </div>
+          ) : null}
 
-          {/* Card 2: TPMS 4+1 Wheel Map (Mitsubishi 773/600 & Subaru 752) */}
+          {/* Card 2: TPMS 4+1 Wheel Map */}
           <div className="rounded-xl border border-emerald-300 bg-white p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -1434,7 +1441,9 @@ export default function CanUdsPanel({
                   Давление и температура в шинах (TPMS Карта 4+1 с запаской)
                 </div>
                 <p className="mt-0.5 text-[11px] text-gray-500">
-                  Mitsubishi Pajero Sport III (`773 → 774` OSS/TPMS), Outlander III / ASX (`600 → 500` KOS/TPMS) и Subaru SGP (`752 → 75A`). Поддерживается перестановка позиций колёс после шиномонтажа.
+                  {brand === "subaru"
+                    ? "Subaru SGP (`752 → 75A`). Поддерживается перестановка позиций колёс после шиномонтажа."
+                    : "Mitsubishi Pajero Sport III (`773 → 774` OSS/TPMS) и Outlander III / ASX (`600 → 500` KOS/TPMS). Поддерживается перестановка позиций колёс после шиномонтажа."}
                 </p>
               </div>
               <div className="flex gap-1">
@@ -1455,51 +1464,56 @@ export default function CanUdsPanel({
               </div>
             </div>
 
-            <div className="mt-2.5 grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void readTpmsOnce("mitsubishi-773")}
-                className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
-                  tpmsTarget === "mitsubishi-773"
-                    ? "bg-gray-900 text-white"
-                    : "border border-gray-300 bg-gray-50 text-gray-800"
-                }`}
-              >
-                Pajero Sport III (773)
-              </button>
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void readTpmsOnce("mitsubishi-600")}
-                className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
-                  tpmsTarget === "mitsubishi-600"
-                    ? "bg-gray-900 text-white"
-                    : "border border-gray-300 bg-gray-50 text-gray-800"
-                }`}
-              >
-                Outlander / ASX (600)
-              </button>
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void readTpmsOnce("subaru-752")}
-                className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
-                  tpmsTarget === "subaru-752"
-                    ? "bg-gray-900 text-white"
-                    : "border border-gray-300 bg-gray-50 text-gray-800"
-                }`}
-              >
-                Subaru SGP (752)
-              </button>
+            <div className="mt-2.5 grid grid-cols-2 gap-2">
+              {brand === "mitsubishi" ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={hwBusy || monitoring}
+                    onClick={() => void readTpmsOnce("mitsubishi-773")}
+                    className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
+                      tpmsTarget === "mitsubishi-773"
+                        ? "bg-gray-900 text-white"
+                        : "border border-gray-300 bg-gray-50 text-gray-800"
+                    }`}
+                  >
+                    Pajero Sport III (773)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={hwBusy || monitoring}
+                    onClick={() => void readTpmsOnce("mitsubishi-600")}
+                    className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
+                      tpmsTarget === "mitsubishi-600"
+                        ? "bg-gray-900 text-white"
+                        : "border border-gray-300 bg-gray-50 text-gray-800"
+                    }`}
+                  >
+                    Outlander / ASX (600)
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={hwBusy || monitoring}
+                  onClick={() => void readTpmsOnce("subaru-752")}
+                  className={`rounded-xl px-2.5 py-2.5 text-xs font-semibold disabled:opacity-40 ${
+                    tpmsTarget === "subaru-752"
+                      ? "bg-gray-900 text-white"
+                      : "border border-gray-300 bg-gray-50 text-gray-800"
+                  }`}
+                >
+                  Subaru SGP (752)
+                </button>
+              )}
             </div>
 
             {tpmsReport ? (
               <div className="mt-3 space-y-2">
                 {tpmsReport.wheels.every((w) => w.pressureBar == null) ? (
                   <p className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
-                    Давление не пришло — выберите блок (600 Outlander / 773 Pajero Sport), IG ON, при необходимости
-                    поездка &gt;30 км/ч. Raw: <span className="font-mono">{tpmsReport.rawHex || "—"}</span>
+                    Давление не пришло — зажигание ON, при необходимости поездка &gt;30 км/ч. Raw:{" "}
+                    <span className="font-mono">{tpmsReport.rawHex || "—"}</span>
                   </p>
                 ) : null}
                 <div className="flex items-center justify-between text-[11px] text-gray-500">
@@ -1595,33 +1609,40 @@ export default function CanUdsPanel({
               </span>
             </div>
             <p className="mt-1 text-xs text-gray-700">
-              Сводка полезных рабочих параметров без затрагивания подушек (SRS) и тормозов (ABS): давление в 4 шинах TPMS (`752`), температуры ДВС/КПП и каналы силовой установки (`7A2` / `7E1`), напряжение бортсети и датчики обоих полубаков (`783`), а также параметры ДВС (`7E0`).
+              {brand === "subaru"
+                ? "Сводка рабочих параметров без затрагивания подушек (SRS) и тормозов (ABS): давление в шинах TPMS (`752`), температуры ДВС/КПП и каналы силовой установки (`7A2` / `7E1`), напряжение бортсети и датчики баков (`783`), параметры ДВС (`7E0`)."
+                : "Сводка рабочих параметров двигателя и коробки Pajero (`7E0` / `7E1`, KWP `21`) без команд записи."}
             </p>
-            <div className="mt-2.5 grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void runCatalog("subaru-tcm")}
-                className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                Subaru SGP + Шины
-              </button>
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void runCatalog("subaru")}
-                className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-2.5 py-2.5 text-xs font-medium text-emerald-800 disabled:opacity-40"
-              >
-                Subaru ДВС (7E0)
-              </button>
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void runCatalog("pajero")}
-                className="rounded-xl border border-gray-300 px-2.5 py-2.5 text-xs disabled:opacity-40"
-              >
-                Pajero 21 (7E0+7E1)
-              </button>
+            <div className="mt-2.5 grid grid-cols-2 gap-2">
+              {brand === "subaru" ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={hwBusy || monitoring}
+                    onClick={() => void runCatalog("subaru-tcm")}
+                    className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                  >
+                    Subaru SGP + Шины
+                  </button>
+                  <button
+                    type="button"
+                    disabled={hwBusy || monitoring}
+                    onClick={() => void runCatalog("subaru")}
+                    className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-2.5 py-2.5 text-xs font-medium text-emerald-800 disabled:opacity-40"
+                  >
+                    Subaru ДВС (7E0)
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={hwBusy || monitoring}
+                  onClick={() => void runCatalog("pajero")}
+                  className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Pajero 21 (7E0+7E1)
+                </button>
+              )}
             </div>
             {catalog.length > 0 ? (
               <ul className="mt-3 space-y-1.5 text-sm">
@@ -1639,7 +1660,15 @@ export default function CanUdsPanel({
               </ul>
             ) : (
               <p className="mt-2.5 text-xs text-gray-500">
-                Нажмите <strong>«Subaru SGP + Шины»</strong> или <strong>«Pajero 21 (7E0+7E1)»</strong> для мгновенного чтения параметров.
+                {brand === "subaru" ? (
+                  <>
+                    Нажмите <strong>«Subaru SGP + Шины»</strong> или <strong>«Subaru ДВС (7E0)»</strong> для мгновенного чтения параметров.
+                  </>
+                ) : (
+                  <>
+                    Нажмите <strong>«Pajero 21 (7E0+7E1)»</strong> для мгновенного чтения параметров.
+                  </>
+                )}
               </p>
             )}
           </div>
@@ -1735,7 +1764,9 @@ export default function CanUdsPanel({
               ) : null}
             </div>
             <p className="mt-1 text-xs text-gray-500">
-              Опрашивает все блоки Subaru и Mitsubishi (`UDS 19 02 FF`, `KWP2000 18 00 FF 00` и `OBD Mode 03`). Для <strong>обычных блоков</strong> (ДВС `7E0`, АКПП/CVT `7E1`, Силовая `7A2`, ETACS `620`/`7A1`, Приборка `783`/`6A0`, TPMS/KOS `752`/`773`/`600`, Климат `7C4`/`688`, 4WD `7B6`, Сонары `786`/`763`) доступен безопасный сброс ошибок (`14 FF FF FF` / `14 FF 00`). Для <strong>блоков безопасности</strong> (Подушки SRS `780`/`7B2`, Тормоза ABS/ASC `7B0`/`784`, Руль EPS/SAS `746`/`622`, EyeSight `787`) разрешено <strong>только чтение</strong> без риска сбить калибровки.
+              {brand === "subaru"
+                ? "Опрашивает блоки Subaru (`UDS 19 02 FF` и `OBD Mode 03`): ДВС `7E0`, КПП `7E1`, силовая `7A2`, приборка `783`, BIU/TPMS `752`, климат `7C4`, сонары `786`. Для обычных блоков доступен сброс (`14 FF FF FF`). SRS `780`, ABS `7B0`, EPS `746` и EyeSight `787` — только чтение."
+                : "Опрашивает блоки Mitsubishi (`KWP2000 18 00 FF 00` и `OBD Mode 03`): ДВС `7E0`, АКПП `7E1`, ETACS `620`/`7A1`, приборка `6A0`, TPMS `773`/`600`, климат `688`. Для обычных блоков доступен сброс (`14 FF 00`). SRS `6E0`, ABS `784` и SAS `622` — только чтение."}
             </p>
 
             <button
@@ -1744,7 +1775,7 @@ export default function CanUdsPanel({
               onClick={() => void runAllModuleDtcScan()}
               className="mt-2.5 w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-4 py-3 text-xs font-semibold text-white disabled:opacity-40"
             >
-              Проверить ошибки во всех блоках ({KNOWN_MODULE_TARGETS.filter((t) => t.rx != null).length} ЭБУ)
+              Проверить ошибки во всех блоках ({brand === "subaru" ? 12 : 10} ЭБУ)
             </button>
 
             {dtcProgress ? <p className="mt-2 text-xs text-emerald-700">{dtcProgress}</p> : null}
@@ -1845,7 +1876,7 @@ export default function CanUdsPanel({
       ) : view === "monitor" ? (
         <>
           <p className="text-xs text-gray-500">
-            Пассивная прослушка шины (`ATMA` / `ATCRA`). Включает автоматический декодер широковещательных CAN-фреймов Mitsubishi & Subaru (`0x236` угол руля, `0x318` передача АКПП, `0x32F` ручник EPB, `0x214`/`0x215` скорости 4 колёс, `0x208` тормоз, `0x210` педаль газа, `0x154` топливо/пробег, `0x608` темп. ОЖ/улицы) и интерактивный Diff-охотник за кнопками.
+            Пассивная прослушка шины (`ATMA` / `ATCRA`). Включает автоматический декодер широковещательных CAN-фреймов (`0x236` угол руля, `0x318` передача АКПП, `0x32F` ручник EPB, `0x214`/`0x215` скорости 4 колёс, `0x208` тормоз, `0x210` педаль газа, `0x154` топливо/пробег, `0x608` темп. ОЖ/улицы) и интерактивный Diff-охотник за кнопками.
           </p>
           <p className="text-xs text-gray-500">
             Потери адаптера: {losses}. Фильтр и протокол меняются только когда монитор остановлен.
@@ -2065,33 +2096,40 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-gray-200 bg-white p-3">
             <div className="text-xs font-medium text-gray-700">Заводские таблицы (1 нажатие)</div>
             <p className="mt-1 text-xs text-gray-500">
-              Subaru ДВС (`7E0` SSM `A8`), Subaru SGP (`7E1` КПП + `7A2` 2.4 TURBO + `752` Шины TPMS + `783` Приборка), Pajero Sport (`7E0` `21 01–04`).
+              {brand === "subaru"
+                ? "Subaru ДВС (`7E0` SSM `A8`), Subaru SGP (`7E1` КПП + `7A2` 2.4 TURBO + `752` Шины TPMS + `783` Приборка)."
+                : "Pajero Sport (`7E0` `21 01–04`)."}
             </p>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void runCatalog("subaru")}
-                className="rounded-xl border border-gray-900 bg-gray-900 px-2.5 py-2.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-40"
-              >
-                Subaru ДВС (7E0)
-              </button>
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void runCatalog("subaru-tcm")}
-                className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-2.5 py-2.5 text-xs font-medium text-emerald-800 disabled:opacity-40"
-              >
-                Subaru SGP + Шины
-              </button>
-              <button
-                type="button"
-                disabled={hwBusy || monitoring}
-                onClick={() => void runCatalog("pajero")}
-                className="rounded-xl border border-gray-300 px-2.5 py-2.5 text-xs disabled:opacity-40"
-              >
-                Pajero 21 (7E0)
-              </button>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {brand === "subaru" ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={hwBusy || monitoring}
+                    onClick={() => void runCatalog("subaru")}
+                    className="rounded-xl border border-gray-900 bg-gray-900 px-2.5 py-2.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-40"
+                  >
+                    Subaru ДВС (7E0)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={hwBusy || monitoring}
+                    onClick={() => void runCatalog("subaru-tcm")}
+                    className="rounded-xl border border-emerald-500/60 bg-emerald-50 px-2.5 py-2.5 text-xs font-medium text-emerald-800 disabled:opacity-40"
+                  >
+                    Subaru SGP + Шины
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={hwBusy || monitoring}
+                  onClick={() => void runCatalog("pajero")}
+                  className="rounded-xl border border-gray-900 bg-gray-900 px-2.5 py-2.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-40"
+                >
+                  Pajero 21 (7E0)
+                </button>
+              )}
             </div>
             {catalog.length > 0 ? (
               <ul className="mt-3 space-y-1 text-sm">
@@ -2110,6 +2148,7 @@ export default function CanUdsPanel({
             ) : null}
           </div>
 
+          {brand === "subaru" ? (
           <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-emerald-800">
@@ -2285,6 +2324,7 @@ export default function CanUdsPanel({
               ) : null}
             </div>
           </div>
+          ) : null}
 
           <div className="rounded-xl border border-gray-200 bg-white p-3">
             <div className="flex items-center justify-between gap-2">
@@ -2368,7 +2408,7 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-gray-200 bg-white p-3">
             <div className="text-xs font-medium text-gray-700">Ручной запрос к блоку</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {KNOWN_MODULE_TARGETS.filter((t) => t.rx != null).map((target) => {
+              {brandModules.map((target) => {
                 const txHex = target.tx.toString(16).toUpperCase();
                 const rxHex = target.rx!.toString(16).toUpperCase();
                 const active = tx.toUpperCase() === txHex && rx.toUpperCase() === rxHex;
@@ -2420,7 +2460,7 @@ export default function CanUdsPanel({
             ) : null}
 
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {UDS_TEMPLATES.map((item) => (
+              {UDS_TEMPLATES.filter((item) => brand === "mitsubishi" || item.id !== "2101").map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -2484,7 +2524,8 @@ export default function CanUdsPanel({
                 ) : null}
               </div>
               <p className="mt-1 text-[11px] text-gray-500">
-                Открывает сессию `10 03`, удерживает её через `3E 00`, находит рабочие DID на блоке (например CVT `7E1` или ABS `7B0`) и в конце отправляет `10 01`, чтобы погасить лампы на панели.
+                Открывает сессию `10 03`, удерживает её через `3E 00`, находит рабочие DID на блоке
+                {brand === "subaru" ? " (например CVT `7E1` или ABS `7B0`)" : " (например ДВС `7E0` или ETACS `620`)"} и в конце отправляет `10 01`, чтобы погасить лампы на панели.
               </p>
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                 <button

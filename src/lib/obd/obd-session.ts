@@ -1251,6 +1251,7 @@ export class ObdBleSession {
     onProgress?: (status: string, partial: ModuleDtcReport[]) => void,
     shouldStop?: () => boolean,
     catalogTargets?: ModuleDtcTarget[],
+    onlyBrand?: "subaru" | "mitsubishi",
   ): Promise<ModuleDtcReport[]> {
     this.requireAdapter();
     await this.waitLeave();
@@ -1402,7 +1403,16 @@ export class ObdBleSession {
         safetyCritical: false,
         canSafeClear: true,
       },
-    ];
+    ].filter((target) => {
+      if (!onlyBrand) return true;
+      const subaruTx = new Set([
+        0x7e0, 0x7e1, 0x7a3, 0x7a2, 0x783, 0x752, 0x7c4, 0x786, 0x746, 0x787, 0x7b0, 0x780,
+      ]);
+      const mitsubishiTx = new Set([
+        0x7e0, 0x7e1, 0x620, 0x6a0, 0x773, 0x600, 0x622, 0x784, 0x6e0, 0x688,
+      ]);
+      return (onlyBrand === "subaru" ? subaruTx : mitsubishiTx).has(target.tx);
+    });
 
     const out: ModuleDtcReport[] = [];
     try {

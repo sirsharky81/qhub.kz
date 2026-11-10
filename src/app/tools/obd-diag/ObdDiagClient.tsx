@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { formatBleFailure } from "@/lib/obd/ble-error";
 import { bytesToHex } from "@/lib/obd/hex";
 import {
@@ -37,7 +37,6 @@ import { useObdScroll } from "./ObdScrollContext";
 import CanUdsPanel from "./CanUdsPanel";
 import {
   BrandDiagPanel,
-  type BrandDiagBrand,
   type MitsubishiDiagView,
 } from "./BrandDiagPanel";
 import { LiveMetricCards } from "./LiveMetricCards";
@@ -82,9 +81,6 @@ export default function ObdDiagClient({
     }
     return "brand-diag";
   });
-  const [brandDiagBrand, setBrandDiagBrand] = useState<BrandDiagBrand>(() =>
-    isMitsuMode ? "mitsubishi" : "subaru",
-  );
   const [mitsuDiagView, setMitsuDiagView] = useState<MitsubishiDiagView>(() => {
     const param = searchParams.get("tab");
     if (param === "mitsu-sas" || param === "steering-mitsu") return "steering";
@@ -266,7 +262,9 @@ export default function ObdDiagClient({
         const msg = formatBleFailure(vehicleErr);
         pushLog(`Адаптер подключён (CAN/UDS доступны). OBD-II: ${msg}`);
         setError(
-          `${msg} Адаптер уже подключён — вкладки CAN / UDS и Mitsubishi доступны, либо включите зажигание и нажмите «Повторить связь с ЭБУ».`,
+          isMitsuMode
+            ? `${msg} Адаптер уже подключён — вкладки MUT-III, ETACS и CAN / UDS доступны, либо включите зажигание и нажмите «Повторить связь с ЭБУ».`
+            : `${msg} Адаптер уже подключён — вкладки SSM4 и CAN / UDS доступны, либо включите зажигание и нажмите «Повторить связь с ЭБУ».`,
         );
       }
     });
@@ -539,20 +537,6 @@ export default function ObdDiagClient({
                 {supplyVolts.toFixed(1)} В
               </span>
             ) : null}
-            {!isMitsuMode && (
-              <Link
-                href="/tools/subaru-coding"
-                className="rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-900 hover:bg-blue-100"
-              >
-                Приборка °C & Ключи/RES →
-              </Link>
-            )}
-            <Link
-              href={isMitsuMode ? "/tools/obd-diag" : "/tools/mitsubishi-diag"}
-              className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
-            >
-              {isMitsuMode ? "Subaru Diagnostics" : "Mitsubishi Diagnostics"}
-            </Link>
           </div>
         </header>
 
@@ -603,7 +587,6 @@ export default function ObdDiagClient({
             active={tab === "brand-diag"}
             onClick={() => {
               setPoll(false);
-              setBrandDiagBrand(isMitsuMode ? "mitsubishi" : "subaru");
               setTab("brand-diag");
             }}
           >
@@ -634,10 +617,10 @@ export default function ObdDiagClient({
           </TabButton>
         </div>
 
-        {tab === "brand-diag" ? (
+        {(tab === "brand-diag" || (!isMitsuMode && tab === "mitsubishi")) ? (
           <BrandDiagPanel
-            brand={brandDiagBrand}
-            onBrandChange={setBrandDiagBrand}
+            brand={isMitsuMode ? "mitsubishi" : "subaru"}
+            onBrandChange={() => {}}
             mitsuView={mitsuDiagView}
             onMitsuViewChange={setMitsuDiagView}
             session={session}
@@ -701,7 +684,7 @@ export default function ObdDiagClient({
                   </div>
                 ) : (
                   <p className="text-xs text-gray-500">
-                    Стандарт SAE J1979 (Subaru, Mitsubishi, Toyota и др.). Выберите нужные датчики звездой ★ для быстрого опроса 3–4 раза в секунду.
+                    Стандарт SAE J1979. Выберите нужные датчики звездой ★ для быстрого опроса 3–4 раза в секунду.
                   </p>
                 )}
 
@@ -753,7 +736,7 @@ export default function ObdDiagClient({
               </div>
             )}
           </section>
-        ) : tab === "mitsubishi" ? (
+        ) : tab === "mitsubishi" && isMitsuMode ? (
           <section className="flex flex-col gap-3">
             <div className="rounded-xl border border-gray-200 bg-white p-3">
               <div className="text-xs font-medium text-gray-800">
@@ -1139,6 +1122,7 @@ export default function ObdDiagClient({
             enabled={phase !== "idle"}
             linkLostTick={linkLostTick}
             onLog={pushLog}
+            brand={isMitsuMode ? "mitsubishi" : "subaru"}
           />
         )}
 

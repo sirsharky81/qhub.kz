@@ -36,10 +36,10 @@ export function EtacsSubpageNav({
 export function EtacsObdLink() {
   return (
     <Link
-      href="/tools/obd-diag"
+      href="/tools/mitsubishi-diag?tab=etacs"
       className="text-xs text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
     >
-      OBD Scanner — выгрузка с блока
+      Mitsubishi Diagnostics — выгрузка с блока
     </Link>
   );
 }

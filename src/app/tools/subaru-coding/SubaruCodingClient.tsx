@@ -238,9 +238,6 @@ export default function SubaruCodingClient() {
             <Link href="/tools/obd-diag" className="underline hover:text-gray-800">
               ← В Subaru Diagnostics
             </Link>
-            <Link href="/tools/mitsubishi-diag" className="underline hover:text-gray-800">
-              Mitsubishi Diagnostics
-            </Link>
           </div>
         </div>
       </div>
