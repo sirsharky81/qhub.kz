@@ -5682,47 +5682,94 @@ export function SubaruSsmPanel({
               }}
             >
               <div
-                className="w-full max-w-md rounded-2xl border border-amber-300 bg-white p-5 shadow-xl"
+                className="w-full max-w-lg rounded-2xl border border-blue-900 bg-white p-5 shadow-xl"
                 onClick={(e) => e.stopPropagation()}
               >
-                <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-xs font-bold text-amber-900">
-                  783 → 78B · UDS 2E DID 0250 / 0251
-                </span>
-                <h2 className="mt-2 text-base font-bold text-gray-900">
-                  Записать 12-колоночный код в приборку
-                </h2>
-                <div className="mt-3 rounded-xl border border-amber-400/50 bg-amber-50 p-3 text-xs text-amber-950 space-y-1.5">
-                  <div>
-                    Сейчас на приборке:{" "}
-                    <code className="font-mono font-bold">
-                      {meter12Read
-                        ? `${meter12Read.match.inferredAppliedModel} + ${meter12Read.match.inferredOptionCode}`
-                        : "считаем DID 0250 перед записью"}
-                    </code>
-                  </div>
-                  <div>
-                    Будет записано:{" "}
-                    <code className="font-mono font-bold">
-                      {meter12WritePending.appliedModel} + {meter12WritePending.optionCode}
-                    </code>
-                  </div>
-                  <p className="leading-relaxed">
-                    Только Procedure B (`sendMetVariByApplied` / `MET-002.srp` / `MET-009.srp`). В сервисном бюллетене Subaru и сценарии `MET-009.srp` (блок `B04`) для входа в режим записи вводится код разблокировки <code className="font-mono font-bold">0205</code>, после чего сканер выполняет `10 03` → `27 03 → 27 04` (`GetSecurityAccessSelKey` `idx=11/35`) → `2E 10C2 FF` → `2E A002 / A011` → `2E 10C2 00`. Одометр не затрагивается.
-                  </p>
+                <div className="rounded-lg bg-blue-900 px-3 py-1.5 text-xs font-bold text-white flex items-center justify-between">
+                  <span>Write Control module setting information (TechTIPS 08 · MET-002.srp)</span>
+                  <span className="font-mono text-[11px] text-blue-200">783 → 78B</span>
                 </div>
-                <label className="mt-4 block space-y-1">
-                  <span className="text-sm font-medium text-gray-900">
-                    Код разблокировки из бюллетеня (<code className="font-mono font-bold">0205</code>) или Option Code (<code className="font-mono font-bold">{meter12WritePending.optionCode}</code>):
-                  </span>
-                  <input
-                    type="text"
-                    maxLength={8}
-                    value={meter12WriteConfirmTyped}
-                    onChange={(e) => setMeter12WriteConfirmTyped(e.target.value.toUpperCase())}
-                    className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
-                    autoFocus
-                  />
-                </label>
+
+                <div className="mt-3 rounded-xl border border-gray-300 bg-gray-50 p-3 text-xs text-gray-800 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-700 font-bold text-white text-[11px]">
+                      i
+                    </span>
+                    <div>
+                      <div className="font-semibold text-gray-900">
+                        Cannot write the External Data of the Combination Meter. → Change the mode of the meter? [Yes]
+                      </div>
+                      <div className="text-[11px] text-gray-600 mt-0.5">
+                        Если приборка уже запрограммирована (`22 10C2 = 00`), введите сервисный код <code className="font-mono font-bold">0205</code> из бюллетеня Subaru TechTIPS.
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="block pt-1">
+                    <span className="text-xs font-semibold text-gray-900">
+                      Press &quot;OK&quot; after input code number (код из бюллетеня <code className="font-mono font-bold">0205</code>):
+                    </span>
+                    <input
+                      type="text"
+                      maxLength={8}
+                      value={meter12WriteConfirmTyped}
+                      onChange={(e) => setMeter12WriteConfirmTyped(e.target.value.toUpperCase())}
+                      className="mt-1 w-40 rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase text-gray-900"
+                      autoFocus
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3 text-xs text-gray-900 space-y-2">
+                  <div className="font-bold text-blue-950">
+                    Write ECU setting 12 columns of models — Verify the vehicle information is correct:
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-[11px] font-semibold text-gray-700">Input the applied model code (7 симв.):</span>
+                      <input
+                        type="text"
+                        maxLength={7}
+                        value={meter12WritePending.appliedModel}
+                        onChange={(e) =>
+                          setMeter12WritePending({
+                            ...meter12WritePending,
+                            appliedModel: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7),
+                          })
+                        }
+                        className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold text-gray-700">Input the option code (4 симв.):</span>
+                      <input
+                        type="text"
+                        maxLength={4}
+                        value={meter12WritePending.optionCode}
+                        onChange={(e) =>
+                          setMeter12WritePending({
+                            ...meter12WritePending,
+                            optionCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4),
+                          })
+                        }
+                        className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase"
+                      />
+                    </label>
+                  </div>
+                  <div className="rounded bg-white/80 px-2.5 py-1.5 font-mono text-xs text-gray-800 border border-blue-200">
+                    <div>Applied Model Code : <strong>{meter12WritePending.appliedModel}</strong></div>
+                    <div>Option Code : <strong>{meter12WritePending.optionCode}</strong></div>
+                    <div className="mt-1 font-sans text-[11px] text-gray-600">
+                      Сейчас на приборке:{" "}
+                      <code className="font-mono font-semibold">
+                        {meter12Read
+                          ? `${meter12Read.match.inferredAppliedModel} + ${meter12Read.match.inferredOptionCode}`
+                          : "будет считано перед записью"}
+                      </code>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button
                     type="button"
@@ -5732,19 +5779,21 @@ export function SubaruSsmPanel({
                     }}
                     className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2.5 text-xs font-semibold text-gray-900 hover:bg-gray-200"
                   >
-                    Отмена
+                    Cancel (Отмена)
                   </button>
                   <button
                     type="button"
                     onClick={() => void executeMeter12Write()}
                     disabled={
-                      meter12WriteConfirmTyped.trim().toUpperCase() !== meter12WritePending.optionCode &&
-                      meter12WriteConfirmTyped.trim().toUpperCase() !== "0205" &&
-                      meter12WriteConfirmTyped.trim().toUpperCase() !== "205"
+                      meter12WritePending.appliedModel.trim().length !== 7 ||
+                      meter12WritePending.optionCode.trim().length !== 4 ||
+                      (meter12WriteConfirmTyped.trim().toUpperCase() !== meter12WritePending.optionCode &&
+                        meter12WriteConfirmTyped.trim().toUpperCase() !== "0205" &&
+                        meter12WriteConfirmTyped.trim().toUpperCase() !== "205")
                     }
-                    className="rounded-xl border border-gray-900 bg-gray-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
+                    className="rounded-xl border border-blue-900 bg-blue-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40"
                   >
-                    Да, разблокировать (0205) и записать
+                    OK — Разблокировать (0205) и записать
                   </button>
                 </div>
               </div>
