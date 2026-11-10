@@ -42,6 +42,15 @@ function loadLastPhone(): string {
   return localStorage.getItem(LAST_PHONE_STORAGE) ?? "";
 }
 
+function getSafeNextPath(): string {
+  if (typeof window === "undefined") return "/tools/messenger/home";
+  const next = new URLSearchParams(window.location.search).get("next") ?? "";
+  if (next.startsWith("/tools/") && !next.startsWith("//")) {
+    return next;
+  }
+  return "/tools/messenger/home";
+}
+
 function saveLastPhone(phone: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(LAST_PHONE_STORAGE, phone);
@@ -102,7 +111,7 @@ export function MessengerLoginClient() {
           setStep("setPin");
           return;
         }
-        router.replace("/tools/messenger/home");
+        router.replace(getSafeNextPath());
         return;
       }
       setCheckingSession(false);
@@ -258,13 +267,13 @@ export function MessengerLoginClient() {
       setShowInstallModal(true);
       return;
     }
-    router.replace("/tools/messenger/home");
+    router.replace(getSafeNextPath());
   }
 
   function handleInstallContinue() {
     localStorage.setItem(MESSENGER_INSTALL_PROMPT_SHOWN, "1");
     setShowInstallModal(false);
-    router.replace("/tools/messenger/home");
+    router.replace(getSafeNextPath());
   }
 
   async function handleLogin() {
@@ -291,7 +300,7 @@ export function MessengerLoginClient() {
       await ensureDeviceKeyPublished().catch(() => {});
       await setStorageKeyFromPin(pin).catch(() => {});
       void ensureMessengerPushSubscription();
-      router.replace("/tools/messenger/home");
+      router.replace(getSafeNextPath());
     } finally {
       setLoading(false);
     }

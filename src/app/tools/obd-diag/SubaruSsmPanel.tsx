@@ -945,8 +945,12 @@ export function SubaruSsmPanel({
   const openMeter12WriteConfirm = useCallback(
     (appliedModel: string, optionCode: string) => {
       if (!ready || busy) return;
+      const cleanModel =
+        appliedModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7) || "BTAEYR8";
+      const cleanOpt =
+        optionCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "C05L";
       setMeter12WriteConfirmTyped("");
-      setMeter12WritePending({ appliedModel, optionCode });
+      setMeter12WritePending({ appliedModel: cleanModel, optionCode: cleanOpt });
     },
     [ready, busy],
   );
@@ -2325,9 +2329,11 @@ export function SubaruSsmPanel({
                 { id: "f1-diag", label: "F1 Diagnosis", action: () => setTopView("all-dtc") },
                 {
                   id: "f2-immo",
-                  label: "F2 Immobilizer / Reg.",
+                  label: "F2 Immobilizer / Ключи / RES →",
                   action: () => {
-                    setTopView("immo");
+                    if (typeof window !== "undefined") {
+                      window.location.href = "/tools/subaru-coding?tab=immo";
+                    }
                   },
                 },
                 {
@@ -2447,11 +2453,9 @@ export function SubaruSsmPanel({
             { id: "each-system", title: "F1 По блокам (40 систем)", icon: Cpu },
             { id: "multi-system", title: "F1 Мульти-система", icon: Layers },
             { id: "data-monitor", title: "Data Monitor (Live)", icon: Activity },
-            { id: "customize", title: "Customize / 12 Columns (°C / км/ч)", icon: Sliders },
-            { id: "immo", title: "F2 Immobilizer / Ключи / RES", icon: Lock },
             { id: "utilities", title: "Utility (.srp Калибровки)", icon: Wrench },
             { id: "ssm4-db", title: "F3 / F4 / F5 Коды SSM4", icon: FileSearch },
-            { id: "legacy-tools", title: "Ранние утилиты (Угол руля / CVT / TPMS)", icon: Gauge },
+            { id: "legacy-tools", title: "Угол руля / CVT / TPMS", icon: Gauge },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
@@ -5504,15 +5508,10 @@ export function SubaruSsmPanel({
                       appliedModelAnalysis.optionCode,
                     )
                   }
-                  disabled={
-                    !ready ||
-                    busy ||
-                    !appliedModelAnalysis.valid ||
-                    !isSubaruMeterWriteDestination(appliedModelAnalysis.optionDestinationPrefix)
-                  }
+                  disabled={!ready || busy}
                   className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
                 >
-                  Записать код из полей ({appliedModelAnalysis.appliedModel}+{appliedModelAnalysis.optionCode})
+                  Записать код из полей ({appliedModelAnalysis.appliedModel || "BTAEYR8"}+{appliedModelAnalysis.optionCode || "U45L"})
                 </button>
                 <button
                   type="button"
@@ -5522,7 +5521,7 @@ export function SubaruSsmPanel({
                       appliedModelAnalysis.canadianOptionCodeC0,
                     )
                   }
-                  disabled={!ready || busy || !appliedModelAnalysis.valid}
+                  disabled={!ready || busy}
                   className="rounded-lg bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
                 >
                   Записать Канада {appliedModelAnalysis.canadianOptionCodeC0} (°C, км/ч)
@@ -5534,10 +5533,10 @@ export function SubaruSsmPanel({
                       appliedModelAnalysis.optionDestinationPrefix,
                     ) && appliedModelAnalysis.optionDestinationPrefix.startsWith("U")
                       ? appliedModelAnalysis.optionCode
-                      : `U4${appliedModelAnalysis.optionEquipmentSuffix || "5D"}`;
+                      : `U4${appliedModelAnalysis.optionEquipmentSuffix || "5L"}`;
                     openMeter12WriteConfirm(appliedModelAnalysis.appliedModel, usCode);
                   }}
-                  disabled={!ready || busy || !appliedModelAnalysis.valid}
+                  disabled={!ready || busy}
                   className="rounded-lg border border-gray-400 bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 disabled:opacity-40"
                 >
                   Вернуть США (°F, mph)

@@ -254,15 +254,45 @@ export const apps: App[] = [
   },
   {
     id: "obd-diag",
-    title: "OBD Scanner (BLE)",
+    title: "Subaru Diagnostics",
     description:
-      "OBD-II через vLinker BLE и диагностика Mitsubishi: карта блоков, ошибки и живые параметры Outlander III и Pajero Sport III.",
+      "Диагностика Subaru (SSM4) через vLinker BLE: 40 систем, ошибки, Data Monitor, калибровки .srp, OBD2 Live и CAN/UDS.",
     longDescription:
-      "Подключение vLinker по Bluetooth LE, стандарт SAE J1979 для любых OBD2-авто (Subaru, Mitsubishi, Toyota и др.): чтение и сброс DTC, live-PID включая топливные коррекции. Вкладка Mitsubishi ETACS — только выгрузка variant/custom для MMCodingWriter, локально на устройстве.",
+      "Подключение vLinker по Bluetooth LE: полная диагностика Subaru Select Monitor 4 (40 блоков, чтение и сброс ошибок, Data Monitor, сервисные процедуры .srp), OBD2 Live-параметры и CAN/UDS консоль.",
     href: "/tools/obd-diag",
     tags: ["tools"],
     icon: "/tools/obd-diag/icon-192.png",
     color: "from-emerald-500/10 to-slate-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 3,
+  },
+  {
+    id: "subaru-coding",
+    title: "Subaru Coding & Immobilizer",
+    description:
+      "Кодирование приборной панели Subaru (°F → °C, 12-колоночный код) и функции иммобилайзера F2: чтение ключей, прописка ключей и регистрация RES.",
+    longDescription:
+      "Защищённый сервис по номеру телефона: перевод американской приборки Subaru в канадскую метрическую систему (°C, км/ч, л/100км) и работа с иммобилайзером F2 (считать ключи, прописать ключ, прописать автозапуск RES).",
+    href: "/tools/subaru-coding",
+    tags: ["tools"],
+    icon: "/tools/obd-diag/icon-192.png",
+    color: "from-blue-500/10 to-slate-600/5",
+    author: "QHub",
+    authorType: "qhub",
+    sortOrder: 3,
+  },
+  {
+    id: "mitsubishi-diag",
+    title: "Mitsubishi Diagnostics",
+    description:
+      "MUT-III диагностика Mitsubishi (Outlander III, Pajero Sport III), OBD2 Live, калибровка угла руля SAS, TPMS и выгрузка/запись Mitsubishi ETACS (.kon / .cuf).",
+    longDescription:
+      "Отдельный сервис диагностики Mitsubishi через vLinker BLE: ошибки и live-параметры блоков MUT-III, сервисные тесты, калибровка датчика угла руля SAS, чтение и прописка датчиков TPMS, вкладка OBD2 Live и выгрузка/запись кодировок Mitsubishi ETACS (.kon / .cuf).",
+    href: "/tools/mitsubishi-diag",
+    tags: ["tools"],
+    icon: "/tools/obd-diag/icon-192.png",
+    color: "from-red-500/10 to-slate-600/5",
     author: "QHub",
     authorType: "qhub",
     sortOrder: 3,

@@ -60,37 +60,31 @@ const phaseLabels: Record<ObdConnectionPhase, string> = {
   vehicle: "Связь с ЭБУ",
 };
 
-export default function ObdDiagClient() {
+export default function ObdDiagClient({
+  mode = "subaru",
+}: {
+  mode?: "subaru" | "mitsubishi";
+} = {}) {
+  const isMitsuMode = mode === "mitsubishi";
   const searchParams = useSearchParams();
   const [session] = useState(() => new ObdBleSession());
   const sessionRef = useRef(session);
   const [tab, setTab] = useState<ToolTab>(() => {
     const param = searchParams.get("tab");
     if (param === "can") return "can";
-    if (param === "mitsubishi" || param === "etacs") return "mitsubishi";
-    if (
-      param === "subaru" ||
-      param === "diag" ||
-      param === "mitsu-sas" ||
-      param === "steering-mitsu" ||
-      param === "tpms" ||
-      param === "mitsu-tpms" ||
-      param === "brand-diag"
-    ) {
+    if (param === "obd" || param === "live") return "obd";
+    if (isMitsuMode) {
+      if (param === "mitsubishi" || param === "etacs") return "mitsubishi";
       return "brand-diag";
     }
-    return "obd";
-  });
-  const [brandDiagBrand, setBrandDiagBrand] = useState<BrandDiagBrand>(() => {
-    const param = searchParams.get("tab");
-    if (param === "subaru") return "subaru";
-    if (param === "diag" || param === "mitsu-sas" || param === "steering-mitsu" || param === "tpms" || param === "mitsu-tpms") {
-      return "mitsubishi";
+    if (param === "subaru" || param === "diag" || param === "brand-diag") {
+      return "brand-diag";
     }
-    const brand = searchParams.get("brand");
-    if (brand === "mitsubishi") return "mitsubishi";
-    return "subaru";
+    return "brand-diag";
   });
+  const [brandDiagBrand, setBrandDiagBrand] = useState<BrandDiagBrand>(() =>
+    isMitsuMode ? "mitsubishi" : "subaru",
+  );
   const [mitsuDiagView, setMitsuDiagView] = useState<MitsubishiDiagView>(() => {
     const param = searchParams.get("tab");
     if (param === "mitsu-sas" || param === "steering-mitsu") return "steering";
@@ -530,16 +524,36 @@ export default function ObdDiagClient() {
 
   return (
     <>
-        <header className="mb-3 flex items-baseline justify-between gap-2">
+        <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-[11px] uppercase tracking-wider text-gray-500">QHub · Диагностика</p>
-            <h1 className="text-xl font-semibold">OBD / CAN / ETACS Scanner</h1>
+            <p className="text-[11px] uppercase tracking-wider text-gray-500">
+              {isMitsuMode ? "QHub · MUT-III & ETACS" : "QHub · SSM4 & OBD-II"}
+            </p>
+            <h1 className="text-xl font-semibold">
+              {isMitsuMode ? "Mitsubishi Diagnostics" : "Subaru Diagnostics"}
+            </h1>
           </div>
-          {supplyVolts != null ? (
-            <span className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 font-mono text-xs text-emerald-700">
-              {supplyVolts.toFixed(1)} В
-            </span>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {supplyVolts != null ? (
+              <span className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 font-mono text-xs text-emerald-700">
+                {supplyVolts.toFixed(1)} В
+              </span>
+            ) : null}
+            {!isMitsuMode && (
+              <Link
+                href="/tools/subaru-coding"
+                className="rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-900 hover:bg-blue-100"
+              >
+                Приборка °C & Ключи/RES →
+              </Link>
+            )}
+            <Link
+              href={isMitsuMode ? "/tools/obd-diag" : "/tools/mitsubishi-diag"}
+              className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+            >
+              {isMitsuMode ? "Subaru Diagnostics" : "Mitsubishi Diagnostics"}
+            </Link>
+          </div>
         </header>
 
         <ConnectionPanel
@@ -585,17 +599,29 @@ export default function ObdDiagClient() {
         ) : null}
 
         <div className="mb-3 flex min-w-0 flex-wrap rounded-xl border border-gray-200 bg-gray-50 p-1">
-          <TabButton active={tab === "obd"} onClick={() => setTab("obd")}>
-            OBD-II
-          </TabButton>
           <TabButton
             active={tab === "brand-diag"}
             onClick={() => {
               setPoll(false);
+              setBrandDiagBrand(isMitsuMode ? "mitsubishi" : "subaru");
               setTab("brand-diag");
             }}
           >
-            Диагностика
+            {isMitsuMode ? "MUT-III Блоки" : "Subaru SSM4"}
+          </TabButton>
+          {isMitsuMode && (
+            <TabButton
+              active={tab === "mitsubishi"}
+              onClick={() => {
+                setPoll(false);
+                setTab("mitsubishi");
+              }}
+            >
+              Mitsubishi ETACS
+            </TabButton>
+          )}
+          <TabButton active={tab === "obd"} onClick={() => setTab("obd")}>
+            OBD2 Live
           </TabButton>
           <TabButton
             active={tab === "can"}
@@ -605,15 +631,6 @@ export default function ObdDiagClient() {
             }}
           >
             CAN / UDS
-          </TabButton>
-          <TabButton
-            active={tab === "mitsubishi"}
-            onClick={() => {
-              setPoll(false);
-              setTab("mitsubishi");
-            }}
-          >
-            ETACS Mitsubishi
           </TabButton>
         </div>
 

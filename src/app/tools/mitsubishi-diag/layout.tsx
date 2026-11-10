@@ -1,14 +1,18 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { readNextBuildId } from "@/lib/obd-diag/read-build-id";
+import { ObdScrollShell } from "../obd-diag/ObdScrollShell";
 
-const ICON_BASE = "/tools/mitsubishi-diag";
+export const dynamic = "force-dynamic";
+
+const ICON_BASE = "/tools/obd-diag";
 
 export const metadata: Metadata = {
   manifest: `${ICON_BASE}/manifest.json`,
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Mitsu Diag",
+    title: "Mitsubishi Diagnostics",
   },
   icons: {
     icon: [{ url: `${ICON_BASE}/icon-192.png`, sizes: "192x192", type: "image/png" }],
@@ -17,9 +21,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#059669",
+  themeColor: "#ffffff",
+  interactiveWidget: "resizes-visual",
 };
 
 export default function MitsubishiDiagLayout({ children }: { children: ReactNode }) {
-  return children;
+  const pageBuildId = readNextBuildId();
+  return <ObdScrollShell pageBuildId={pageBuildId}>{children}</ObdScrollShell>;
 }

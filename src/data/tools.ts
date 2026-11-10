@@ -13,12 +13,32 @@ export interface Tool {
 export const tools: Tool[] = [
   {
     id: "obd-diag",
-    name: "OBD Scanner (BLE)",
+    name: "Subaru Diagnostics",
     description:
-      "vLinker BLE: OBD-II, диагностика Mitsubishi (ошибки и параметры Outlander III и Pajero Sport III) и выгрузка ETACS.",
+      "vLinker BLE: диагностика Subaru (SSM4 — 40 систем, ошибки, Data Monitor, калибровки .srp), OBD2 Live и CAN/UDS.",
     icon: "Gauge",
     category: "utilities",
     href: "/tools/obd-diag",
+    isNew: true,
+  },
+  {
+    id: "subaru-coding",
+    name: "Subaru Coding & Immobilizer",
+    description:
+      "Перевод приборной панели Subaru (°F → °C, 12-колоночный код) и иммобилайзер F2: чтение ключей, прописка ключей и RES.",
+    icon: "KeyRound",
+    category: "utilities",
+    href: "/tools/subaru-coding",
+    isNew: true,
+  },
+  {
+    id: "mitsubishi-diag",
+    name: "Mitsubishi Diagnostics",
+    description:
+      "vLinker BLE: диагностика Mitsubishi (MUT-III блоки, ошибки, угол руля SAS, TPMS), OBD2 Live и выгрузка/запись Mitsubishi ETACS (.kon / .cuf).",
+    icon: "Gauge",
+    category: "utilities",
+    href: "/tools/mitsubishi-diag",
     isNew: true,
   },
   {

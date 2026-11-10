@@ -3,11 +3,11 @@ import { Suspense } from "react";
 import ObdDiagClient from "./ObdDiagClient";
 
 export const metadata: Metadata = {
-  title: "OBD Scanner BLE — коды и параметры | QHub",
+  title: "Subaru Diagnostics — SSM4, OBD2 Live и CAN/UDS | QHub",
   description:
-    "Универсальный OBD-II через vLinker BLE: коды ошибок, live-параметры, CAN-монитор и UDS. Отдельно — выгрузка Mitsubishi ETACS (.kon / .cuf).",
+    "Диагностика Subaru (SSM4) через vLinker BLE: чтение и сброс ошибок по 40 системам, Data Monitor, сервисные калибровки .srp, OBD2 Live и CAN/UDS.",
   openGraph: {
-    title: "QHub OBD Scanner",
+    title: "Subaru Diagnostics | QHub",
     url: "https://qhub.kz/tools/obd-diag",
     siteName: "QHub",
     locale: "ru_KZ",
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 export default function ObdDiagPage() {
   return (
     <Suspense fallback={<div className="min-h-dvh bg-gray-50" />}>
-      <ObdDiagClient />
+      <ObdDiagClient mode="subaru" />
     </Suspense>
   );
 }

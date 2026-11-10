@@ -47,7 +47,6 @@ function SubTab({
 
 export function BrandDiagPanel({
   brand,
-  onBrandChange,
   mitsuView,
   onMitsuViewChange,
   session,
@@ -60,15 +59,6 @@ export function BrandDiagPanel({
 }: Props) {
   return (
     <section className="flex min-w-0 flex-col gap-3">
-      <div className="flex min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-1">
-        <SubTab active={brand === "subaru"} onClick={() => onBrandChange("subaru")}>
-          Subaru
-        </SubTab>
-        <SubTab active={brand === "mitsubishi"} onClick={() => onBrandChange("mitsubishi")}>
-          Mitsubishi
-        </SubTab>
-      </div>
-
       {brand === "subaru" ? (
         <SubaruSsmPanel
           session={session}
