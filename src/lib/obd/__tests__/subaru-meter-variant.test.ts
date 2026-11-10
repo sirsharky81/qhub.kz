@@ -156,6 +156,8 @@ describe("subaru-meter-variant", () => {
 
   it("writes MET-002.srp A002/A011 variant registers (2E 10C2 FF -> 2E A002 03 -> 2E A011 00 -> 2E 10C2 00) when meter uses A0xx table", async () => {
     const elm = scriptedElm({
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
       "2E10C2FF": "6E 10 C2",
       "2EA00203": "6E A0 02",
       "2EA01100": "6E A0 11",
@@ -197,12 +199,11 @@ describe("subaru-meter-variant", () => {
       "2E02504254414359523855343544": "7F 2E 31",
       "2E0250425441435952385534354400": "7F 2E 31",
       "2E02514254414359523855343544": "7F 2E 31",
-      // CGW FilterRemove must succeed first — otherwise SGP drops 27 xx to the meter
-      "31010200": "71 01 02 00",
+      // Live BT 2024: 763 31 01 02 0C first (may include 7F 31 78 pending)
+      "3101020C": "7F 31 78 71 01 02 0C",
       "2210C2": "62 10 C2 00",
-      // probe after FilterRemove + unlockSubaruMeterSecurityAccess + retries
-      "2703": ["67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78"],
-      [`2704${expectedKey}`]: ["67 04", "67 04", "67 04"],
+      "2703": ["67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78"],
+      [`2704${expectedKey}`]: ["67 04", "67 04"],
       "2E10C2FF": "6E 10 C2",
       "2EA00202": "6E A0 02",
       "2EA011FF": "6E A0 11",
@@ -222,11 +223,13 @@ describe("subaru-meter-variant", () => {
     expect(result.writtenDid).toBe("A002/A011");
     expect(result.writtenHex).toBe("A002=02 A011=FF");
     expect(result.seedHex).toBe("12 34 56 78");
-    expect(elm.sent).toContain("31010200");
-    expect(elm.sent.indexOf("31010200")).toBeLessThan(elm.sent.indexOf("2703"));
+    expect(elm.sent).toContain("3101020C");
+    expect(elm.sent.indexOf("3101020C")).toBeLessThan(elm.sent.indexOf("2703"));
     expect(elm.sent).toContain("2703");
     expect(elm.sent).toContain(`2704${expectedKey}`);
     expect(result.steps.join(" ")).toMatch(/фильтр SID снят/);
+    // No wasted 27 05/07/09/61 probing
+    expect(elm.sent.some((s) => s === "2705" || s === "2707" || s === "2709" || s === "2761")).toBe(false);
 
     // Verify AES-128-ECB vector from SSM4 CMD_SecurityAccess2018CY1
     const aesSeed = [
@@ -263,19 +266,13 @@ describe("subaru-meter-variant", () => {
       .join("");
 
     const elm = scriptedElm({
-      // First CGW attempt: FilterRemove needs SA (NRC 33), then AES unlock KeyVersion C1, then 31 01 02 00 OK
-      "31010200": ["7F 31 33", "71 01 02 00"],
-      "3101020C": "7F 31 33",
-      "31011201": "7F 31 33",
-      "220251": "62 02 51 C1",
-      "2707": "67 07 F8 EE 16 09 EC 9A B9 1C 83 58 06 0F DE BC 3E 06",
-      [`2708${outKey}`]: "67 08",
-      "2210C2": "62 10 C2 00",
+      // Fast path matching live BT 2024 log: 763 31 01 02 0C succeeds (pending+positive)
+      "3101020C": "7F 31 78 71 01 02 0C",
+      "31010200": "7F 31 33",
+      "2210C2": "62 10 C2 FF",
       "2E0250425441455952385534354C": "7F 2E 31",
       "2E0250425441455952385534354C00": "7F 2E 31",
       "2E0251425441455952385534354C": "7F 2E 31",
-      "2703": ["67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78", "67 03 12 34 56 78"],
-      [`2704${meterKey}`]: ["67 04", "67 04", "67 04"],
       "2E10C2FF": "6E 10 C2",
       "2EA00202": "6E A0 02",
       "2EA011FF": "6E A0 11",
@@ -285,19 +282,23 @@ describe("subaru-meter-variant", () => {
     const result = await writeSubaruMeter12ColumnCode(elm, {
       appliedModel: "BTAEYR8",
       optionCode: "U45L",
-      currentDids: [],
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
       txHex: "783",
       rxHex: "78B",
     });
 
-    expect(elm.sent).toContain("31010200");
-    expect(elm.sent.some((s) => s.startsWith("2707") || s.startsWith("2708") || s === "31010200")).toBe(
-      true,
-    );
-    expect(elm.sent.indexOf("31010200")).toBeLessThan(elm.sent.indexOf("2703"));
+    expect(elm.sent).toContain("3101020C");
+    expect(elm.sent.indexOf("3101020C")).toBeLessThan(elm.sent.indexOf("2EA00202"));
+    // Gate already FF → no meter SecurityAccess spam
+    expect(elm.sent.some((s) => s.startsWith("27"))).toBe(false);
     expect(result.steps.join(" ")).toMatch(/фильтр SID снят/);
+    expect(result.steps.join(" ")).toMatch(/27 xx не нужен/);
     expect(result.success).toBe(true);
-    // outKey kept so AES path stays covered when KeyVersion C1 is matched first
+    expect(result.writtenDid).toBe("A002/A011");
     expect(outKey).toHaveLength(32);
+    expect(meterKey).toHaveLength(8);
   });
 });
