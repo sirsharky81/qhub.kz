@@ -141,7 +141,7 @@ export function MitsubishiTpmsPanel({ session, phase, busy }: Props) {
         <div>
           <h3 className="text-sm font-bold text-gray-900">Давление шин и батарейки датчиков</h3>
           <p className="mt-1 text-[11px] text-gray-500">
-            Чтение с блока TPMS: Pajero Sport 773, Outlander и ASX 600, кузов 620 или 7A1. Заряд батареек передатчиков проверяется по статусу приёма и флагам MUT-III C1910–C1950 (ОК / Разряжена).
+            Чтение давления и заряда батареек датчиков TPMS.
           </p>
         </div>
 

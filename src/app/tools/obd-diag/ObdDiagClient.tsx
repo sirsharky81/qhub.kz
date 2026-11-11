@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { formatBleFailure } from "@/lib/obd/ble-error";
-import { bytesToHex } from "@/lib/obd/hex";
 import {
   ObdBleSession,
   type FreezeFrameReport,
@@ -19,20 +18,7 @@ import {
 } from "@/lib/obd/obd2";
 import { formatObdEnvironmentLines, probeObdEnvironment } from "@/lib/obd/obd-environment";
 import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transport";
-import {
-  downloadMitsubishiEtacsCoding,
-  listMitsubishiEtacsProfiles,
-  uploadMitsubishiEtacsSingleBlock,
-} from "@/lib/obd/mitsubishi-etacs-download";
-import {
-  etacsDownloadNames,
-  formatMutCodingContainer,
-  parseMitsubishiCodingFileBytes,
-  type EtacsCodingDump,
-  type EtacsWriteBlockResult,
-} from "@/lib/obd/mitsubishi-etacs";
 import { remedyForDtcCode } from "@/lib/obd/dtc-remedies";
-import { saveBlobToDevice } from "@/lib/platform/save-file";
 import { useObdScroll } from "./ObdScrollContext";
 import CanUdsPanel from "./CanUdsPanel";
 import {
@@ -65,6 +51,7 @@ export default function ObdDiagClient({
   mode?: "subaru" | "mitsubishi";
 } = {}) {
   const isMitsuMode = mode === "mitsubishi";
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [session] = useState(() => new ObdBleSession());
   const sessionRef = useRef(session);
@@ -72,13 +59,6 @@ export default function ObdDiagClient({
     const param = searchParams.get("tab");
     if (param === "can") return "can";
     if (param === "obd" || param === "live") return "obd";
-    if (isMitsuMode) {
-      if (param === "mitsubishi" || param === "etacs") return "mitsubishi";
-      return "brand-diag";
-    }
-    if (param === "subaru" || param === "diag" || param === "brand-diag") {
-      return "brand-diag";
-    }
     return "brand-diag";
   });
   const [mitsuDiagView, setMitsuDiagView] = useState<MitsubishiDiagView>(() => {
@@ -107,22 +87,6 @@ export default function ObdDiagClient({
   const [pinnedPids, setPinnedPids] = useState<string[]>([]);
   const [onlyPinned, setOnlyPinned] = useState(false);
   const [pidNote, setPidNote] = useState<string | null>(null);
-  const [profileId, setProfileId] = useState(listMitsubishiEtacsProfiles()[0]?.id ?? "auto");
-  const [etacsDump, setEtacsDump] = useState<EtacsCodingDump | null>(null);
-  const [loadedKon, setLoadedKon] = useState<{
-    fileName: string;
-    payload: Uint8Array;
-    lidHex?: string | null;
-    partNumber?: string | null;
-  } | null>(null);
-  const [loadedCuf, setLoadedCuf] = useState<{
-    fileName: string;
-    payload: Uint8Array;
-    lidHex?: string | null;
-    partNumber?: string | null;
-  } | null>(null);
-  const [konWriteResult, setKonWriteResult] = useState<EtacsWriteBlockResult | null>(null);
-  const [cufWriteResult, setCufWriteResult] = useState<EtacsWriteBlockResult | null>(null);
   const [poll, setPoll] = useState(false);
   const [linkLostTick, setLinkLostTick] = useState(0);
   const [envLines, setEnvLines] = useState<string[] | null>(null);
@@ -131,7 +95,14 @@ export default function ObdDiagClient({
   const pinnedRef = useRef<ReadonlySet<string>>(new Set());
 
   const { transport, ready: transportReady } = useObdTransportKind();
-  const profiles = listMitsubishiEtacsProfiles();
+
+  useEffect(() => {
+    if (!isMitsuMode) return;
+    const param = searchParams.get("tab");
+    if (param === "mitsubishi" || param === "etacs") {
+      router.replace("/tools/etacs-coding");
+    }
+  }, [isMitsuMode, router, searchParams]);
 
   useEffect(() => {
     pinnedRef.current = onlyPinned && pinnedPids.length > 0 ? new Set(pinnedPids) : new Set();
@@ -263,7 +234,7 @@ export default function ObdDiagClient({
         pushLog(`Адаптер подключён (CAN/UDS доступны). OBD-II: ${msg}`);
         setError(
           isMitsuMode
-            ? `${msg} Адаптер уже подключён — вкладки MUT-III, ETACS и CAN / UDS доступны, либо включите зажигание и нажмите «Повторить связь с ЭБУ».`
+            ? `${msg} Адаптер уже подключён — вкладки MMC, OBD2 Live и CAN / UDS доступны, либо включите зажигание и нажмите «Повторить связь с ЭБУ».`
             : `${msg} Адаптер уже подключён — вкладки SSM4 и CAN / UDS доступны, либо включите зажигание и нажмите «Повторить связь с ЭБУ».`,
         );
       }
@@ -325,177 +296,6 @@ export default function ObdDiagClient({
       setDtcChecked(true);
     });
 
-  const readEtacs = (overrideProfileId?: string) =>
-    run("Чтение кодировки Mitsubishi (.kon / .cuf)", async () => {
-      const targetId = overrideProfileId ?? profileId;
-      if (overrideProfileId) setProfileId(overrideProfileId);
-      const dump = await downloadMitsubishiEtacsCoding(sessionRef.current, targetId);
-      setEtacsDump(dump);
-      const unitTag = dump.moduleKind === "engine" ? "ДВС (ECM)" : "ETACS";
-      pushLog(
-        `${unitTag} ${dump.txHex}→${dump.rxHex}: variant ${dump.variant.length} байт, custom ${dump.custom.length} байт${
-          dump.partNumber ? `, блок ${dump.partNumber}` : ""
-        }`,
-      );
-    });
-
-  const saveEtacsFile = async (kind: "kon" | "cuf" | "json") => {
-    if (!etacsDump) return;
-    const now = new Date();
-    const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    const moduleTag = etacsDump.moduleKind === "engine" ? "engine" : "etacs";
-    const fallbackPart = etacsDump.partNumber ?? (etacsDump.moduleKind === "engine" ? "1860D362" : "8637C671");
-    const fallbackVin = etacsDump.vin ?? null;
-    const prefix = etacsDump.partNumber
-      ? `${moduleTag}_${etacsDump.partNumber}_${stamp}`
-      : `${moduleTag}_${stamp}`;
-    const names = etacsDownloadNames(prefix, {
-      partNumber: fallbackPart,
-      vin: fallbackVin,
-      date: now,
-    });
-    if (kind === "kon") {
-      const containerBytes = formatMutCodingContainer({
-        payload: etacsDump.variant,
-        partNumber: fallbackPart,
-        vin: fallbackVin,
-        timestamp: now,
-      });
-      await saveBlobToDevice(
-        new Blob([Uint8Array.from(containerBytes)], { type: "application/octet-stream" }),
-        names.kon,
-      );
-      pushLog(`Сохранён ${names.kon} (формат MMCodingWriter 1233 Б, данные ${etacsDump.variant.length} Б)`);
-      return;
-    }
-    if (kind === "cuf") {
-      const containerBytes = formatMutCodingContainer({
-        payload: etacsDump.custom,
-        partNumber: fallbackPart,
-        vin: fallbackVin,
-        timestamp: now,
-      });
-      await saveBlobToDevice(
-        new Blob([Uint8Array.from(containerBytes)], { type: "application/octet-stream" }),
-        names.cuf,
-      );
-      pushLog(`Сохранён ${names.cuf} (формат MMCodingWriter 1233 Б, данные ${etacsDump.custom.length} Б)`);
-      return;
-    }
-    const backup = {
-      timestamp: new Date().toISOString(),
-      profileId: etacsDump.profileId,
-      tx: etacsDump.txHex,
-      rx: etacsDump.rxHex,
-      partNumber: etacsDump.partNumber,
-      swVersion: etacsDump.swVersion ?? null,
-      vin: etacsDump.vin ?? null,
-      variantUsedId: etacsDump.variantUsedId ?? null,
-      customUsedId: etacsDump.customUsedId ?? null,
-      variantHex: bytesToHex(etacsDump.variant, ""),
-      customHex: bytesToHex(etacsDump.custom, ""),
-      extraLids: (etacsDump.extraLids ?? []).map((item) => ({
-        lidHex: item.lidHex,
-        label: item.label,
-        length: item.payload.length,
-        hex: bytesToHex(item.payload, " "),
-        ascii: item.ascii,
-      })),
-    };
-    await saveBlobToDevice(
-      new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }),
-      names.json,
-    );
-    pushLog(`Сохранён резервный ${names.json}`);
-  };
-
-  const handleLoadMitsubishiFile = async (kind: "kon" | "cuf", file: File | null) => {
-    if (!file) return;
-    setError(null);
-    try {
-      const buf = new Uint8Array(await file.arrayBuffer());
-      const parsed = parseMitsubishiCodingFileBytes(buf, kind, file.name);
-      if (kind === "kon") {
-        setLoadedKon({
-          fileName: file.name,
-          payload: parsed.payload,
-          lidHex: parsed.detectedLidHex ?? null,
-          partNumber: parsed.detectedPartNumber ?? null,
-        });
-        setKonWriteResult(null);
-        pushLog(`Загружен файл .kon: ${file.name} (${parsed.payload.length} байт)`);
-      } else {
-        setLoadedCuf({
-          fileName: file.name,
-          payload: parsed.payload,
-          lidHex: parsed.detectedLidHex ?? null,
-          partNumber: parsed.detectedPartNumber ?? null,
-        });
-        setCufWriteResult(null);
-        pushLog(`Загружен файл .cuf: ${file.name} (${parsed.payload.length} байт)`);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const writeKonSeparately = () => {
-    if (!loadedKon) return;
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `Записать Variant Coding (.kon, ${loadedKon.payload.length} байт) в блок Mitsubishi?\n\nВАЖНО: При записи .kon блок ETACS сбрасывает пользовательские настройки .cuf на базовые! После успешной записи .kon обязательно отдельно запишите ваш файл .cuf (Шаг 2).`,
-      )
-    ) {
-      return;
-    }
-    return run("Запись Variant (.kon) в блок Mitsubishi", async () => {
-      const targetProfileId = etacsDump?.profileId ?? profileId;
-      const overrideLid = loadedKon.lidHex ?? etacsDump?.variantUsedId;
-      const res = await uploadMitsubishiEtacsSingleBlock(sessionRef.current, {
-        profileId: targetProfileId,
-        kind: "kon",
-        payload: loadedKon.payload,
-        overrideLidHex: overrideLid ?? undefined,
-      });
-      setKonWriteResult(res);
-      pushLog(
-        `Записан .kon (${res.writeCommandHex}) в ${res.txHex}→${res.rxHex}: ${res.writtenBytes} Б${
-          res.verified ? " [проверено OK]" : ""
-        }`,
-      );
-    });
-  };
-
-  const writeCufSeparately = () => {
-    if (!loadedCuf) return;
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `Записать Custom Coding (.cuf, ${loadedCuf.payload.length} байт) в блок ETACS?\n\nЗапись .cuf выполняется отдельно после .kon и восстанавливает пользовательские настройки блока.`,
-      )
-    ) {
-      return;
-    }
-    return run("Запись Custom (.cuf) в блок ETACS", async () => {
-      const targetProfileId =
-        etacsDump?.moduleKind === "etacs" ? etacsDump.profileId : profileId.startsWith("engine") ? "auto" : profileId;
-      const overrideLid = loadedCuf.lidHex ?? etacsDump?.customUsedId;
-      const res = await uploadMitsubishiEtacsSingleBlock(sessionRef.current, {
-        profileId: targetProfileId,
-        kind: "cuf",
-        payload: loadedCuf.payload,
-        overrideLidHex: overrideLid ?? undefined,
-      });
-      setCufWriteResult(res);
-      pushLog(
-        `Записан .cuf (${res.writeCommandHex}) в ${res.txHex}→${res.rxHex}: ${res.writtenBytes} Б${
-          res.verified ? " [проверено OK]" : ""
-        }`,
-      );
-    });
-  };
-
   const togglePin = (pid: string) => {
     setPinnedPids((prev) =>
       prev.includes(pid) ? prev.filter((item) => item !== pid) : [...prev, pid],
@@ -525,7 +325,7 @@ export default function ObdDiagClient({
         <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-[11px] uppercase tracking-wider text-gray-500">
-              {isMitsuMode ? "QHub · MUT-III & ETACS" : "QHub · SSM4 & OBD-II"}
+              {isMitsuMode ? "QHub · MMC" : "QHub · SSM4 & OBD-II"}
             </p>
             <h1 className="text-xl font-semibold">
               {isMitsuMode ? "Mitsubishi Diagnostics" : "Subaru Diagnostics"}
@@ -590,19 +390,16 @@ export default function ObdDiagClient({
               setTab("brand-diag");
             }}
           >
-            {isMitsuMode ? "MUT-III Блоки" : "Subaru SSM4"}
+            {isMitsuMode ? "MMC Блоки" : "Subaru SSM4"}
           </TabButton>
-          {isMitsuMode && (
-            <TabButton
-              active={tab === "mitsubishi"}
-              onClick={() => {
-                setPoll(false);
-                setTab("mitsubishi");
-              }}
+          {isMitsuMode ? (
+            <Link
+              href="/tools/etacs-coding"
+              className="flex-1 rounded-lg px-1 py-2 text-center text-xs font-medium text-gray-500 transition hover:text-gray-800 sm:text-sm"
             >
               Mitsubishi ETACS
-            </TabButton>
-          )}
+            </Link>
+          ) : null}
           <TabButton active={tab === "obd"} onClick={() => setTab("obd")}>
             OBD2 Live
           </TabButton>
@@ -735,386 +532,6 @@ export default function ObdDiagClient({
                 {identity ? <IdentityList report={identity} /> : null}
               </div>
             )}
-          </section>
-        ) : tab === "mitsubishi" && isMitsuMode ? (
-          <section className="flex flex-col gap-3">
-            <div className="rounded-xl border border-gray-200 bg-white p-3">
-              <div className="text-xs font-medium text-gray-800">
-                Выгрузка кодировки Mitsubishi ETACS и ДВС (`.kon` и `.cuf`)
-              </div>
-              <p className="mt-1 text-xs text-gray-500">
-                Совместимо с MMCodingWriter и MUT Coding. Читает Variant Coding (`LID 30 / 32 / 42` → `.kon`) из кузовного блока ETACS (`8637xxxx`) и ЭБУ двигателя (`1860xxxx`, `7E0 → 7E8`), а также Custom Coding (`LID 31` → `.cuf`). Зажигание должно быть в положении ON (двигатель заглушен).
-              </p>
-
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={busy || phase === "idle"}
-                  onClick={() => readEtacs("auto")}
-                  className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
-                >
-                  Считать ETACS (.kon + .cuf)
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || phase === "idle"}
-                  onClick={() => readEtacs("engine-auto")}
-                  className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
-                >
-                  Считать ДВС 7E0 (.kon)
-                </button>
-              </div>
-
-              <label className="mt-3 block text-xs text-gray-500">
-                Ручной выбор профиля CAN (ETACS / Двигатель)
-                <select
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                  value={profileId}
-                  onChange={(e) => setProfileId(e.target.value)}
-                  disabled={busy || phase === "idle"}
-                >
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="mt-2.5">
-                <ActionButton disabled={busy || phase === "idle"} onClick={() => readEtacs()}>
-                  Считать по выбранному профилю
-                </ActionButton>
-              </div>
-            </div>
-
-            {etacsDump ? (
-              <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3.5 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-emerald-800">Кодировка успешно считана</span>
-                  <span className="font-mono text-xs text-gray-500">
-                    {etacsDump.txHex} → {etacsDump.rxHex}
-                  </span>
-                </div>
-                {etacsDump.partNumber ? (
-                  <p className="mt-1 text-xs text-gray-700">
-                    Номер блока / SW: <span className="font-mono text-emerald-700">{etacsDump.partNumber}</span>
-                    {etacsDump.swVersion ? (
-                      <span className="ml-2 font-mono text-gray-500">({etacsDump.swVersion})</span>
-                    ) : null}
-                  </p>
-                ) : null}
-                {etacsDump.vin ? (
-                  <p className="mt-0.5 text-xs text-gray-700">
-                    VIN в блоке: <span className="font-mono text-cyan-700">{etacsDump.vin}</span>
-                  </p>
-                ) : null}
-                {etacsDump.customStatusNote ? (
-                  <p className="mt-1.5 rounded-lg border border-amber-500/30 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
-                    {etacsDump.customStatusNote}
-                  </p>
-                ) : null}
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg bg-gray-100 p-2">
-                    <div className="text-gray-500">
-                      Variant (`.kon`){etacsDump.variantUsedId ? ` · ${etacsDump.variantUsedId}` : ""}
-                    </div>
-                    <div className="font-mono text-sm font-medium text-gray-900">
-                      {etacsDump.variant.length} байт
-                    </div>
-                    <div className="mt-1 truncate font-mono text-[11px] text-gray-500">
-                      {bytesToHex(etacsDump.variant.slice(0, 12))}…
-                    </div>
-                  </div>
-                  <div className="rounded-lg bg-gray-100 p-2">
-                    <div className="text-gray-500">
-                      Custom (`.cuf`){etacsDump.customUsedId ? ` · ${etacsDump.customUsedId}` : ""}
-                    </div>
-                    <div className="font-mono text-sm font-medium text-gray-900">
-                      {etacsDump.custom.length > 0
-                        ? `${etacsDump.custom.length} байт`
-                        : etacsDump.moduleKind === "engine"
-                          ? "не используется (только .kon)"
-                          : "не отдан (7F 21 12)"}
-                    </div>
-                    <div className="mt-1 truncate font-mono text-[11px] text-gray-500">
-                      {etacsDump.custom.length > 0
-                        ? `${bytesToHex(etacsDump.custom.slice(0, 12))}…`
-                        : etacsDump.moduleKind === "engine"
-                          ? "Для ЭБУ ДВС предусмотрен только Variant (.kon)"
-                          : etacsDump.rawCustomResponse.slice(0, 48)}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void saveEtacsFile("kon")}
-                    className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-medium text-white"
-                  >
-                    Скачать .kon ({etacsDump.variant.length} Б)
-                  </button>
-                  <button
-                    type="button"
-                    disabled={etacsDump.custom.length === 0}
-                    onClick={() => void saveEtacsFile("cuf")}
-                    className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-medium text-white disabled:opacity-40"
-                  >
-                    {etacsDump.custom.length > 0
-                      ? `Скачать .cuf (${etacsDump.custom.length} Б)`
-                      : "Нет .cuf в блоке"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void saveEtacsFile("json")}
-                    className="col-span-2 rounded-xl border border-gray-300 px-3 py-2 text-xs text-gray-800"
-                  >
-                    Сохранить резервную копию (.json с дампом)
-                  </button>
-                  <Link
-                    href="/tools/etacs-coding"
-                    className="col-span-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-center text-xs font-medium text-amber-900"
-                  >
-                    Открыть в редакторе ETACS Coding (.kon / .cuf)
-                  </Link>
-                </div>
-
-                {etacsDump.extraLids && etacsDump.extraLids.length > 0 ? (
-                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5 text-xs">
-                    <div className="font-medium text-gray-700">
-                      Дополнительные регистры блока ({etacsDump.extraLids.length} LID) — нажмите «В .kon» или «В .cuf» для выбора:
-                    </div>
-                    <div className="mt-1.5 flex flex-col gap-1.5">
-                      {etacsDump.extraLids.map((extra) => (
-                        <div
-                          key={extra.lidHex}
-                          className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium text-gray-800">
-                              <span className="font-mono text-emerald-700">{extra.lidHex}</span> · {extra.label} (
-                              {extra.payload.length} Б)
-                            </div>
-                            <div className="truncate font-mono text-[10px] text-gray-500">
-                              {extra.ascii ? `${extra.ascii} · ` : ""}
-                              {bytesToHex(extra.payload.slice(0, 16))}
-                              {extra.payload.length > 16 ? "…" : ""}
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setEtacsDump((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        variant: extra.payload,
-                                        variantUsedId: extra.lidHex,
-                                        rawVariantResponse: bytesToHex(extra.payload),
-                                      }
-                                    : prev,
-                                )
-                              }
-                              className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800"
-                            >
-                              В .kon
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setEtacsDump((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        custom: extra.payload,
-                                        customUsedId: extra.lidHex,
-                                        customStatusNote: null,
-                                      }
-                                    : prev,
-                                )
-                              }
-                              className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800"
-                            >
-                              В .cuf
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {/* Sequential, separate writing of .kon (Step 1) and .cuf (Step 2) */}
-            <div className="rounded-xl border border-amber-300 bg-white p-3.5 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-amber-900">
-                  Последовательная запись в блок (`.kon` → затем `.cuf`)
-                </span>
-                <span className="rounded bg-amber-950/60 px-2 py-0.5 font-mono text-[10px] text-amber-800">
-                  KWP 3B / UDS 2E
-                </span>
-              </div>
-              <p className="mt-1.5 text-gray-700">
-                Запись выполняется <strong>строго раздельно в 2 шага</strong>: когда вы заливаете{" "}
-                <span className="font-mono text-amber-900">.kon</span> (Variant Coding), блок ETACS автоматически сбрасывает настройки{" "}
-                <span className="font-mono text-amber-900">.cuf</span> (Custom Coding) на заводские базовые. Поэтому сначала запишите{" "}
-                <span className="font-mono text-amber-900">.kon</span>, дождитесь ответа блока и <strong>отдельно вторым шагом</strong> залейте ваш сохранённый{" "}
-                <span className="font-mono text-amber-900">.cuf</span>.
-              </p>
-
-              {/* Step 1: Write .kon */}
-              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-gray-900">
-                    Шаг 1. Запись Variant Coding (`.kon`)
-                  </span>
-                  {etacsDump && etacsDump.variant.length > 0 ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setLoadedKon({
-                          fileName: `Текущий считанный .kon (${etacsDump.partNumber ?? etacsDump.txHex})`,
-                          payload: etacsDump.variant,
-                          lidHex: etacsDump.variantUsedId ?? null,
-                          partNumber: etacsDump.partNumber,
-                        });
-                        setKonWriteResult(null);
-                      }}
-                      className="rounded-lg border border-gray-300 bg-gray-100 px-2 py-1 text-[11px] text-gray-800"
-                    >
-                      Взять считанный ({etacsDump.variant.length} Б)
-                    </button>
-                  ) : null}
-                </div>
-                <p className="mt-1 text-[11px] text-gray-500">
-                  Выберите модифицированный файл `.kon` (или резервный `.json`) с телефона. Подходит как для ETACS (`8637xxxx`), так и для ЭБУ двигателя (`1860xxxx`).
-                </p>
-
-                <label className="mt-2 block">
-                  <span className="sr-only">Выбрать файл .kon</span>
-                  <input
-                    type="file"
-                    accept=".kon,.json,.bin,.txt,application/octet-stream,application/json"
-                    disabled={busy}
-                    onChange={(e) => void handleLoadMitsubishiFile("kon", e.target.files?.[0] ?? null)}
-                    className="block w-full text-xs text-gray-700 file:mr-2.5 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-900"
-                  />
-                </label>
-
-                {loadedKon ? (
-                  <div className="mt-2 rounded-lg border border-gray-200 bg-white/90 p-2 font-mono text-[11px] text-gray-800">
-                    <div>
-                      Файл: <span className="text-emerald-700">{loadedKon.fileName}</span> ({loadedKon.payload.length} байт)
-                      {loadedKon.partNumber ? ` · Блок ${loadedKon.partNumber}` : ""}
-                    </div>
-                    <div className="mt-0.5 truncate text-gray-500">
-                      HEX: {bytesToHex(loadedKon.payload.slice(0, 16))}
-                      {loadedKon.payload.length > 16 ? "…" : ""}
-                    </div>
-                  </div>
-                ) : null}
-
-                <button
-                  type="button"
-                  disabled={busy || phase === "idle" || !loadedKon}
-                  onClick={() => void writeKonSeparately()}
-                  className="mt-2.5 w-full rounded-xl bg-amber-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
-                >
-                  {loadedKon
-                    ? `1. Записать ТОЛЬКО .kon в блок (${loadedKon.payload.length} Б)`
-                    : "1. Сначала выберите файл .kon"}
-                </button>
-
-                {konWriteResult ? (
-                  <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2 text-[11px] text-emerald-800">
-                    <div className="font-semibold">
-                      {konWriteResult.txHex} → {konWriteResult.rxHex} ({konWriteResult.writeCommandHex}):{" "}
-                      {konWriteResult.verified ? "Записано и сверено по чтению OK" : "Принято блоком OK"}
-                    </div>
-                    <div className="mt-0.5 text-amber-900">{konWriteResult.note}</div>
-                  </div>
-                ) : null}
-              </div>
-
-              {/* Step 2: Write .cuf */}
-              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-gray-900">
-                    Шаг 2. Запись Custom Coding (`.cuf`) — после `.kon`
-                  </span>
-                  {etacsDump && etacsDump.custom.length > 0 ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setLoadedCuf({
-                          fileName: `Ранее считанный .cuf (${etacsDump.partNumber ?? etacsDump.txHex})`,
-                          payload: etacsDump.custom,
-                          lidHex: etacsDump.customUsedId ?? null,
-                          partNumber: etacsDump.partNumber,
-                        });
-                        setCufWriteResult(null);
-                      }}
-                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800"
-                    >
-                      Взять сохранённый .cuf ({etacsDump.custom.length} Б)
-                    </button>
-                  ) : null}
-                </div>
-                <p className="mt-1 text-[11px] text-gray-500">
-                  Загрузите ваш ранее сохранённый `.cuf` (или нажмите «Взять сохранённый .cuf»), чтобы восстановить кастомные настройки ETACS после заливки `.kon`.
-                </p>
-
-                <label className="mt-2 block">
-                  <span className="sr-only">Выбрать файл .cuf</span>
-                  <input
-                    type="file"
-                    accept=".cuf,.json,.bin,.txt,application/octet-stream,application/json"
-                    disabled={busy}
-                    onChange={(e) => void handleLoadMitsubishiFile("cuf", e.target.files?.[0] ?? null)}
-                    className="block w-full text-xs text-gray-700 file:mr-2.5 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-900"
-                  />
-                </label>
-
-                {loadedCuf ? (
-                  <div className="mt-2 rounded-lg border border-gray-200 bg-white/90 p-2 font-mono text-[11px] text-gray-800">
-                    <div>
-                      Файл: <span className="text-emerald-700">{loadedCuf.fileName}</span> ({loadedCuf.payload.length} байт)
-                      {loadedCuf.lidHex ? ` · ${loadedCuf.lidHex}` : ""}
-                    </div>
-                    <div className="mt-0.5 truncate text-gray-500">
-                      HEX: {bytesToHex(loadedCuf.payload.slice(0, 16))}
-                      {loadedCuf.payload.length > 16 ? "…" : ""}
-                    </div>
-                  </div>
-                ) : null}
-
-                <button
-                  type="button"
-                  disabled={busy || phase === "idle" || !loadedCuf}
-                  onClick={() => void writeCufSeparately()}
-                  className="mt-2.5 w-full rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
-                >
-                  {loadedCuf
-                    ? `2. Записать ТОЛЬКО .cuf в ETACS (${loadedCuf.payload.length} Б)`
-                    : "2. Выберите или подставьте файл .cuf"}
-                </button>
-
-                {cufWriteResult ? (
-                  <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2 text-[11px] text-emerald-800">
-                    <div className="font-semibold">
-                      {cufWriteResult.txHex} → {cufWriteResult.rxHex} ({cufWriteResult.writeCommandHex}):{" "}
-                      {cufWriteResult.verified ? "Записано и сверено по чтению OK" : "Принято блоком OK"}
-                    </div>
-                    <div className="mt-0.5">{cufWriteResult.note}</div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
           </section>
         ) : (
           <CanUdsPanel

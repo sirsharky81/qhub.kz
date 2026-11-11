@@ -27,7 +27,6 @@ export function MitsubishiSteeringPanel({
   const [steeringSource, setSteeringSource] = useState<MitsuSteeringSource>("mitsu-622");
   const [steeringData, setSteeringData] = useState<{
     angleDeg: number;
-    rawHex: string;
     angularSpeedDegPerSec: number | null;
     calibrated: boolean | null;
     sourceLabel: string;
@@ -62,10 +61,9 @@ export function MitsubishiSteeringPanel({
           const mitsu = await session.readMitsubishiSteeringAngle(src);
           setSteeringData({
             angleDeg: mitsu.angleDeg,
-            rawHex: mitsu.rawHex,
             angularSpeedDegPerSec: mitsu.angularSpeedDegPerSec,
             calibrated: mitsu.calibrated,
-            sourceLabel: `${mitsu.txHex} → ${mitsu.rxHex}`,
+            sourceLabel: steeringSource === "mitsu-622" ? "SAS" : "ABS",
             ticks,
           });
         } catch {
@@ -113,7 +111,7 @@ export function MitsubishiSteeringPanel({
 
       {phase !== "vehicle" ? (
         <p className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500">
-          Подключите vLinker и установите связь с ЭБУ, затем выберите блок SAS (622) или ABS/VDC (784).
+          Подключите адаптер и установите связь с ЭБУ, затем выберите датчик угла руля или блок ABS.
         </p>
       ) : null}
 
@@ -124,8 +122,7 @@ export function MitsubishiSteeringPanel({
               Угол поворота руля Mitsubishi (SAS / ABS)
             </div>
             <p className="mt-0.5 text-[11px] text-gray-500">
-              Live-опрос KWP <strong>21 01–04</strong> на <strong>622 → 484</strong> (SAS) или{" "}
-              <strong>784 → 785</strong> (ABS/ASC). Цель для сход-развала — около <strong>0.0°</strong>.
+              Живой угол руля с датчика SAS или с блока ABS. Для сход-развала цель — около 0.0°.
             </p>
           </div>
           <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-700">
@@ -144,7 +141,7 @@ export function MitsubishiSteeringPanel({
                 : "border border-gray-300 bg-gray-50 text-gray-700"
             }`}
           >
-            SAS 622 → 484
+            SAS
           </button>
           <button
             type="button"
@@ -156,7 +153,7 @@ export function MitsubishiSteeringPanel({
                 : "border border-gray-300 bg-gray-50 text-gray-700"
             }`}
           >
-            ABS / VDC 784 → 785
+            ABS / VDC
           </button>
         </div>
 
@@ -202,11 +199,7 @@ export function MitsubishiSteeringPanel({
                   }}
                 />
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-2 border-t border-gray-200 pt-2.5 text-left font-mono text-[11px]">
-                <div>
-                  <div className="font-sans text-[10px] text-gray-500">Raw</div>
-                  <div className="text-gray-800">{steeringData.rawHex}</div>
-                </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gray-200 pt-2.5 text-left font-mono text-[11px]">
                 <div>
                   <div className="font-sans text-[10px] text-gray-500">Скорость</div>
                   <div className="text-gray-800">
@@ -257,12 +250,7 @@ export function MitsubishiSteeringPanel({
 
         <div className="mt-3 rounded-xl border border-amber-300 bg-amber-950/15 p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold text-amber-900">
-              Калибровка нуля SAS (622 → 484 + 784 → 785)
-            </span>
-            <span className="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] text-amber-800">
-              KWP 31 02 / 31 01
-            </span>
+            <span className="text-xs font-semibold text-amber-900">Калибровка нуля SAS</span>
           </div>
           <p className="mt-1 text-[11px] text-gray-700">
             После сход-развала или снятия руля: фиксация нулевой точки на SAS и перезапуск VDC. Только при руле строго
@@ -287,11 +275,6 @@ export function MitsubishiSteeringPanel({
               <div className="font-semibold">
                 {sasCalResult.success ? "Калибровка выполнена" : "Ошибка калибровки"}
               </div>
-              <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-gray-700">
-                {sasCalResult.steps.map((s, idx) => (
-                  <li key={idx}>• {s}</li>
-                ))}
-              </ul>
             </div>
           ) : null}
         </div>

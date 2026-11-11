@@ -666,7 +666,7 @@ export default function CanUdsPanel({
           ? "Subaru ДВС (7E0)"
           : group === "subaru-tcm"
             ? "Subaru КПП (7E1)"
-            : "Pajero 21 (7E0)",
+            : "Pajero",
       );
     } finally {
       setBusy(false);
@@ -907,7 +907,7 @@ export default function CanUdsPanel({
       const data = await session.readMitsubishiTransmission();
       setMitsuTcmData(data);
       onLog(
-        `Mitsubishi АКПП/CVT (7E1): темп=${data.atfTempC ?? "—"}°C, передача=${data.currentGearText}, ${data.disengagedStateText}`,
+        `АКПП / CVT: температура=${data.atfTempC ?? "—"}°C, передача=${data.currentGearText}, ${data.disengagedStateText}`,
       );
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Ошибка чтения АКПП/CVT Mitsubishi");
@@ -921,7 +921,7 @@ export default function CanUdsPanel({
     setMitsuTcmLive(true);
     setBusy(true);
     setLocalError(null);
-    onLog("Старт живого опроса АКПП/CVT Mitsubishi (7E1 → 7E9 · KWP 21 02 / 21 04)");
+    onLog("Старт живого опроса АКПП и вариатора");
     try {
       while (!stopMitsuTcmRef.current) {
         try {
@@ -979,10 +979,10 @@ export default function CanUdsPanel({
       const meter = await session.readMitsubishiMeter();
       setMitsuMeter(meter);
       onLog(
-        `Приборка Mitsubishi (6A0 → 514): топливо=${meter.fuelLiters ?? "—"} л, пробег=${meter.odometerKm ?? "—"} км`,
+        `Приборка: топливо=${meter.fuelLiters ?? "—"} л, пробег=${meter.odometerKm ?? "—"} км`,
       );
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "Ошибка чтения приборки 6A0");
+      setLocalError(error instanceof Error ? error.message : "Ошибка чтения приборки");
     } finally {
       setBusy(false);
     }
@@ -1106,7 +1106,7 @@ export default function CanUdsPanel({
           }
         }
       }
-      onLog("Чтение блоков безопасности ABS/EPB (7B0) и SRS Airbag (780) завершено (Read-Only)");
+      onLog(brand === "mitsubishi" ? "Чтение блоков безопасности завершено. Только чтение." : "Чтение блоков безопасности ABS/EPB (7B0) и SRS Airbag (780) завершено (Read-Only)");
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Ошибка чтения блоков безопасности");
     } finally {
@@ -1154,7 +1154,7 @@ export default function CanUdsPanel({
       return;
     }
     const confirmed = window.confirm(
-      `Стереть коды ошибок в блоке «${mod.title}» (${mod.txHex} → ${mod.rxHex})?\n\nЗажигание должно быть включено (ON), двигатель заглушен.`,
+      `Стереть коды ошибок в блоке «${mod.title}»${brand === "mitsubishi" ? "" : ` (${mod.txHex} → ${mod.rxHex})`}?\n\nЗажигание должно быть включено (ON), двигатель заглушен.`,
     );
     if (!confirmed) return;
     setBusy(true);
@@ -1256,16 +1256,13 @@ export default function CanUdsPanel({
             <div className="flex items-center justify-between gap-2">
               <div>
                 <div className="text-xs font-semibold text-emerald-700">
-                  Mitsubishi АКПП (8AT V8AWG / 5AT) и Вариатор CVT (`7E1 → 7E9` · KWP `21 02` / `21 04` / `21 03`)
+                  АКПП и вариатор
                 </div>
                 <p className="mt-0.5 text-[11px] text-gray-500">
-                  Температура масла АКПП (`°C`), текущая включенная передача (`1..8`), явный статус <strong>«Передача выключена (P/N / Автонейтраль)»</strong>, обороты входного/выходного валов и скольжение блокировки гидротрансформатора.
+                  Температура масла, включённая передача, статус нейтрали, обороты валов и скольжение гидротрансформатора.
                 </p>
               </div>
-              <span className="shrink-0 rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-700">
-                7E1 → 7E9
-              </span>
-            </div>
+              </div>
 
             <div className="mt-2.5 flex flex-wrap gap-2">
               <button
@@ -1274,7 +1271,7 @@ export default function CanUdsPanel({
                 onClick={() => void readMitsuTcmOnce()}
                 className="flex-1 rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                Прочитать АКПП / CVT (21 02 + 21 04)
+                Прочитать АКПП / CVT
               </button>
               {!mitsuTcmLive ? (
                 <button
@@ -1300,7 +1297,7 @@ export default function CanUdsPanel({
                 onClick={() => void readMitsuMeterOnce()}
                 className="rounded-xl border border-gray-300 bg-gray-50 px-3 py-2.5 text-xs font-medium text-gray-800 disabled:opacity-40"
               >
-                Приборка 6A0 (Топливо в л / Пробег)
+                Топливо и пробег
               </button>
             </div>
 
@@ -1328,8 +1325,8 @@ export default function CanUdsPanel({
                     <div className="mt-0.5 text-[10px] text-gray-500">
                       {mitsuTcmData.atfTempC == null
                         ? mitsuTcmData.atfFormula === "a-55"
-                          ? "MUT-III CVT: A−55"
-                          : "MUT-III 8AT: A−50"
+                          ? "CVT"
+                          : "АКПП"
                         : mitsubishiFluidBand(mitsuTcmData.atfTempC, mitsuTcmData.transmissionType).labelRu}
                     </div>
                   </div>
@@ -1402,7 +1399,7 @@ export default function CanUdsPanel({
                 </div>
                 {mitsuTcmData.cvtDegradationCount != null ? (
                   <div className="mt-2 border-t border-gray-200 pt-1.5 text-xs text-gray-700">
-                    Счётчик деградации жидкости CVT (`21 10`):{" "}
+                    Счётчик деградации жидкости CVT:{" "}
                     <strong className="font-mono text-emerald-700">{mitsuTcmData.cvtDegradationCount}</strong> ед.
                   </div>
                 ) : null}
@@ -1411,18 +1408,16 @@ export default function CanUdsPanel({
 
             {mitsuMeter ? (
               <div className="mt-2.5 rounded-xl border border-gray-200 bg-gray-50/90 p-2.5 text-xs">
-                <div className="font-semibold text-emerald-700">
-                  Приборная панель Mitsubishi (`6A0 → 514` · KWP `21 A3` / `21 AD`)
-                </div>
+                <div className="font-semibold text-emerald-700">Приборная панель</div>
                 <div className="mt-1.5 grid grid-cols-2 gap-2 font-mono">
                   <div className="rounded bg-white p-2">
-                    <div className="font-sans text-[10px] text-gray-500">Остаток топлива в баке (`21 A3`)</div>
+                    <div className="font-sans text-[10px] text-gray-500">Остаток топлива в баке</div>
                     <div className="text-base font-bold text-emerald-700">
                       {mitsuMeter.fuelLiters != null ? `${mitsuMeter.fuelLiters} л` : "нет ответа"}
                     </div>
                   </div>
                   <div className="rounded bg-white p-2">
-                    <div className="font-sans text-[10px] text-gray-500">Одометр в приборке (`21 AD`)</div>
+                    <div className="font-sans text-[10px] text-gray-500">Одометр</div>
                     <div className="text-base font-bold text-gray-900">
                       {mitsuMeter.odometerKm != null ? `${mitsuMeter.odometerKm.toLocaleString("ru-RU")} км` : "нет ответа"}
                     </div>
@@ -1443,7 +1438,7 @@ export default function CanUdsPanel({
                 <p className="mt-0.5 text-[11px] text-gray-500">
                   {brand === "subaru"
                     ? "Subaru SGP (`752 → 75A`). Поддерживается перестановка позиций колёс после шиномонтажа."
-                    : "Mitsubishi Pajero Sport III (`773 → 774` OSS/TPMS) и Outlander III / ASX (`600 → 500` KOS/TPMS). Поддерживается перестановка позиций колёс после шиномонтажа."}
+                    : "Давление в шинах Pajero Sport, Outlander и ASX. Поддерживается перестановка позиций колёс после шиномонтажа."}
                 </p>
               </div>
               <div className="flex gap-1">
@@ -1477,7 +1472,7 @@ export default function CanUdsPanel({
                         : "border border-gray-300 bg-gray-50 text-gray-800"
                     }`}
                   >
-                    Pajero Sport III (773)
+                    Pajero Sport
                   </button>
                   <button
                     type="button"
@@ -1489,7 +1484,7 @@ export default function CanUdsPanel({
                         : "border border-gray-300 bg-gray-50 text-gray-800"
                     }`}
                   >
-                    Outlander / ASX (600)
+                    Outlander / ASX
                   </button>
                 </>
               ) : (
@@ -1611,7 +1606,7 @@ export default function CanUdsPanel({
             <p className="mt-1 text-xs text-gray-700">
               {brand === "subaru"
                 ? "Сводка рабочих параметров без затрагивания подушек (SRS) и тормозов (ABS): давление в шинах TPMS (`752`), температуры ДВС/КПП и каналы силовой установки (`7A2` / `7E1`), напряжение бортсети и датчики баков (`783`), параметры ДВС (`7E0`)."
-                : "Сводка рабочих параметров двигателя и коробки Pajero (`7E0` / `7E1`, KWP `21`) без команд записи."}
+                : "Сводка рабочих параметров двигателя и коробки. Команды записи не отправляются."}
             </p>
             <div className="mt-2.5 grid grid-cols-2 gap-2">
               {brand === "subaru" ? (
@@ -1640,7 +1635,7 @@ export default function CanUdsPanel({
                   onClick={() => void runCatalog("pajero")}
                   className="rounded-xl border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
                 >
-                  Pajero 21 (7E0+7E1)
+                  Pajero
                 </button>
               )}
             </div>
@@ -1666,7 +1661,7 @@ export default function CanUdsPanel({
                   </>
                 ) : (
                   <>
-                    Нажмите <strong>«Pajero 21 (7E0+7E1)»</strong> для мгновенного чтения параметров.
+                    Нажмите <strong>«Pajero»</strong> для чтения параметров.
                   </>
                 )}
               </p>
@@ -1678,14 +1673,22 @@ export default function CanUdsPanel({
           <div className="rounded-xl border border-amber-300 bg-amber-950/15 p-3.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-amber-900">
-                Системы безопасности: Тормоза ABS / VDC / EPB (`7B0`) и Подушки SRS Airbag (`780`)
+                {brand === "mitsubishi"
+                  ? "Системы безопасности: тормоза ABS / VDC / EPB и подушки SRS"
+                  : "Системы безопасности: Тормоза ABS / VDC / EPB (`7B0`) и Подушки SRS Airbag (`780`)"}
               </span>
               <span className="shrink-0 rounded border border-amber-400/50 bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-900">
                 STRICT READ-ONLY
               </span>
             </div>
             <p className="mt-1 text-xs text-gray-700">
-              Эти блоки вынесены отдельно. Разрешено <strong>только чтение паспорта и состояния датчиков (`Service 22`)</strong> с обязательным возвратом в штатную сессию (`10 01`). Любые команды сброса, адаптации или записи для `7B0` и `780` аппаратно заблокированы.
+              {brand === "mitsubishi" ? (
+                <>Эти блоки вынесены отдельно. Разрешено только чтение. Сброс, адаптация и запись для них заблокированы.</>
+              ) : (
+                <>
+                  Эти блоки вынесены отдельно. Разрешено <strong>только чтение паспорта и состояния датчиков (`Service 22`)</strong> с обязательным возвратом в штатную сессию (`10 01`). Любые команды сброса, адаптации или записи для `7B0` и `780` аппаратно заблокированы.
+                </>
+              )}
             </p>
             <div className="mt-2.5 grid grid-cols-3 gap-2">
               <button
@@ -1702,7 +1705,7 @@ export default function CanUdsPanel({
                 onClick={() => void readSafetyModulesOnce("abs")}
                 className="rounded-xl border border-amber-500/50 bg-white px-2.5 py-2.5 text-xs font-medium text-amber-900 disabled:opacity-40"
               >
-                Тормоза ABS / EPB (7B0)
+                Тормоза ABS / EPB{brand === "mitsubishi" ? "" : " (7B0)"}
               </button>
               <button
                 type="button"
@@ -1710,7 +1713,7 @@ export default function CanUdsPanel({
                 onClick={() => void readSafetyModulesOnce("srs")}
                 className="rounded-xl border border-amber-500/50 bg-white px-2.5 py-2.5 text-xs font-medium text-amber-900 disabled:opacity-40"
               >
-                Подушки SRS (780)
+                Подушки SRS{brand === "mitsubishi" ? "" : " (780)"}
               </button>
             </div>
 
@@ -1723,8 +1726,12 @@ export default function CanUdsPanel({
                     <div key={grp} className="rounded-lg border border-gray-200 bg-gray-50/90 p-2.5">
                       <div className="text-xs font-semibold text-amber-800">
                         {grp === "abs"
-                          ? "Тормозная система ABS / VDC / Электроручник EPB (7B0 → 7B8)"
-                          : "Подушки безопасности и преднатяжители SRS Airbag (780 → 788)"}
+                          ? brand === "mitsubishi"
+                            ? "Тормозная система ABS / VDC / электроручник"
+                            : "Тормозная система ABS / VDC / Электроручник EPB (7B0 → 7B8)"
+                          : brand === "mitsubishi"
+                            ? "Подушки безопасности и преднатяжители"
+                            : "Подушки безопасности и преднатяжители SRS Airbag (780 → 788)"}
                       </div>
                       <ul className="mt-2 space-y-1 text-xs">
                         {items.map((item) => (
@@ -1766,7 +1773,7 @@ export default function CanUdsPanel({
             <p className="mt-1 text-xs text-gray-500">
               {brand === "subaru"
                 ? "Опрашивает блоки Subaru (`UDS 19 02 FF` и `OBD Mode 03`): ДВС `7E0`, КПП `7E1`, силовая `7A2`, приборка `783`, BIU/TPMS `752`, климат `7C4`, сонары `786`. Для обычных блоков доступен сброс (`14 FF FF FF`). SRS `780`, ABS `7B0`, EPS `746` и EyeSight `787` — только чтение."
-                : "Опрашивает блоки Mitsubishi (`KWP2000 18 00 FF 00` и `OBD Mode 03`): ДВС `7E0`, АКПП `7E1`, ETACS `620`/`7A1`, приборка `6A0`, TPMS `773`/`600`, климат `688`. Для обычных блоков доступен сброс (`14 FF 00`). SRS `6E0`, ABS `784` и SAS `622` — только чтение."}
+                : "Опрашивает блоки Mitsubishi: двигатель, коробку, кузов, приборку, датчики шин и климат. Ошибки подушек, ABS и датчика угла руля только читаются."}
             </p>
 
             <button
@@ -1812,7 +1819,7 @@ export default function CanUdsPanel({
                             </span>
                           )}
                         </div>
-                        {mod.systemName || mod.partNumber ? (
+                        {brand !== "mitsubishi" && (mod.systemName || mod.partNumber) ? (
                           <div className="mt-0.5 text-[11px] text-gray-500">
                             {[mod.systemName, mod.partNumber ? `OEM ${mod.partNumber}` : null]
                               .filter(Boolean)
@@ -1829,7 +1836,7 @@ export default function CanUdsPanel({
                               : "text-amber-800"
                         }`}
                       >
-                        {mod.rawStatus}
+                        {brand === "mitsubishi" ? mod.rawStatus.replace(/\s*\([^)]*\)\s*$/u, "") : mod.rawStatus}
                       </span>
                     </div>
 
@@ -1863,7 +1870,7 @@ export default function CanUdsPanel({
                           onClick={() => void handleSafeClearModuleDtc(mod)}
                           className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] text-gray-800 hover:border-amber-500/50 hover:text-amber-900 disabled:opacity-40"
                         >
-                          Стереть ошибки в блоке {mod.txHex}
+                          Стереть ошибки{brand === "mitsubishi" ? "" : ` в блоке ${mod.txHex}`}
                         </button>
                       </div>
                     ) : null}
@@ -1876,7 +1883,9 @@ export default function CanUdsPanel({
       ) : view === "monitor" ? (
         <>
           <p className="text-xs text-gray-500">
-            Пассивная прослушка шины (`ATMA` / `ATCRA`). Включает автоматический декодер широковещательных CAN-фреймов (`0x236` угол руля, `0x318` передача АКПП, `0x32F` ручник EPB, `0x214`/`0x215` скорости 4 колёс, `0x208` тормоз, `0x210` педаль газа, `0x154` топливо/пробег, `0x608` темп. ОЖ/улицы) и интерактивный Diff-охотник за кнопками.
+            {brand === "mitsubishi"
+              ? "Пассивная прослушка шины. Можно смотреть руль, коробку, ручник, колёса, тормоз и бак."
+              : "Пассивная прослушка шины (`ATMA` / `ATCRA`). Включает автоматический декодер широковещательных CAN-фреймов (`0x236` угол руля, `0x318` передача АКПП, `0x32F` ручник EPB, `0x214`/`0x215` скорости 4 колёс, `0x208` тормоз, `0x210` педаль газа, `0x154` топливо/пробег, `0x608` темп. ОЖ/улицы) и интерактивный Diff-охотник за кнопками."}
           </p>
           <p className="text-xs text-gray-500">
             Потери адаптера: {losses}. Фильтр и протокол меняются только когда монитор остановлен.
@@ -1886,15 +1895,26 @@ export default function CanUdsPanel({
             <Field label="Маска" value={filterMask} disabled={monitoring || busy} onChange={setFilterMask} />
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {[
-              { id: "236", label: "0x236 Руль SAS" },
-              { id: "318", label: "0x318 АКПП / Передача" },
-              { id: "32F", label: "0x32F Электроручник EPB" },
-              { id: "214", label: "0x214 Колёса ABS" },
-              { id: "208", label: "0x208 Тормоз" },
-              { id: "154", label: "0x154 Бак / Одометр" },
-              { id: "", label: "Все ID" },
-            ].map((preset) => (
+            {(brand === "mitsubishi"
+              ? [
+                  { id: "236", label: "Руль" },
+                  { id: "318", label: "АКПП" },
+                  { id: "32F", label: "Электроручник" },
+                  { id: "214", label: "Колёса" },
+                  { id: "208", label: "Тормоз" },
+                  { id: "154", label: "Бак и пробег" },
+                  { id: "", label: "Все" },
+                ]
+              : [
+                  { id: "236", label: "0x236 Руль SAS" },
+                  { id: "318", label: "0x318 АКПП / Передача" },
+                  { id: "32F", label: "0x32F Электроручник EPB" },
+                  { id: "214", label: "0x214 Колёса ABS" },
+                  { id: "208", label: "0x208 Тормоз" },
+                  { id: "154", label: "0x154 Бак / Одометр" },
+                  { id: "", label: "Все ID" },
+                ]
+            ).map((preset) => (
               <button
                 key={preset.label}
                 type="button"
@@ -2098,7 +2118,7 @@ export default function CanUdsPanel({
             <p className="mt-1 text-xs text-gray-500">
               {brand === "subaru"
                 ? "Subaru ДВС (`7E0` SSM `A8`), Subaru SGP (`7E1` КПП + `7A2` 2.4 TURBO + `752` Шины TPMS + `783` Приборка)."
-                : "Pajero Sport (`7E0` `21 01–04`)."}
+                : "Pajero."}
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               {brand === "subaru" ? (
@@ -2127,7 +2147,7 @@ export default function CanUdsPanel({
                   onClick={() => void runCatalog("pajero")}
                   className="rounded-xl border border-gray-900 bg-gray-900 px-2.5 py-2.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-40"
                 >
-                  Pajero 21 (7E0)
+                  Pajero
                 </button>
               )}
             </div>
@@ -2342,7 +2362,9 @@ export default function CanUdsPanel({
               ) : null}
             </div>
             <p className="mt-1 text-xs text-gray-500">
-              Будит все блоки (`3E 00` → `10 03` → `09 04`), автоматически читает их заводской номер (`F18E`) и имя системы (`F197`), а после опроса закрывает сессию (`10 01`), чтобы на приборке сразу гасли лампы ABS/VDC.
+              {brand === "mitsubishi"
+                ? "Будит блоки, читает имя системы и затем закрывает сессию, чтобы лампы на панели погасли."
+                : "Будит все блоки (`3E 00` → `10 03` → `09 04`), автоматически читает их заводской номер (`F18E`) и имя системы (`F197`), а после опроса закрывает сессию (`10 01`), чтобы на приборке сразу гасли лампы ABS/VDC."}
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button
@@ -2359,7 +2381,7 @@ export default function CanUdsPanel({
                 onClick={() => void scan("3E 00", "standard")}
                 className="rounded-xl border border-gray-300 px-3 py-2 text-xs font-medium disabled:opacity-40"
               >
-                Быстрый 7E0–7DF
+                {brand === "mitsubishi" ? "Быстрый опрос" : "Быстрый 7E0–7DF"}
               </button>
               <button
                 type="button"
@@ -2367,7 +2389,7 @@ export default function CanUdsPanel({
                 onClick={() => void scan("3E 00", "wide")}
                 className="rounded-xl border border-amber-500/50 bg-amber-950/20 px-3 py-2 text-xs font-medium text-amber-900 disabled:opacity-40"
               >
-                Полный перебор 700–7E7
+                {brand === "mitsubishi" ? "Полный перебор" : "Полный перебор 700–7E7"}
               </button>
             </div>
             {scanRows.length > 0 ? (
@@ -2383,7 +2405,15 @@ export default function CanUdsPanel({
                   >
                     <div className="min-w-0">
                       <div className="font-mono font-medium">
-                        {row.address} · <span className="font-sans text-gray-700">{row.name}</span>
+                        {brand === "mitsubishi" ? (
+                          <span className="font-sans text-gray-700">
+                            {row.name.replace(/\s*\([^)]*\)/g, "").trim()}
+                          </span>
+                        ) : (
+                          <>
+                            {row.address} · <span className="font-sans text-gray-700">{row.name}</span>
+                          </>
+                        )}
                       </div>
                       <div className="truncate text-gray-500">{row.detail}</div>
                     </div>
@@ -2396,7 +2426,7 @@ export default function CanUdsPanel({
                         }}
                         className="shrink-0 rounded-lg border border-gray-900 bg-gray-900 hover:bg-gray-800 px-2.5 py-1.5 text-xs font-medium text-white"
                       >
-                        Выбрать {row.txHex}
+                        {brand === "mitsubishi" ? "Выбрать" : `Выбрать ${row.txHex}`}
                       </button>
                     ) : null}
                   </li>
@@ -2427,16 +2457,20 @@ export default function CanUdsPanel({
                         : "border-gray-300 text-gray-500"
                     }`}
                   >
-                    {txHex} {target.name.split(" ")[0]}
+                    {brand === "mitsubishi"
+                      ? target.name.replace(/\s*\([^)]*\)/g, "").replace(/^Mitsubishi\s+/i, "").trim()
+                      : `${txHex} ${target.name.split(" ")[0]}`}
                   </button>
                 );
               })}
             </div>
 
+            {brand === "mitsubishi" ? null : (
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Field label="Адрес запроса (TX)" value={tx} disabled={busy} onChange={setTx} />
               <Field label="Адрес ответа (RX)" value={rx} disabled={busy} onChange={setRx} />
             </div>
+            )}
             <div className="mt-2">
               <Field label="Команда (hex)" value={request} disabled={busy} onChange={setRequest} />
             </div>
@@ -2524,8 +2558,8 @@ export default function CanUdsPanel({
                 ) : null}
               </div>
               <p className="mt-1 text-[11px] text-gray-500">
-                Открывает сессию `10 03`, удерживает её через `3E 00`, находит рабочие DID на блоке
-                {brand === "subaru" ? " (например CVT `7E1` или ABS `7B0`)" : " (например ДВС `7E0` или ETACS `620`)"} и в конце отправляет `10 01`, чтобы погасить лампы на панели.
+                Открывает диагностическую сессию и читает паспорт блока
+                {brand === "subaru" ? " (например CVT `7E1` или ABS `7B0`)" : ""}, затем возвращает блок в обычный режим, чтобы погасить лампы на панели.
               </p>
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                 <button

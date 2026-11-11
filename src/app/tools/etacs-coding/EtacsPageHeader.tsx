@@ -36,10 +36,10 @@ export function EtacsSubpageNav({
 export function EtacsObdLink() {
   return (
     <Link
-      href="/tools/mitsubishi-diag?tab=etacs"
+      href="/tools/mitsubishi-diag"
       className="text-xs text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
     >
-      Mitsubishi Diagnostics — выгрузка с блока
+      Mitsubishi Diagnostics
     </Link>
   );
 }

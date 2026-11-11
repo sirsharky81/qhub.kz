@@ -32,11 +32,7 @@ export function SteeringCalConfirmDialog({ brand, open, onCancel, onConfirm }: P
         <p className="mt-2 text-sm leading-relaxed text-gray-800">
           {isMitsu ? (
             <>
-              Блок SAS (<span className="font-mono text-xs text-emerald-700">622 → 484</span>) запишет
-              нулевую точку, затем перезапустится VDC (
-              <span className="font-mono text-xs text-emerald-700">784 → 785</span>). KWP{" "}
-              <span className="font-mono text-xs">31 02</span> /{" "}
-              <span className="font-mono text-xs">31 01</span>.
+              Блок датчика угла руля запишет нулевую точку, затем перезапустится система стабилизации.
             </>
           ) : (
             <>
@@ -54,8 +50,9 @@ export function SteeringCalConfirmDialog({ brand, open, onCancel, onConfirm }: P
             <li>Зажигание ON{isMitsu ? ", селектор P или N" : ", ручник затянут"}</li>
           </ul>
           <p className="mt-2 text-amber-900/90">
-            Неверный нуль ухудшит работу VDC/ESP и EyeSight; при сомнениях используйте официальный
-            Subaru Select Monitor.
+            {isMitsu
+              ? "Неверный нуль ухудшит работу системы стабилизации."
+              : "Неверный нуль ухудшит работу VDC/ESP и EyeSight; при сомнениях используйте официальный Subaru Select Monitor."}
           </p>
         </div>
         <p className="mt-4 text-sm font-medium text-gray-900">

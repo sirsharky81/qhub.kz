@@ -1438,7 +1438,9 @@ export class ObdBleSession {
         const allowMitsubishiKwp = target.mitsubishiKwp ?? !catalogTargets?.length;
         const txHex = target.tx.toString(16).toUpperCase();
         const rxHex = target.rx.toString(16).toUpperCase();
-        onProgress?.(`Проверка ошибок ${target.title}…`, [...out]);
+        const visibleTitle =
+          onlyBrand === "mitsubishi" ? target.title.replace(/\s*\([^)]*\)\s*$/u, "") : target.title;
+        onProgress?.(`Проверка ошибок ${visibleTitle}…`, [...out]);
 
         let responded = false;
         let sessionOpened = false;
@@ -1709,7 +1711,7 @@ export class ObdBleSession {
         out.push({
           txHex,
           rxHex,
-          title: target.title,
+          title: visibleTitle,
           safetyCritical: target.safetyCritical,
           canSafeClear: target.canSafeClear,
           responded,

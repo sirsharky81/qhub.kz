@@ -132,7 +132,6 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   const [meter, setMeter] = useState<MitsubishiMeterReport | null>(null);
   const tcmLiveRef = useRef(false);
   const [tcmLive, setTcmLive] = useState(false);
-  const [profileNote, setProfileNote] = useState<string | null>(null);
   const [selectedSkey, setSelectedSkey] = useState<string | null>(null);
   const [serviceResult, setServiceResult] = useState<MitsubishiServiceExecutionResult | null>(null);
 
@@ -345,7 +344,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       mitsubishiKwp: true,
     };
     try {
-      setStatus(`Опрос «${ecu.nameRu}» (${ecu.txCanId}→${ecu.rxCanId})…`);
+      setStatus(`Опрос «${ecu.nameRu}»…`);
       const found = await session.scanCatalogModules("6", [target]);
       const report = found[0];
       if (report) {
@@ -368,7 +367,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
 
   const clearEcu = async (ecu: CatalogEcu) => {
     if (!ecu.canSafeClear) return;
-    const confirmed = window.confirm(`Сбросить ошибки блока «${ecu.nameRu}» (${ecu.txCanId}→${ecu.rxCanId})?`);
+    const confirmed = window.confirm(`Сбросить ошибки блока «${ecu.nameRu}»?`);
     if (!confirmed) return;
     setBusy(true);
     setError(null);
@@ -444,7 +443,6 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     setSamples([]);
     setLiveNow({});
     setSignals([]);
-    setProfileNote(null);
     if (!vehicle) return;
     try {
       let diagVersion: string | null = null;
@@ -472,7 +470,6 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       const list = body.signals ?? [];
       setSelectedSkey(body.skey ?? null);
       setSignals(list);
-      setProfileNote(body.profileNoteRu ?? null);
       const serviceIds = serviceSet ? pickServiceSetSignals(list, serviceSet, MAX_LIVE) : [];
       setPicked(serviceIds.length > 0 ? serviceIds : pickPreferredMonitorSignals(list, MAX_LIVE));
       setStatus(null);
@@ -503,8 +500,8 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     if (partNumber) query.set("partNumber", partNumber);
     const response = await fetch(`/api/etacs-coding/diag/signals?${query.toString()}`);
     const body = (await response.json()) as { error?: string; skey?: string };
-    if (!response.ok) throw new Error(body.error || "Не удалось определить профиль SKEY блока");
-    if (!body.skey) throw new Error("Каталог MUT-III не вернул SKEY для этого блока.");
+    if (!response.ok) throw new Error(body.error || "Не удалось определить блок");
+    if (!body.skey) throw new Error("Каталог MMC не нашёл этот блок.");
     return body.skey;
   };
 
@@ -518,10 +515,10 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     setError(null);
     setServiceResult(null);
     try {
-      setStatus("Определяю профиль SKEY блока…");
+      setStatus("Определяю блок…");
       const skey = await resolveSkeyForEcu(ecu);
       const confirmed = window.confirm(
-        `${proc.nameRu}\n\nАвтомобиль: ${vehicle?.nameRu ?? "—"}\nБлок: ${ecu.nameRu} (${proc.txCanId}→${proc.rxCanId}, SKEY ${skey}, fid=${proc.fid})\n\nНазначение:\n${proc.descriptionRu}\n\nОбязательные условия:\n${proc.preconditionsRu}\n\nВыполнить процедуру?`,
+        `${proc.nameRu}\n\nАвтомобиль: ${vehicle?.nameRu ?? "—"}\nБлок: ${ecu.nameRu}\n\nНазначение:\n${proc.descriptionRu}\n\nОбязательные условия:\n${proc.preconditionsRu}\n\nВыполнить процедуру?`,
       );
       if (!confirmed) {
         setStatus(null);
@@ -552,7 +549,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       setTcm(await session.readMitsubishiTransmission());
     } catch (cause) {
       setTcm(null);
-      setError(cause instanceof Error ? cause.message : "Нет ответа TCM 7E1");
+      setError(cause instanceof Error ? cause.message : "Нет ответа коробки передач");
     } finally {
       setBusy(false);
     }
@@ -588,7 +585,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     try {
       setMeter(await session.readMitsubishiMeter());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Нет ответа приборки 6A0");
+      setError(cause instanceof Error ? cause.message : "Нет ответа приборки");
     } finally {
       setBusy(false);
     }
@@ -710,9 +707,9 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         const master = texts[ecu.dtcMasterId] ?? {};
         return {
           nameRu: ecu.nameRu,
-          address: `${ecu.txCanId}→${ecu.rxCanId}`,
+          address: "",
           responded: report ? report.responded : null,
-          partNumber: report?.partNumber ?? null,
+          partNumber: null,
           dtcs: (report?.dtcs ?? []).map((dtc) => ({
             code: dtc.code,
             textRu: master[dtc.code]?.ru || dtc.description,
@@ -770,10 +767,6 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <h3 className="truncate text-sm font-semibold text-emerald-700">Live · {selected.nameRu}</h3>
-              <p className="font-mono text-[10px] text-gray-500">
-                {selected.txCanId} → {selected.rxCanId}
-              </p>
-              {profileNote ? <p className="text-[10px] text-gray-500">{profileNote}</p> : null}
             </div>
             <button
               type="button"
@@ -799,7 +792,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               className="rounded border border-gray-300 px-2 py-1 text-[10px] text-gray-700"
               onClick={() => setPicked(pickPreferredMonitorSignals(signals, MAX_LIVE))}
             >
-              Датчики MUT-III
+              Датчики MMC
             </button>
             <button
               type="button"
@@ -874,10 +867,10 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         {availableProcedures.length > 0 ? (
           <details open className="rounded-lg border border-amber-300/80 bg-amber-50/40 p-2.5">
             <summary className="cursor-pointer text-xs font-semibold text-gray-900">
-              Калибровки, сбросы адаптаций и тесты MUT-III SE ({availableProcedures.length}) · SKEY {selectedSkey}
+              Калибровки, сбросы адаптаций и тесты MMC ({availableProcedures.length})
             </summary>
             <p className="mt-1 text-[11px] leading-snug text-gray-600">
-              Доступны только процедуры, официально привязанные в базе MUT-III SE к блоку «{selected.nameRu}» ({selected.txCanId}→{selected.rxCanId}, SKEY {selectedSkey}) выбранного автомобиля {vehicle?.nameRu}. Полный список по всем блокам — вкладка «Сервис и тесты».
+              Показаны процедуры для блока «{selected.nameRu}» автомобиля {vehicle?.nameRu}. Полный список — на вкладке «Сервис и тесты».
             </p>
             <div className="mt-2 space-y-2">
               {availableProcedures.map((proc) => (
@@ -888,10 +881,6 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-semibold text-gray-900">{proc.nameRu}</div>
-                      <div className="mt-0.5 font-mono text-[10px] text-gray-500">
-                        MUT-III fid={proc.fid} · {proc.txCanId}→{proc.rxCanId} · Команда {proc.startRequest}
-                        {proc.verifyReadRequest ? ` · Контроль ${proc.verifyReadRequest}` : ""}
-                      </div>
                     </div>
                     <button
                       type="button"
@@ -912,18 +901,13 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
             {serviceResult ? (
               <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-950">
                 <div className="font-semibold">
-                  Результат: {serviceResult.nameRu} (SKEY {serviceResult.skey})
+                  Результат: {serviceResult.nameRu}
                 </div>
                 {serviceResult.decodedSummary ? (
                   <div className="mt-1 font-mono text-[11px] font-bold text-emerald-900">
                     {serviceResult.decodedSummary}
                   </div>
                 ) : null}
-                <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-gray-700">
-                  {serviceResult.steps.map((step, idx) => (
-                    <li key={idx}>{step}</li>
-                  ))}
-                </ul>
               </div>
             ) : null}
           </details>
@@ -980,10 +964,10 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       {section === "service" ? (
       <div className="rounded-xl border border-amber-300/80 bg-white p-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-bold text-gray-900">Сервис и тесты MUT-III SE</h3>
+          <h3 className="text-sm font-bold text-gray-900">Сервис и тесты MMC</h3>
           <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
             {vehicle
-              ? `Показаны только калибровки, сбросы адаптаций и тесты, которые база MUT-III SE привязала к блокам «${vehicle.nameRu}» по SKEY и CAN-адресу. Чужие команды для этой машины скрыты.`
+              ? `Калибровки, сбросы адаптаций и тесты для «${vehicle.nameRu}».`
               : "Подключите адаптер — VIN прочитается сам, и список процедур откроется для этой модели."}
           </p>
         </div>
@@ -998,16 +982,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               <article key={ecu.sysKey} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <h4 className="text-sm font-semibold text-gray-900">{ecu.nameRu}</h4>
-                  <span className="font-mono text-[10px] text-gray-500">
-                    {ecu.txCanId}→{ecu.rxCanId}
-                  </span>
                 </div>
-                {ecu.skeys && ecu.skeys.length > 0 ? (
-                  <p className="mt-0.5 font-mono text-[10px] text-gray-500">
-                    SKEY {ecu.skeys.slice(0, 4).join(", ")}
-                    {ecu.skeys.length > 4 ? ` · +${ecu.skeys.length - 4}` : ""}
-                  </p>
-                ) : null}
                 <div className="mt-2 space-y-3">
                   {groupServiceProcedures(procedures).map((group) => (
                     <div key={group.id}>
@@ -1034,18 +1009,13 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         {serviceResult ? (
           <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-950">
             <div className="font-semibold">
-              Результат: {serviceResult.nameRu} (SKEY {serviceResult.skey})
+              Результат: {serviceResult.nameRu}
             </div>
             {serviceResult.decodedSummary ? (
               <div className="mt-1 font-mono text-[11px] font-bold text-emerald-900">
                 {serviceResult.decodedSummary}
               </div>
             ) : null}
-            <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-gray-700">
-              {serviceResult.steps.map((step, idx) => (
-                <li key={idx}>{step}</li>
-              ))}
-            </ul>
           </div>
         ) : null}
       </div>
@@ -1055,7 +1025,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-bold text-gray-900">Топливо и пробег</h3>
-            <p className="text-[11px] text-gray-500">Приборка 6A0 → 514, кадры 21 A3 и 21 AD.</p>
+            <p className="text-[11px] text-gray-500">Показания приборной панели.</p>
           </div>
           <button
             type="button"
@@ -1089,7 +1059,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
           <div>
             <h3 className="text-sm font-bold text-gray-900">АКПП / CVT · температура масла</h3>
             <p className="text-[11px] text-gray-500">
-              MUT-III SE: AT8 по картеру, 40–43 °C на 6B31 и 43–46 °C на 4N15. При 47 °C индикатор мигает, уровень не проверяют. CVT — при 70–80 °C, селектор P, холостой ход.
+              AT8 по картеру: 40–43 °C на 6B31 и 43–46 °C на 4N15. При 47 °C индикатор мигает, уровень не проверяют. CVT — при 70–80 °C, селектор P, холостой ход.
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -1099,7 +1069,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               onClick={() => void readTcmOnce()}
               className="rounded-lg border border-gray-900 bg-gray-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
             >
-              Считать TCM 7E1
+              Считать АКПП
             </button>
             <button
               type="button"
@@ -1128,7 +1098,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
                 </div>
               ) : null}
               <div className="mt-1 font-mono text-[10px] text-gray-500">
-                {tcm.atfFormula === "a-55" ? "MUT-III A−55" : "MUT-III A−50"}
+                {tcm.atfFormula === "a-55" ? "CVT" : "АКПП"}
                 {tcm.atfTempPipeC != null ? ` · труба ${tcm.atfTempPipeC} °C` : ""}
                 {tcm.atfTempPanC != null ? ` · картер ${tcm.atfTempPanC} °C` : ""}
               </div>
@@ -1165,7 +1135,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               }}
               className="rounded-lg border border-emerald-700 px-3 py-1.5 text-[11px] text-emerald-800 disabled:opacity-40"
             >
-              Data List АКПП из MUT-III
+              Параметры АКПП
             </button>
           ) : null}
         </div>
@@ -1250,14 +1220,11 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               <div className="w-full text-left">
                 <div className="flex items-baseline justify-between gap-2">
                   <h3 className="text-sm font-medium text-gray-900">{ecu.nameRu}</h3>
-                  <span className="font-mono text-[10px] text-gray-500">
-                    {ecu.txCanId}→{ecu.rxCanId}
-                  </span>
                 </div>
                 <p className="mt-1 text-xs text-gray-500">
                   {report
                     ? report.responded
-                      ? `${report.dtcs.length} ошибок${report.partNumber ? ` · ${report.partNumber}` : ""}`
+                      ? `${report.dtcs.length} ошибок`
                       : "не установлен в этой комплектации (нет ответа)"
                     : "ошибки ещё не считаны"}
                 </p>
@@ -1359,10 +1326,6 @@ function ServiceProcedureCard({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="text-xs font-semibold text-gray-900">{proc.nameRu}</div>
-          <div className="mt-0.5 font-mono text-[10px] text-gray-500">
-            MUT-III fid={proc.fid} · {proc.txCanId}→{proc.rxCanId} · Команда {proc.startRequest}
-            {proc.verifyReadRequest ? ` · Контроль ${proc.verifyReadRequest}` : ""}
-          </div>
         </div>
         <button
           type="button"
