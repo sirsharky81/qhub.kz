@@ -1025,26 +1025,30 @@ export class ObdBleSession {
     const dids: { did: string; label: string; hex: string; decoded: string }[] = [];
 
     try {
-      await this.elm!.sendCommand("ATST64");
+      await this.elm!.sendCommand("ATST20");
     } catch {
       /* ignore */
     }
 
     try {
-      // Read ONLY essential variant DIDs on 783->78B first so we never stall or drop BLE link!
-      const fastMeterDids = ["0250", "0251", "A002", "A011", "10C2", "0220", "F190", "F18E"] as const;
       for (const target of targets) {
         const txHex = target.tx.toString(16).toUpperCase();
         try {
-          await this.udsExchange(target.tx, target.rx, "1003", 1_200);
+          await this.udsExchange(target.tx, target.rx, "3E00", 800);
+          await this.udsExchange(target.tx, target.rx, "1003", 900);
         } catch {
           /* ignore */
         }
 
         let gotPositive = false;
-        for (const didHex of fastMeterDids) {
+        const queue: string[] = [...SUBARU_METER_12COLUMN_READ_DIDS];
+        const visited = new Set<string>();
+        while (queue.length > 0) {
+          const didHex = queue.shift()!.toUpperCase();
+          if (visited.has(didHex)) continue;
+          visited.add(didHex);
           try {
-            const raw22 = await this.udsExchange(target.tx, target.rx, `22${didHex}`, 1_100);
+            const raw22 = await this.udsExchange(target.tx, target.rx, `22${didHex}`, 900);
             const parsed = parseUdsResponse(raw22, 0x22);
             if (parsed.kind !== "positive") continue;
             gotPositive = true;
@@ -1063,6 +1067,13 @@ export class ObdBleSession {
               hex,
               decoded,
             });
+            if ((didNum === 0xa000 || didNum === 0xa020) && body.length === 4) {
+              const supported = decodeUdsDidSupportBitmap(didNum, body);
+              for (const childDid of supported) {
+                const childHex = childDid.toString(16).padStart(4, "0").toUpperCase();
+                if (!visited.has(childHex)) queue.push(childHex);
+              }
+            }
             if (didHex === "F190") {
               const ascii = body
                 .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
