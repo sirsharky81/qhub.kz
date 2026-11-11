@@ -225,7 +225,7 @@ export default function SubaruCodingClient() {
             Subaru Coding & Immobilizer
           </h1>
           <p className="text-sm text-gray-600 leading-relaxed">
-            Кодирование приборной панели Subaru (°F → °C, 12-колоночный код) и функции иммобилайзера F2 (чтение ключей, прописка ключей и регистрация Remote Engine Start) доступны после входа по номеру телефона.
+            Перевод показаний Subaru с °F на °C и иммобилайзер (чтение ключей, прописка ключей и регистрация автозапуска RES) доступны после входа по номеру телефона.
           </p>
           <button
             type="button"
@@ -339,7 +339,7 @@ export default function SubaruCodingClient() {
             tab === "meter" ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
           }`}
         >
-          Приборка (°F → °C · 12 колонок)
+          °F → °C
         </button>
         <button
           type="button"
@@ -357,10 +357,10 @@ export default function SubaruCodingClient() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-bold text-gray-900">
-                Перевод приборной панели Subaru США → Канада (°C, км/ч, л/100км)
+                Перевод с °F на °C
               </h2>
               <p className="text-xs text-gray-500">
-                Чтение и запись 12-колоночного кода (`783 → 78B` · `A002 / A011`) со снятием фильтра шлюза (`763 → 31 01 02 0C → 10 01`).
+                Считывание текущих единиц и перевод на градусы Цельсия.
               </p>
             </div>
             <button
@@ -369,7 +369,7 @@ export default function SubaruCodingClient() {
               onClick={() => void handleReadMeter12Column()}
               className="rounded-xl bg-blue-800 hover:bg-blue-900 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
             >
-              1. Считать код с приборки (783)
+              1. Считать текущие единицы
             </button>
           </div>
 
@@ -377,7 +377,7 @@ export default function SubaruCodingClient() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
                 <div className="text-[10px] font-bold uppercase text-amber-900">
-                  Сейчас в приборке ({meter12Read.txHex}→{meter12Read.rxHex})
+                  Сейчас
                 </div>
                 <div className="mt-1 font-mono text-base font-bold text-gray-900">
                   {meter12Read.match.actualAppliedModel} + {meter12Read.match.actualOptionCode}
@@ -433,7 +433,7 @@ export default function SubaruCodingClient() {
           {/* Always-active Write Buttons when connected */}
           <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-3.5 space-y-2.5">
             <div className="text-xs font-bold text-emerald-950">
-              2. Запись конфигурации в приборку (`763 → 783`, одометр не затрагивается):
+              2. Перевести на °C:
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
@@ -581,8 +581,7 @@ export default function SubaruCodingClient() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="rounded-lg bg-blue-900 px-3 py-1.5 text-xs font-bold text-white flex items-center justify-between">
-              <span>Запись 12-колоночного кода приборки</span>
-              <span className="font-mono text-[11px] text-blue-200">763 → 783</span>
+              <span>Перевод на °C</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
@@ -637,7 +636,7 @@ export default function SubaruCodingClient() {
                 onClick={() => void executeMeter12Write()}
                 className="rounded-xl bg-blue-900 hover:bg-blue-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
               >
-                OK — Записать в приборку
+                OK — перевести на °C
               </button>
             </div>
           </div>

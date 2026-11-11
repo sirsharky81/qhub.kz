@@ -25,7 +25,7 @@ export const tools: Tool[] = [
     id: "subaru-coding",
     name: "Subaru Coding & Immobilizer",
     description:
-      "Перевод приборной панели Subaru (°F → °C, 12-колоночный код) и иммобилайзер F2: чтение ключей, прописка ключей и RES.",
+      "Перевод показаний Subaru с °F на °C и иммобилайзер: чтение ключей, прописка ключей и RES.",
     icon: "KeyRound",
     category: "utilities",
     href: "/tools/subaru-coding",
