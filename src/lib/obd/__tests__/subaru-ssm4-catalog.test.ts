@@ -11,14 +11,21 @@ import {
   SUBARU_METER_12COLUMN_READ_DIDS,
   SUBARU_METER_VARIANT_SAFE_PATH,
   SUBARU_SSM4_VIN_WMI,
+  SUBARU_METER_VARIANT_READ_FACTS,
   asciiFromSubaruDidHex,
   buildSsm4RequestHex,
+  isSsm4CgdwPairValid,
   isSubaruSsm4VinWmiAllowed,
   decodeSsm4SignalPayload,
   decodeSubaruAppliedModel12Columns,
   extractAppliedModelAndOptionCodeFromDump,
+  compareMeterAndEyesightVariants,
+  extractEyesightVariantFromDids,
+  matchSsm4OptionFromEyesightDids,
+  matchSsm4OptionFromMeterDids,
   matchSsm4VehicleByVin,
   parseSubaru12ColumnFromAscii,
+  resolveCanadianOptionCodesForSubaru,
 } from "../subaru-ssm4-catalog";
 
 describe("subaru-ssm4-catalog", () => {
@@ -112,24 +119,40 @@ describe("subaru-ssm4-catalog", () => {
     expect(SSM4_SIGNALS.length).toBeGreaterThanOrEqual(120);
   });
 
-  it("decodes TSB 07-183-20 (MC-10182242-0001.pdf) 7-digit Applied Model + 4-digit Option Code (e.g. BTACYR8 + U45D -> C0QF)", () => {
+  it("resolves Canadian Option Codes from SSM4 cgdw (BTACYR8/BTAEYR8 → C0QF, not C0RC/C05D)", () => {
     const res = decodeSubaruAppliedModel12Columns("BTACYR8", "U45D");
     expect(res.valid).toBe(true);
+    expect(res.validInSsm4Cgdw).toBe(true);
     expect(res.seriesCode).toBe("BTA");
     expect(res.modelYearChar).toBe("C");
     expect(res.gradeChar).toBe("R");
     expect(res.drivetrainChar).toBe("8");
     expect(res.optionDestinationPrefix).toBe("U4");
     expect(res.canadianOptionCodeC0).toBe("C0QF");
-    expect(res.canadianOptionCodeC5).toBe("C05D");
+    expect(res.canadianOptionCodeC5).toBe("U45D");
+    expect(res.cgdwOptionCodes).toEqual(["U45D", "U45X", "C0QF"]);
 
-    // Single X-Mode Outback Limited 2.5i (BT9CYDC) suggests Dual X-Mode Onyx 2.5i (BT9CYTC)
-    const lim25 = decodeSubaruAppliedModel12Columns("BT9CYDC", "U57H");
-    expect(lim25.canadianOptionCodeC0).toBe("C07H");
-    expect(lim25.canadianOptionCodeC5).toBe("C57H");
-    expect(lim25.dualXModeAppliedModelSuggestion).toBe("BT9CYTC");
+    const my2024 = decodeSubaruAppliedModel12Columns("BTAEYR8", "U45D");
+    expect(my2024.validInSsm4Cgdw).toBe(true);
+    expect(my2024.canadianOptionCodeC0).toBe("C0QF");
+    expect(my2024.canadianOptionCodeC5).toBe("C0RF");
+    expect(isSsm4CgdwPairValid("BTAEYR8", "C0QF")).toBe(true);
+    expect(isSsm4CgdwPairValid("BTAEYR8", "C0RC")).toBe(false);
+    expect(isSsm4CgdwPairValid("BTACYR8", "C05D")).toBe(false);
+    expect(resolveCanadianOptionCodesForSubaru("BTAEYR8", "U45L")).toEqual({
+      primaryC0: "C0QF",
+      secondaryAlt: "C0RF",
+    });
 
-    expect(SUBARU_CANADIAN_OPTION_PRESETS.length).toBeGreaterThanOrEqual(12);
+    // Dual X-Mode is 6th Applied char; Limited 2.5 suggests Onyx …T…
+    const lim25 = decodeSubaruAppliedModel12Columns("BT9CYDL", "U54G");
+    expect(lim25.validInSsm4Cgdw).toBe(true);
+    expect(lim25.canadianOptionCodeC0).toBe("C54G");
+    expect(lim25.dualXModeAppliedModelSuggestion).toBe("BT9CYTL");
+
+    expect(SUBARU_CANADIAN_OPTION_PRESETS[0]?.canadianOptionCodeC0).toBe("C0QF");
+    expect(SUBARU_METER_VARIANT_READ_FACTS.a002Map["03"]).toBe("C0");
+    expect(SUBARU_CANADIAN_OPTION_PRESETS.length).toBeGreaterThanOrEqual(5);
   });
 
   it("accepts SIA Outback WMI 4S4 in the SSM4 chkDigit1to3 table and rejects unknown WMI", () => {
@@ -194,7 +217,7 @@ describe("subaru-ssm4-catalog", () => {
     expect(caDump.inferredRegion).toContain("CANADA");
     expect(SUBARU_METER_12COLUMN_READ_DIDS[0]).toBe("0250");
 
-    // Reconstructs 2024 MY Outback Wilderness (VIN 4S4BTGUD1R3270223 -> BTAEYR8 + U45L actual, C0RC / C05L recommended)
+    // Reconstructs 2024 MY Outback Wilderness (VIN 4S4BTGUD1R3270223 -> BTAEYR8 + U45D from cgdw, CA C0QF/C0RF)
     const bitmask2024 = extractAppliedModelAndOptionCodeFromDump({
       vin: "4S4BTGUD1R3270223",
       modules: [
@@ -208,10 +231,10 @@ describe("subaru-ssm4-catalog", () => {
     });
     expect(bitmask2024.foundDirectAscii).toBe(false);
     expect(bitmask2024.actualAppliedModel).toBe("BTAEYR8");
-    expect(bitmask2024.actualOptionCode).toBe("U45L");
+    expect(bitmask2024.actualOptionCode).toBe("U45D");
     expect(bitmask2024.actualRegion).toContain("USA");
-    expect(bitmask2024.recommendedCanadianOptionC0).toBe("C0RC");
-    expect(bitmask2024.recommendedCanadianOptionC5).toBe("C05L");
+    expect(bitmask2024.recommendedCanadianOptionC0).toBe("C0QF");
+    expect(bitmask2024.recommendedCanadianOptionC5).toBe("C0RF");
 
     // Regression: DID A002 = 02 with numeric temperature hint "-38°C/-48°C" must NEVER
     // glue "38C" + "48C" into bogus Mexican Option Code "C48C" / "C08C"
@@ -249,10 +272,11 @@ describe("subaru-ssm4-catalog", () => {
     });
     expect(liveA002Dump.foundDirectAscii).toBe(false);
     expect(liveA002Dump.actualAppliedModel).toBe("BTAEYR8");
-    expect(liveA002Dump.actualOptionCode).toBe("U45L");
+    expect(liveA002Dump.actualOptionCode).toBe("U45D");
     expect(liveA002Dump.actualRegion).toBe("USA (U4 / U5 / U6 — °F, мили)");
-    expect(liveA002Dump.recommendedCanadianOptionC0).toBe("C0RC");
-    expect(liveA002Dump.recommendedCanadianOptionC5).toBe("C05L");
+    expect(liveA002Dump.recommendedCanadianOptionC0).toBe("C0QF");
+    expect(liveA002Dump.recommendedCanadianOptionC5).toBe("C0RF");
+    expect(liveA002Dump.explanationRu).toContain("A002");
 
     // Different Outback: 2021 Outback 2.5i Limited (VIN 4S4BTADC5M3123456) with A002 = 05 (U5 PZEV)
     const outback2021Lim = extractAppliedModelAndOptionCodeFromDump({
@@ -289,7 +313,7 @@ describe("subaru-ssm4-catalog", () => {
     expect(outback2022Wilderness.actualAppliedModel).toBe("BTACYR8");
     expect(outback2022Wilderness.actualOptionCode).toBe("C0QF");
     expect(outback2022Wilderness.recommendedCanadianOptionC0).toBe("C0QF");
-    expect(outback2022Wilderness.recommendedCanadianOptionC5).toBe("C05D");
+    expect(outback2022Wilderness.recommendedCanadianOptionC5).toBe("U45D");
 
     // Different Outback: 2023 Outback Onyx XT 2.4T (VIN 4S4BTGND8P3123456) already converted to Canada (A002 = 03, A011 = 00)
     const outback2023OnyxCa = extractAppliedModelAndOptionCodeFromDump({
@@ -307,5 +331,164 @@ describe("subaru-ssm4-catalog", () => {
     expect(outback2023OnyxCa.actualAppliedModel).toBe("BTADYH8");
     expect(outback2023OnyxCa.actualOptionCode).toBe("C0QF");
     expect(outback2023OnyxCa.actualRegion).toBe("CANADA (C0 / C5 — °C, км/ч)");
+
+    // Full A0xx fingerprint reverse-match: SSM4 wrote DID mask, not ASCII 7+4 —
+    // but Option Code can be downloaded by matching cgdw (C0QF vs C0RF via A036).
+    // Full catalog row distinguishes BTAEYR8+C0QF (no A02E) from BTADYR8+C0QF (A02E=00)
+    expect(
+      matchSsm4OptionFromMeterDids(null, {
+        A002: "03",
+        A011: "00",
+        A007: "30",
+        A016: "03",
+        A021: "14",
+        A024: "02",
+        A027: "02",
+        A028: "01",
+        A02D: "01",
+        A036: "00",
+        A02E: "--",
+      }),
+    ).toMatchObject({
+      optionCode: "C0QF",
+      appliedModel: "BTAEYR8",
+      unique: true,
+      candidates: ["BTAEYR8+C0QF"],
+    });
+    expect(
+      matchSsm4OptionFromMeterDids(null, {
+        A002: "03",
+        A011: "00",
+        A007: "30",
+        A016: "03",
+        A021: "14",
+        A024: "02",
+        A027: "02",
+        A028: "01",
+        A02D: "01",
+        A036: "FF",
+        A02E: "--",
+      }),
+    ).toMatchObject({
+      optionCode: "C0RF",
+      appliedModel: "BTAEYR8",
+      unique: true,
+      candidates: ["BTAEYR8+C0RF"],
+    });
+    // Without probing A02E (unread), C0QF still collides — must read all written DIDs
+    expect(
+      matchSsm4OptionFromMeterDids(null, {
+        A002: "03",
+        A011: "00",
+        A007: "30",
+        A016: "03",
+        A021: "14",
+        A024: "02",
+        A027: "02",
+        A028: "01",
+        A02D: "01",
+        A036: "00",
+      })?.unique,
+    ).toBe(false);
+
+    const fpDump = extractAppliedModelAndOptionCodeFromDump({
+      vin: "4S4BTGUD1R3270223",
+      modules: [
+        {
+          txHex: "783",
+          dids: [
+            { did: "A002", label: "DID A002", hex: "03", decoded: "03" },
+            { did: "A011", label: "DID A011", hex: "00", decoded: "00" },
+            { did: "A007", label: "DID A007", hex: "30", decoded: "30" },
+            { did: "A016", label: "DID A016", hex: "03", decoded: "03" },
+            { did: "A021", label: "DID A021", hex: "14", decoded: "14" },
+            { did: "A024", label: "DID A024", hex: "02", decoded: "02" },
+            { did: "A027", label: "DID A027", hex: "02", decoded: "02" },
+            { did: "A028", label: "DID A028", hex: "01", decoded: "01" },
+            { did: "A02D", label: "DID A02D", hex: "01", decoded: "01" },
+            { did: "A02E", label: "DID A02E", hex: "--", decoded: "absent" },
+            { did: "A036", label: "DID A036", hex: "FF", decoded: "FF" },
+          ],
+        },
+      ],
+    });
+    expect(fpDump.actualOptionCode).toBe("C0RF");
+    expect(fpDump.actualAppliedModel).toBe("BTAEYR8");
+    expect(fpDump.sourceDid).toBe("783 A0xx fingerprint→cgdw");
+    expect(fpDump.explanationRu).toContain("уникальной строки cgdw");
+    expect(fpDump.explanationRu).toContain("не из VIN");
+    expect(SUBARU_METER_VARIANT_READ_FACTS.fingerprintDidKeys).toContain("A036");
+    expect(SUBARU_METER_VARIANT_READ_FACTS.eyesightLib).toBe("Y-YwPHBWHoZ.mLW");
+
+    // EyeSight Y-Yw 35xx: C0RF unique globally; compare vs meter
+    const esC0rf = matchSsm4OptionFromEyesightDids("BTAEYR8", {
+      "3501": "A5",
+      "3502": "30",
+      "3503": "EC",
+      "3504": "C7",
+      "3505": "12",
+      "3506": "9B",
+      "3507": "48",
+      "3508": "00",
+      "3509": "D3",
+      "350A": "08",
+      "350B": "00",
+      "350C": "00",
+      "350D": "00",
+      "350E": "00",
+      "350F": "00",
+      "3510": "00",
+    });
+    expect(esC0rf).toMatchObject({
+      optionCode: "C0RF",
+      appliedModel: "BTAEYR8",
+      unique: true,
+    });
+    const esExtract = extractEyesightVariantFromDids(
+      [
+        { did: "3501", hex: "A5" },
+        { did: "3502", hex: "30" },
+        { did: "3503", hex: "EC" },
+        { did: "3504", hex: "C7" },
+        { did: "3505", hex: "12" },
+        { did: "3506", hex: "9B" },
+        { did: "3507", hex: "48" },
+        { did: "3508", hex: "00" },
+        { did: "3509", hex: "D3" },
+        { did: "350A", hex: "08" },
+        { did: "350B", hex: "00" },
+        { did: "350C", hex: "00" },
+        { did: "350D", hex: "00" },
+        { did: "350E", hex: "00" },
+        { did: "350F", hex: "00" },
+        { did: "3510", hex: "00" },
+      ],
+      null,
+    );
+    expect(esExtract.optionCode).toBe("C0RF");
+    expect(esExtract.destinationHint).toBe("CANADA");
+
+    const aligned = compareMeterAndEyesightVariants(
+      {
+        actualAppliedModel: "BTAEYR8",
+        actualOptionCode: "C0RF",
+        actualRegion: "CANADA (C0 / C5 — °C, км/ч)",
+      },
+      esExtract,
+    );
+    expect(aligned.optionCodesMatch).toBe(true);
+    expect(aligned.regionsAligned).toBe(true);
+
+    const mismatch = compareMeterAndEyesightVariants(
+      {
+        actualAppliedModel: "BTAEYR8",
+        actualOptionCode: "U45D",
+        actualRegion: "USA (U4 / U5 / U6 — °F, мили)",
+      },
+      esExtract,
+    );
+    expect(mismatch.optionCodesMatch).toBe(false);
+    expect(mismatch.regionsAligned).toBe(false);
+    expect(mismatch.verdictRu).toContain("Расхождение");
   });
 });

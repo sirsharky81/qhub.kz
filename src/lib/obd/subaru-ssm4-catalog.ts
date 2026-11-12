@@ -3,7 +3,39 @@ import {
   decodeSubaruTemperatureBytes,
   decodeSubaruTpmsBytes,
 } from "./subaru-decode";
+import {
+  matchSsm4OptionFromMeterDids,
+  SSM4_CGDW_FP_DID_KEYS,
+} from "./subaru-ssm4-cgdw-fingerprints";
+import {
+  isSsm4CgdwPairValid,
+  listSsm4CgdwOptionsForAppliedModel,
+  resolveSsm4CanadianOptionsFromCgdw,
+} from "./subaru-ssm4-cgdw-pairs";
+import {
+  eyesightDestinationHintFrom3502,
+  matchSsm4OptionFromEyesightDids,
+  SSM4_YYW_FP_DID_KEYS,
+} from "./subaru-ssm4-yyw-fingerprints";
 import { decodeUdsDidSupportBitmap, formatUdsPayload, isUdsBitmapDid } from "./uds";
+
+export {
+  isSsm4CgdwPairValid,
+  listSsm4CgdwOptionsForAppliedModel,
+  resolveSsm4CanadianOptionsFromCgdw,
+  SSM4_CGDW_PAIRS,
+} from "./subaru-ssm4-cgdw-pairs";
+export {
+  matchSsm4OptionFromMeterDids,
+  SSM4_CGDW_FP_DID_KEYS,
+  fingerprintFromMeterDids,
+} from "./subaru-ssm4-cgdw-fingerprints";
+export {
+  eyesightDestinationHintFrom3502,
+  matchSsm4OptionFromEyesightDids,
+  SSM4_YYW_FP_DID_KEYS,
+  fingerprintFromEyesightDids,
+} from "./subaru-ssm4-yyw-fingerprints";
 
 export type Ssm4Group = "Powertrain" | "Chassis" | "Body";
 
@@ -4311,15 +4343,11 @@ export interface SubaruCanadianPreset {
 }
 
 /**
- * Reference catalog of North American (USDM -> Canadian CDM C0/C5) Applied Model + Option Code
- * combinations for the models covered by TSB 07-183-20 (MC-10182242-0001.pdf):
- * - 2020–24 Legacy / Outback (BT9 / BTA / BW)
- * - 2019–24 Forester (SK9)
- * - 2018–24 Crosstrek / XV (GT7 / GTE / GU)
- * - 2017–24 Impreza (GK / GT)
- * - 2019–24 Ascent (WMA)
+ * Quick presets for US→CA Option Code swaps — pairs taken from dealer SSM4
+ * `cgdwPHBWHoZ.mLW` (see `SSM4_CGDW_PAIRS` / FULL CSV). Prefer that table over
+ * inventing C0RC/C05D for Wilderness.
  *
- * In Subaru's 4-character Option Code (Digits 1–2 = Destination, Digits 3–4 = Equipment Package):
+ * Option Code Digits 1–2 = Destination, Digits 3–4 = Equipment Package:
  * - U4 = USA Federal (50-state / Turbo FA24F)
  * - U5 = USA California / PZEV (2.5L / 2.0L NA)
  * - U6 = USA Federal Non-PZEV
@@ -5864,240 +5892,112 @@ export const SSM4_FULL_SYSTEMS: readonly Ssm4SystemEntry[] = [
 ];
 
 export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
-  // 1. Outback BT (2020–2025) — 2.4L Turbo (BTA) & 2.5L NA (BT9)
+  // Exact pairs from dealer SSM4 cgdwPHBWHoZ.mLW (updated Env pack).
   {
     id: "bt-outback-wilderness-24t-2024",
     modelSeriesRu: "Outback VI (BT · 2024 MY)",
     years: "2024–2025",
-    trimRu: "Wilderness 2.4T (шильдик США 4S4BTGUD1R3270223: U45L → Канада C0RC / C0RF)",
-    engineRu: "FA24FXZHMF 2.4L Turbo (CVT TR690R6MCB)",
+    trimRu: "Wilderness 2.4T (BTAEYR8 · Dual X-Mode = 6-й знак R)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690 + EyeSight)",
     appliedModel: "BTAEYR8",
-    usOptionCodeExamples: ["U45L", "U45D"],
-    canadianOptionCodeC0: "C0RC",
+    usOptionCodeExamples: ["U45D", "U4TD", "U45J"],
+    canadianOptionCodeC0: "C0QF",
     canadianOptionCodeC5: "C0RF",
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu:
-      "2024 MY Revision E: США BTAEYR8 + U45L → в SSM4 канадский Option Code C0RC (или C0RF / C0RL; в Канаде есть подогрев руля, поэтому хвост RC/RF вместо 5L)",
+      "SSM4 cgdw: BTAEYR8 принимает US U45D/U4TD/U45J и CA C0QF/C0RF. Шильдик может показывать U45L, но в таблице SSM4 U45L нет — для °C пишите C0QF (или C0RF).",
+  },
+  {
+    id: "bt-outback-wilderness-24t-2023",
+    modelSeriesRu: "Outback VI (BT · 2023 MY)",
+    years: "2023",
+    trimRu: "Wilderness 2.4T (BTADYR8)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690 + EyeSight)",
+    appliedModel: "BTADYR8",
+    usOptionCodeExamples: ["U45D", "U45X"],
+    canadianOptionCodeC0: "C0QF",
+    canadianOptionCodeC5: "U45X",
+    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
+    featuresRu: "SSM4: BTADYR8 + U45D/U45X (US) или C0QF (CA). C05D / C01D — нет в каталоге.",
   },
   {
     id: "bt-outback-wilderness-24t",
-    modelSeriesRu: "Outback VI (BT · 2022–2023 MY)",
-    years: "2022–2023",
-    trimRu: "Wilderness 2.4T (2022 MY Revision C · шильдик США U45D → Канада C0QF!)",
-    engineRu: "FA24FXZHKA 2.4L Turbo (CVT TR690R6KDA)",
+    modelSeriesRu: "Outback VI (BT · 2022 MY)",
+    years: "2022",
+    trimRu: "Wilderness 2.4T (BTACYR8 · U45D → C0QF)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690 + EyeSight)",
     appliedModel: "BTACYR8",
-    usOptionCodeExamples: ["U45D", "U45C", "U45I"],
+    usOptionCodeExamples: ["U45D", "U45X"],
     canadianOptionCodeC0: "C0QF",
-    canadianOptionCodeC5: "C05F",
+    canadianOptionCodeC5: "U45X",
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu:
-      "В США U45D (5=StarTex+PRG+BSD, D=люк+Navi+RAB без подогрева руля), а в Канаде с завода идёт подогрев руля и нет кожи (Q+F) → точный заводской канадский код для SSM4: BTACYR8 + C0QF!",
+      "Проверено вводом в SSM4: BTACYR8+C0QF и BTACYR8+U45D принимаются; BTACYR7/9 и C05D/C01D — «некорректный».",
   },
   {
     id: "bt-outback-onyx-xt-24t",
     modelSeriesRu: "Outback VI (BT)",
-    years: "2020–2024",
-    trimRu: "Onyx Edition XT / Outdoor XT 2.4T",
-    engineRu: "FA24F 2.4L Turbo (CVT TR690)",
+    years: "2022–2023",
+    trimRu: "Onyx Edition XT / Outdoor XT 2.4T (6-й знак H = Dual X-Mode)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690)",
     appliedModel: "BTACYH8",
-    usOptionCodeExamples: ["U45B", "U45D", "U45I"],
+    usOptionCodeExamples: ["U45D", "U45X", "U4HX"],
     canadianOptionCodeC0: "C0QF",
-    canadianOptionCodeC5: "C05B",
+    canadianOptionCodeC5: "C0IY",
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu:
-      "В Канаде комплектация Outdoor XT (StarTex + люк + подогрев руля + RAB) имеет заводской код C0QF (для 2022–2023 MY) или C0RF (2024 MY)",
+      "SSM4: BTACYH8 + U45D/U45X/U4HX или C0QF/C0IY. Dual X-Mode даёт grade H, не Option Code.",
   },
   {
     id: "bt-outback-limited-xt-24t",
     modelSeriesRu: "Outback VI (BT)",
-    years: "2020–2024",
-    trimRu: "Limited XT 2.4T",
-    engineRu: "FA24F 2.4L Turbo (CVT TR690)",
+    years: "2022–2023",
+    trimRu: "Limited XT 2.4T (6-й знак J = Single X-Mode)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690)",
     appliedModel: "BTACYJ8",
-    usOptionCodeExamples: ["U44G", "U44C", "U47H"],
+    usOptionCodeExamples: ["U44G"],
     canadianOptionCodeC0: "C04G",
-    canadianOptionCodeC5: "C04C",
+    canadianOptionCodeC5: "C0JZ",
     xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
     featuresRu:
-      "Кожа, люк, Harman/Kardon, навигация, DriverFocus DMS, подогрев руля, RAB, BSD/RCTA (4G / 4C по мануалу Outback BT)",
+      "SSM4: BTACYJ8 + U44G / C04G / C0JZ / C062 / C0JV. Для Dual X-Mode нужен Applied с 6-м знаком H или R.",
   },
   {
     id: "bt-outback-touring-xt-24t",
     modelSeriesRu: "Outback VI (BT)",
-    years: "2020–2024",
-    trimRu: "Touring XT / Premier XT 2.4T",
-    engineRu: "FA24F 2.4L Turbo (CVT TR690)",
+    years: "2022–2023",
+    trimRu: "Touring XT / Premier XT 2.4T (6-й знак K = Single)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690)",
     appliedModel: "BTACYK8",
-    usOptionCodeExamples: ["U44G", "U44V", "U48Y"],
+    usOptionCodeExamples: ["U44G"],
     canadianOptionCodeC0: "C04G",
-    canadianOptionCodeC5: "C0SG",
+    canadianOptionCodeC5: "C04G",
     xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
-    featuresRu:
-      "Nappa кожа, вентиляция сидений, передняя камера, 11.6\" Navi, Harman/Kardon, люк, подогрев руля (C04G для 2020–2023 / C0SG для 2024+)",
-  },
-  {
-    id: "bt-outback-premium-25i",
-    modelSeriesRu: "Outback VI (BT)",
-    years: "2020–2024",
-    trimRu: "2.5i Premium / Convenience / Touring (CA)",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "BT9CYCC",
-    usOptionCodeExamples: ["U53B", "U53D", "U53E", "U63D"],
-    canadianOptionCodeC0: "C03D",
-    canadianOptionCodeC5: "C53D",
-    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
-    featuresRu: "11.6\" экран, электропривод багажника PRG, BSD/RCTA, бесключевой доступ, °C / км/ч",
+    featuresRu: "SSM4: BTACYK8 + U44G или C04G.",
   },
   {
     id: "bt-outback-onyx-25i",
     modelSeriesRu: "Outback VI (BT)",
-    years: "2022–2024",
-    trimRu: "2.5i Onyx Edition (с Dual X-Mode на 2.5L!)",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "BT9CYTC",
-    usOptionCodeExamples: ["U55D", "U65D"],
-    canadianOptionCodeC0: "C05D",
-    canadianOptionCodeC5: "C55D",
+    years: "2023–2024",
+    trimRu: "2.5i Onyx Edition (6-й знак T = Dual X-Mode на 2.5)",
+    engineRu: "FB25D 2.5L DI (CVT)",
+    appliedModel: "BT9EYTL",
+    usOptionCodeExamples: ["U5QD", "U5RD", "U5QJ"],
+    canadianOptionCodeC0: "C5QF",
+    canadianOptionCodeC5: "C5RF",
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu:
-      "Включает двухрежимный Dual X-Mode на атмосферном моторе 2.5L FB25D + метрику Канады (°C, км/ч)",
-  },
-  {
-    id: "bt-outback-limited-25i",
-    modelSeriesRu: "Outback VI (BT)",
-    years: "2020–2024",
-    trimRu: "2.5i Limited",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "BT9CYDC",
-    usOptionCodeExamples: ["U57H", "U57Y", "U67H"],
-    canadianOptionCodeC0: "C07H",
-    canadianOptionCodeC5: "C57H",
-    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
-    featuresRu: "Кожа, Harman/Kardon, люк, RAB, BSD/RCTA, 11.6\", °C / км/ч",
-  },
-  {
-    id: "bt-outback-touring-25i",
-    modelSeriesRu: "Outback VI (BT)",
-    years: "2020–2024",
-    trimRu: "2.5i Touring / Premier (CA)",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "BT9CYEC",
-    usOptionCodeExamples: ["U58Y", "U68Y"],
-    canadianOptionCodeC0: "C08Y",
-    canadianOptionCodeC5: "C58Y",
-    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
-    featuresRu: "Максимальная комплектация 2.5L: Nappa, вентиляция, передняя камера, люк, °C / км/ч",
-  },
-
-  // 2. Forester SK (2019–2024)
-  {
-    id: "sk-forester-sport-dual-xmode",
-    modelSeriesRu: "Forester V (SK)",
-    years: "2019–2024",
-    trimRu: "2.5i Sport (с двухрежимным Dual X-Mode)",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "SK9CY5C",
-    usOptionCodeExamples: ["U54D", "U54H", "U64D"],
-    canadianOptionCodeC0: "C04D",
-    canadianOptionCodeC5: "C54D",
-    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
-    featuresRu:
-      "Двухрежимный Dual X-Mode, панорамный люк, BSD/RCTA, RAB, SI-Drive Sport#, °C / км/ч",
-  },
-  {
-    id: "sk-forester-wilderness",
-    modelSeriesRu: "Forester V (SK)",
-    years: "2022–2024",
-    trimRu: "2.5i Wilderness",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "SK9CYRC",
-    usOptionCodeExamples: ["U45D", "U55D"],
-    canadianOptionCodeC0: "C05D",
-    canadianOptionCodeC5: "C55D",
-    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
-    featuresRu:
-      "Dual X-Mode, передняя камера, 8\" Harman/Kardon, панорамный люк, RAB, °C / км/ч",
-  },
-  {
-    id: "sk-forester-limited-touring",
-    modelSeriesRu: "Forester V (SK)",
-    years: "2019–2024",
-    trimRu: "2.5i Limited / Touring (Premier CA)",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "SK9CY7C",
-    usOptionCodeExamples: ["U57H", "U58Y", "U68Y"],
-    canadianOptionCodeC0: "C08Y",
-    canadianOptionCodeC5: "C58Y",
-    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
-    featuresRu:
-      "Dual X-Mode, DriverFocus DMS, кожа, Harman/Kardon, подогрев руля и задних сидений, °C / км/ч",
-  },
-
-  // 3. Crosstrek / XV (GT / GU 2018–2024)
-  {
-    id: "gt-crosstrek-sport-limited-25",
-    modelSeriesRu: "Crosstrek / XV (GT / GU)",
-    years: "2021–2024",
-    trimRu: "2.5i Sport / Outdoor (CA) / Limited",
-    engineRu: "FB25D 2.5L DI (CVT TR580)",
-    appliedModel: "GTACY7C",
-    usOptionCodeExamples: ["U54D", "U57H", "U64D"],
-    canadianOptionCodeC0: "C04D",
-    canadianOptionCodeC5: "C54D",
-    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
-    featuresRu:
-      "Двухрежимный Dual X-Mode (на комплектациях Sport / Outdoor 2.5L), люк, BSD/RCTA, RAB, °C / км/ч",
-  },
-  {
-    id: "gt-crosstrek-premium-20",
-    modelSeriesRu: "Crosstrek / XV (GT)",
-    years: "2018–2023",
-    trimRu: "2.0i Premium / Touring (CA) / Limited",
-    engineRu: "FB20D 2.0L DI (CVT TR580)",
-    appliedModel: "GT7CY5C",
-    usOptionCodeExamples: ["U53D", "U57H"],
-    canadianOptionCodeC0: "C03D",
-    canadianOptionCodeC5: "C53D",
-    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
-    featuresRu: "Однорежимный X-Mode, зимний пакет, EyeSight, BSD/RCTA, °C / км/ч",
-  },
-
-  // 4. Ascent WM (2019–2024)
-  {
-    id: "wm-ascent-limited-touring-onyx",
-    modelSeriesRu: "Ascent (WM)",
-    years: "2019–2024",
-    trimRu: "2.4T Onyx / Limited / Touring (Premier CA)",
-    engineRu: "FA24F 2.4L Turbo (CVT TR690)",
-    appliedModel: "WMACY7B",
-    usOptionCodeExamples: ["U47H", "U48Y", "U45D"],
-    canadianOptionCodeC0: "C07H",
-    canadianOptionCodeC5: "C57H",
-    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
-    featuresRu:
-      "Dual X-Mode (c 2021MY), 3 ряда, панорама, Harman/Kardon, RAB, передняя камера / 360°, °C / км/ч",
-  },
-
-  // 5. Legacy BW (2020–2024) & Impreza GK/GT (2017–2023)
-  {
-    id: "bw-legacy-limited-xt",
-    modelSeriesRu: "Legacy VII (BW)",
-    years: "2020–2024",
-    trimRu: "2.5i / 2.4T Limited / Touring XT (Premier CA)",
-    engineRu: "FB25D 2.5L / FA24F 2.4T",
-    appliedModel: "BWACY98",
-    usOptionCodeExamples: ["U47H", "U57H"],
-    canadianOptionCodeC0: "C07H",
-    canadianOptionCodeC5: "C57H",
-    xModeTypeRu: "Без X-Mode (Sedan / Impreza)",
-    featuresRu: "Седан: 11.6\" экран, Harman/Kardon, люк, DriverFocus, метрика Канады (°C, км/ч)",
+      "SSM4: BT9EYTL + U5QD/U5RD/U5QJ или C5QF/C5RF. Dual X-Mode — 6-й знак T; C05D в каталоге нет.",
   },
 ];
-
 export interface SubaruAppliedModelAnalysis {
   appliedModel: string;
   optionCode: string;
   valid: boolean;
+  /** True when Applied+Option pair exists in dealer Env cgdwPHBWHoZ.mLW. */
+  validInSsm4Cgdw: boolean;
+  /** All Option Codes accepted by SSM4 for this Applied Model (from cgdw). */
+  cgdwOptionCodes: string[];
   seriesCode: string;
   modelYearChar: string;
   modelYearText: string;
@@ -6164,19 +6064,54 @@ export const SUBARU_METER_VARIANT_SAFE_PATH = {
   forbiddenInner: "scr_ext_in_writeCommonArea",
 } as const;
 
-/** Read-only UDS 22 DIDs that SSM4 uses for Combination Meter 12-column variant (`cGZGBPHB-WmTWLZ.mHZ` + `0250`/`0251`). */
+/**
+ * Why SSM4 asks for Applied Model + Option Code:
+ * Both are the **PC-side lookup key** into Env DBs — not a mandatory ASCII string in ECUs.
+ * - Meter: `cgdwPHBWHoZ.mLW` → A0xx DID mask (sendMetVariByApplied / MET-002)
+ * - EyeSight stereo: `Y-YwPHBWHoZ.mLW` → 3501..3510 DID mask (ADA-031/032, CheckAdaVariantDid)
+ * - Mono camera: `c7YcwPHBWHoZ.mLW` → 3201.. (MCAM)
+ *
+ * The mask **encodes** that Applied+Option. SSM4 needs the 7-char Applied because
+ * GetFindByAppliedModelList indexes by it. ASCII `BTAEYR8` is rarely readable from the ECU;
+ * download A0xx / 35xx and reverse-match. For BTAEYR8 the EyeSight 35xx fingerprint is
+ * globally unique → can recover Applied+Option from 787 alone.
+ */
+export const SUBARU_METER_VARIANT_READ_FACTS = {
+  destinationDid: "A002",
+  unitsDid: "A011",
+  a002Map: { "02": "U4", "03": "C0", "05": "U5", "06": "C5" } as const,
+  a011Map: { FF: "USA °F/MPH", "00": "Canada °C/km/h" } as const,
+  ascii12ColumnDids: ["0250", "0251", "F1A0", "F1A1"] as const,
+  fingerprintDidKeys: SSM4_CGDW_FP_DID_KEYS,
+  eyesightLib: "Y-YwPHBWHoZ.mLW",
+  meterLib: "cgdwPHBWHoZ.mLW",
+  eyesightDidKeys: SSM4_YYW_FP_DID_KEYS,
+  noteRu:
+    "SSM4: (Applied,Option)→строка cgdw→полный набор A0xx (не только A002/A011). Обратно: считав все DID строки (в т.ч. отсутствие A02E), получаем model+option. Урезанный отпечаток давал ложные коллизии.",
+} as const;
+
+/** EyeSight stereo variant DIDs from Y-Yw (787 → 78F). */
+export const SUBARU_EYESIGHT_VARIANT_READ_DIDS = [
+  ...SSM4_YYW_FP_DID_KEYS,
+  "3091",
+  "3092",
+  "3093",
+  "3094",
+  "309D",
+  "F182",
+  "F18E",
+  "F190",
+  "F197",
+  "A001",
+] as const;
+
+/** Read-only UDS 22 DIDs probed for meter variant / full cgdw fingerprint reverse-match. */
 export const SUBARU_METER_12COLUMN_READ_DIDS = [
   "0250",
   "0251",
   "A000",
-  "A001",
-  "A002",
-  "A007",
-  "A011",
-  "A016",
-  "A024",
-  "A027",
-  "A028",
+  "A020",
+  ...SSM4_CGDW_FP_DID_KEYS,
   "0240",
   "0200",
   "0220",
@@ -6226,17 +6161,14 @@ const SUBARU_MY_CHAR_MAP: Record<string, string> = {
 };
 
 /**
- * Maps a US 7-char Applied Model + 4-char Option Code (e.g. `BTACYR8` + `U45D`)
- * to the exact factory Canadian `C0__` / `C5__` Option Code accepted by SSM4 `cgdwPHBWHoZ.mLW`.
+ * Maps Applied Model (+ optional current Option) to Canadian Option Codes accepted by
+ * SSM4 `cgdwPHBWHoZ.mLW` (dealer Env). Source of truth is the decoded pair catalog —
+ * not suffix-swap heuristics.
  *
- * Crucial Subaru factory rule (from 2022–2024 Outback Service Manual "Identification -> Option Code"):
- * - On US 2022–2023 Outback Wilderness (`BTACYR8` / `BTADYR8`), the US Option Code is `U45D`
- *   (`5` = L-pkg + Power Rear Gate + BSD + Telematics without leather; `D` = Sunroof + Navigation + RAB, NO heated steering wheel).
- * - In Canada, the 2022–2023 Outback Wilderness (`VIN 4S4BTHTD5N...`, `BTACYR8`) has a standard heated steering wheel and no built-in Navigation,
- *   so its factory Option Code on the B-pillar and in SSM4's lookup table is **`C0QF`** (`Q` = Power seat + Keyless + PRG + BSD + Telematics,
- *   `F` = Sunroof + Steering heater + RAB)! Entering `C05D` in SSM4 is rejected because `BTACYR8 + C05D` does not exist in Subaru Canada's catalog.
- * - On 2024+ Outback Wilderness (`BTAEYR8`), US is `U45L`, while Canada (which has Wide-angle mono camera + HK + Sunroof + Steering heater + RAB)
- *   uses **`C0RC`** (or `C0RF` / `C05L`).
+ * Verified pairs (SSM4 accept / reject):
+ * - `BTACYR8` + `C0QF` / `U45D` → OK; `C05D` / `C01D` / `BTACYR7|9` → rejected
+ * - `BTAEYR8` + `C0QF` / `C0RF` / `U45D` / `U4TD` / `U45J` → OK; `C0RC` / `U45L` not in table
+ * Dual X-Mode is the 6th Applied Model character (R/H/T), not the Option Code.
  */
 export function resolveCanadianOptionCodesForSubaru(
   appliedModel: string,
@@ -6244,38 +6176,21 @@ export function resolveCanadianOptionCodesForSubaru(
 ): { primaryC0: string; secondaryAlt: string } {
   const app = appliedModel.trim().toUpperCase();
   const opt = optionCode.trim().toUpperCase();
-  const suffix = opt.length === 4 ? opt.slice(2, 4) : "QF";
-  const series = app.slice(0, 3);
-  const rev = app.slice(3, 4);
-  const grade = app.slice(5, 6);
-
-  // Outback 2.4T (BTA) & Legacy 2.4T (BWA)
-  if (series === "BTA" || series === "BWA") {
-    // Wilderness (grade R)
-    if (grade === "R") {
-      if (rev === "A" || rev === "B" || rev === "C" || rev === "D") {
-        // 2020-2023 MY: Factory Canadian Option Code for BTACYR8 / BTADYR8 is C0QF!
-        return { primaryC0: "C0QF", secondaryAlt: `C0${suffix === "QF" ? "5F" : suffix}` };
-      }
-      // 2024+ MY (E/F/G): Factory Canadian Option Code for BTAEYR8 (with Wide-angle mono camera R + HK/Sunroof/Heated wheel/RAB C or F)
-      return { primaryC0: "C0RC", secondaryAlt: suffix === "5L" ? "C05L" : `C0${suffix}` };
-    }
-    // Onyx XT / Outdoor XT (grade H)
-    if (grade === "H") {
-      if (rev === "A" || rev === "B" || rev === "C" || rev === "D") {
-        return { primaryC0: "C0QF", secondaryAlt: `C0${suffix}` };
-      }
-      return { primaryC0: "C0RF", secondaryAlt: `C0${suffix}` };
-    }
-    // Limited XT (grade J) / Touring XT (grade K)
-    if (grade === "J" || grade === "K") {
-      if (rev === "E" || rev === "F" || rev === "G") {
-        return { primaryC0: "C0SG", secondaryAlt: "C04G" };
-      }
-      return { primaryC0: "C04G", secondaryAlt: `C0${suffix}` };
-    }
+  const fromCgdw = resolveSsm4CanadianOptionsFromCgdw(app);
+  if (fromCgdw.primaryC0) {
+    return {
+      primaryC0: fromCgdw.primaryC0,
+      secondaryAlt: fromCgdw.secondaryAlt ?? fromCgdw.primaryC0,
+    };
   }
 
+  // Fallback only when Applied Model is absent from the Env pack.
+  const suffix = opt.length === 4 ? opt.slice(2, 4) : "QF";
+  const series = app.slice(0, 3);
+  const grade = app.slice(5, 6);
+  if ((series === "BTA" || series === "BWA") && (grade === "R" || grade === "H")) {
+    return { primaryC0: "C0QF", secondaryAlt: "C0RF" };
+  }
   return {
     primaryC0: `C0${suffix}`,
     secondaryAlt: `C5${suffix}`,
@@ -6318,8 +6233,11 @@ export function decodeSubaruAppliedModel12Columns(
   const resolvedCan = resolveCanadianOptionCodesForSubaru(app, opt);
   const canadianOptionCodeC0 = resolvedCan.primaryC0;
   const canadianOptionCodeC5 = resolvedCan.secondaryAlt;
+  const cgdwOptionCodes = listSsm4CgdwOptionsForAppliedModel(app).map((p) => p.optionCode);
+  const validInSsm4Cgdw = valid && isSsm4CgdwPairValid(app, opt);
 
   // Suggest Dual X-Mode grade letter in position 6 if currently Single X-Mode
+  // (Dual X-Mode is Applied Model grade, not Option Code destination).
   let dualGrade = gradeChar;
   if (seriesCode === "BTA" && !["R", "H"].includes(gradeChar)) {
     dualGrade = "R"; // Wilderness / Onyx XT has Dual X-Mode on 2.4T
@@ -6337,6 +6255,8 @@ export function decodeSubaruAppliedModel12Columns(
     appliedModel: app,
     optionCode: opt,
     valid,
+    validInSsm4Cgdw,
+    cgdwOptionCodes,
     seriesCode,
     modelYearChar,
     modelYearText,
@@ -6431,8 +6351,10 @@ function regionFromOptionCode(
 
 /**
  * Inspects a captured Subaru Meter (783/7C0) & BIU (752) dump and extracts or reconstructs
- * the exact 7-character Applied Model + 4-character Option Code (e.g. BTACYR8 + C05D),
- * so the user sees the human-readable code instead of raw hex bytes.
+ * Applied Model + Option Code.
+ *
+ * Meter facts: A002/A011 give destination/units bytes; 0250/0251 may be bitmask (not ASCII).
+ * Full 7+4 often comes from VIN + cgdw US list / B-pillar — not inventing C0RC/C05D.
  */
 export function extractAppliedModelAndOptionCodeFromDump(
   dump: {
@@ -6443,7 +6365,7 @@ export function extractAppliedModelAndOptionCodeFromDump(
     }[];
   },
   fallbackAppliedModel = "BTAEYR8",
-  fallbackUsOptionCode = "U45L",
+  fallbackUsOptionCode = "U45D",
 ): SubaruDumpCodeMatch {
   let directAppliedModel: string | null = null;
   let directOptionCode: string | null = null;
@@ -6499,8 +6421,8 @@ export function extractAppliedModelAndOptionCodeFromDump(
   else if (a011Byte === "FF") destFromA002 = "U4";
   else if (a011Byte === "00") destFromA002 = "C0";
 
-  // Reconstruct exact 7-character Applied Model & 4-character Option Code from 17-char VIN
-  // Example from user's B-pillar: VIN 4S4BTGUD1R3270223 -> Applied Model BTAEYR8 + Option Code U45L
+  // Reconstruct Applied Model from VIN; Option suffix from cgdw US list (not invented U45L/C0RC).
+  // Example: VIN 4S4BTGUD1R3270223 -> BTAEYR8; cgdw US options U45D/U4TD/U45J; CA C0QF/C0RF.
   const cleanFallbackApp = fallbackAppliedModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   const cleanFallbackOpt = fallbackUsOptionCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   let baseApp =
@@ -6510,7 +6432,7 @@ export function extractAppliedModelAndOptionCodeFromDump(
   let defaultEquipSuffix =
     cleanFallbackOpt.length === 4 && /^(U4|U5|U6|C0|C5)[A-Z0-9]{2}$/.test(cleanFallbackOpt)
       ? cleanFallbackOpt.slice(2, 4)
-      : "5L";
+      : "5D";
 
   if (!directAppliedModel && dump.vin && dump.vin.length === 17) {
     const vin = dump.vin.toUpperCase();
@@ -6546,17 +6468,17 @@ export function extractAppliedModelAndOptionCodeFromDump(
           : "C";
       let gradeChar = "R";
       if (engineTrim === "GU" || engineTrim === "AU") {
-        gradeChar = "R"; // Wilderness (BTAEYR8 / BTACYR8)
-        defaultEquipSuffix = rev === "E" || rev === "D" || rev === "F" || rev === "G" ? "5L" : "5D";
+        gradeChar = "R"; // Wilderness — cgdw US is U45D (not U45L)
+        defaultEquipSuffix = "5D";
       } else if (engineTrim === "GN" || engineTrim === "AN") {
         gradeChar = "H"; // Onyx XT
-        defaultEquipSuffix = "5B";
+        defaultEquipSuffix = "5D";
       } else if (engineTrim === "GL" || engineTrim === "AL") {
         gradeChar = "J"; // Limited XT
-        defaultEquipSuffix = "7H";
+        defaultEquipSuffix = "4G";
       } else if (engineTrim === "GM" || engineTrim === "AM") {
         gradeChar = "K"; // Touring XT
-        defaultEquipSuffix = "8Y";
+        defaultEquipSuffix = "4G";
       } else if (engineTrim === "AF" || engineTrim === "AT") {
         gradeChar = "T"; // 2.5i Onyx Edition (Dual X-Mode)
         defaultEquipSuffix = "5D";
@@ -6592,8 +6514,48 @@ export function extractAppliedModelAndOptionCodeFromDump(
     }
   }
 
+  // Same logic as SSM4 write path, reversed:
+  // (Applied, Option) → unique cgdw row → DID payload written.
+  // DID payload → catalog row(s). If globally unique → Applied+Option without VIN.
+  // If several rows share the payload → VIN/hint disambiguates Applied, then Option.
+  const globalFp = matchSsm4OptionFromMeterDids(null, didMap);
+  let fpMatch = globalFp;
+  let appFromCatalog = false;
+  if (globalFp?.unique && globalFp.appliedModel) {
+    baseApp = globalFp.appliedModel;
+    appFromCatalog = true;
+  } else if (globalFp && !globalFp.unique) {
+    // Same DID payload shared by several catalog rows — disambiguate Applied via VIN/hint.
+    const vinHit = globalFp.candidates.find((c) => c.startsWith(`${baseApp}+`));
+    if (vinHit) {
+      fpMatch = {
+        ...globalFp,
+        optionCode: vinHit.slice(baseApp.length + 1),
+        appliedModel: baseApp,
+        unique: true,
+        candidates: [vinHit],
+      };
+      appFromCatalog = true;
+    } else {
+      fpMatch = matchSsm4OptionFromMeterDids(baseApp, didMap) ?? globalFp;
+    }
+  } else {
+    // Incomplete A0xx dump (or no global hit): scope by Applied from VIN/ASCII, then Option.
+    fpMatch = matchSsm4OptionFromMeterDids(baseApp, didMap);
+  }
+
+  const cgdwOpts = listSsm4CgdwOptionsForAppliedModel(baseApp);
+  const firstUsOpt = cgdwOpts.find((p) => p.optionCode.startsWith("U"))?.optionCode;
+  if (firstUsOpt && firstUsOpt.length === 4) {
+    defaultUsDest = firstUsOpt.slice(0, 2) as "U4" | "U5";
+    defaultEquipSuffix = firstUsOpt.slice(2, 4);
+  }
+
   if (directAppliedModel || directOptionCode) {
-    const actualOpt = directOptionCode ?? `${destFromA002 ?? defaultUsDest}${defaultEquipSuffix}`;
+    const actualOpt =
+      directOptionCode ??
+      fpMatch?.optionCode ??
+      `${destFromA002 ?? defaultUsDest}${defaultEquipSuffix}`;
     const resolvedCan = resolveCanadianOptionCodesForSubaru(baseApp, actualOpt);
     const actualRegion = regionFromOptionCode(actualOpt);
     return {
@@ -6609,37 +6571,62 @@ export function extractAppliedModelAndOptionCodeFromDump(
       inferredRegion: actualRegion,
       inferredAppliedModel: baseApp,
       inferredOptionCode: actualOpt,
-      explanationRu: `Прямое совпадение ASCII-кода в ответе приборки (${sourceDid}): фактический код ${baseApp} + ${actualOpt}. Рекомендуемый канадский код для °C и км/ч: ${baseApp} + ${resolvedCan.primaryC0}.`,
+      explanationRu: `Прямое совпадение ASCII в ${sourceDid}: ${baseApp} + ${actualOpt}. По cgdw SSM4 для °C: ${baseApp} + ${resolvedCan.primaryC0}${resolvedCan.secondaryAlt !== resolvedCan.primaryC0 ? ` (альт. ${resolvedCan.secondaryAlt})` : ""}.`,
     };
   }
 
-  // Reconstructed actual factory code vs recommended Canadian code
   const activeDest = destFromA002 ?? defaultUsDest;
-  const resolvedCan = resolveCanadianOptionCodesForSubaru(baseApp, `${defaultUsDest}${defaultEquipSuffix}`);
-  const actualOpt =
-    activeDest === "C0"
-      ? resolvedCan.primaryC0
-      : activeDest === "C5"
-        ? resolvedCan.secondaryAlt
-        : `${activeDest}${defaultEquipSuffix}`;
+  const resolvedCan = resolveCanadianOptionCodesForSubaru(
+    baseApp,
+    fpMatch?.optionCode ?? `${defaultUsDest}${defaultEquipSuffix}`,
+  );
+  const caForActive =
+    activeDest === "C5" && resolvedCan.secondaryAlt.startsWith("C5")
+      ? resolvedCan.secondaryAlt
+      : resolvedCan.primaryC0;
+  let actualOpt: string;
+  let recoveredHow: string;
+  if (fpMatch?.unique && (fpMatch.appliedModel || appFromCatalog)) {
+    actualOpt = fpMatch.optionCode;
+    if (fpMatch.appliedModel) baseApp = fpMatch.appliedModel;
+    recoveredHow = `Applied+Option из уникальной строки cgdw по A0xx: ${baseApp}+${actualOpt} (как SSM4 пишет из справочника).`;
+  } else if (fpMatch) {
+    actualOpt = fpMatch.optionCode;
+    recoveredHow = fpMatch.unique
+      ? `Option из cgdw по A0xx: ${actualOpt}; Applied ${baseApp}${appFromCatalog ? " (из справочника)" : " (VIN/подсказка — отпечаток делит несколько строк)"}.`
+      : `A0xx совпал с несколькими строками cgdw: ${fpMatch.candidates.join(", ")}. Взят ${baseApp}+${actualOpt}.`;
+  } else if (activeDest === "C0" || activeDest === "C5") {
+    actualOpt = caForActive.startsWith(activeDest) ? caForActive : resolvedCan.primaryC0;
+    recoveredHow = `Полный A0xx-отпечаток не сошёлся; регион из A002/A011 → ${actualOpt}.`;
+  } else {
+    actualOpt = `${activeDest}${defaultEquipSuffix}`;
+    recoveredHow = `Полный A0xx-отпечаток не сошёлся; типовой US → ${actualOpt}.`;
+  }
   const actualRegion = regionFromOptionCode(actualOpt);
   const canC0 = resolvedCan.primaryC0;
   const canC5 = resolvedCan.secondaryAlt;
 
   const regSourceText =
-    a002Byte || a011Byte
-      ? `Из регистров приборки 783 (A002=${a002Byte ?? "—"}, A011=${a011Byte ?? "—"}) считан активный регион ${activeDest} (${actualRegion}).`
-      : `Приборка хранит вариант в битовой маске (без открытой ASCII-строки).`;
-  const vinSourceText =
-    dump.vin && dump.vin.length === 17
-      ? `По VIN ${dump.vin} определена модель ${baseApp} и типовой пакет ${actualOpt} (хвост пакета опций ${defaultEquipSuffix} при необходимости сверьте с табличкой на стойке B).`
-      : `VIN из ЭБУ не получен — использован введённый шаблон ${baseApp} + ${actualOpt} (проверьте 7+4 знака по табличке на стойке B).`;
+    a002Byte || a011Byte || fpMatch
+      ? `С приборки 783: A002=${a002Byte ?? "—"}, A011=${a011Byte ?? "—"}. ${recoveredHow}`
+      : `Приборка не отдала ASCII 12-колонок (0250/0251 часто битовая маска).`;
+  const vinSourceText = appFromCatalog
+    ? `Model/Option не из VIN — из строки Env cgdw.`
+    : dump.vin && dump.vin.length === 17
+      ? `Applied уточнён по VIN ${dump.vin} → ${baseApp} (отпечаток A0xx не уникален во всём справочнике).`
+      : `Applied ${baseApp} из подсказки; сверьте со стойкой B.`;
 
   return {
     foundDirectAscii: false,
     directAppliedModel: null,
     directOptionCode: null,
-    sourceDid: a002Byte ? "783 DID A002" : a011Byte ? "783 DID A011" : null,
+    sourceDid: fpMatch
+      ? "783 A0xx fingerprint→cgdw"
+      : a002Byte
+        ? "783 DID A002"
+        : a011Byte
+          ? "783 DID A011"
+          : null,
     actualRegion,
     actualAppliedModel: baseApp,
     actualOptionCode: actualOpt,
@@ -6648,7 +6635,126 @@ export function extractAppliedModelAndOptionCodeFromDump(
     inferredRegion: actualRegion,
     inferredAppliedModel: baseApp,
     inferredOptionCode: actualOpt,
-    explanationRu: `${regSourceText} ${vinSourceText} Для перевода в °C и км/ч рекомендуется канадский код: ${baseApp} + ${canC0}.`,
+    explanationRu: `${regSourceText} ${vinSourceText} Для °C/км/ч: ${baseApp} + ${canC0}.`,
+  };
+}
+
+export interface SubaruEyesightVariantMatch {
+  appliedModel: string | null;
+  optionCode: string | null;
+  unique: boolean;
+  candidates: string[];
+  fp: string;
+  destinationHint: "USA" | "CANADA" | "UNKNOWN";
+  byte3502: string | null;
+  explanationRu: string;
+}
+
+/** Decode EyeSight 787 DID 35xx dump via Y-YwPHBWHoZ.mLW fingerprint. */
+export function extractEyesightVariantFromDids(
+  dids: { did: string; hex: string }[],
+  hintAppliedModel?: string | null,
+): SubaruEyesightVariantMatch {
+  const didMap: Record<string, string> = {};
+  for (const d of dids) {
+    didMap[d.did.toUpperCase()] = d.hex.trim().toUpperCase();
+  }
+  const byte3502 = didMap["3502"]?.split(/\s+/)[0] ?? null;
+  const destinationHint = eyesightDestinationHintFrom3502(byte3502);
+  const matched = matchSsm4OptionFromEyesightDids(hintAppliedModel, didMap);
+  if (!matched) {
+    return {
+      appliedModel: null,
+      optionCode: null,
+      unique: false,
+      candidates: [],
+      fp: "",
+      destinationHint,
+      byte3502,
+      explanationRu: byte3502
+        ? `EyeSight 3502=${byte3502} (${destinationHint}), но полный отпечаток 35xx не совпал с Y-Yw.`
+        : "EyeSight не ответил на вариантные DID 3501..3510.",
+    };
+  }
+  return {
+    appliedModel: matched.appliedModel,
+    optionCode: matched.optionCode,
+    unique: matched.unique,
+    candidates: matched.candidates,
+    fp: matched.fp,
+    destinationHint,
+    byte3502,
+    explanationRu: matched.unique
+      ? `EyeSight 35xx→Y-Yw: ${matched.appliedModel ?? hintAppliedModel ?? "?"} + ${matched.optionCode} (3502=${byte3502 ?? "—"} → ${destinationHint}).`
+      : `EyeSight 35xx неоднозначно: ${matched.candidates.join(", ")} (взят ${matched.optionCode}).`,
+  };
+}
+
+export interface SubaruMeterEyesightCompare {
+  optionCodesMatch: boolean | null;
+  appliedModelsMatch: boolean | null;
+  regionsAligned: boolean | null;
+  meterOption: string;
+  eyesightOption: string | null;
+  meterApplied: string;
+  eyesightApplied: string | null;
+  meterRegion: SubaruDumpCodeMatch["actualRegion"];
+  eyesightRegion: "USA" | "CANADA" | "UNKNOWN";
+  verdictRu: string;
+  detailRu: string;
+}
+
+/** Compare meter cgdw Option vs EyeSight Y-Yw Option / destination. */
+export function compareMeterAndEyesightVariants(
+  meter: Pick<SubaruDumpCodeMatch, "actualAppliedModel" | "actualOptionCode" | "actualRegion">,
+  eyesight: SubaruEyesightVariantMatch,
+): SubaruMeterEyesightCompare {
+  const meterOpt = meter.actualOptionCode.toUpperCase();
+  const esOpt = eyesight.optionCode?.toUpperCase() ?? null;
+  const meterApp = meter.actualAppliedModel.toUpperCase();
+  const esApp = eyesight.appliedModel?.toUpperCase() ?? null;
+
+  const optionCodesMatch = esOpt ? meterOpt === esOpt : null;
+  const appliedModelsMatch = esApp ? meterApp === esApp : null;
+
+  const meterIsCa =
+    meter.actualRegion.startsWith("CANADA") ||
+    meterOpt.startsWith("C0") ||
+    meterOpt.startsWith("C5");
+  const meterIsUs =
+    meter.actualRegion.startsWith("USA") ||
+    meterOpt.startsWith("U4") ||
+    meterOpt.startsWith("U5") ||
+    meterOpt.startsWith("U6");
+  let regionsAligned: boolean | null = null;
+  if (eyesight.destinationHint === "CANADA") regionsAligned = meterIsCa;
+  else if (eyesight.destinationHint === "USA") regionsAligned = meterIsUs;
+
+  let verdictRu: string;
+  if (optionCodesMatch === true && (appliedModelsMatch === true || appliedModelsMatch === null)) {
+    verdictRu = "Совпадают: приборка и EyeSight указывают на один и тот же Option Code.";
+  } else if (optionCodesMatch === false) {
+    verdictRu = `Расхождение Option: приборка ${meterOpt}, EyeSight ${esOpt}.`;
+  } else if (regionsAligned === false) {
+    verdictRu = `Регионы не сходятся: приборка ${meter.actualRegion}, EyeSight 3502→${eyesight.destinationHint}.`;
+  } else if (esOpt == null) {
+    verdictRu = "EyeSight вариант не распознан — сравнить Option нельзя (проверьте 787 / 35xx).";
+  } else {
+    verdictRu = "Частичное совпадение — см. детали.";
+  }
+
+  return {
+    optionCodesMatch,
+    appliedModelsMatch,
+    regionsAligned,
+    meterOption: meterOpt,
+    eyesightOption: esOpt,
+    meterApplied: meterApp,
+    eyesightApplied: esApp,
+    meterRegion: meter.actualRegion,
+    eyesightRegion: eyesight.destinationHint,
+    verdictRu,
+    detailRu: `${eyesight.explanationRu} Приборка: ${meterApp}+${meterOpt}.`,
   };
 }
 
