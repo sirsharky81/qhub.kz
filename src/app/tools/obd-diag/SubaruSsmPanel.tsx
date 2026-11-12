@@ -4,6 +4,7 @@ import type {
   ModuleDtcReport,
   SubaruMeter12ColumnRead,
   SubaruMeter12ColumnWriteSessionResult,
+  SubaruMeterEyesightCompareResult,
   SubaruRegionConfigDump,
 } from "@/lib/obd/obd-session";
 import type { SasCalibrationResult, TpmsWheelReading } from "@/lib/obd/mitsubishi-modules";
@@ -232,8 +233,10 @@ export function SubaruSsmPanel({
   const [configDumpB, setConfigDumpB] = useState<SubaruRegionConfigDump | null>(null);
   const [configProgress, setConfigProgress] = useState<string | null>(null);
   const [appliedModelInput, setAppliedModelInput] = useState<string>("BTAEYR8");
-  const [optionCodeInput, setOptionCodeInput] = useState<string>("U45L");
+  const [optionCodeInput, setOptionCodeInput] = useState<string>("U45D");
   const [meter12Read, setMeter12Read] = useState<SubaruMeter12ColumnRead | null>(null);
+  const [meterEyesightCompare, setMeterEyesightCompare] =
+    useState<SubaruMeterEyesightCompareResult | null>(null);
   const [meter12WritePending, setMeter12WritePending] = useState<{
     appliedModel: string;
     optionCode: string;
@@ -942,13 +945,36 @@ export function SubaruSsmPanel({
     }
   }, [ready, busy, session, setBusy, setError]);
 
+  const handleCompareMeterEyesight = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    setConfigProgress("Сравнение приборки (A0xx/cgdw) и EyeSight (35xx/Y-Yw)…");
+    try {
+      const result = await session.readSubaruMeterEyesightVariantCompare("6");
+      setMeterEyesightCompare(result);
+      setMeter12Read(result.meter);
+      if (result.meter.match.actualAppliedModel) {
+        setAppliedModelInput(result.meter.match.actualAppliedModel);
+      }
+      if (result.meter.match.actualOptionCode) {
+        setOptionCodeInput(result.meter.match.actualOptionCode);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка сравнения приборка / EyeSight");
+    } finally {
+      setConfigProgress(null);
+      setBusy(false);
+    }
+  }, [ready, busy, session, setBusy, setError]);
+
   const openMeter12WriteConfirm = useCallback(
     (appliedModel: string, optionCode: string) => {
       if (!ready || busy) return;
       const cleanModel =
         appliedModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7) || "BTAEYR8";
       const cleanOpt =
-        optionCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "C05L";
+        optionCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "C0QF";
       setMeter12WriteConfirmTyped("");
       setMeter12WritePending({ appliedModel: cleanModel, optionCode: cleanOpt });
     },
@@ -5247,13 +5273,15 @@ export function SubaruSsmPanel({
                 Калькулятор «Write ECU setting 12 columns of models» (7-значный Applied Model + 4-значный Option Code)
               </h4>
               <p className="mt-0.5 text-xs text-gray-500">
-                Для перевода американской приборки и климата в метрику (<strong>°C, км/ч, л/100км</strong>) и активации{" "}
-                <strong>Dual X-Mode</strong> используется исключительно{" "}
-                <code className="font-mono font-bold">Write Control module setting information → Write ECU setting 12 columns of models</code>{" "}
-                (Operation Procedure B по бюллетеню <code className="font-mono">MC-10182242-0001.pdf</code>). В SSM4 это цепочка{" "}
-                <code className="font-mono">changeVariant → getOpDigit/findOpCode → sendMetVariByApplied</code>: в приборку уходит только DID-список вариантной маски
-                (UDS <code className="font-mono">2E</code>, в том числе DID <code className="font-mono">0250</code>). Одометр в этот список не входит.
-                Путь <code className="font-mono">sendMetVariant / writeCommonArea</code> (файл вариантной прошивки) — это Procedure A, его здесь нет.
+                Для метрики (<strong>°C, км/ч</strong>) — Procedure B:{" "}
+                <code className="font-mono">changeVariant → findOpCode (cgdw) → sendMetVariByApplied</code> / запись{" "}
+                <code className="font-mono">A002/A011</code>. Одометр и Procedure A (<code className="font-mono">writeCommonArea</code>) не используются.
+                <strong> Dual X-Mode</strong> — это 6-й знак Applied Model (R/H/T), а не Option Code: перевод на C0QF не включает Dual X-Mode.
+              </p>
+              <p className="mt-1 text-[11px] text-gray-500">
+                Applied Model — ключ к <code className="font-mono">cgdw</code> (приборка A0xx) и{" "}
+                <code className="font-mono">Y-Yw</code> (EyeSight 35xx): в ЭБУ пишется маска конфига, не ASCII-строка.
+                Сравнение: одинаковый ли Option / регион в 783 и 787.
               </p>
             </div>
 
@@ -5264,12 +5292,51 @@ export function SubaruSsmPanel({
                 disabled={!ready || busy}
                 className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
               >
-                Считать 12-колоночный код с приборки (только чтение 22)
+                Считать вариант с приборки (A0xx)
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCompareMeterEyesight()}
+                disabled={!ready || busy}
+                className="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Сравнить с EyeSight (787 · 35xx)
               </button>
               <span className="text-[11px] text-gray-500">
-                IG ON. Одометр не пишется: запрос `22 0250` / `22 0251`, без `2E`.
+                IG ON. Только чтение 22.
               </span>
             </div>
+
+            {meterEyesightCompare && (
+              <div
+                className={`rounded-lg border p-3 text-xs space-y-1.5 ${
+                  meterEyesightCompare.compare.optionCodesMatch === true
+                    ? "border-emerald-300 bg-emerald-50"
+                    : meterEyesightCompare.compare.optionCodesMatch === false ||
+                        meterEyesightCompare.compare.regionsAligned === false
+                      ? "border-rose-300 bg-rose-50"
+                      : "border-amber-300 bg-amber-50"
+                }`}
+              >
+                <div className="font-bold">{meterEyesightCompare.compare.verdictRu}</div>
+                <div>
+                  Приборка:{" "}
+                  <code className="font-mono font-bold">
+                    {meterEyesightCompare.compare.meterApplied}+
+                    {meterEyesightCompare.compare.meterOption}
+                  </code>
+                  {" · "}
+                  EyeSight:{" "}
+                  <code className="font-mono font-bold">
+                    {(meterEyesightCompare.compare.eyesightApplied ?? "—")}+
+                    {(meterEyesightCompare.compare.eyesightOption ?? "—")}
+                  </code>{" "}
+                  (3502→{meterEyesightCompare.compare.eyesightRegion})
+                </div>
+                <div className="text-[11px] text-gray-700">{meterEyesightCompare.compare.detailRu}</div>
+              </div>
+            )}
+
 
             {meter12Read && (
               <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2.5">
@@ -5385,14 +5452,14 @@ export function SubaruSsmPanel({
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold text-gray-700">
-                  4-значный Option Code (со стойки B, например U45L → C05L):
+                  4-значный Option Code (со стойки B / cgdw: U45D → C0QF):
                 </label>
                 <input
                   type="text"
                   maxLength={4}
                   value={optionCodeInput}
                   onChange={(e) => setOptionCodeInput(e.target.value.toUpperCase())}
-                  placeholder="Например: U45L"
+                  placeholder="Например: U45D"
                   className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 font-mono text-xs font-bold uppercase"
                 />
               </div>
@@ -5408,14 +5475,26 @@ export function SubaruSsmPanel({
                 </span>
                 <span
                   className={`rounded px-2 py-0.5 text-[11px] font-bold ${
-                    appliedModelAnalysis.valid
+                    appliedModelAnalysis.validInSsm4Cgdw
                       ? "bg-emerald-100 text-emerald-700"
-                      : "bg-amber-500/15 text-amber-800"
+                      : appliedModelAnalysis.valid
+                        ? "bg-amber-500/15 text-amber-800"
+                        : "bg-amber-500/15 text-amber-800"
                   }`}
                 >
-                  {appliedModelAnalysis.valid ? "Формат 7 + 4 корректен" : "Введите 7 + 4 символа"}
+                  {appliedModelAnalysis.validInSsm4Cgdw
+                    ? "Пара есть в cgdw SSM4"
+                    : appliedModelAnalysis.valid
+                      ? "Формат 7+4 OK, пары нет в cgdw"
+                      : "Введите 7 + 4 символа"}
                 </span>
               </div>
+              {appliedModelAnalysis.valid && appliedModelAnalysis.cgdwOptionCodes.length > 0 && (
+                <div className="text-[11px] text-gray-600">
+                  Допустимые Option по cgdw:{" "}
+                  <code className="font-mono font-bold">{appliedModelAnalysis.cgdwOptionCodes.join(", ")}</code>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
                 <div>
@@ -5461,14 +5540,13 @@ export function SubaruSsmPanel({
                 {appliedModelAnalysis.dualXModeAppliedModelSuggestion !==
                   appliedModelAnalysis.appliedModel && (
                   <div className="pt-1 text-amber-800">
-                    • Чтобы одновременно включить двухрежимный <strong>Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)</strong>: используйте Applied Model{" "}
+                    • Dual X-Mode задаётся 6-м знаком Applied Model (сейчас{" "}
+                    <code className="font-mono font-bold">{appliedModelAnalysis.gradeChar}</code>
+                    ). Вариант с Dual:{" "}
                     <code className="font-mono font-bold">
                       {appliedModelAnalysis.dualXModeAppliedModelSuggestion}
-                    </code>{" "}
-                    + Option Code{" "}
-                    <code className="font-mono font-bold">
-                      {appliedModelAnalysis.canadianOptionCodeC0}
                     </code>
+                    {" "}— Option Code для °C при этом не «включает» Dual.
                   </div>
                 )}
               </div>
@@ -5476,7 +5554,7 @@ export function SubaruSsmPanel({
 
             <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
               <div className="text-xs font-bold text-amber-950">
-                Запись в приборку (Procedure B): UDS 2E только DID 0250 / 0251. Одометр и writeCommonArea не трогаются.
+                Запись в приборку (Procedure B): UDS 2E A002/A011 (и при необходимости 0250/0251). Одометр не трогается.
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -5490,7 +5568,7 @@ export function SubaruSsmPanel({
                   disabled={!ready || busy}
                   className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
                 >
-                  Записать код из полей ({appliedModelAnalysis.appliedModel || "BTAEYR8"}+{appliedModelAnalysis.optionCode || "U45L"})
+                  Записать код из полей ({appliedModelAnalysis.appliedModel || "BTAEYR8"}+{appliedModelAnalysis.optionCode || "U45D"})
                 </button>
                 <button
                   type="button"
@@ -5508,18 +5586,13 @@ export function SubaruSsmPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    const eqSuffix = appliedModelAnalysis.optionEquipmentSuffix || "5L";
-                    const usSuffix =
-                      eqSuffix === "QF"
-                        ? "5D"
-                        : eqSuffix === "RC" || eqSuffix === "RF"
-                          ? "5L"
-                          : eqSuffix;
+                    const fromCgdw = appliedModelAnalysis.cgdwOptionCodes.find((c) => c.startsWith("U"));
                     const usCode =
-                      isSubaruMeterWriteDestination(appliedModelAnalysis.optionDestinationPrefix) &&
+                      fromCgdw ??
+                      (isSubaruMeterWriteDestination(appliedModelAnalysis.optionDestinationPrefix) &&
                       appliedModelAnalysis.optionDestinationPrefix.startsWith("U")
                         ? appliedModelAnalysis.optionCode
-                        : `U4${usSuffix}`;
+                        : `U4${appliedModelAnalysis.optionEquipmentSuffix === "QF" || appliedModelAnalysis.optionEquipmentSuffix === "RF" ? "5D" : appliedModelAnalysis.optionEquipmentSuffix || "5D"}`);
                     openMeter12WriteConfirm(appliedModelAnalysis.appliedModel, usCode);
                   }}
                   disabled={!ready || busy}
@@ -5581,7 +5654,7 @@ export function SubaruSsmPanel({
             {/* Reference Table of Canadian Option Codes across TSB 07-183-20 models */}
             <div className="space-y-1.5">
               <div className="text-xs font-bold text-gray-700">
-                Справочник канадских кодов (Applied Model + Option Code C0/C5) по бюллетеню TSB 07-183-20 (нажмите, чтобы подставить):
+                Справочник замен из Env cgdwPHBWHoZ.mLW (нажмите строку — подставить Applied + US Option):
               </div>
               <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="w-full text-left text-[11px]">

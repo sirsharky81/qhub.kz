@@ -41,9 +41,15 @@ import {
 } from "./subaru-steering-calibration";
 import { readSubaruCvtFluidTemp, type SubaruCvtFluidReading } from "./subaru-cvt-read";
 import {
+  SUBARU_EYESIGHT_VARIANT_READ_DIDS,
   SUBARU_METER_12COLUMN_READ_DIDS,
+  SSM4_CGDW_FP_DID_KEYS,
+  compareMeterAndEyesightVariants,
   extractAppliedModelAndOptionCodeFromDump,
+  extractEyesightVariantFromDids,
   type SubaruDumpCodeMatch,
+  type SubaruEyesightVariantMatch,
+  type SubaruMeterEyesightCompare,
 } from "./subaru-ssm4-catalog";
 import {
   writeSubaruMeter12ColumnCode as executeSubaruMeter12ColumnWrite,
@@ -158,6 +164,23 @@ export interface SubaruMeter12ColumnRead {
   vin: string | null;
   dids: { did: string; label: string; hex: string; decoded: string }[];
   match: SubaruDumpCodeMatch;
+}
+
+export interface SubaruEyesightVariantRead {
+  capturedAt: string;
+  txHex: string;
+  rxHex: string;
+  vin: string | null;
+  dids: { did: string; label: string; hex: string; decoded: string }[];
+  match: SubaruEyesightVariantMatch;
+}
+
+export interface SubaruMeterEyesightCompareResult {
+  capturedAt: string;
+  vin: string | null;
+  meter: SubaruMeter12ColumnRead;
+  eyesight: SubaruEyesightVariantRead;
+  compare: SubaruMeterEyesightCompare;
 }
 
 export interface SubaruMeter12ColumnWriteSessionResult extends SubaruMeter12ColumnWriteResult {
@@ -892,10 +915,15 @@ export class ObdBleSession {
           let step = 0;
           const visited = new Set<number>();
           const emptyHops = new Map<number, number>();
+          const eyesightVariantDids = SUBARU_EYESIGHT_VARIANT_READ_DIDS.map((h) =>
+            Number.parseInt(h, 16),
+          );
           const queue: number[] =
             target.tx === 0x783 || target.tx === 0x7c0 || target.tx === 0x752
               ? [...meterVariantDids, ...passportDids, ...rootBitmaps]
-              : [...passportDids, ...rootBitmaps];
+              : target.tx === 0x787
+                ? [...eyesightVariantDids, ...passportDids, ...rootBitmaps]
+                : [...passportDids, ...rootBitmaps];
 
           while (queue.length > 0) {
             if (shouldStop?.()) break;
@@ -1041,6 +1069,7 @@ export class ObdBleSession {
         }
 
         let gotPositive = false;
+        const fpDidSet = new Set<string>(SSM4_CGDW_FP_DID_KEYS as unknown as string[]);
         const queue: string[] = [...SUBARU_METER_12COLUMN_READ_DIDS];
         const visited = new Set<string>();
         while (queue.length > 0) {
@@ -1050,7 +1079,18 @@ export class ObdBleSession {
           try {
             const raw22 = await this.udsExchange(target.tx, target.rx, `22${didHex}`, 900);
             const parsed = parseUdsResponse(raw22, 0x22);
-            if (parsed.kind !== "positive") continue;
+            if (parsed.kind !== "positive") {
+              // Absent fingerprint DID is part of the catalog row (e.g. A02E missing on BTAEYR8).
+              if (fpDidSet.has(didHex)) {
+                dids.push({
+                  did: didHex,
+                  label: resolveDidLabel(didHex, txHex) ?? `DID ${didHex}`,
+                  hex: "--",
+                  decoded: "отсутствует в приборке (NRC / нет ответа)",
+                });
+              }
+              continue;
+            }
             gotPositive = true;
             const didNum = Number.parseInt(didHex, 16);
             const body =
@@ -1082,7 +1122,14 @@ export class ObdBleSession {
               if (ascii.length >= 11) vin = ascii;
             }
           } catch {
-            /* DID not supported on this meter */
+            if (fpDidSet.has(didHex)) {
+              dids.push({
+                did: didHex,
+                label: resolveDidLabel(didHex, txHex) ?? `DID ${didHex}`,
+                hex: "--",
+                decoded: "отсутствует в приборке (ошибка чтения)",
+              });
+            }
           }
         }
 
@@ -1164,6 +1211,115 @@ export class ObdBleSession {
       vin,
       dids,
       match,
+    };
+  }
+
+  /**
+   * Read-only EyeSight (787) variant DIDs 3501..3510 from Y-YwPHBWHoZ.mLW mapping.
+   * Never writes. Used to compare stereo-camera coding vs Combination Meter.
+   */
+  async readSubaruEyesightVariantCode(
+    protocol: CanProtocol = "6",
+    hintAppliedModel?: string | null,
+  ): Promise<SubaruEyesightVariantRead> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед чтением EyeSight");
+    await this.ensureUdsProfile(protocol);
+
+    const tx = 0x787;
+    const rx = 0x78f;
+    const txHex = "787";
+    const rxHex = "78F";
+    const dids: { did: string; label: string; hex: string; decoded: string }[] = [];
+    let vin: string | null = null;
+
+    try {
+      await this.elm!.sendCommand("ATST20");
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      try {
+        await this.udsExchange(tx, rx, "3E00", 800);
+        await this.udsExchange(tx, rx, "1003", 900);
+      } catch {
+        /* ignore */
+      }
+
+      for (const didHex of SUBARU_EYESIGHT_VARIANT_READ_DIDS) {
+        try {
+          const raw22 = await this.udsExchange(tx, rx, `22${didHex}`, 900);
+          const parsed = parseUdsResponse(raw22, 0x22);
+          if (parsed.kind !== "positive") continue;
+          const didNum = Number.parseInt(didHex, 16);
+          const body =
+            parsed.payload.length >= 2 &&
+            parsed.payload[0] === ((didNum >> 8) & 0xff) &&
+            parsed.payload[1] === (didNum & 0xff)
+              ? parsed.payload.slice(2)
+              : parsed.payload;
+          const hex = body.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          const decoded = formatUdsPayload(parsed.payload, 0x22, txHex);
+          dids.push({
+            did: didHex,
+            label: resolveDidLabel(didHex, txHex) ?? `DID ${didHex}`,
+            hex,
+            decoded,
+          });
+          if (didHex === "F190") {
+            const ascii = body
+              .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
+              .join("")
+              .trim();
+            if (ascii.length >= 11) vin = ascii;
+          }
+        } catch {
+          /* DID not supported */
+        }
+      }
+
+      try {
+        await this.udsExchange(tx, rx, "1001", 700);
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      try {
+        await this.elm!.sendCommand("ATSTFF");
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const match = extractEyesightVariantFromDids(dids, hintAppliedModel);
+    return {
+      capturedAt: new Date().toISOString(),
+      txHex,
+      rxHex,
+      vin,
+      dids,
+      match,
+    };
+  }
+
+  /** Read meter + EyeSight variants and compare Option Code / region. */
+  async readSubaruMeterEyesightVariantCompare(
+    protocol: CanProtocol = "6",
+  ): Promise<SubaruMeterEyesightCompareResult> {
+    const meter = await this.readSubaruMeter12ColumnCode(protocol);
+    const eyesight = await this.readSubaruEyesightVariantCode(
+      protocol,
+      meter.match.actualAppliedModel,
+    );
+    const compare = compareMeterAndEyesightVariants(meter.match, eyesight.match);
+    return {
+      capturedAt: new Date().toISOString(),
+      vin: meter.vin ?? eyesight.vin,
+      meter,
+      eyesight,
+      compare,
     };
   }
 

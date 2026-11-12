@@ -11,6 +11,7 @@ import {
   type ObdConnectionPhase,
   type SubaruMeter12ColumnRead,
   type SubaruMeter12ColumnWriteSessionResult,
+  type SubaruMeterEyesightCompareResult,
 } from "@/lib/obd/obd-session";
 import {
   SUBARU_CANADIAN_OPTION_PRESETS,
@@ -49,8 +50,10 @@ export default function SubaruCodingClient() {
 
   // Meter 12-column state
   const [appliedModelInput, setAppliedModelInput] = useState("BTAEYR8");
-  const [optionCodeInput, setOptionCodeInput] = useState("U45L");
+  const [optionCodeInput, setOptionCodeInput] = useState("U45D");
   const [meter12Read, setMeter12Read] = useState<SubaruMeter12ColumnRead | null>(null);
+  const [meterEyesightCompare, setMeterEyesightCompare] =
+    useState<SubaruMeterEyesightCompareResult | null>(null);
   const [meter12WriteResult, setMeter12WriteResult] =
     useState<SubaruMeter12ColumnWriteSessionResult | null>(null);
   const [meter12WritePending, setMeter12WritePending] = useState<{
@@ -166,13 +169,35 @@ export default function SubaruCodingClient() {
     }
   }, [ready, busy]);
 
+  const handleCompareMeterEyesight = useCallback(async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await sessionRef.current.readSubaruMeterEyesightVariantCompare("6");
+      setMeterEyesightCompare(result);
+      setMeter12Read(result.meter);
+      if (result.meter.match.actualAppliedModel.length === 7) {
+        setAppliedModelInput(result.meter.match.actualAppliedModel);
+      }
+      if (result.meter.match.actualOptionCode.length === 4) {
+        setOptionCodeInput(result.meter.match.actualOptionCode);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка сравнения приборка / EyeSight");
+    } finally {
+      setBusy(false);
+      setPhase(sessionRef.current.phase);
+    }
+  }, [ready, busy]);
+
   const openMeterWriteModal = useCallback(
     (rawModel: string, rawOption: string) => {
       if (!ready || busy) return;
       const cleanModel =
         rawModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7) || "BTAEYR8";
       const cleanOpt =
-        rawOption.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "C05L";
+        rawOption.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "C0QF";
       setMeter12WritePending({ appliedModel: cleanModel, optionCode: cleanOpt });
     },
     [ready, busy],
@@ -360,24 +385,34 @@ export default function SubaruCodingClient() {
                 Перевод с °F на °C
               </h2>
               <p className="text-xs text-gray-500">
-                Считывание текущих единиц и перевод на градусы Цельсия.
+                SSM4 спрашивает Applied Model как ключ к cgdw (приборка A0xx) и Y-Yw (EyeSight 35xx) — в ЭБУ уходит маска, не ASCII 7+4.
               </p>
             </div>
-            <button
-              type="button"
-              disabled={!ready || busy}
-              onClick={() => void handleReadMeter12Column()}
-              className="rounded-xl bg-blue-800 hover:bg-blue-900 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
-            >
-              1. Считать текущие единицы
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={!ready || busy}
+                onClick={() => void handleReadMeter12Column()}
+                className="rounded-xl bg-blue-800 hover:bg-blue-900 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                1. Считать приборку
+              </button>
+              <button
+                type="button"
+                disabled={!ready || busy}
+                onClick={() => void handleCompareMeterEyesight()}
+                className="rounded-xl bg-indigo-800 hover:bg-indigo-900 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Сравнить с EyeSight (787)
+              </button>
+            </div>
           </div>
 
           {meter12Read && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
                 <div className="text-[10px] font-bold uppercase text-amber-900">
-                  Сейчас
+                  Приборка (cgdw → A0xx)
                 </div>
                 <div className="mt-1 font-mono text-base font-bold text-gray-900">
                   {meter12Read.match.actualAppliedModel} + {meter12Read.match.actualOptionCode}
@@ -395,6 +430,42 @@ export default function SubaruCodingClient() {
                   Альтернатива PZEV: {meter12Read.match.recommendedCanadianOptionC5}
                 </div>
               </div>
+            </div>
+          )}
+
+          {meterEyesightCompare && (
+            <div
+              className={`rounded-xl border p-3 space-y-2 ${
+                meterEyesightCompare.compare.optionCodesMatch === true
+                  ? "border-emerald-300 bg-emerald-50"
+                  : meterEyesightCompare.compare.optionCodesMatch === false ||
+                      meterEyesightCompare.compare.regionsAligned === false
+                    ? "border-rose-300 bg-rose-50"
+                    : "border-amber-300 bg-amber-50"
+              }`}
+            >
+              <div className="text-xs font-bold text-gray-900">
+                {meterEyesightCompare.compare.verdictRu}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  Приборка 783:{" "}
+                  <code className="font-mono font-bold">
+                    {meterEyesightCompare.compare.meterApplied}+
+                    {meterEyesightCompare.compare.meterOption}
+                  </code>
+                </div>
+                <div>
+                  EyeSight 787:{" "}
+                  <code className="font-mono font-bold">
+                    {(meterEyesightCompare.compare.eyesightApplied ?? "—")}+
+                    {(meterEyesightCompare.compare.eyesightOption ?? "—")}
+                  </code>
+                  {" "}
+                  (3502→{meterEyesightCompare.compare.eyesightRegion})
+                </div>
+              </div>
+              <div className="text-[11px] text-gray-700">{meterEyesightCompare.compare.detailRu}</div>
             </div>
           )}
 
@@ -416,7 +487,7 @@ export default function SubaruCodingClient() {
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-semibold text-gray-800">
-                Option Code (4 знака — U45L / C05L / C05D):
+                Option Code (4 знака — U45D / C0QF / C0RF):
               </span>
               <input
                 type="text"
@@ -430,6 +501,20 @@ export default function SubaruCodingClient() {
             </label>
           </div>
 
+          {appliedModelAnalysis.valid && (
+            <div
+              className={`rounded-xl border px-3 py-2 text-[11px] ${
+                appliedModelAnalysis.validInSsm4Cgdw
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : "border-amber-300 bg-amber-50 text-amber-950"
+              }`}
+            >
+              {appliedModelAnalysis.validInSsm4Cgdw
+                ? `Пара в каталоге SSM4 cgdw: OK. Допустимые Option: ${appliedModelAnalysis.cgdwOptionCodes.join(", ") || "—"}.`
+                : `Пары ${appliedModelAnalysis.appliedModel}+${appliedModelAnalysis.optionCode} нет в cgdw SSM4 — запись может быть отклонена. Для °C используйте ${appliedModelAnalysis.canadianOptionCodeC0}. Dual X-Mode = 6-й знак Applied (${appliedModelAnalysis.gradeChar}), не Option Code.`}
+            </div>
+          )}
+
           {/* Always-active Write Buttons when connected */}
           <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-3.5 space-y-2.5">
             <div className="text-xs font-bold text-emerald-950">
@@ -442,7 +527,7 @@ export default function SubaruCodingClient() {
                 onClick={() =>
                   openMeterWriteModal(
                     appliedModelAnalysis.appliedModel || "BTAEYR8",
-                    appliedModelAnalysis.canadianOptionCodeC0 || "C05L",
+                    appliedModelAnalysis.canadianOptionCodeC0 || "C0QF",
                   )
                 }
                 className="rounded-xl bg-emerald-700 hover:bg-emerald-800 px-3 py-2.5 text-xs font-bold text-white disabled:opacity-40"
@@ -453,33 +538,21 @@ export default function SubaruCodingClient() {
                 type="button"
                 disabled={!ready || busy}
                 onClick={() => {
+                  const fromCgdw = appliedModelAnalysis.cgdwOptionCodes.find((c) => c.startsWith("U"));
+                  if (fromCgdw) {
+                    openMeterWriteModal(appliedModelAnalysis.appliedModel || "BTAEYR8", fromCgdw);
+                    return;
+                  }
                   const rawSuffix =
-                    optionCodeInput.trim().length === 4 ? optionCodeInput.trim().toUpperCase().slice(2, 4) : "5L";
+                    optionCodeInput.trim().length === 4 ? optionCodeInput.trim().toUpperCase().slice(2, 4) : "5D";
                   const usSuffix =
-                    rawSuffix === "QF"
-                      ? appliedModelAnalysis.appliedModel.slice(5, 6) === "H"
-                        ? "5B"
-                        : "5D"
-                      : rawSuffix === "RC" || rawSuffix === "RF"
-                        ? "5L"
-                        : rawSuffix;
+                    rawSuffix === "QF" || rawSuffix === "RF" || rawSuffix === "IY" ? "5D" : rawSuffix;
                   openMeterWriteModal(appliedModelAnalysis.appliedModel || "BTAEYR8", `U4${usSuffix}`);
                 }}
                 className="rounded-xl border border-gray-400 bg-white hover:bg-gray-50 px-3 py-2.5 text-xs font-bold text-gray-900 disabled:opacity-40"
               >
-                Вернуть США (U4
-                {(() => {
-                  const rawSuffix =
-                    optionCodeInput.trim().length === 4 ? optionCodeInput.trim().toUpperCase().slice(2, 4) : "5L";
-                  return rawSuffix === "QF"
-                    ? appliedModelAnalysis.appliedModel.slice(5, 6) === "H"
-                      ? "5B"
-                      : "5D"
-                    : rawSuffix === "RC" || rawSuffix === "RF"
-                      ? "5L"
-                      : rawSuffix;
-                })()}{" "}
-                · °F, мили)
+                Вернуть США (
+                {appliedModelAnalysis.cgdwOptionCodes.find((c) => c.startsWith("U")) ?? "U45D"} · °F, мили)
               </button>
               <button
                 type="button"
@@ -487,7 +560,7 @@ export default function SubaruCodingClient() {
                 onClick={() => openMeterWriteModal(appliedModelInput, optionCodeInput)}
                 className="rounded-xl bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-bold text-white disabled:opacity-40"
               >
-                Записать из полей ({appliedModelInput || "BTAEYR8"}+{optionCodeInput || "U45L"})
+                Записать из полей ({appliedModelInput || "BTAEYR8"}+{optionCodeInput || "U45D"})
               </button>
             </div>
             <div className="pt-1">
@@ -535,7 +608,7 @@ export default function SubaruCodingClient() {
           {/* Presets Table */}
           <div className="space-y-1.5">
             <div className="text-xs font-bold text-gray-700">
-              Быстрый выбор комплектации по кузову (нажмите на строку, чтобы подставить):
+              Справочник замен из SSM4 cgdw (нажмите — подставить Applied + канадский Option):
             </div>
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="w-full text-left text-[11px]">
