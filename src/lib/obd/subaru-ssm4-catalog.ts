@@ -5869,29 +5869,29 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     id: "bt-outback-wilderness-24t-2024",
     modelSeriesRu: "Outback VI (BT · 2024 MY)",
     years: "2024–2025",
-    trimRu: "Wilderness 2.4T (ваш шильдик 4S4BTGUD1R3270223!)",
+    trimRu: "Wilderness 2.4T (шильдик США 4S4BTGUD1R3270223: U45L → Канада C0RC / C0RF)",
     engineRu: "FA24FXZHMF 2.4L Turbo (CVT TR690R6MCB)",
     appliedModel: "BTAEYR8",
     usOptionCodeExamples: ["U45L", "U45D"],
-    canadianOptionCodeC0: "C05L",
-    canadianOptionCodeC5: "C55L",
+    canadianOptionCodeC0: "C0RC",
+    canadianOptionCodeC5: "C0RF",
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu:
-      "2024 MY Revision E: BTAEYR8 + U45L → канадский C05L (°C, км/ч, л/100км, TPMS 315 МГц, Dual X-Mode)",
+      "2024 MY Revision E: США BTAEYR8 + U45L → в SSM4 канадский Option Code C0RC (или C0RF / C0RL; в Канаде есть подогрев руля, поэтому хвост RC/RF вместо 5L)",
   },
   {
     id: "bt-outback-wilderness-24t",
     modelSeriesRu: "Outback VI (BT · 2022–2023 MY)",
     years: "2022–2023",
-    trimRu: "Wilderness 2.4T (2022 MY Revision C · шильдик 4S4BTGUD2N3149226)",
+    trimRu: "Wilderness 2.4T (2022 MY Revision C · шильдик США U45D → Канада C0QF!)",
     engineRu: "FA24FXZHKA 2.4L Turbo (CVT TR690R6KDA)",
     appliedModel: "BTACYR8",
-    usOptionCodeExamples: ["U45D", "U45C"],
-    canadianOptionCodeC0: "C05D",
-    canadianOptionCodeC5: "C55D",
+    usOptionCodeExamples: ["U45D", "U45C", "U45I"],
+    canadianOptionCodeC0: "C0QF",
+    canadianOptionCodeC5: "C05F",
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu:
-      "Двухрежимный Dual X-Mode, 11.6\" CP1, передняя камера, люк, RAB, BSD/RCTA, метрика Канады (°C, км/ч)",
+      "В США U45D (5=StarTex+PRG+BSD, D=люк+Navi+RAB без подогрева руля), а в Канаде с завода идёт подогрев руля и нет кожи (Q+F) → точный заводской канадский код для SSM4: BTACYR8 + C0QF!",
   },
   {
     id: "bt-outback-onyx-xt-24t",
@@ -5900,12 +5900,12 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     trimRu: "Onyx Edition XT / Outdoor XT 2.4T",
     engineRu: "FA24F 2.4L Turbo (CVT TR690)",
     appliedModel: "BTACYH8",
-    usOptionCodeExamples: ["U45B", "U45D"],
-    canadianOptionCodeC0: "C05B",
-    canadianOptionCodeC5: "C55B",
+    usOptionCodeExamples: ["U45B", "U45D", "U45I"],
+    canadianOptionCodeC0: "C0QF",
+    canadianOptionCodeC5: "C05B",
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu:
-      "Dual X-Mode (активирует 2 режима X-Mode при выборе кода H/R), StarTex, 11.6\", передняя камера, °C / км/ч",
+      "В Канаде комплектация Outdoor XT (StarTex + люк + подогрев руля + RAB) имеет заводской код C0QF (для 2022–2023 MY) или C0RF (2024 MY)",
   },
   {
     id: "bt-outback-limited-xt-24t",
@@ -5914,12 +5914,12 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     trimRu: "Limited XT 2.4T",
     engineRu: "FA24F 2.4L Turbo (CVT TR690)",
     appliedModel: "BTACYJ8",
-    usOptionCodeExamples: ["U47H", "U47Y"],
-    canadianOptionCodeC0: "C07H",
-    canadianOptionCodeC5: "C57H",
+    usOptionCodeExamples: ["U44G", "U44C", "U47H"],
+    canadianOptionCodeC0: "C04G",
+    canadianOptionCodeC5: "C04C",
     xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
     featuresRu:
-      "Кожа, люк, Harman/Kardon, навигация, DriverFocus DMS, RAB, BSD/RCTA, °C / км/ч",
+      "Кожа, люк, Harman/Kardon, навигация, DriverFocus DMS, подогрев руля, RAB, BSD/RCTA (4G / 4C по мануалу Outback BT)",
   },
   {
     id: "bt-outback-touring-xt-24t",
@@ -5928,12 +5928,12 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     trimRu: "Touring XT / Premier XT 2.4T",
     engineRu: "FA24F 2.4L Turbo (CVT TR690)",
     appliedModel: "BTACYK8",
-    usOptionCodeExamples: ["U48Y", "U49Y"],
-    canadianOptionCodeC0: "C08Y",
-    canadianOptionCodeC5: "C58Y",
+    usOptionCodeExamples: ["U44G", "U44V", "U48Y"],
+    canadianOptionCodeC0: "C04G",
+    canadianOptionCodeC5: "C0SG",
     xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
     featuresRu:
-      "Nappa кожа, вентиляция сидений, передняя камера, 11.6\" Navi, Harman/Kardon, люк, °C / км/ч",
+      "Nappa кожа, вентиляция сидений, передняя камера, 11.6\" Navi, Harman/Kardon, люк, подогрев руля (C04G для 2020–2023 / C0SG для 2024+)",
   },
   {
     id: "bt-outback-premium-25i",
@@ -6226,12 +6226,69 @@ const SUBARU_MY_CHAR_MAP: Record<string, string> = {
 };
 
 /**
+ * Maps a US 7-char Applied Model + 4-char Option Code (e.g. `BTACYR8` + `U45D`)
+ * to the exact factory Canadian `C0__` / `C5__` Option Code accepted by SSM4 `cgdwPHBWHoZ.mLW`.
+ *
+ * Crucial Subaru factory rule (from 2022–2024 Outback Service Manual "Identification -> Option Code"):
+ * - On US 2022–2023 Outback Wilderness (`BTACYR8` / `BTADYR8`), the US Option Code is `U45D`
+ *   (`5` = L-pkg + Power Rear Gate + BSD + Telematics without leather; `D` = Sunroof + Navigation + RAB, NO heated steering wheel).
+ * - In Canada, the 2022–2023 Outback Wilderness (`VIN 4S4BTHTD5N...`, `BTACYR8`) has a standard heated steering wheel and no built-in Navigation,
+ *   so its factory Option Code on the B-pillar and in SSM4's lookup table is **`C0QF`** (`Q` = Power seat + Keyless + PRG + BSD + Telematics,
+ *   `F` = Sunroof + Steering heater + RAB)! Entering `C05D` in SSM4 is rejected because `BTACYR8 + C05D` does not exist in Subaru Canada's catalog.
+ * - On 2024+ Outback Wilderness (`BTAEYR8`), US is `U45L`, while Canada (which has Wide-angle mono camera + HK + Sunroof + Steering heater + RAB)
+ *   uses **`C0RC`** (or `C0RF` / `C05L`).
+ */
+export function resolveCanadianOptionCodesForSubaru(
+  appliedModel: string,
+  optionCode: string,
+): { primaryC0: string; secondaryAlt: string } {
+  const app = appliedModel.trim().toUpperCase();
+  const opt = optionCode.trim().toUpperCase();
+  const suffix = opt.length === 4 ? opt.slice(2, 4) : "QF";
+  const series = app.slice(0, 3);
+  const rev = app.slice(3, 4);
+  const grade = app.slice(5, 6);
+
+  // Outback 2.4T (BTA) & Legacy 2.4T (BWA)
+  if (series === "BTA" || series === "BWA") {
+    // Wilderness (grade R)
+    if (grade === "R") {
+      if (rev === "A" || rev === "B" || rev === "C" || rev === "D") {
+        // 2020-2023 MY: Factory Canadian Option Code for BTACYR8 / BTADYR8 is C0QF!
+        return { primaryC0: "C0QF", secondaryAlt: `C0${suffix === "QF" ? "5F" : suffix}` };
+      }
+      // 2024+ MY (E/F/G): Factory Canadian Option Code for BTAEYR8 (with Wide-angle mono camera R + HK/Sunroof/Heated wheel/RAB C or F)
+      return { primaryC0: "C0RC", secondaryAlt: suffix === "5L" ? "C05L" : `C0${suffix}` };
+    }
+    // Onyx XT / Outdoor XT (grade H)
+    if (grade === "H") {
+      if (rev === "A" || rev === "B" || rev === "C" || rev === "D") {
+        return { primaryC0: "C0QF", secondaryAlt: `C0${suffix}` };
+      }
+      return { primaryC0: "C0RF", secondaryAlt: `C0${suffix}` };
+    }
+    // Limited XT (grade J) / Touring XT (grade K)
+    if (grade === "J" || grade === "K") {
+      if (rev === "E" || rev === "F" || rev === "G") {
+        return { primaryC0: "C0SG", secondaryAlt: "C04G" };
+      }
+      return { primaryC0: "C04G", secondaryAlt: `C0${suffix}` };
+    }
+  }
+
+  return {
+    primaryC0: `C0${suffix}`,
+    secondaryAlt: `C5${suffix}`,
+  };
+}
+
+/**
  * Decodes the 7-character Applied Model + 4-character Option Code ("12 columns of models")
  * used by SSM4 Combination Meter Variant Work (TSB 07-183-20 / MC-10182242-0001.pdf, Operation Procedure B).
  *
  * Example from user's photo (2022 Outback Wilderness, VIN 4S4BTGUD2N3149226):
  * - Applied Model: BTACYR8 (BTA = Outback 2.4T, C = 2022MY, Y = US/Canada SIA, R = Wilderness, 8 = TR690 8-speed CVT + EyeSight)
- * - Option Code:   U45D    (U4 = USA Federal -> replace with C05D or C55D for Canada Metric °C & km/h)
+ * - Option Code:   U45D    (U4 = USA Federal -> replace with C0QF for Canada Metric °C & km/h in SSM4)
  */
 export function decodeSubaruAppliedModel12Columns(
   appliedModelInput: string,
@@ -6258,10 +6315,9 @@ export function decodeSubaruAppliedModel12Columns(
     SUBARU_OPTION_DEST_MAP[optionDestinationPrefix] ??
     `Код региона "${optionDestinationPrefix}" (первые 2 символа Option Code)`;
 
-  const canadianOptionCodeC0 =
-    opt.length === 4 ? `C0${opt.slice(2, 4)}` : "C05D";
-  const canadianOptionCodeC5 =
-    opt.length === 4 ? `C5${opt.slice(2, 4)}` : "C55D";
+  const resolvedCan = resolveCanadianOptionCodesForSubaru(app, opt);
+  const canadianOptionCodeC0 = resolvedCan.primaryC0;
+  const canadianOptionCodeC5 = resolvedCan.secondaryAlt;
 
   // Suggest Dual X-Mode grade letter in position 6 if currently Single X-Mode
   let dualGrade = gradeChar;
@@ -6538,7 +6594,7 @@ export function extractAppliedModelAndOptionCodeFromDump(
 
   if (directAppliedModel || directOptionCode) {
     const actualOpt = directOptionCode ?? `${destFromA002 ?? defaultUsDest}${defaultEquipSuffix}`;
-    const suffix = actualOpt.slice(2, 4) || defaultEquipSuffix;
+    const resolvedCan = resolveCanadianOptionCodesForSubaru(baseApp, actualOpt);
     const actualRegion = regionFromOptionCode(actualOpt);
     return {
       foundDirectAscii: true,
@@ -6548,21 +6604,27 @@ export function extractAppliedModelAndOptionCodeFromDump(
       actualRegion,
       actualAppliedModel: baseApp,
       actualOptionCode: actualOpt,
-      recommendedCanadianOptionC0: `C0${suffix}`,
-      recommendedCanadianOptionC5: `C5${suffix}`,
+      recommendedCanadianOptionC0: resolvedCan.primaryC0,
+      recommendedCanadianOptionC5: resolvedCan.secondaryAlt,
       inferredRegion: actualRegion,
       inferredAppliedModel: baseApp,
       inferredOptionCode: actualOpt,
-      explanationRu: `Прямое совпадение ASCII-кода в ответе приборки (${sourceDid}): фактический код ${baseApp} + ${actualOpt}. Рекомендуемый канадский код для °C и км/ч: ${baseApp} + C0${suffix}.`,
+      explanationRu: `Прямое совпадение ASCII-кода в ответе приборки (${sourceDid}): фактический код ${baseApp} + ${actualOpt}. Рекомендуемый канадский код для °C и км/ч: ${baseApp} + ${resolvedCan.primaryC0}.`,
     };
   }
 
   // Reconstructed actual factory code vs recommended Canadian code
   const activeDest = destFromA002 ?? defaultUsDest;
-  const actualOpt = `${activeDest}${defaultEquipSuffix}`;
+  const resolvedCan = resolveCanadianOptionCodesForSubaru(baseApp, `${defaultUsDest}${defaultEquipSuffix}`);
+  const actualOpt =
+    activeDest === "C0"
+      ? resolvedCan.primaryC0
+      : activeDest === "C5"
+        ? resolvedCan.secondaryAlt
+        : `${activeDest}${defaultEquipSuffix}`;
   const actualRegion = regionFromOptionCode(actualOpt);
-  const canC0 = `C0${defaultEquipSuffix}`;
-  const canC5 = `C5${defaultEquipSuffix}`;
+  const canC0 = resolvedCan.primaryC0;
+  const canC5 = resolvedCan.secondaryAlt;
 
   const regSourceText =
     a002Byte || a011Byte

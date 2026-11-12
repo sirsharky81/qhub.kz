@@ -5508,11 +5508,18 @@ export function SubaruSsmPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    const usCode = isSubaruMeterWriteDestination(
-                      appliedModelAnalysis.optionDestinationPrefix,
-                    ) && appliedModelAnalysis.optionDestinationPrefix.startsWith("U")
-                      ? appliedModelAnalysis.optionCode
-                      : `U4${appliedModelAnalysis.optionEquipmentSuffix || "5L"}`;
+                    const eqSuffix = appliedModelAnalysis.optionEquipmentSuffix || "5L";
+                    const usSuffix =
+                      eqSuffix === "QF"
+                        ? "5D"
+                        : eqSuffix === "RC" || eqSuffix === "RF"
+                          ? "5L"
+                          : eqSuffix;
+                    const usCode =
+                      isSubaruMeterWriteDestination(appliedModelAnalysis.optionDestinationPrefix) &&
+                      appliedModelAnalysis.optionDestinationPrefix.startsWith("U")
+                        ? appliedModelAnalysis.optionCode
+                        : `U4${usSuffix}`;
                     openMeter12WriteConfirm(appliedModelAnalysis.appliedModel, usCode);
                   }}
                   disabled={!ready || busy}

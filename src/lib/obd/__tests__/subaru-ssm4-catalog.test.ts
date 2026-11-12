@@ -112,7 +112,7 @@ describe("subaru-ssm4-catalog", () => {
     expect(SSM4_SIGNALS.length).toBeGreaterThanOrEqual(120);
   });
 
-  it("decodes TSB 07-183-20 (MC-10182242-0001.pdf) 7-digit Applied Model + 4-digit Option Code (e.g. BTACYR8 + U45D -> C05D)", () => {
+  it("decodes TSB 07-183-20 (MC-10182242-0001.pdf) 7-digit Applied Model + 4-digit Option Code (e.g. BTACYR8 + U45D -> C0QF)", () => {
     const res = decodeSubaruAppliedModel12Columns("BTACYR8", "U45D");
     expect(res.valid).toBe(true);
     expect(res.seriesCode).toBe("BTA");
@@ -120,8 +120,8 @@ describe("subaru-ssm4-catalog", () => {
     expect(res.gradeChar).toBe("R");
     expect(res.drivetrainChar).toBe("8");
     expect(res.optionDestinationPrefix).toBe("U4");
-    expect(res.canadianOptionCodeC0).toBe("C05D");
-    expect(res.canadianOptionCodeC5).toBe("C55D");
+    expect(res.canadianOptionCodeC0).toBe("C0QF");
+    expect(res.canadianOptionCodeC5).toBe("C05D");
 
     // Single X-Mode Outback Limited 2.5i (BT9CYDC) suggests Dual X-Mode Onyx 2.5i (BT9CYTC)
     const lim25 = decodeSubaruAppliedModel12Columns("BT9CYDC", "U57H");
@@ -194,7 +194,7 @@ describe("subaru-ssm4-catalog", () => {
     expect(caDump.inferredRegion).toContain("CANADA");
     expect(SUBARU_METER_12COLUMN_READ_DIDS[0]).toBe("0250");
 
-    // Reconstructs 2024 MY Outback Wilderness (VIN 4S4BTGUD1R3270223 -> BTAEYR8 + U45L actual, C05L recommended)
+    // Reconstructs 2024 MY Outback Wilderness (VIN 4S4BTGUD1R3270223 -> BTAEYR8 + U45L actual, C0RC / C05L recommended)
     const bitmask2024 = extractAppliedModelAndOptionCodeFromDump({
       vin: "4S4BTGUD1R3270223",
       modules: [
@@ -210,8 +210,8 @@ describe("subaru-ssm4-catalog", () => {
     expect(bitmask2024.actualAppliedModel).toBe("BTAEYR8");
     expect(bitmask2024.actualOptionCode).toBe("U45L");
     expect(bitmask2024.actualRegion).toContain("USA");
-    expect(bitmask2024.recommendedCanadianOptionC0).toBe("C05L");
-    expect(bitmask2024.recommendedCanadianOptionC5).toBe("C55L");
+    expect(bitmask2024.recommendedCanadianOptionC0).toBe("C0RC");
+    expect(bitmask2024.recommendedCanadianOptionC5).toBe("C05L");
 
     // Regression: DID A002 = 02 with numeric temperature hint "-38°C/-48°C" must NEVER
     // glue "38C" + "48C" into bogus Mexican Option Code "C48C" / "C08C"
@@ -251,8 +251,8 @@ describe("subaru-ssm4-catalog", () => {
     expect(liveA002Dump.actualAppliedModel).toBe("BTAEYR8");
     expect(liveA002Dump.actualOptionCode).toBe("U45L");
     expect(liveA002Dump.actualRegion).toBe("USA (U4 / U5 / U6 — °F, мили)");
-    expect(liveA002Dump.recommendedCanadianOptionC0).toBe("C05L");
-    expect(liveA002Dump.recommendedCanadianOptionC5).toBe("C55L");
+    expect(liveA002Dump.recommendedCanadianOptionC0).toBe("C0RC");
+    expect(liveA002Dump.recommendedCanadianOptionC5).toBe("C05L");
 
     // Different Outback: 2021 Outback 2.5i Limited (VIN 4S4BTADC5M3123456) with A002 = 05 (U5 PZEV)
     const outback2021Lim = extractAppliedModelAndOptionCodeFromDump({
@@ -273,7 +273,7 @@ describe("subaru-ssm4-catalog", () => {
     expect(outback2021Lim.recommendedCanadianOptionC0).toBe("C07H");
     expect(outback2021Lim.recommendedCanadianOptionC5).toBe("C57H");
 
-    // 2022 Outback Wilderness (B-pillar photo VIN 4S4BTGUD2N3149226 -> BTACYR8 + U45D / C05D)
+    // 2022 Outback Wilderness (B-pillar photo VIN 4S4BTGUD2N3149226 -> BTACYR8 + U45D -> Canadian C0QF!)
     const outback2022Wilderness = extractAppliedModelAndOptionCodeFromDump({
       vin: "4S4BTGUD2N3149226",
       modules: [
@@ -287,9 +287,9 @@ describe("subaru-ssm4-catalog", () => {
       ],
     });
     expect(outback2022Wilderness.actualAppliedModel).toBe("BTACYR8");
-    expect(outback2022Wilderness.actualOptionCode).toBe("C05D");
-    expect(outback2022Wilderness.recommendedCanadianOptionC0).toBe("C05D");
-    expect(outback2022Wilderness.recommendedCanadianOptionC5).toBe("C55D");
+    expect(outback2022Wilderness.actualOptionCode).toBe("C0QF");
+    expect(outback2022Wilderness.recommendedCanadianOptionC0).toBe("C0QF");
+    expect(outback2022Wilderness.recommendedCanadianOptionC5).toBe("C05D");
 
     // Different Outback: 2023 Outback Onyx XT 2.4T (VIN 4S4BTGND8P3123456) already converted to Canada (A002 = 03, A011 = 00)
     const outback2023OnyxCa = extractAppliedModelAndOptionCodeFromDump({
@@ -305,7 +305,7 @@ describe("subaru-ssm4-catalog", () => {
       ],
     });
     expect(outback2023OnyxCa.actualAppliedModel).toBe("BTADYH8");
-    expect(outback2023OnyxCa.actualOptionCode).toBe("C05B");
+    expect(outback2023OnyxCa.actualOptionCode).toBe("C0QF");
     expect(outback2023OnyxCa.actualRegion).toBe("CANADA (C0 / C5 — °C, км/ч)");
   });
 });
