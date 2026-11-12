@@ -453,13 +453,33 @@ export default function SubaruCodingClient() {
                 type="button"
                 disabled={!ready || busy}
                 onClick={() => {
-                  const suffix =
-                    optionCodeInput.trim().length === 4 ? optionCodeInput.trim().slice(2, 4) : "5L";
-                  openMeterWriteModal(appliedModelAnalysis.appliedModel || "BTAEYR8", `U4${suffix}`);
+                  const rawSuffix =
+                    optionCodeInput.trim().length === 4 ? optionCodeInput.trim().toUpperCase().slice(2, 4) : "5L";
+                  const usSuffix =
+                    rawSuffix === "QF"
+                      ? appliedModelAnalysis.appliedModel.slice(5, 6) === "H"
+                        ? "5B"
+                        : "5D"
+                      : rawSuffix === "RC" || rawSuffix === "RF"
+                        ? "5L"
+                        : rawSuffix;
+                  openMeterWriteModal(appliedModelAnalysis.appliedModel || "BTAEYR8", `U4${usSuffix}`);
                 }}
                 className="rounded-xl border border-gray-400 bg-white hover:bg-gray-50 px-3 py-2.5 text-xs font-bold text-gray-900 disabled:opacity-40"
               >
-                Вернуть США (U4{optionCodeInput.trim().slice(2, 4) || "5L"} · °F, мили)
+                Вернуть США (U4
+                {(() => {
+                  const rawSuffix =
+                    optionCodeInput.trim().length === 4 ? optionCodeInput.trim().toUpperCase().slice(2, 4) : "5L";
+                  return rawSuffix === "QF"
+                    ? appliedModelAnalysis.appliedModel.slice(5, 6) === "H"
+                      ? "5B"
+                      : "5D"
+                    : rawSuffix === "RC" || rawSuffix === "RF"
+                      ? "5L"
+                      : rawSuffix;
+                })()}{" "}
+                · °F, мили)
               </button>
               <button
                 type="button"
