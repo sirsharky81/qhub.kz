@@ -291,7 +291,7 @@ export const apps: App[] = [
       "Отдельный сервис диагностики Mitsubishi через vLinker BLE: ошибки и live-параметры блоков MUT-III, сервисные тесты, калибровка датчика угла руля SAS, чтение и прописка датчиков TPMS, вкладка OBD2 Live и выгрузка/запись кодировок Mitsubishi ETACS (.kon / .cuf).",
     href: "/tools/mitsubishi-diag",
     tags: ["tools"],
-    icon: "/tools/obd-diag/icon-192.png",
+    icon: "/tools/mitsubishi-diag/icon-192.png",
     color: "from-red-500/10 to-slate-600/5",
     author: "QHub",
     authorType: "qhub",
