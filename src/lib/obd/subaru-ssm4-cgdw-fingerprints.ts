@@ -5778,7 +5778,7 @@ export function matchSsm4OptionFromMeterDids(
   const knownSlots = SSM4_CGDW_FP_DID_KEYS.filter((_, i) => fp.slice(i * 2, i * 2 + 2) !== "__").length;
   const app = appliedModel?.trim().toUpperCase() || "";
   if (app) {
-    const list = byModel.get(app) ?? [];
+  const list = byModel.get(app) ?? [];
     const exact = list.filter((p) => p.fp === fp);
     return packMeterMatch(exact.length ? exact : compatibleHits(list, fp), fp);
   }
@@ -5787,4 +5787,128 @@ export function matchSsm4OptionFromMeterDids(
   if (exact.length) return packMeterMatch(exact, fp);
   if (knownSlots < 8) return null; // too few DIDs → do not guess Applied globally
   return packMeterMatch(compatibleHits(SSM4_CGDW_FINGERPRINTS, fp), fp);
+}
+
+export interface Ssm4MeterCatalogByteDiff {
+  did: string;
+  car: string;
+  catalog: string;
+}
+
+export interface Ssm4AppliedRowDiff {
+  optionCode: string;
+  /** Every read slot matches this catalog row, and nothing in the row was left unread. */
+  identical: boolean;
+  unreadSlots: number;
+  diffs: Ssm4MeterCatalogByteDiff[];
+}
+
+const fpKeySet = new Set<string>(SSM4_CGDW_FP_DID_KEYS as readonly string[]);
+const SUPPORT_BITMAP_A0_DIDS = new Set(["A000", "A020", "A040", "A060"]);
+
+/**
+ * Returns the exact list of `{ did, byteHex }` entries that SSM4 `sendMetVariByApplied`
+ * writes for an `(appliedModel, optionCode)` pair from `cgdwPHBWHoZ.mLW`.
+ * Slots marked `"--"` in the catalog row are omitted. Returns `null` if the pair is not in `cgdw`.
+ */
+export function getSsm4CgdwWriteDids(
+  appliedModel: string,
+  optionCode: string,
+): { did: string; byteHex: string }[] | null {
+  const app = appliedModel.trim().toUpperCase();
+  const opt = optionCode.trim().toUpperCase();
+  const row = (byModel.get(app) ?? []).find((r) => r.optionCode === opt);
+  if (!row) return null;
+  const out: { did: string; byteHex: string }[] = [];
+  for (let i = 0; i < SSM4_CGDW_FP_DID_KEYS.length; i++) {
+    const byteHex = row.fp.slice(i * 2, i * 2 + 2);
+    if (byteHex === "--" || !/^[0-9A-F]{2}$/.test(byteHex)) continue;
+    out.push({ did: SSM4_CGDW_FP_DID_KEYS[i]!, byteHex });
+  }
+  return out;
+}
+
+/**
+ * Compare a meter A0xx dump to every cgdw row of one Applied Model.
+ * Unread slots (`__`) are skipped, so a partial dump still shows real mismatches.
+ * Extra read A0xx DIDs (e.g. A004, A017, A037 from mHZ) that respond on the car are also
+ * flagged against `--` in the catalog row.
+ * `U45L` is not a row: the sticker code is identified only if the car bytes match one of these rows.
+ */
+export function diffMeterAgainstAppliedCatalog(
+  appliedModel: string,
+  didHexById: Record<string, string>,
+): Ssm4AppliedRowDiff[] {
+  const app = appliedModel.trim().toUpperCase();
+  const got = fingerprintFromMeterDids(didHexById);
+  const rows = byModel.get(app) ?? [];
+
+  // Extra A0xx DIDs present on the car outside the 41 cgdw fingerprint keys (e.g. A004/A017/A037)
+  const extraCarDids: { did: string; car: string }[] = [];
+  for (const [rawKey, rawVal] of Object.entries(didHexById)) {
+    const did = rawKey.trim().toUpperCase();
+    if (!/^A0[0-9A-F]{2}$/.test(did)) continue;
+    if (fpKeySet.has(did) || SUPPORT_BITMAP_A0_DIDS.has(did)) continue;
+    const val = rawVal.trim().toUpperCase();
+    if (!val || val === "--" || val === "ABSENT") continue;
+    const tok = (val.split(/\s+/)[0] ?? "").slice(0, 2);
+    if (/^[0-9A-F]{2}$/.test(tok)) {
+      extraCarDids.push({ did, car: tok });
+    }
+  }
+  extraCarDids.sort((a, b) => a.did.localeCompare(b.did));
+
+  return rows.map((row) => {
+    const diffs: Ssm4MeterCatalogByteDiff[] = [];
+    let unreadSlots = 0;
+    for (let i = 0; i < SSM4_CGDW_FP_DID_KEYS.length; i++) {
+      const car = got.slice(i * 2, i * 2 + 2);
+      const catalog = row.fp.slice(i * 2, i * 2 + 2);
+      if (car === "__") {
+        unreadSlots++;
+        continue;
+      }
+      if (car !== catalog) {
+        diffs.push({ did: SSM4_CGDW_FP_DID_KEYS[i]!, car, catalog });
+      }
+    }
+    for (const extra of extraCarDids) {
+      diffs.push({ did: extra.did, car: extra.car, catalog: "--" });
+    }
+    return {
+      optionCode: row.optionCode,
+      identical: diffs.length === 0 && unreadSlots === 0,
+      unreadSlots,
+      diffs,
+    };
+  });
+}
+
+export interface Ssm4MeterCatalogSummary {
+  appliedModel: string;
+  closestOptionCode: string | null;
+  closestDiffCount: number;
+  rows: Ssm4AppliedRowDiff[];
+}
+
+export function summarizeMeterCatalogComparison(
+  appliedModel: string,
+  didHexById: Record<string, string>,
+): Ssm4MeterCatalogSummary {
+  const app = appliedModel.trim().toUpperCase();
+  const rows = diffMeterAgainstAppliedCatalog(app, didHexById);
+  let closestOptionCode: string | null = null;
+  let closestDiffCount = Number.POSITIVE_INFINITY;
+  for (const row of rows) {
+    if (row.diffs.length < closestDiffCount) {
+      closestDiffCount = row.diffs.length;
+      closestOptionCode = row.optionCode;
+    }
+  }
+  return {
+    appliedModel: app,
+    closestOptionCode,
+    closestDiffCount: Number.isFinite(closestDiffCount) ? closestDiffCount : 0,
+    rows,
+  };
 }

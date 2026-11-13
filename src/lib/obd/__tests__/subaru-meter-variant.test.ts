@@ -9,6 +9,13 @@ import {
   writeSubaruMeter12ColumnCode,
   type SubaruMeterWriteLink,
 } from "../subaru-meter-variant";
+import { getSsm4CgdwWriteDids } from "../subaru-ssm4-catalog";
+import {
+  buildSubaruMeterBackup,
+  diffBackupVsLiveMeter,
+  parseSubaruMeterBackupJson,
+  serializeSubaruMeterBackup,
+} from "../subaru-meter-backup";
 
 function scriptedElm(replies: Record<string, string | string[]>): SubaruMeterWriteLink & {
   sent: string[];
@@ -299,5 +306,251 @@ describe("subaru-meter-variant", () => {
     expect(result.success).toBe(true);
     // outKey kept so AES path stays covered when KeyVersion C1 is matched first
     expect(outKey).toHaveLength(32);
+  });
+
+  it("writes all 28 cgdw DIDs in full-cgdw mode like SSM4 sendMetVariByApplied, and blocks unknown U45L in full-cgdw", async () => {
+    const c0qfDids = getSsm4CgdwWriteDids("BTAEYR8", "C0QF");
+    expect(c0qfDids).not.toBeNull();
+    expect(c0qfDids).toHaveLength(28);
+
+    const replies: Record<string, string> = {
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
+      "2E10C2FF": "6E 10 C2",
+      "2E10C200": "6E 10 C2",
+    };
+    for (const item of c0qfDids!) {
+      replies[`2E${item.did}${item.byteHex}`] = `6E ${item.did.slice(0, 2)} ${item.did.slice(2)}`;
+    }
+    const elm = scriptedElm(replies);
+
+    const okRes = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+        { did: "A02E", hex: "--" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "full-cgdw",
+    });
+
+    expect(okRes.success).toBe(true);
+    expect(okRes.writtenDid).toBe("CGDW A0xx (28/28)");
+    const sent2e = elm.sent.filter((s) => s.startsWith("2EA0"));
+    expect(sent2e).toHaveLength(28);
+    expect(sent2e).toContain("2EA00203");
+    expect(sent2e).toContain("2EA01100");
+    expect(sent2e).toContain("2EA02402");
+    expect(sent2e).toContain("2EA041FF");
+
+    const elmBlocked = scriptedElm({});
+    const blockedRes = await writeSubaruMeter12ColumnCode(elmBlocked, {
+      appliedModel: "BTAEYR8",
+      optionCode: "U45L",
+      writeMode: "full-cgdw",
+    });
+    expect(blockedRes.success).toBe(false);
+    expect(elmBlocked.sent).toHaveLength(0);
+    expect(blockedRes.steps.join(" ")).toMatch(/нет в справочнике SSM4 cgdw/);
+  });
+
+  it("builds, serializes, validates, and restores 1:1 original backup (even for U45L) via custom-a0xx", async () => {
+    const backup = buildSubaruMeterBackup(
+      {
+        capturedAt: "2026-11-14T00:00:00.000Z",
+        vin: "4S4BTGUD1R3270223",
+        txHex: "783",
+        rxHex: "78B",
+        dids: [
+          { did: "A000", label: "map", hex: "7F DE 00 00", decoded: "" },
+          { did: "A002", label: "dest", hex: "02", decoded: "" },
+          { did: "A011", label: "units", hex: "FF", decoded: "" },
+          { did: "A017", label: "extra", hex: "01", decoded: "" },
+          { did: "A024", label: "es", hex: "04", decoded: "" },
+          { did: "A02E", label: "my", hex: "--", decoded: "" },
+          { did: "A036", label: "pkg", hex: "00", decoded: "" },
+        ],
+        match: {
+          foundDirectAscii: false,
+          directAppliedModel: null,
+          directOptionCode: null,
+          sourceDid: "783 A0xx",
+          actualRegion: "USA (U4 / U5 / U6 — °F, мили)",
+          actualAppliedModel: "BTAEYR8",
+          actualOptionCode: "U45D",
+          recommendedCanadianOptionC0: "C0QF",
+          recommendedCanadianOptionC5: "C0RF",
+          inferredRegion: "USA (U4 / U5 / U6 — °F, мили)",
+          inferredAppliedModel: "BTAEYR8",
+          inferredOptionCode: "U45D",
+          explanationRu: "",
+        },
+      },
+      "U45L",
+    );
+
+    expect(backup.stickerOptionCode).toBe("U45L");
+    expect(backup.restoreA0xxDids).toEqual([
+      { did: "A002", byteHex: "02" },
+      { did: "A011", byteHex: "FF" },
+      { did: "A017", byteHex: "01" },
+      { did: "A024", byteHex: "04" },
+      { did: "A036", byteHex: "00" },
+    ]);
+    expect(backup.absentA0xxDids).toContain("A02E");
+
+    const parsed = parseSubaruMeterBackupJson(serializeSubaruMeterBackup(backup));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const liveDiff = diffBackupVsLiveMeter(parsed.backup, [
+      { did: "A002", hex: "03" },
+      { did: "A011", hex: "00" },
+      { did: "A017", hex: "01" },
+      { did: "A024", hex: "02" },
+      { did: "A036", hex: "00" },
+    ]);
+    expect(liveDiff.changed.map((c) => c.did)).toEqual(["A002", "A011", "A024"]);
+
+    const elm = scriptedElm({
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
+      "2E10C2FF": "6E 10 C2",
+      "2EA00202": "6E A0 02",
+      "2EA011FF": "6E A0 11",
+      "2EA01701": "6E A0 17",
+      "2EA02404": "6E A0 24",
+      "2EA03600": "6E A0 36",
+      "2E10C200": "6E 10 C2",
+    });
+
+    const restoreRes = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: parsed.backup.appliedModel,
+      optionCode: parsed.backup.stickerOptionCode ?? parsed.backup.inferredOptionCode,
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "custom-a0xx",
+      customA0xxWrites: parsed.backup.restoreA0xxDids,
+    });
+    expect(restoreRes.success).toBe(true);
+    expect(restoreRes.writtenDid).toBe("BACKUP A0xx (5/5)");
+
+    // Safety: reject non-A0xx (e.g. odometer / 0200)
+    const badBackup = serializeSubaruMeterBackup({
+      ...backup,
+      restoreA0xxDids: [{ did: "0200", byteHex: "00" }],
+    });
+    expect(parseSubaruMeterBackupJson(badBackup).ok).toBe(false);
+  });
+
+  it("uses CGW-001 (763: 3101020C -> 1001), skips dead 2E 0250 and 2703 probe when 10C2=FF, and escalates to 2707/08+31010200 if 10C2=00 drops 2703", async () => {
+    // Case A: BT 2024 fast path with A002 snapshot and 10C2=FF
+    const headersA: number[] = [];
+    const sentA: string[] = [];
+    const elmFast: SubaruMeterWriteLink = {
+      async sendCommand(cmd) {
+        sentA.push(cmd.replace(/\s+/g, "").toUpperCase());
+        return "OK";
+      },
+      async setCanHeader(tx) {
+        headersA.push(tx);
+      },
+      async sendPayload(hex) {
+        const k = hex.replace(/\s+/g, "").toUpperCase();
+        sentA.push(k);
+        if (k === "1003") return "50 03";
+        if (k === "1001") return "50 01";
+        if (k === "3E00") return "7E 00";
+        if (k === "3101020C") return "71 01 02 0C";
+        if (k === "2210C2") return "62 10 C2 FF";
+        if (k === "2E10C2FF") return "6E 10 C2";
+        if (k === "2EA00203") return "6E A0 02";
+        if (k === "2EA01100") return "6E A0 11";
+        if (k === "2E10C200") return "6E 10 C2";
+        return "NO DATA";
+      },
+    };
+    const fastRes = await writeSubaruMeter12ColumnCode(elmFast, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C0QF",
+      currentDids: [{ did: "A002", hex: "02" }, { did: "A011", hex: "FF" }],
+      txHex: "783",
+      rxHex: "78B",
+    });
+    expect(fastRes.success).toBe(true);
+    expect(headersA).not.toContain(0x750);
+    expect(sentA.some((s) => s.startsWith("2E0250"))).toBe(false);
+    expect(sentA.some((s) => s.startsWith("27"))).toBe(false);
+    expect(sentA.indexOf("3101020C")).toBeLessThan(sentA.indexOf("1001"));
+
+    // Case B: 10C2=00 and 2703 initially NO DATA after 3101020C -> escalates to 2707/2708 + 31010200 -> 1001 -> 2703/2704
+    const cgwKeyHex = computeSubaruSecurityKey16ByteAesEcb(
+      [0xf8, 0xee, 0x16, 0x09, 0xec, 0x9a, 0xb9, 0x1c, 0x83, 0x58, 0x06, 0x0f, 0xde, 0xbc, 0x3e, 0x06],
+      "66D5364A0D2D45C67E8DB120ED471438".match(/../g)!.map((h) => Number.parseInt(h, 16)),
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+    const meterSeed = [0x11, 0x22, 0x33, 0x44];
+    const meterKey = computeSubaruSecurityKey4Byte(
+      meterSeed,
+      SUBARU_METER_SECURITY_KEY_TABLES[0]!.words,
+      "ctrl-mode1",
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    let activeTxEsc = 0;
+    const sentEsc: string[] = [];
+    const esc2703Queue = ["NO DATA", "67 03 11 22 33 44"];
+    const elmEsc: SubaruMeterWriteLink = {
+      async sendCommand(cmd) {
+        sentEsc.push(cmd.replace(/\s+/g, "").toUpperCase());
+        return "OK";
+      },
+      async setCanHeader(tx) {
+        activeTxEsc = tx;
+      },
+      async sendPayload(hex) {
+        const k = hex.replace(/\s+/g, "").toUpperCase();
+        sentEsc.push(`${activeTxEsc.toString(16)}:${k}`);
+        if (k === "1003") return "50 03";
+        if (k === "1001") return "50 01";
+        if (k === "3E00") return "7E 00";
+        if (activeTxEsc === 0x763) {
+          if (k === "3101020C") return "71 01 02 0C";
+          if (k === "220251") return "62 02 51 C1";
+          if (k === "2707") return "67 07 F8 EE 16 09 EC 9A B9 1C 83 58 06 0F DE BC 3E 06";
+          if (k === `2708${cgwKeyHex}`) return "67 08";
+          if (k === "31010200") return "71 01 02 00";
+          return "NO DATA";
+        }
+        if (activeTxEsc === 0x783) {
+          if (k === "2210C2") return "62 10 C2 00";
+          if (k === "2703") return esc2703Queue.length > 1 ? esc2703Queue.shift()! : esc2703Queue[0]!;
+          if (k === `2704${meterKey}`) return "67 04";
+          if (k === "2E10C2FF") return "6E 10 C2";
+          if (k === "2EA00202") return "6E A0 02";
+          if (k === "2EA011FF") return "6E A0 11";
+          if (k === "2E10C200") return "6E 10 C2";
+          return "NO DATA";
+        }
+        return "NO DATA";
+      },
+    };
+
+    const escRes = await writeSubaruMeter12ColumnCode(elmEsc, {
+      appliedModel: "BTAEYR8",
+      optionCode: "U45L",
+      currentDids: [{ did: "A002", hex: "02" }, { did: "A011", hex: "FF" }],
+      txHex: "783",
+      rxHex: "78B",
+    });
+    expect(escRes.success).toBe(true);
+    expect(sentEsc).toContain(`763:2708${cgwKeyHex}`);
+    expect(sentEsc).toContain("763:31010200");
+    expect(sentEsc).toContain(`783:2704${meterKey}`);
   });
 });

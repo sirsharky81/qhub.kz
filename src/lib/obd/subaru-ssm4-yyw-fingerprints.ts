@@ -947,10 +947,126 @@ export function matchSsm4OptionFromEyesightDids(
   return packMatch(byFp.get(fp) ?? [], fp);
 }
 
-/** Destination hint from EyeSight DID 3502 (20≈US, 30≈CA for BTA stereo). */
+/** Destination hint from EyeSight DID 3502 (20/21≈US, 30/31≈CA for SGP stereo). */
 export function eyesightDestinationHintFrom3502(byteHex: string | null | undefined): "USA" | "CANADA" | "UNKNOWN" {
   const b = (byteHex ?? "").trim().toUpperCase().slice(0, 2);
-  if (b === "20") return "USA";
-  if (b === "30") return "CANADA";
+  if (b === "20" || b === "21") return "USA";
+  if (b === "30" || b === "31") return "CANADA";
   return "UNKNOWN";
+}
+
+/** Exact Y-Yw row for SSM4 ADA-031 write (Selection of Parameter). */
+export function lookupSsm4YywFingerprint(
+  appliedModel: string,
+  optionCode: string,
+): Ssm4YywFingerprint | null {
+  const app = appliedModel.trim().toUpperCase();
+  const opt = optionCode.trim().toUpperCase();
+  const list = byModel.get(app) ?? [];
+  return list.find((p) => p.optionCode === opt) ?? null;
+}
+
+/** Split 32-char Y-Yw fp into per-DID single-byte hex (3501..3510). */
+export function yywFingerprintToDidByteMap(fp: string): Record<string, string> {
+  const clean = fp.trim().toUpperCase();
+  const out: Record<string, string> = {};
+  for (let i = 0; i < SSM4_YYW_FP_DID_KEYS.length; i++) {
+    const byte = clean.slice(i * 2, i * 2 + 2);
+    if (byte.length === 2) out[SSM4_YYW_FP_DID_KEYS[i]!] = byte;
+  }
+  return out;
+}
+
+/** Exact list of 16 `{ did, byteHex }` writes for SSM4 ADA-031 (`3501..3510`) from Y-Yw. */
+export function getSsm4YywWriteDids(
+  appliedModel: string,
+  optionCode: string,
+): { did: string; byteHex: string }[] | null {
+  const row = lookupSsm4YywFingerprint(appliedModel, optionCode);
+  if (!row) return null;
+  const map = yywFingerprintToDidByteMap(row.fp);
+  const out: { did: string; byteHex: string }[] = [];
+  for (const did of SSM4_YYW_FP_DID_KEYS) {
+    const byteHex = map[did];
+    if (byteHex && /^[0-9A-F]{2}$/.test(byteHex)) {
+      out.push({ did, byteHex });
+    }
+  }
+  return out;
+}
+
+export interface Ssm4EyesightCatalogByteDiff {
+  did: string;
+  car: string;
+  catalog: string;
+}
+
+export interface Ssm4EyesightAppliedRowDiff {
+  optionCode: string;
+  identical: boolean;
+  unreadSlots: number;
+  diffs: Ssm4EyesightCatalogByteDiff[];
+}
+
+export interface Ssm4EyesightCatalogSummary {
+  appliedModel: string;
+  closestOptionCode: string | null;
+  closestDiffCount: number;
+  rows: Ssm4EyesightAppliedRowDiff[];
+}
+
+/**
+ * Compare live EyeSight 3501..3510 dump against every Y-Yw row for one Applied Model.
+ * Unread slots (`__`) are skipped so partial dumps still show real mismatches.
+ */
+export function diffEyesightAgainstAppliedCatalog(
+  appliedModel: string,
+  didHexById: Record<string, string>,
+): Ssm4EyesightAppliedRowDiff[] {
+  const app = appliedModel.trim().toUpperCase();
+  const got = fingerprintFromEyesightDids(didHexById);
+  const rows = byModel.get(app) ?? [];
+  return rows.map((row) => {
+    const diffs: Ssm4EyesightCatalogByteDiff[] = [];
+    let unreadSlots = 0;
+    for (let i = 0; i < SSM4_YYW_FP_DID_KEYS.length; i++) {
+      const car = got.slice(i * 2, i * 2 + 2);
+      const catalog = row.fp.slice(i * 2, i * 2 + 2);
+      if (car === "__") {
+        unreadSlots++;
+        continue;
+      }
+      if (car !== catalog) {
+        diffs.push({ did: SSM4_YYW_FP_DID_KEYS[i]!, car, catalog });
+      }
+    }
+    return {
+      optionCode: row.optionCode,
+      identical: diffs.length === 0 && unreadSlots === 0,
+      unreadSlots,
+      diffs,
+    };
+  });
+}
+
+export function summarizeEyesightCatalogComparison(
+  appliedModel: string,
+  didHexById: Record<string, string>,
+): Ssm4EyesightCatalogSummary {
+  const app = appliedModel.trim().toUpperCase();
+  const rows = diffEyesightAgainstAppliedCatalog(app, didHexById);
+  let closestOptionCode: string | null = null;
+  let closestDiffCount = Number.POSITIVE_INFINITY;
+  for (const row of rows) {
+    if (row.diffs.length < closestDiffCount) {
+      closestDiffCount = row.diffs.length;
+      closestOptionCode = row.optionCode;
+    }
+  }
+  return {
+    appliedModel: app,
+    closestOptionCode,
+    closestDiffCount: Number.isFinite(closestDiffCount) ? closestDiffCount : 0,
+    rows,
+  };
 }

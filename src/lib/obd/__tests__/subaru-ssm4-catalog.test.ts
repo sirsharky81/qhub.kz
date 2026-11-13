@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  lookupSsm4YywFingerprint,
+  yywFingerprintToDidByteMap,
+} from "../subaru-ssm4-yyw-fingerprints";
+import { SUBARU_EYESIGHT_ADA031_WRITE_DIDS } from "../subaru-eyesight-variant";
+import {
   SSM4_ECUS,
   SSM4_FULL_SYSTEMS,
   SSM4_FUNCTION_CODES,
@@ -8,7 +13,9 @@ import {
   SSM4_UTILITIES,
   SSM4_VEHICLES,
   SUBARU_CANADIAN_OPTION_PRESETS,
+  SUBARU_EYESIGHT_VARIANT_READ_DIDS,
   SUBARU_METER_12COLUMN_READ_DIDS,
+  SUBARU_METER_SSM4_MHZ_READ_DIDS,
   SUBARU_METER_VARIANT_SAFE_PATH,
   SUBARU_SSM4_VIN_WMI,
   SUBARU_METER_VARIANT_READ_FACTS,
@@ -22,6 +29,9 @@ import {
   compareMeterAndEyesightVariants,
   extractEyesightVariantFromDids,
   matchSsm4OptionFromEyesightDids,
+  diffEyesightAgainstAppliedCatalog,
+  diffMeterAgainstAppliedCatalog,
+  getSsm4YywWriteDids,
   matchSsm4OptionFromMeterDids,
   matchSsm4VehicleByVin,
   parseSubaru12ColumnFromAscii,
@@ -418,6 +428,40 @@ describe("subaru-ssm4-catalog", () => {
     expect(fpDump.explanationRu).toContain("уникальной строки cgdw");
     expect(fpDump.explanationRu).toContain("не из VIN");
     expect(SUBARU_METER_VARIANT_READ_FACTS.fingerprintDidKeys).toContain("A036");
+
+    const partialUs = diffMeterAgainstAppliedCatalog("BTAEYR8", {
+      A002: "02",
+      A011: "FF",
+      A024: "04",
+      A036: "00",
+    });
+    const byOpt = Object.fromEntries(partialUs.map((row) => [row.optionCode, row]));
+    expect(byOpt.U45D?.diffs).toEqual([]);
+    expect(byOpt.U4TD?.diffs).toEqual([{ did: "A036", car: "00", catalog: "FF" }]);
+    expect(byOpt.U45J?.diffs).toEqual([{ did: "A024", car: "04", catalog: "02" }]);
+    expect(byOpt.C0QF?.diffs.map((d) => d.did)).toEqual(["A002", "A011", "A024"]);
+    expect(byOpt.C0RF?.diffs.map((d) => d.did)).toEqual(["A002", "A011", "A024", "A036"]);
+    expect(byOpt.U45L).toBeUndefined();
+
+    // SSM4 mHZ Read DID TBL has exact 46 DIDs (including A004, A017, A037, A040)
+    expect(SUBARU_METER_SSM4_MHZ_READ_DIDS).toHaveLength(46);
+    for (const did of ["A000", "A004", "A017", "A020", "A037", "A040", "A041"] as const) {
+      expect(SUBARU_METER_SSM4_MHZ_READ_DIDS).toContain(did);
+      expect(SUBARU_METER_12COLUMN_READ_DIDS).toContain(did);
+    }
+    expect(SUBARU_METER_12COLUMN_READ_DIDS).toContain("A00E");
+    expect(SUBARU_METER_12COLUMN_READ_DIDS).toContain("10C2");
+
+    // Extra A0xx DID outside 41 cgdw keys (e.g. A017) is reported as car-only difference against `--`
+    const withExtra = diffMeterAgainstAppliedCatalog("BTAEYR8", {
+      A002: "02",
+      A011: "FF",
+      A017: "01",
+      A024: "04",
+      A036: "00",
+    });
+    const extraU45d = withExtra.find((r) => r.optionCode === "U45D");
+    expect(extraU45d?.diffs).toContainEqual({ did: "A017", car: "01", catalog: "--" });
     expect(SUBARU_METER_VARIANT_READ_FACTS.eyesightLib).toBe("Y-YwPHBWHoZ.mLW");
 
     // EyeSight Y-Yw 35xx: C0RF unique globally; compare vs meter
@@ -490,5 +534,41 @@ describe("subaru-ssm4-catalog", () => {
     expect(mismatch.optionCodesMatch).toBe(false);
     expect(mismatch.regionsAligned).toBe(false);
     expect(mismatch.verdictRu).toContain("Расхождение");
+  });
+
+  it("maps Y-Yw fingerprints to ADA-031 2E bytes (BTAEYR8 US vs CA)", () => {
+    const us = lookupSsm4YywFingerprint("BTAEYR8", "U45D");
+    const ca = lookupSsm4YywFingerprint("BTAEYR8", "C0QF");
+    expect(us?.fp).toMatch(/^A520/);
+    expect(ca?.fp).toMatch(/^A530/);
+    const usMap = yywFingerprintToDidByteMap(us!.fp);
+    const caMap = yywFingerprintToDidByteMap(ca!.fp);
+    expect(usMap["3502"]).toBe("20");
+    expect(caMap["3502"]).toBe("30");
+    for (const did of SUBARU_EYESIGHT_ADA031_WRITE_DIDS) {
+      expect(usMap[did]).toHaveLength(2);
+      expect(caMap[did]).toHaveLength(2);
+    }
+
+    // Full 16 DIDs (3501..350A + 350B..3510 from Y-YwPHBW-WmPGBu.mHZ / ADA-031 ReadWriteDidListData)
+    const writeList = getSsm4YywWriteDids("BTAEYR8", "C0QF");
+    expect(writeList).toHaveLength(16);
+    expect(writeList?.find((w) => w.did === "3502")?.byteHex).toBe("30");
+    expect(writeList?.find((w) => w.did === "3510")?.byteHex).toBe("00");
+    expect(SUBARU_EYESIGHT_VARIANT_READ_DIDS).toContain("3510");
+    expect(SUBARU_EYESIGHT_VARIANT_READ_DIDS).toContain("309D");
+
+    // Diff US BTAEYR8 EyeSight dump against all Y-Yw rows for BTAEYR8
+    const esDiff = diffEyesightAgainstAppliedCatalog("BTAEYR8", usMap);
+    const esByOpt = Object.fromEntries(esDiff.map((r) => [r.optionCode, r]));
+    expect(esByOpt.U45D?.identical).toBe(true);
+    expect(esByOpt.U45D?.diffs).toEqual([]);
+    expect(esByOpt.U4TD?.diffs).toEqual([{ did: "3509", car: "C3", catalog: "D3" }]);
+    expect(esByOpt.U45J?.diffs).toEqual([{ did: "3504", car: "C7", catalog: "C6" }]);
+    expect(esByOpt.C0QF?.diffs).toEqual([{ did: "3502", car: "20", catalog: "30" }]);
+    expect(esByOpt.C0RF?.diffs).toEqual([
+      { did: "3502", car: "20", catalog: "30" },
+      { did: "3509", car: "C3", catalog: "D3" },
+    ]);
   });
 });

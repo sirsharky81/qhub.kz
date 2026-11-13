@@ -1139,5 +1139,16 @@ describe("sendUds gate", () => {
     expect(meter.fuelLiters).toBeCloseTo(44.8, 1);
     expect(meter.odometerKm).toBe(123456);
   });
+
+  it("does not nibble-shift 16-byte UDS 67 07 SecurityAccess seed containing 7F at odd nibble offset", () => {
+    const parsed = parseUdsResponse(
+      "67 07 F8 EE 16 09 EC 9A B9 1C 83 58 06 0F DE BC 3E 06",
+      0x27,
+    );
+    expect(parsed.kind).toBe("positive");
+    expect(parsed.payload).toHaveLength(17);
+    expect(parsed.payload[0]).toBe(0x07);
+    expect(parsed.payload[1]).toBe(0xf8);
+  });
 });
 

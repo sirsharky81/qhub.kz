@@ -8,8 +8,10 @@ export interface SubaruMeterWriteLink {
 import {
   asciiFromSubaruDidHex,
   decodeSubaruAppliedModel12Columns,
+  getSsm4CgdwWriteDids,
   parseSubaru12ColumnFromAscii,
 } from "./subaru-ssm4-catalog";
+import { isWritableMeterA0xxDid, type SubaruMeterA0xxWriteEntry } from "./subaru-meter-backup";
 
 /**
  * 32-nibble S-box (`KeyPartsTable`) from SSM4 `CMD_FhiCan.dll` (`0x1000824b` / `0x10008985`)
@@ -73,35 +75,64 @@ export const SUBARU_METER_SECURITY_KEY_TABLES: readonly {
   },
 ];
 
-/**
- * AES-128-ECB keys (`CVsmRsKeyTableAES` in `VsmDatabase.dll`) for `CMD_SecurityAccess2018CY1`
- * when an SGP module returns a 16-byte seed on `27 03` / `27 01`.
- */
-export const SUBARU_SGP_AES128_KEYS: readonly {
+export interface SubaruSgpAesKeyEntry {
   id: string;
+  ecuKind: number;
+  keyVersion: number;
   keyHex: string;
-}[] = [
-  // Combination Meter SGP (ecuKind=0x0012 in FHIUtilityCtrlNK.dll 0x10082228 & VsmDatabase)
-  { id: "CTRL_MET_0251_1", keyHex: "00F17B760F53C30CBFFB54AD808F497A" },
-  { id: "CTRL_MET_0251_3", keyHex: "76E19EDB3027B6C51C8E90CED15E59BA" },
-  // KeyVersion 0251=01/02/03/129/130 across SGP Body/Meter/Gateway/Chassis ECUs
-  { id: "12234_0251_1", keyHex: "8C15AC1E0EDFB84D8A1C1526CDFF0850" },
-  { id: "12234_0251_2", keyHex: "0F84E1C95C8277A370E6CE71BFA6831D" },
-  { id: "12234_0251_129", keyHex: "1615239AB78925A41F18E6AA07673581" },
-  { id: "12236_0251_130", keyHex: "6A673120695FD8431286925F8601F955" },
-  { id: "CTRL_CGW_0251_1", keyHex: "7D89DDE1C95A224ED723E04496F4C0AE" },
-  { id: "CTRL_CGW_0251_2", keyHex: "C92270E66463395407F6C3014DC890B0" },
-  { id: "CTRL_CGW_0251_193", keyHex: "66D5364A0D2D45C67E8DB120ED471438" },
-  { id: "CTRL_CGW_0251_194", keyHex: "37490E2C46C57F8CB22FEC48133965D6" },
-  { id: "12555_0251_1", keyHex: "35371DE1F774FC0123A8AE67A725D1BB" },
-  { id: "12625_0251_1", keyHex: "7168633A55270B3BA4E873BBBC248EC6" },
-  { id: "12627_0251_1", keyHex: "18852C9509C8610F3E894CD8F23EB30D" },
-  { id: "12645_0251_1", keyHex: "0D816973C75E8B38B920061FCEDBCBAE" },
-  { id: "12201_0251_3", keyHex: "76E19EDB3027B6C51C8E90CED15E59BA" },
-  { id: "12585_0251_2", keyHex: "3C74A203B92DC74A0BC9D36489223F0A" },
-  { id: "12265_0251_2", keyHex: "1BF6344AA6256C70E45D8754CD653FB2" },
-  { id: "12265_0251_3", keyHex: "7692E7932F23A901568DDFA5FF580625" },
-  { id: "12265_0251_4", keyHex: "1B8E5CE1CA38AEB6B4AC07C62FC8D769" },
+  decrypt?: boolean;
+}
+
+/**
+ * Complete 36-entry AES-128-ECB key table (`0x10082228` in `FHIUtilityCtrlNK.dll` + `VsmDatabase.dll`
+ * `CVsmRsKeyTableAES`) for `CMD_SecurityAccess2018CY1` / `SecurityAccessExecute` / `cgwSidFilterRemove`.
+ */
+export const SUBARU_SGP_AES128_KEYS: readonly SubaruSgpAesKeyEntry[] = [
+  // Combination Meter SGP (ecuKind=0x0012 / 0x0010 / 0x0011)
+  { id: "CTRL_MET_0251_1", ecuKind: 0x12, keyVersion: 1, keyHex: "00F17B760F53C30CBFFB54AD808F497A" },
+  { id: "CTRL_MET_0251_3", ecuKind: 0x12, keyVersion: 3, keyHex: "76E19EDB3027B6C51C8E90CED15E59BA" },
+  { id: "12645_0251_1", ecuKind: 0x10, keyVersion: 1, keyHex: "0D816973C75E8B38B920061FCEDBCBAE" },
+  { id: "CTRL_0011_0251_1", ecuKind: 0x11, keyVersion: 1, keyHex: "0D816973C75E8B38B920061FCEDBCBAE" },
+  // EyeSight / Front Camera / Chassis SGP (`SecurityAccessExecute("3","2")` → ecuKind=0x0003 / 0x0002 / 0x0005 / 0x000F)
+  { id: "12555_0251_1", ecuKind: 0x03, keyVersion: 1, keyHex: "35371DE1F774FC0123A8AE67A725D1BB" },
+  { id: "CTRL_0002_0251_1", ecuKind: 0x02, keyVersion: 1, keyHex: "33E63CA0431153460C18F1064C70FE41" },
+  { id: "CTRL_0002_0251_16", ecuKind: 0x02, keyVersion: 0x10, keyHex: "A808350D2BAF2084F0A5C10790A5D506" },
+  { id: "CTRL_0002_0251_32", ecuKind: 0x02, keyVersion: 0x20, keyHex: "295A6EBAEC78D774D8AAC1E0B3B5750C" },
+  { id: "CTRL_0005_0251_1", ecuKind: 0x05, keyVersion: 1, keyHex: "33E63CA0431153460C18F1064C70FE41" },
+  { id: "CTRL_0005_0251_16", ecuKind: 0x05, keyVersion: 0x10, keyHex: "A808350D2BAF2084F0A5C10790A5D506" },
+  { id: "CTRL_0005_0251_32", ecuKind: 0x05, keyVersion: 0x20, keyHex: "295A6EBAEC78D774D8AAC1E0B3B5750C" },
+  { id: "CTRL_000F_0251_1", ecuKind: 0x0f, keyVersion: 1, keyHex: "469A20AB308D5CA64BCD5BBE535BD85F" },
+  { id: "CTRL_000F_0251_2", ecuKind: 0x0f, keyVersion: 2, keyHex: "E40EAFE45074A0A0BE9917B0BF59F99B" },
+  { id: "CTRL_000F_0251_3", ecuKind: 0x0f, keyVersion: 3, keyHex: "8FA3CA5E632DB80E4EE7889F08B43DB0" },
+  // CGW / Body / Immobilizer / Radar / Powertrain SGP
+  { id: "CTRL_CGW_0251_1", ecuKind: 0x04, keyVersion: 1, keyHex: "7D89DDE1C95A224ED723E04496F4C0AE" },
+  { id: "CTRL_CGW_0251_2", ecuKind: 0x04, keyVersion: 2, keyHex: "C92270E66463395407F6C3014DC890B0" },
+  { id: "CTRL_CGW_0251_193", ecuKind: 0x04, keyVersion: 0xc1, keyHex: "66D5364A0D2D45C67E8DB120ED471438" },
+  { id: "CTRL_CGW_0251_194", ecuKind: 0x04, keyVersion: 0xc2, keyHex: "37490E2C46C57F8CB22FEC48133965D6" },
+  { id: "12265_0251_2", ecuKind: 0x01, keyVersion: 2, keyHex: "1BF6344AA6256C70E45D8754CD653FB2" },
+  { id: "12265_0251_3", ecuKind: 0x01, keyVersion: 3, keyHex: "7692E7932F23A901568DDFA5FF580625" },
+  { id: "12265_0251_4", ecuKind: 0x01, keyVersion: 4, keyHex: "1B8E5CE1CA38AEB6B4AC07C62FC8D769" },
+  { id: "12234_0251_129", ecuKind: 0x06, keyVersion: 0x81, keyHex: "1615239AB78925A41F18E6AA07673581" },
+  { id: "12236_0251_130", ecuKind: 0x06, keyVersion: 0x82, keyHex: "6A673120695FD8431286925F8601F955" },
+  { id: "CTRL_0007_0251_129", ecuKind: 0x07, keyVersion: 0x81, keyHex: "D4C520C672EA785BF319B01A66D02B53" },
+  { id: "CTRL_0007_0251_130", ecuKind: 0x07, keyVersion: 0x82, keyHex: "8B1103CEFC35D915FDA0D869542854DC" },
+  { id: "CTRL_0008_0251_1", ecuKind: 0x08, keyVersion: 1, keyHex: "394332E5CAF0130924621CDE82F32C0D" },
+  { id: "12625_0251_1", ecuKind: 0x09, keyVersion: 1, keyHex: "7168633A55270B3BA4E873BBBC248EC6" },
+  { id: "12627_0251_1", ecuKind: 0x0a, keyVersion: 1, keyHex: "18852C9509C8610F3E894CD8F23EB30D" },
+  { id: "CTRL_000C_0251_255", ecuKind: 0x0c, keyVersion: 0xff, keyHex: "E5718F0C1ABE632DF650B837C3AA92E1" },
+  { id: "CTRL_000C_0251_4", ecuKind: 0x0c, keyVersion: 4, keyHex: "FD04EFD1A9FE210536FFF26F9D69854E" },
+  { id: "CTRL_000D_0251_1", ecuKind: 0x0d, keyVersion: 1, keyHex: "AEA6D9296786430A22A084EBA4498EE3" },
+  { id: "CTRL_000D_0251_2", ecuKind: 0x0d, keyVersion: 2, keyHex: "0B4BB2772B2119F733FC8C3A7304F022" },
+  { id: "CTRL_000E_0251_1", ecuKind: 0x0e, keyVersion: 1, keyHex: "BCB8039CCDFCF5C82D4803E50F399F26" },
+  { id: "CTRL_000E_0251_2", ecuKind: 0x0e, keyVersion: 2, keyHex: "9978D5FA22B0C4E78B5D6451B2F7B7B5" },
+  // ecuKind=0x0000 (flag=1 → AES-128-ECB Decrypt)
+  { id: "CTRL_0000_0251_1_DEC", ecuKind: 0x00, keyVersion: 1, decrypt: true, keyHex: "92BF3DA9EADC2EB50E1A7BC13983899D" },
+  { id: "CTRL_0000_0251_2_DEC", ecuKind: 0x00, keyVersion: 2, decrypt: true, keyHex: "AECD1B5CDDE980BFC6869AB2D3DAEA1A" },
+  // Legacy VsmDatabase aliases
+  { id: "12234_0251_1", ecuKind: 0x06, keyVersion: 1, keyHex: "8C15AC1E0EDFB84D8A1C1526CDFF0850" },
+  { id: "12234_0251_2", ecuKind: 0x06, keyVersion: 2, keyHex: "0F84E1C95C8277A370E6CE71BFA6831D" },
+  { id: "12201_0251_3", ecuKind: 0x12, keyVersion: 3, keyHex: "76E19EDB3027B6C51C8E90CED15E59BA" },
+  { id: "12585_0251_2", ecuKind: 0x05, keyVersion: 2, keyHex: "3C74A203B92DC74A0BC9D36489223F0A" },
 ];
 
 function subaruFeistelRound16(ax: number): number {
@@ -252,6 +283,109 @@ export function computeSubaruSecurityKey16ByteAesEcb(
     for (let i = 0; i < 16; i++) s[i] = (s[i]! ^ w[base + i]!) & 0xff;
   }
   return s;
+}
+
+const INV_AES_SBOX: readonly number[] = [
+  0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb,
+  0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb,
+  0x54, 0x7b, 0x94, 0x32, 0xa6, 0xc2, 0x23, 0x3d, 0xee, 0x4c, 0x95, 0x0b, 0x42, 0xfa, 0xc3, 0x4e,
+  0x08, 0x2e, 0xa1, 0x66, 0x28, 0xd9, 0x24, 0xb2, 0x76, 0x5b, 0xa2, 0x49, 0x6d, 0x8b, 0xd1, 0x25,
+  0x72, 0xf8, 0xf6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xd4, 0xa4, 0x5c, 0xcc, 0x5d, 0x65, 0xb6, 0x92,
+  0x6c, 0x70, 0x48, 0x50, 0xfd, 0xed, 0xb9, 0xda, 0x5e, 0x15, 0x46, 0x57, 0xa7, 0x8d, 0x9d, 0x84,
+  0x90, 0xd8, 0xab, 0x00, 0x8c, 0xbc, 0xd3, 0x0a, 0xf7, 0xe4, 0x58, 0x05, 0xb8, 0xb3, 0x45, 0x06,
+  0xd0, 0x2c, 0x1e, 0x8f, 0xca, 0x3f, 0x0f, 0x02, 0xc1, 0xaf, 0xbd, 0x03, 0x01, 0x13, 0x8a, 0x6b,
+  0x3a, 0x91, 0x11, 0x41, 0x4f, 0x67, 0xdc, 0xea, 0x97, 0xf2, 0xcf, 0xce, 0xf0, 0xb4, 0xe6, 0x73,
+  0x96, 0xac, 0x74, 0x22, 0xe7, 0xad, 0x35, 0x85, 0xe2, 0xf9, 0x37, 0xe8, 0x1c, 0x75, 0xdf, 0x6e,
+  0x47, 0xf1, 0x1a, 0x71, 0x1d, 0x29, 0xc5, 0x89, 0x6f, 0xb7, 0x62, 0x0e, 0xaa, 0x18, 0xbe, 0x1b,
+  0xfc, 0x56, 0x3e, 0x4b, 0xc6, 0xd2, 0x79, 0x20, 0x9a, 0xdb, 0xc0, 0xfe, 0x78, 0xcd, 0x5a, 0xf4,
+  0x1f, 0xdd, 0xa8, 0x33, 0x88, 0x07, 0xc7, 0x31, 0xb1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xec, 0x5f,
+  0x60, 0x51, 0x7f, 0xa9, 0x19, 0xb5, 0x4a, 0x0d, 0x2d, 0xe5, 0x7a, 0x9f, 0x93, 0xc9, 0x9c, 0xef,
+  0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
+  0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d,
+];
+
+function gmul(a: number, b: number): number {
+  let p = 0;
+  let aa = a & 0xff;
+  let bb = b & 0xff;
+  for (let i = 0; i < 8; i++) {
+    if (bb & 1) p ^= aa;
+    const hi = aa & 0x80;
+    aa = (aa << 1) & 0xff;
+    if (hi) aa ^= 0x1b;
+    bb >>= 1;
+  }
+  return p & 0xff;
+}
+
+/**
+ * Computes the 16-byte SecurityAccess key from a 16-byte seed using AES-128-ECB decrypt
+ * (when `FHIUtilityCtrlNK.dll` `0x10082228` record has decrypt flag `1` → `0x1000F560`).
+ */
+export function computeSubaruSecurityKey16ByteAesEcbDecrypt(
+  seed16: readonly number[],
+  key16: readonly number[],
+): number[] {
+  if (seed16.length !== 16 || key16.length !== 16) return [];
+  const w = new Array<number>(176);
+  for (let i = 0; i < 16; i++) w[i] = key16[i]! & 0xff;
+  let rcon = 1;
+  for (let i = 16; i < 176; i += 4) {
+    let t0 = w[i - 4]!;
+    let t1 = w[i - 3]!;
+    let t2 = w[i - 2]!;
+    let t3 = w[i - 1]!;
+    if (i % 16 === 0) {
+      const tmp = t0;
+      t0 = AES_SBOX[t1]! ^ rcon;
+      t1 = AES_SBOX[t2]!;
+      t2 = AES_SBOX[t3]!;
+      t3 = AES_SBOX[tmp]!;
+      rcon = xtime(rcon);
+    }
+    w[i] = w[i - 16]! ^ t0;
+    w[i + 1] = w[i - 15]! ^ t1;
+    w[i + 2] = w[i - 14]! ^ t2;
+    w[i + 3] = w[i - 13]! ^ t3;
+  }
+
+  let s = seed16.map((b) => b & 0xff);
+  for (let i = 0; i < 16; i++) s[i] = (s[i]! ^ w[160 + i]!) & 0xff;
+
+  for (let round = 9; round >= 0; round--) {
+    s = [
+      s[0]!, s[13]!, s[10]!, s[7]!,
+      s[4]!, s[1]!, s[14]!, s[11]!,
+      s[8]!, s[5]!, s[2]!, s[15]!,
+      s[12]!, s[9]!, s[6]!, s[3]!,
+    ];
+    for (let i = 0; i < 16; i++) s[i] = INV_AES_SBOX[s[i]!]!;
+    const base = round * 16;
+    for (let i = 0; i < 16; i++) s[i] = (s[i]! ^ w[base + i]!) & 0xff;
+    if (round > 0) {
+      for (let c = 0; c < 16; c += 4) {
+        const a0 = s[c]!;
+        const a1 = s[c + 1]!;
+        const a2 = s[c + 2]!;
+        const a3 = s[c + 3]!;
+        s[c] = gmul(a0, 0x0e) ^ gmul(a1, 0x0b) ^ gmul(a2, 0x0d) ^ gmul(a3, 0x09);
+        s[c + 1] = gmul(a0, 0x09) ^ gmul(a1, 0x0e) ^ gmul(a2, 0x0b) ^ gmul(a3, 0x0d);
+        s[c + 2] = gmul(a0, 0x0d) ^ gmul(a1, 0x09) ^ gmul(a2, 0x0e) ^ gmul(a3, 0x0b);
+        s[c + 3] = gmul(a0, 0x0b) ^ gmul(a1, 0x0d) ^ gmul(a2, 0x09) ^ gmul(a3, 0x0e);
+      }
+    }
+  }
+  return s;
+}
+
+function computeSubaruAesKeyFromEntry(
+  seed16: readonly number[],
+  entry: SubaruSgpAesKeyEntry,
+): number[] {
+  const keyBytes = didBytes(entry.keyHex);
+  return entry.decrypt
+    ? computeSubaruSecurityKey16ByteAesEcbDecrypt(seed16, keyBytes)
+    : computeSubaruSecurityKey16ByteAesEcb(seed16, keyBytes);
 }
 
 /** Procedure B write targets only — never odometer / common-area DIDs. */
@@ -591,43 +725,36 @@ async function openMeterSession(elm: SubaruMeterWriteLink, tx: number, rx: numbe
   await elm.sendPayload("1003", 2_000);
 }
 
-/** CGW addresses used by SSM4 `cgwChkAndFilterRemove` / `cgwSidFilterRemove` / `CGW-001.srp`. */
+/** CGW addresses used by SSM4 `cgwChkAndFilterRemove` / `cgwSidFilterRemove` / `CGW-001.srp` (763 first on SGP BT). */
 const CGW_FILTER_TARGETS: readonly { tx: number; rx: number; label: string }[] = [
+  { tx: 0x763, rx: 0x76b, label: "763→76B (cgwChkAndFilterRemove / CGW-001)" },
   { tx: 0x750, rx: 0x758, label: "750→758 (CGTW / Keyless)" },
-  { tx: 0x763, rx: 0x76b, label: "763→76B (cgwChkAndFilterRemove / BRZ-style CGW)" },
   { tx: 0x765, rx: 0x76d, label: "765→76D (Telematics / CGW alt)" },
 ];
+
+const CGW_FILTER_ROUTINES_FAST = ["3101020C", "31010200", "31011201"] as const;
+const CGW_FILTER_ROUTINES_SA = ["31010200", "3101020C", "31011201"] as const;
 
 /**
  * Executes SSM4 Central Gateway SID Filter Removal (`cgwChkAndFilterRemove` / `cgwSidFilterRemove`
  * in `FHIUtilityCtrlNK.dll` + `CGW-001.srp`).
  *
- * Why this is critical on SGP (2020–2024 Outback BT / Forester SK / Crosstrek / WRX):
- * When the CGW SID filter is active, the gateway passes `22 xx xx` / even returns `7F 2E 33` from Meter,
- * BUT silently drops `27 xx` (`SecurityAccess`) frames to `783`, causing `27 03 -> NO DATA`.
- *
- * Exact sequence from `FHIUtilityCtrlNK.dll` (`cgwSidFilterRemove`):
+ * Exact sequence from `CGW-001.srp` + `FHIUtilityCtrlNK.dll`:
  * 1. CGW: `10 03` (`50 03`)
- * 2. Read `22 02 50` / `22 02 51` (AES-128 KeyVersion: `01`, `02`, `C1`=193, `C2`=194)
- * 3. Seed `27 07` (`67 07 <16B>`) or `27 01` → AES-128-ECB key → `27 08` / `27 02`
- * 4. FilterRemove: `31 01 02 00` (`71 01 02 00`), `31 01 02 0C` (`CGW-001.srp`), `31 01 12 01`
- *
- * Only a positive `71 01 …` counts as success — SecurityAccess alone does NOT pass `27` to the meter.
+ * 2. Fast path (`CGW-001.srp` B04→B05): `31 01 02 0C` (`71 01 02 0C`) → **`10 01`** + settle delay
+ * 3. If SA is required (or `requireSecurityAccess: true` for `31 01 02 00`):
+ *    Read `22 02 51` → Seed `27 07`/`27 01` → AES-128 key → `27 08`/`27 02` → `31 01 02 00` → **`10 01`**
  */
 export async function unlockSubaruCgwFilterRemove(
   elm: SubaruMeterWriteLink,
   steps: string[],
+  options: { requireSecurityAccess?: boolean } = {},
 ): Promise<{ filterRemoved: boolean; gatewayLabel: string | null }> {
-  const cgwAesKeys = [
-    { id: "CTRL_CGW_0251_1", kv: 1, keyHex: "7D89DDE1C95A224ED723E04496F4C0AE" },
-    { id: "CTRL_CGW_0251_2", kv: 2, keyHex: "C92270E66463395407F6C3014DC890B0" },
-    { id: "CTRL_CGW_0251_193", kv: 193, keyHex: "66D5364A0D2D45C67E8DB120ED471438" },
-    { id: "CTRL_CGW_0251_194", kv: 194, keyHex: "37490E2C46C57F8CB22FEC48133965D6" },
-    { id: "12234_0251_1", kv: 1, keyHex: "8C15AC1E0EDFB84D8A1C1526CDFF0850" },
-    { id: "12234_0251_2", kv: 2, keyHex: "0F84E1C95C8277A370E6CE71BFA6831D" },
-    { id: "12234_0251_129", kv: 129, keyHex: "1615239AB78925A41F18E6AA07673581" },
-    { id: "12236_0251_130", kv: 130, keyHex: "6A673120695FD8431286925F8601F955" },
-  ];
+  const cgwAesKeys = [...SUBARU_SGP_AES128_KEYS].sort((a, b) => {
+    const aCgw = a.ecuKind === 0x04 || a.ecuKind === 0x06 || a.ecuKind === 0x07 ? 0 : 1;
+    const bCgw = b.ecuKind === 0x04 || b.ecuKind === 0x06 || b.ecuKind === 0x07 ? 0 : 1;
+    return aCgw - bCgw;
+  });
 
   for (const gw of CGW_FILTER_TARGETS) {
     const label = gw.label;
@@ -639,25 +766,36 @@ export async function unlockSubaruCgwFilterRemove(
       continue;
     }
 
-    // CGW-001.srp path: try FilterRemove immediately after 10 03 (some gateways allow it without SA)
-    for (const routineHex of ["31010200", "3101020C", "31011201"]) {
-      try {
-        const rawR = await elm.sendPayload(routineHex, 2_000);
-        const pR = parseUdsResponse(rawR, 0x31);
-        const clean = rawR.replace(/>/g, "").trim();
-        if (pR.kind === "positive") {
-          steps.push(
-            `${label}: ✓ фильтр SID снят без SecurityAccess (${routineHex.slice(0, 2)} ${routineHex.slice(2, 4)} ${routineHex.slice(4, 6)} ${routineHex.slice(6)} → ${clean})`,
-          );
-          return { filterRemoved: true, gatewayLabel: label };
+    // CGW-001.srp Block B04 -> B05: try 31 01 02 0C first without SA, then close gateway session with 10 01!
+    if (!options.requireSecurityAccess) {
+      for (const routineHex of CGW_FILTER_ROUTINES_FAST) {
+        try {
+          const rawR = await elm.sendPayload(routineHex, 3_000);
+          const pR = parseUdsResponse(rawR, 0x31);
+          const clean = rawR.replace(/>/g, "").trim();
+          if (pR.kind === "positive") {
+            steps.push(
+              `${label}: ✓ фильтр SID снят (${routineHex.slice(0, 2)} ${routineHex.slice(2, 4)} ${routineHex.slice(4, 6)} ${routineHex.slice(6)} → ${clean})`,
+            );
+            try {
+              const raw1001 = await elm.sendPayload("1001", 1_200);
+              steps.push(
+                `${label}: CGW-001 B05 (10 01 → ${raw1001.replace(/>/g, "").trim() || "OK"})`,
+              );
+            } catch {
+              /* ignore */
+            }
+            await sleep(500);
+            return { filterRemoved: true, gatewayLabel: label };
+          }
+          if (pR.kind === "negative") {
+            steps.push(
+              `${label}: ${routineHex.slice(0, 2)} ${routineHex.slice(2, 4)} ${routineHex.slice(4, 6)} ${routineHex.slice(6)} → ${clean} (${pR.nrcText ?? `NRC ${pR.nrc}`})`,
+            );
+          }
+        } catch {
+          /* ignore */
         }
-        if (pR.kind === "negative") {
-          steps.push(
-            `${label}: ${routineHex.slice(0, 2)} ${routineHex.slice(2, 4)} ${routineHex.slice(4, 6)} ${routineHex.slice(6)} → ${clean} (${pR.nrcText ?? `NRC ${pR.nrc}`})`,
-          );
-        }
-      } catch {
-        /* ignore */
       }
     }
 
@@ -677,8 +815,8 @@ export async function unlockSubaruCgwFilterRemove(
 
     const orderedKeys = [...cgwAesKeys].sort((a, b) => {
       if (cgwKeyVersion != null) {
-        const aMatch = a.kv === cgwKeyVersion ? 0 : 1;
-        const bMatch = b.kv === cgwKeyVersion ? 0 : 1;
+        const aMatch = a.keyVersion === cgwKeyVersion ? 0 : 1;
+        const bMatch = b.keyVersion === cgwKeyVersion ? 0 : 1;
         if (aMatch !== bMatch) return aMatch - bMatch;
       }
       return 0;
@@ -717,7 +855,8 @@ export async function unlockSubaruCgwFilterRemove(
       );
       if (seedBytes.length !== 16) continue;
 
-      for (let i = 0; i < orderedKeys.length; i++) {
+      const maxKeyAttempts = Math.min(orderedKeys.length, 10);
+      for (let i = 0; i < maxKeyAttempts; i++) {
         const aes = orderedKeys[i]!;
         if (i > 0) {
           try {
@@ -735,7 +874,7 @@ export async function unlockSubaruCgwFilterRemove(
             /* ignore */
           }
         }
-        const outBytes = computeSubaruSecurityKey16ByteAesEcb(seedBytes, didBytes(aes.keyHex));
+        const outBytes = computeSubaruAesKeyFromEntry(seedBytes, aes);
         const rawKey = await elm.sendPayload(`${pair.keySub}${compactHex(outBytes)}`, 3_000);
         const pKey = parseUdsResponse(rawKey, 0x27);
         steps.push(
@@ -757,7 +896,7 @@ export async function unlockSubaruCgwFilterRemove(
       continue;
     }
 
-    for (const routineHex of ["31010200", "3101020C", "31011201"]) {
+    for (const routineHex of CGW_FILTER_ROUTINES_SA) {
       try {
         const rawR = await elm.sendPayload(routineHex, 2_500);
         const pR = parseUdsResponse(rawR, 0x31);
@@ -766,6 +905,15 @@ export async function unlockSubaruCgwFilterRemove(
           steps.push(
             `${label}: ✓ фильтр SID снят после SecurityAccess (${routineHex.slice(0, 2)} ${routineHex.slice(2, 4)} ${routineHex.slice(4, 6)} ${routineHex.slice(6)} → ${clean})`,
           );
+          try {
+            const raw1001 = await elm.sendPayload("1001", 1_200);
+            steps.push(
+              `${label}: CGW B05 (10 01 → ${raw1001.replace(/>/g, "").trim() || "OK"})`,
+            );
+          } catch {
+            /* ignore */
+          }
+          await sleep(500);
           return { filterRemoved: true, gatewayLabel: label };
         }
         steps.push(
@@ -778,7 +926,7 @@ export async function unlockSubaruCgwFilterRemove(
   }
 
   steps.push(
-    "CGW: не удалось снять SID-фильтр (750/763/765). Пока фильтр активен, приборка отвечает на 22/2E, но глушит 27 xx → NO DATA.",
+    "CGW: не удалось снять SID-фильтр (763/750/765). Пока фильтр активен, приборка отвечает на 22/2E, но глушит 27 xx → NO DATA.",
   );
   return { filterRemoved: false, gatewayLabel: null };
 }
@@ -811,6 +959,9 @@ export async function unlockSubaruMeterSecurityAccess(
   options: {
     userKeyHex?: string;
     keyVersionByte?: number | null;
+    preferNonMeterAes?: boolean;
+    preferEcuKinds?: readonly number[];
+    maxAesAttempts?: number;
   } = {},
 ): Promise<{ unlocked: boolean; seedHex: string | null }> {
   const txHex = tx.toString(16).toUpperCase();
@@ -879,19 +1030,31 @@ export async function unlockSubaruMeterSecurityAccess(
         }
       }
     } else if (seedBytes.length === 16) {
-      // Prioritize key matching DID 0251 KeyVersion if available
+      // Prioritize key matching DID 0251 KeyVersion & ECU kind (EyeSight vs Meter)
       const kv = options.keyVersionByte;
+      const prefKinds = options.preferEcuKinds;
       const orderedAes = [...SUBARU_SGP_AES128_KEYS].sort((a, b) => {
         if (kv != null) {
-          const aMatch = a.id.endsWith(`_${kv}`) ? 0 : 1;
-          const bMatch = b.id.endsWith(`_${kv}`) ? 0 : 1;
+          const aMatch = a.keyVersion === kv ? 0 : 1;
+          const bMatch = b.keyVersion === kv ? 0 : 1;
           if (aMatch !== bMatch) return aMatch - bMatch;
+        }
+        if (prefKinds && prefKinds.length > 0) {
+          const aIdx = prefKinds.indexOf(a.ecuKind);
+          const bIdx = prefKinds.indexOf(b.ecuKind);
+          const aRank = aIdx === -1 ? 999 : aIdx;
+          const bRank = bIdx === -1 ? 999 : bIdx;
+          if (aRank !== bRank) return aRank - bRank;
+        }
+        if (options.preferNonMeterAes) {
+          const aMeter = a.ecuKind === 0x12 || a.ecuKind === 0x04 ? 1 : 0;
+          const bMeter = b.ecuKind === 0x12 || b.ecuKind === 0x04 ? 1 : 0;
+          if (aMeter !== bMeter) return aMeter - bMeter;
         }
         return 0;
       });
       for (const aes of orderedAes) {
-        const keyBytes = didBytes(aes.keyHex);
-        const outBytes = computeSubaruSecurityKey16ByteAesEcb(seedBytes, keyBytes);
+        const outBytes = computeSubaruAesKeyFromEntry(seedBytes, aes);
         const kHex = compactHex(outBytes);
         if (kHex.length === 32 && !candidates.some((c) => c.keyHex === kHex)) {
           candidates.push({ label: `AES-128 ${aes.id}`, keyHex: kHex });
@@ -928,9 +1091,7 @@ export async function unlockSubaruMeterSecurityAccess(
               } else if (sb2.length === 16) {
                 const aes = SUBARU_SGP_AES128_KEYS.find((a) => cand.label.includes(a.id));
                 if (aes) {
-                  activeKeyHex = compactHex(
-                    computeSubaruSecurityKey16ByteAesEcb(sb2, didBytes(aes.keyHex)),
-                  );
+                  activeKeyHex = compactHex(computeSubaruAesKeyFromEntry(sb2, aes));
                 }
               }
             }
@@ -955,8 +1116,9 @@ export async function unlockSubaruMeterSecurityAccess(
       if (pKey.kind === "negative" && (pKey.nrc === 0x36 || pKey.nrc === 0x37)) {
         break;
       }
-      // For 16-byte AES SGP modules, try up to 4 prioritized keys (CTRL_MET + 12234) unless ECU returned NRC 36/37
-      if (seedBytes.length === 16 && !cleanUserKey && i >= 3) {
+      // For 16-byte AES SGP modules, limit unkeyed probes (default 4) unless ECU returned NRC 36/37
+      const maxAes = options.maxAesAttempts ?? 4;
+      if (seedBytes.length === 16 && !cleanUserKey && i + 1 >= maxAes) {
         break;
       }
     }
@@ -1002,8 +1164,14 @@ async function sendWriteWithRetry(
   return last;
 }
 
+export type SubaruMeterWriteMode = "two-did" | "full-cgdw" | "custom-a0xx";
+
 /**
- * Writes Applied Model + Option Code to Combination Meter via UDS 2E DID 0250/0251 or MET-002.srp A002/A011.
+ * Writes Applied Model + Option Code to Combination Meter via UDS 2E DID 0250/0251 or MET-002.srp A0xx.
+ * Supports:
+ * - `two-did` (default): writes only A002 (Destination) + A011 (Units) on SGP meters (safe minimal region switch).
+ * - `full-cgdw`: writes all A0xx variant DIDs from the matching SSM4 cgdw catalog row (`sendMetVariByApplied`).
+ * - `custom-a0xx`: writes exact saved 1-byte A0xx DIDs (for 1:1 original backup restoration, e.g. U45L).
  * Never calls writeCommonArea, never writes odometer DIDs.
  */
 export async function writeSubaruMeter12ColumnCode(
@@ -1015,8 +1183,11 @@ export async function writeSubaruMeter12ColumnCode(
     txHex?: string;
     rxHex?: string;
     securityKeyHex?: string;
+    writeMode?: SubaruMeterWriteMode;
+    customA0xxWrites?: SubaruMeterA0xxWriteEntry[];
   },
 ): Promise<SubaruMeter12ColumnWriteResult> {
+  const writeMode: SubaruMeterWriteMode = input.writeMode ?? "two-did";
   const plan = buildSubaruMeter12ColumnWritePlan(
     input.appliedModel,
     input.optionCode,
@@ -1038,14 +1209,106 @@ export async function writeSubaruMeter12ColumnCode(
   const a002TargetByte =
     destPrefix === "C0" ? "03" : destPrefix === "C5" ? "06" : destPrefix === "U5" ? "05" : "02";
   const a011TargetByte = destPrefix === "C0" || destPrefix === "C5" ? "00" : "FF";
+
+  const currentDidMap: Record<string, string> = {};
+  for (const d of input.currentDids ?? []) {
+    currentDidMap[d.did.trim().toUpperCase()] = d.hex.trim().toUpperCase();
+  }
+
+  // Build explicit A0xx write list depending on writeMode
+  let a0xxWritePlan: { did: string; byteHex: string; noteRu: string }[] = [];
+  if (writeMode === "full-cgdw") {
+    const cleanApp = input.appliedModel.trim().toUpperCase();
+    const cleanOpt = input.optionCode.trim().toUpperCase();
+    const catalogDids = getSsm4CgdwWriteDids(cleanApp, cleanOpt);
+    if (!catalogDids || catalogDids.length === 0) {
+      steps.push(
+        `Пары ${cleanApp} + ${cleanOpt} нет в справочнике SSM4 cgdw — полная запись всех DID невозможна. Выберите код из справочника (например C0QF/U45D), режим «Только 2 DID» или восстановление оригинала из бэкапа.`,
+      );
+      return {
+        success: false,
+        steps,
+        plan,
+        writtenDid: null,
+        writtenHex: null,
+        securityAccessRequired: false,
+        seedHex: null,
+      };
+    }
+    const skippedAbsent: string[] = [];
+    for (const entry of catalogDids) {
+      if (currentDidMap[entry.did] === "--") {
+        skippedAbsent.push(entry.did);
+        continue;
+      }
+      a0xxWritePlan.push({
+        did: entry.did,
+        byteHex: entry.byteHex,
+        noteRu: `cgdw ${cleanApp}+${cleanOpt}`,
+      });
+    }
+    if (skippedAbsent.length > 0) {
+      steps.push(
+        `Пропущены DID, отсутствующие в приборке (--): ${skippedAbsent.join(", ")}`,
+      );
+    }
+    steps.push(
+      `Режим SSM4 sendMetVariByApplied: подготовлено ${a0xxWritePlan.length} вариантных DID для ${cleanApp}+${cleanOpt}.`,
+    );
+  } else if (writeMode === "custom-a0xx") {
+    const rawList = input.customA0xxWrites ?? [];
+    if (rawList.length === 0) {
+      steps.push("Список DID для восстановления оригинала пуст.");
+      return {
+        success: false,
+        steps,
+        plan,
+        writtenDid: null,
+        writtenHex: null,
+        securityAccessRequired: false,
+        seedHex: null,
+      };
+    }
+    for (const item of rawList) {
+      const did = item.did.trim().toUpperCase();
+      const byteHex = item.byteHex.trim().toUpperCase();
+      if (!isWritableMeterA0xxDid(did) || !/^[0-9A-F]{2}$/.test(byteHex)) {
+        steps.push(`Запрещённый или некорректный DID в бэкапе: ${did}=${byteHex}. Запись остановлена.`);
+        return {
+          success: false,
+          steps,
+          plan,
+          writtenDid: null,
+          writtenHex: null,
+          securityAccessRequired: false,
+          seedHex: null,
+        };
+      }
+      a0xxWritePlan.push({ did, byteHex, noteRu: "восстановление оригинала" });
+    }
+    steps.push(
+      `Режим восстановления из бэкапа: подготовлено ${a0xxWritePlan.length} оригинальных A0xx DID.`,
+    );
+  } else {
+    a0xxWritePlan = [
+      { did: "A002", byteHex: a002TargetByte, noteRu: `Destination ${destPrefix}` },
+      {
+        did: "A011",
+        byteHex: a011TargetByte,
+        noteRu: a011TargetByte === "00" ? "°C / км/ч" : "°F / MPH",
+      },
+    ];
+  }
+
   const hasA002Snapshot = (input.currentDids ?? []).some(
     (d) => d.did.toUpperCase() === "A002" || d.did.toUpperCase() === "A011",
   );
+  const forceA0xxPath = writeMode === "full-cgdw" || writeMode === "custom-a0xx";
   const snap0251 = (input.currentDids ?? []).find((d) => d.did.toUpperCase() === "0251");
   const keyVersionByte = snap0251 ? (didBytes(snap0251.hex)[0] ?? null) : null;
 
-  // If 0250/0251 had non-ASCII bitmask AND A002/A011 is present, allow MET-002.srp A002/A011 write path
-  if (!plan.ok && !hasA002Snapshot) {
+  // If 0250/0251 had non-ASCII bitmask AND A002/A011 is present (or A0xx mode is forced), allow MET-002.srp A0xx write path
+  if (!plan.ok && !hasA002Snapshot && !forceA0xxPath) {
     return {
       success: false,
       steps,
@@ -1062,18 +1325,13 @@ export async function writeSubaruMeter12ColumnCode(
   } catch {
     /* ignore */
   }
-
-  try {
-    await openMeterSession(elm, 0x750, 0x758);
-    steps.push("750→758 (CGW): расширенная сессия шлюза (10 03)");
-  } catch {
-    steps.push("750→758 (CGW): 10 03 не обязателен / нет ответа");
-  }
+  await sleep(150);
 
   let securityAccessRequired = false;
   let writtenDid: string | null = null;
   let writtenHex: string | null = null;
   let lastSeedHex: string | null = null;
+  const skip0250Candidates = forceA0xxPath || hasA002Snapshot;
 
   for (const target of targets) {
     const txHex = target.tx.toString(16).toUpperCase();
@@ -1090,39 +1348,49 @@ export async function writeSubaruMeter12ColumnCode(
 
     try {
       let did0250OutOfRange = false;
-      for (const item of plan.candidates) {
-        assertWriteCandidate(item);
-        const parsed = await sendWriteWithRetry(
-          elm,
-          item.requestHex,
-          steps,
-          `${txHex}→${rxHex} 2E ${item.did} (${item.noteRu})`,
-        );
-        if (parsed.kind === "positive") {
-          writtenDid = item.did;
-          writtenHex = item.dataHex;
-          steps.push(`${txHex}→${rxHex}: DID ${item.did} записан (6E)`);
-          break;
-        }
-        if (parsed.kind === "negative" && parsed.nrc === 0x31) {
-          did0250OutOfRange = true;
-        }
-        if (parsed.kind === "negative" && parsed.nrc === 0x33) {
-          securityAccessRequired = true;
-          steps.push(
-            `${txHex}→${rxHex}: NRC 33 SecurityAccess. Ключ приборки в QHub не подставляется — нужна дилерская SSM4.`,
+      if (!skip0250Candidates) {
+        for (const item of plan.candidates) {
+          assertWriteCandidate(item);
+          const parsed = await sendWriteWithRetry(
+            elm,
+            item.requestHex,
+            steps,
+            `${txHex}→${rxHex} 2E ${item.did} (${item.noteRu})`,
           );
-          break;
+          if (parsed.kind === "positive") {
+            writtenDid = item.did;
+            writtenHex = item.dataHex;
+            steps.push(`${txHex}→${rxHex}: DID ${item.did} записан (6E)`);
+            break;
+          }
+          if (parsed.kind === "negative" && parsed.nrc === 0x31) {
+            did0250OutOfRange = true;
+          }
+          if (parsed.kind === "negative" && parsed.nrc === 0x33) {
+            securityAccessRequired = true;
+            steps.push(
+              `${txHex}→${rxHex}: NRC 33 SecurityAccess. Ключ приборки в QHub не подставляется — нужна дилерская SSM4.`,
+            );
+            break;
+          }
         }
+      } else {
+        did0250OutOfRange = true;
+        steps.push(
+          `${txHex}→${rxHex}: SGP / A0xx — пропускаем 2E 0250/0251 и сразу идём через CGW-001 + MET-002/009`,
+        );
       }
 
-      // If 0250/0251 returned NRC 31 (requestOutOfRange) or A002/A011 variant DIDs are present,
-      // execute exact SSM4 MET-002.srp / MET-009.srp Procedure B (service bulletin passcode 0205):
-      // 1) Unlock Central Gateway SID Filter (750->758: 27 07/08 + 31 01 02 00 / 02 0C) so CGW does not drop 27 xx to 783!
-      // 2) B01: 22 10C2 -> B04 (0205) -> B06: 10 03 -> 27 03 -> GetSecurityAccessSelKey(11/35) -> 27 04 -> 2E 10C2 FF -> 2E A002 -> 2E A011 -> 2E 10C2 00
-      if (!writtenDid && !securityAccessRequired && (hasA002Snapshot || did0250OutOfRange)) {
+      // Execute SSM4 CGW-001 + MET-002.srp / MET-009.srp Procedure B:
+      // 1) CGW 763→76B: 10 03 → 31 01 02 0C → 10 01 (and escalate to 27 07/08 + 31 01 02 00 → 10 01 if 27 03 is dropped)
+      // 2) Meter 783→78B: 10 03 → 22 10C2 → (27 03/04 if 10C2=00) → 2E 10C2 FF → 2E A0xx... → 2E 10C2 00
+      if (!writtenDid && !securityAccessRequired && (hasA002Snapshot || did0250OutOfRange || forceA0xxPath)) {
+        const previewWrites =
+          a0xxWritePlan.length <= 4
+            ? a0xxWritePlan.map((w) => `2E ${w.did} ${w.byteHex}`).join(" → ")
+            : `${a0xxWritePlan.length} DID (${a0xxWritePlan[0]!.did}..${a0xxWritePlan[a0xxWritePlan.length - 1]!.did})`;
         steps.push(
-          `${txHex}→${rxHex}: код бюллетеня 0205 принят (MET-009.srp B04→B06) — сначала cgwChkAndFilterRemove (иначе CGW глушит 27 xx → NO DATA), затем MET-002/009 (22 10C2 → 27 03/04 → 2E 10C2 FF → 2E A002 ${a002TargetByte} → 2E A011 ${a011TargetByte} → 2E 10C2 00)`,
+          `${txHex}→${rxHex}: запуск CGW-001 + MET-002/009 (${previewWrites})`,
         );
 
         let cgwOk = false;
@@ -1130,7 +1398,7 @@ export async function writeSubaruMeter12ColumnCode(
           const cgw = await unlockSubaruCgwFilterRemove(elm, steps);
           cgwOk = cgw.filterRemoved;
           if (cgwOk && cgw.gatewayLabel) {
-            steps.push(`${cgw.gatewayLabel}: SID-фильтр снят — переключаемся на приборку ${txHex}→${rxHex}`);
+            steps.push(`${cgw.gatewayLabel}: фильтр снят → переключаемся на приборку ${txHex}→${rxHex}`);
           }
         } catch (err) {
           steps.push(
@@ -1138,32 +1406,12 @@ export async function writeSubaruMeter12ColumnCode(
           );
         }
 
-        // Switch CAN headers back from CGW to Combination Meter and open 10 03!
+        // Switch CAN headers back from CGW to Combination Meter and open 10 03
         await openMeterSession(elm, target.tx, target.rx);
 
-        // Probe whether CGW now forwards SecurityAccess to the meter (single-frame 27 03).
-        if (cgwOk) {
-          try {
-            await elm.sendPayload("1003", 1_500);
-            const probe27 = await elm.sendPayload("2703", 2_500);
-            const pProbe = parseUdsResponse(probe27, 0x27);
-            const cleanProbe = probe27.replace(/>/g, "").trim();
-            if (pProbe.kind === "positive") {
-              steps.push(`${txHex}→${rxHex}: ✓ CGW пропускает 27 03 → ${cleanProbe}`);
-            } else {
-              steps.push(
-                `${txHex}→${rxHex}: после FilterRemove 27 03 → ${cleanProbe || "NO DATA"} — повторно пробуем снять фильтр CGW…`,
-              );
-              const cgw2 = await unlockSubaruCgwFilterRemove(elm, steps);
-              cgwOk = cgw2.filterRemoved;
-              await openMeterSession(elm, target.tx, target.rx);
-            }
-          } catch {
-            /* ignore */
-          }
-        } else {
+        if (!cgwOk) {
           steps.push(
-            `${txHex}→${rxHex}: SID-фильтр CGW НЕ снят. Запись 2E 10C2 FF вернёт NRC 33, а 27 03 — NO DATA. Проверьте IG ON и адаптер, затем повторите.`,
+            `${txHex}→${rxHex}: SID-фильтр CGW НЕ снят. Если 2E 10C2 FF вернёт NRC 33 / 27→NO DATA — проверьте IG ON и адаптер.`,
           );
         }
 
@@ -1181,8 +1429,7 @@ export async function writeSubaruMeter12ColumnCode(
           }
         }
 
-        // Step B01: Check if gate 10C2 is already 0xFF; if it is 0x00 (Used Mode),
-        // ALWAYS run Block B06 (10 03 -> 27 03 -> 27 04) BEFORE sending 2E 10C2 FF!
+        // Step B01: Check 22 10C2 FIRST; only if 10C2=00 (Used Mode) do we need 27 03 → 27 04!
         let gateAlreadyOpen = false;
         let gateReturned00 = false;
         try {
@@ -1200,16 +1447,33 @@ export async function writeSubaruMeter12ColumnCode(
           /* ignore */
         }
 
-        if (!gateAlreadyOpen && gateReturned00) {
+        if (gateAlreadyOpen) {
+          steps.push(`${txHex}→${rxHex}: ворота уже открыты (10C2=FF) — зонд 27 03 не нужен`);
+        } else if (gateReturned00) {
           steps.push(
-            `${txHex}→${rxHex}: приборка в Used Mode (10C2=00) — выполняем MET-002/009.srp Блок B06 (после кода 0205): 10 03 → 27 03 → 27 04 ПЕРЕД 2E 10C2 FF…`,
+            `${txHex}→${rxHex}: приборка в Used Mode (10C2=00) — выполняем 10 03 → 27 03 → 27 04 ПЕРЕД 2E 10C2 FF…`,
           );
           await elm.sendPayload("1003", 1_500);
-          const preUnlock = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+          let preUnlock = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
             userKeyHex: input.securityKeyHex,
             keyVersionByte: activeKeyVersionByte,
+            preferEcuKinds: [0x12, 0x10, 0x11],
           });
           if (preUnlock.seedHex) lastSeedHex = preUnlock.seedHex;
+          // If 27 03 was dropped by CGW (NO DATA), escalate to full AES cgwSidFilterRemove (27 07→27 08 + 31 01 02 00 → 10 01)
+          if (!preUnlock.unlocked && !preUnlock.seedHex) {
+            steps.push(
+              `${txHex}→${rxHex}: 27 03 → NO DATA — пробуем полную AES-разблокировку шлюза CGW (27 07/08 + 31 01 02 00 → 10 01)…`,
+            );
+            await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
+            await openMeterSession(elm, target.tx, target.rx);
+            preUnlock = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+              userKeyHex: input.securityKeyHex,
+              keyVersionByte: activeKeyVersionByte,
+              preferEcuKinds: [0x12, 0x10, 0x11],
+            });
+            if (preUnlock.seedHex) lastSeedHex = preUnlock.seedHex;
+          }
         }
 
         let pGateOpen = await sendWriteWithRetry(
@@ -1220,14 +1484,25 @@ export async function writeSubaruMeter12ColumnCode(
         );
         if (pGateOpen.kind === "negative" && pGateOpen.nrc === 0x33) {
           steps.push(
-            `${txHex}→${rxHex}: 2E 10C2 FF запросил SecurityAccess (NRC 33) — выполняем разблокировку 27 03 / 27 04 (FHIUtilityCtrlNK GetSecAccess idx=11/35)…`,
+            `${txHex}→${rxHex}: 2E 10C2 FF запросил SecurityAccess (NRC 33) — выполняем 27 03 / 27 04…`,
           );
           await elm.sendPayload("1003", 1_500);
-          const unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+          let unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
             userKeyHex: input.securityKeyHex,
             keyVersionByte: activeKeyVersionByte,
+            preferEcuKinds: [0x12, 0x10, 0x11],
           });
           if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
+          if (!unlockRes.unlocked && !unlockRes.seedHex) {
+            await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
+            await openMeterSession(elm, target.tx, target.rx);
+            unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+              userKeyHex: input.securityKeyHex,
+              keyVersionByte: activeKeyVersionByte,
+              preferEcuKinds: [0x12, 0x10, 0x11],
+            });
+            if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
+          }
           if (unlockRes.unlocked) {
             pGateOpen = await sendWriteWithRetry(
               elm,
@@ -1244,53 +1519,69 @@ export async function writeSubaruMeter12ColumnCode(
             `${txHex}→${rxHex}: 2E 10C2 FF остался закрыт (NRC 33 SecurityAccess)${lastSeedHex ? ` · Seed: ${lastSeedHex}` : " · Seed не получен (27 xx → NO DATA — CGW всё ещё режет SecurityAccess)"}.`,
           );
         } else {
-          let pA002 = await sendWriteWithRetry(
-            elm,
-            `2EA002${a002TargetByte}`,
-            steps,
-            `${txHex}→${rxHex} 2E A002 ${a002TargetByte} (Destination ${destPrefix})`,
-          );
-          if (pA002.kind === "negative" && pA002.nrc === 0x33) {
-            const unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
-              userKeyHex: input.securityKeyHex,
-              keyVersionByte,
-            });
-            if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
-            if (unlockRes.unlocked) {
-              await sendWriteWithRetry(
-                elm,
-                "2E10C2FF",
-                steps,
-                `${txHex}→${rxHex} 2E 10C2 FF (повтор открытия после SecurityAccess)`,
-              );
-              pA002 = await sendWriteWithRetry(
-                elm,
-                `2EA002${a002TargetByte}`,
-                steps,
-                `${txHex}→${rxHex} 2E A002 ${a002TargetByte} (повтор Destination ${destPrefix})`,
-              );
+          const okA0xx: { did: string; byteHex: string }[] = [];
+          const nrc31A0xx: string[] = [];
+          let sawNrc33OnA0xx = false;
+          let triedUnlockDuringA0xx = false;
+
+          for (const item of a0xxWritePlan) {
+            let pW = await sendWriteWithRetry(
+              elm,
+              `2E${item.did}${item.byteHex}`,
+              steps,
+              `${txHex}→${rxHex} 2E ${item.did} ${item.byteHex} (${item.noteRu})`,
+            );
+            if (pW.kind === "negative" && pW.nrc === 0x33 && !triedUnlockDuringA0xx) {
+              triedUnlockDuringA0xx = true;
+              const unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+                userKeyHex: input.securityKeyHex,
+                keyVersionByte: activeKeyVersionByte,
+              });
+              if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
+              if (unlockRes.unlocked) {
+                await sendWriteWithRetry(
+                  elm,
+                  "2E10C2FF",
+                  steps,
+                  `${txHex}→${rxHex} 2E 10C2 FF (повтор открытия после SecurityAccess)`,
+                );
+                pW = await sendWriteWithRetry(
+                  elm,
+                  `2E${item.did}${item.byteHex}`,
+                  steps,
+                  `${txHex}→${rxHex} 2E ${item.did} ${item.byteHex} (повтор ${item.noteRu})`,
+                );
+              }
+            }
+            if (pW.kind === "positive") {
+              okA0xx.push({ did: item.did, byteHex: item.byteHex });
+            } else if (pW.kind === "negative" && pW.nrc === 0x31) {
+              nrc31A0xx.push(item.did);
+            } else if (pW.kind === "negative" && pW.nrc === 0x33) {
+              sawNrc33OnA0xx = true;
             }
           }
-          const pA011 = await sendWriteWithRetry(
-            elm,
-            `2EA011${a011TargetByte}`,
-            steps,
-            `${txHex}→${rxHex} 2E A011 ${a011TargetByte} (${a011TargetByte === "00" ? "°C / км/ч" : "°F / MPH"})`,
-          );
+
           await sendWriteWithRetry(
             elm,
             "2E10C200",
             steps,
             `${txHex}→${rxHex} 2E 10C2 00 (закрытие вариантной записи MET-002 B26 C01)`,
           );
-          if (pA002.kind === "positive" || pA011.kind === "positive") {
-            writtenDid = "A002/A011";
-            writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
-            steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
-          } else if (
-            (pA002.kind === "negative" && pA002.nrc === 0x33) ||
-            (pA011.kind === "negative" && pA011.nrc === 0x33)
-          ) {
+
+          if (okA0xx.length > 0) {
+            if (writeMode === "two-did") {
+              writtenDid = "A002/A011";
+              writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
+              steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
+            } else {
+              writtenDid = `${writeMode === "custom-a0xx" ? "BACKUP" : "CGDW"} A0xx (${okA0xx.length}/${a0xxWritePlan.length})`;
+              writtenHex = okA0xx.map((x) => `${x.did}=${x.byteHex}`).join(" ");
+              steps.push(
+                `${txHex}→${rxHex}: записано ${okA0xx.length} из ${a0xxWritePlan.length} вариантных A0xx DID${nrc31A0xx.length ? ` (NRC 31 на: ${nrc31A0xx.join(", ")})` : ""}.`,
+              );
+            }
+          } else if (sawNrc33OnA0xx) {
             securityAccessRequired = true;
           }
         }

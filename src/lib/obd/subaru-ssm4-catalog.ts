@@ -26,15 +26,31 @@ export {
   SSM4_CGDW_PAIRS,
 } from "./subaru-ssm4-cgdw-pairs";
 export {
+  diffMeterAgainstAppliedCatalog,
+  getSsm4CgdwWriteDids,
   matchSsm4OptionFromMeterDids,
+  summarizeMeterCatalogComparison,
   SSM4_CGDW_FP_DID_KEYS,
   fingerprintFromMeterDids,
 } from "./subaru-ssm4-cgdw-fingerprints";
+export type {
+  Ssm4AppliedRowDiff,
+  Ssm4MeterCatalogByteDiff,
+  Ssm4MeterCatalogSummary,
+} from "./subaru-ssm4-cgdw-fingerprints";
 export {
+  diffEyesightAgainstAppliedCatalog,
   eyesightDestinationHintFrom3502,
+  getSsm4YywWriteDids,
   matchSsm4OptionFromEyesightDids,
+  summarizeEyesightCatalogComparison,
   SSM4_YYW_FP_DID_KEYS,
   fingerprintFromEyesightDids,
+} from "./subaru-ssm4-yyw-fingerprints";
+export type {
+  Ssm4EyesightAppliedRowDiff,
+  Ssm4EyesightCatalogByteDiff,
+  Ssm4EyesightCatalogSummary,
 } from "./subaru-ssm4-yyw-fingerprints";
 
 export type Ssm4Group = "Powertrain" | "Chassis" | "Body";
@@ -6090,28 +6106,98 @@ export const SUBARU_METER_VARIANT_READ_FACTS = {
     "SSM4: (Applied,Option)→строка cgdw→полный набор A0xx (не только A002/A011). Обратно: считав все DID строки (в т.ч. отсутствие A02E), получаем model+option. Урезанный отпечаток давал ложные коллизии.",
 } as const;
 
-/** EyeSight stereo variant DIDs from Y-Yw (787 → 78F). */
+/** EyeSight stereo variant DIDs from Y-YwPHBW-WmPGBu.mHZ (`3501..3510`, 16 DIDs) + legacy `Y-YwPHBW-WmPGBN.mHZ` (`3091..309D`). */
 export const SUBARU_EYESIGHT_VARIANT_READ_DIDS = [
   ...SSM4_YYW_FP_DID_KEYS,
   "3091",
   "3092",
   "3093",
   "3094",
+  "3095",
+  "3096",
+  "3097",
+  "3098",
+  "3099",
+  "309A",
+  "309B",
+  "309C",
   "309D",
+  "0250",
+  "0251",
   "F182",
   "F18E",
+  "F187",
   "F190",
   "F197",
-  "A001",
 ] as const;
 
-/** Read-only UDS 22 DIDs probed for meter variant / full cgdw fingerprint reverse-match. */
+/** Exact 46 DIDs read by SSM4 `readMetVariant` (`cGZGBPHB-WmTWLZ.mHZ` `[Read DID TBL]`). */
+export const SUBARU_METER_SSM4_MHZ_READ_DIDS = [
+  "A000",
+  "A001",
+  "A002",
+  "A003",
+  "A004",
+  "A005",
+  "A006",
+  "A007",
+  "A008",
+  "A009",
+  "A00A",
+  "A00B",
+  "A00C",
+  "A00D",
+  "A00F",
+  "A010",
+  "A011",
+  "A012",
+  "A013",
+  "A014",
+  "A015",
+  "A016",
+  "A017",
+  "A018",
+  "A019",
+  "A020",
+  "A021",
+  "A022",
+  "A023",
+  "A024",
+  "A025",
+  "A026",
+  "A027",
+  "A028",
+  "A02A",
+  "A02B",
+  "A02D",
+  "A02E",
+  "A02F",
+  "A034",
+  "A035",
+  "A036",
+  "A037",
+  "A039",
+  "A040",
+  "A041",
+] as const;
+
+/** All 44 1-byte variant A0xx DIDs across `cGZGBPHB-WmTWLZ.mHZ` (43) + `cgdwPHBWHoZ.mLW` (`A00E`). */
+export const SUBARU_METER_ALL_VARIANT_A0XX_DIDS = [
+  ...SSM4_CGDW_FP_DID_KEYS,
+  "A004",
+  "A017",
+  "A037",
+] as const;
+
+/** Read-only UDS 22 DIDs probed for meter variant / full SSM4 `readMetVariant` + cgdw reverse-match. */
 export const SUBARU_METER_12COLUMN_READ_DIDS = [
   "0250",
   "0251",
+  "10C2",
   "A000",
   "A020",
-  ...SSM4_CGDW_FP_DID_KEYS,
+  "A040",
+  ...SUBARU_METER_ALL_VARIANT_A0XX_DIDS,
   "0240",
   "0200",
   "0220",

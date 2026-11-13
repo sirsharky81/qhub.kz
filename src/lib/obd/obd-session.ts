@@ -43,7 +43,7 @@ import { readSubaruCvtFluidTemp, type SubaruCvtFluidReading } from "./subaru-cvt
 import {
   SUBARU_EYESIGHT_VARIANT_READ_DIDS,
   SUBARU_METER_12COLUMN_READ_DIDS,
-  SSM4_CGDW_FP_DID_KEYS,
+  SUBARU_METER_ALL_VARIANT_A0XX_DIDS,
   compareMeterAndEyesightVariants,
   extractAppliedModelAndOptionCodeFromDump,
   extractEyesightVariantFromDids,
@@ -51,10 +51,20 @@ import {
   type SubaruEyesightVariantMatch,
   type SubaruMeterEyesightCompare,
 } from "./subaru-ssm4-catalog";
+import { SSM4_YYW_FP_DID_KEYS } from "./subaru-ssm4-yyw-fingerprints";
+import {
+  readSubaruEyesight35xxDids,
+  writeSubaruEyesightVariantByApplied,
+  type SubaruEyesightVariantWriteResult,
+  type SubaruEyesightWriteMode,
+} from "./subaru-eyesight-variant";
+import type { SubaruEyesightWriteEntry } from "./subaru-eyesight-backup";
 import {
   writeSubaruMeter12ColumnCode as executeSubaruMeter12ColumnWrite,
   type SubaruMeter12ColumnWriteResult,
+  type SubaruMeterWriteMode,
 } from "./subaru-meter-variant";
+import type { SubaruMeterA0xxWriteEntry } from "./subaru-meter-backup";
 import {
   probeSubaruResCm as executeSubaruResCmProbe,
   registerSubaruResCm as executeSubaruResCmRegister,
@@ -173,6 +183,9 @@ export interface SubaruEyesightVariantRead {
   vin: string | null;
   dids: { did: string; label: string; hex: string; decoded: string }[];
   match: SubaruEyesightVariantMatch;
+  steps?: string[];
+  cgwFilterRemoved?: boolean;
+  securityAccessRequired?: boolean;
 }
 
 export interface SubaruMeterEyesightCompareResult {
@@ -182,6 +195,8 @@ export interface SubaruMeterEyesightCompareResult {
   eyesight: SubaruEyesightVariantRead;
   compare: SubaruMeterEyesightCompare;
 }
+
+export type { SubaruEyesightVariantWriteResult };
 
 export interface SubaruMeter12ColumnWriteSessionResult extends SubaruMeter12ColumnWriteResult {
   before: SubaruMeter12ColumnRead;
@@ -1069,7 +1084,7 @@ export class ObdBleSession {
         }
 
         let gotPositive = false;
-        const fpDidSet = new Set<string>(SSM4_CGDW_FP_DID_KEYS as unknown as string[]);
+        const fpDidSet = new Set<string>(SUBARU_METER_ALL_VARIANT_A0XX_DIDS as unknown as string[]);
         const queue: string[] = [...SUBARU_METER_12COLUMN_READ_DIDS];
         const visited = new Set<string>();
         while (queue.length > 0) {
@@ -1107,7 +1122,7 @@ export class ObdBleSession {
               hex,
               decoded,
             });
-            if ((didNum === 0xa000 || didNum === 0xa020) && body.length === 4) {
+            if ((didNum === 0xa000 || didNum === 0xa020 || didNum === 0xa040) && body.length === 4) {
               const supported = decodeUdsDidSupportBitmap(didNum, body);
               for (const childDid of supported) {
                 const childHex = childDid.toString(16).padStart(4, "0").toUpperCase();
@@ -1215,24 +1230,26 @@ export class ObdBleSession {
   }
 
   /**
-   * Read-only EyeSight (787) variant DIDs 3501..3510 from Y-YwPHBWHoZ.mLW mapping.
+   * Read-only EyeSight (787 / 784) variant DIDs 3501..3510 (ADA-032 Confirm on Parameter, Y-YwPHBWHoZ.mLW).
    * Never writes. Used to compare stereo-camera coding vs Combination Meter.
    */
   async readSubaruEyesightVariantCode(
     protocol: CanProtocol = "6",
     hintAppliedModel?: string | null,
+    securityKeyHex?: string,
   ): Promise<SubaruEyesightVariantRead> {
     this.requireAdapter();
     await this.waitLeave();
     if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед чтением EyeSight");
     await this.ensureUdsProfile(protocol);
 
-    const tx = 0x787;
-    const rx = 0x78f;
-    const txHex = "787";
-    const rxHex = "78F";
     const dids: { did: string; label: string; hex: string; decoded: string }[] = [];
     let vin: string | null = null;
+    let txHex = "787";
+    let rxHex = "78F";
+    const steps: string[] = [];
+    let cgwFilterRemoved = false;
+    let securityAccessRequired = false;
 
     try {
       await this.elm!.sendCommand("ATST20");
@@ -1241,49 +1258,59 @@ export class ObdBleSession {
     }
 
     try {
-      try {
-        await this.udsExchange(tx, rx, "3E00", 800);
-        await this.udsExchange(tx, rx, "1003", 900);
-      } catch {
-        /* ignore */
-      }
+      const probe = await readSubaruEyesight35xxDids(this.elm!, {
+        steps,
+        withCgw: true,
+        didHexList: SUBARU_EYESIGHT_VARIANT_READ_DIDS,
+        securityKeyHex,
+        unlockIfNrc33: true,
+      });
+
+      cgwFilterRemoved = probe.cgwFilterRemoved;
+      securityAccessRequired = probe.securityAccessRequired;
+      txHex = probe.tx.toString(16).toUpperCase();
+      rxHex = probe.rx.toString(16).toUpperCase();
+      const activeTxHex = txHex;
 
       for (const didHex of SUBARU_EYESIGHT_VARIANT_READ_DIDS) {
-        try {
-          const raw22 = await this.udsExchange(tx, rx, `22${didHex}`, 900);
-          const parsed = parseUdsResponse(raw22, 0x22);
-          if (parsed.kind !== "positive") continue;
-          const didNum = Number.parseInt(didHex, 16);
-          const body =
-            parsed.payload.length >= 2 &&
-            parsed.payload[0] === ((didNum >> 8) & 0xff) &&
-            parsed.payload[1] === (didNum & 0xff)
-              ? parsed.payload.slice(2)
-              : parsed.payload;
-          const hex = body.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-          const decoded = formatUdsPayload(parsed.payload, 0x22, txHex);
-          dids.push({
-            did: didHex,
-            label: resolveDidLabel(didHex, txHex) ?? `DID ${didHex}`,
-            hex,
-            decoded,
-          });
-          if (didHex === "F190") {
-            const ascii = body
-              .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
-              .join("")
-              .trim();
-            if (ascii.length >= 11) vin = ascii;
+        const rawHex = probe.didMap[didHex.toUpperCase()];
+        if (!rawHex) {
+          if ((SSM4_YYW_FP_DID_KEYS as readonly string[]).includes(didHex.toUpperCase())) {
+            dids.push({
+              did: didHex,
+              label: resolveDidLabel(didHex, activeTxHex) ?? `DID ${didHex}`,
+              hex: "--",
+              decoded: probe.cgwFilterRemoved
+                ? "нет ответа (NRC / не поддерживается)"
+                : "нет ответа — возможно нужен CGW FilterRemove",
+            });
           }
-        } catch {
-          /* DID not supported */
+          continue;
         }
-      }
-
-      try {
-        await this.udsExchange(tx, rx, "1001", 700);
-      } catch {
-        /* ignore */
+        const body = rawHex
+          .trim()
+          .split(/\s+/)
+          .map((h) => Number.parseInt(h, 16));
+        const hex = rawHex;
+        const didNum = Number.parseInt(didHex, 16);
+        const decoded = formatUdsPayload(
+          [((didNum >> 8) & 0xff), didNum & 0xff, ...body],
+          0x22,
+          activeTxHex,
+        );
+        dids.push({
+          did: didHex,
+          label: resolveDidLabel(didHex, activeTxHex) ?? `DID ${didHex}`,
+          hex,
+          decoded,
+        });
+        if (didHex === "F190") {
+          const ascii = body
+            .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ""))
+            .join("")
+            .trim();
+          if (ascii.length >= 11) vin = ascii;
+        }
       }
     } finally {
       try {
@@ -1301,17 +1328,22 @@ export class ObdBleSession {
       vin,
       dids,
       match,
+      steps,
+      cgwFilterRemoved,
+      securityAccessRequired,
     };
   }
 
   /** Read meter + EyeSight variants and compare Option Code / region. */
   async readSubaruMeterEyesightVariantCompare(
     protocol: CanProtocol = "6",
+    securityKeyHex?: string,
   ): Promise<SubaruMeterEyesightCompareResult> {
     const meter = await this.readSubaruMeter12ColumnCode(protocol);
     const eyesight = await this.readSubaruEyesightVariantCode(
       protocol,
       meter.match.actualAppliedModel,
+      securityKeyHex,
     );
     const compare = compareMeterAndEyesightVariants(meter.match, eyesight.match);
     return {
@@ -1324,14 +1356,18 @@ export class ObdBleSession {
   }
 
   /**
-   * Procedure B only: UDS 2E on Combination Meter DID 0250/0251 (sendMetVariByApplied).
-   * Reads current layout first, writes Applied+Option, then re-reads. Never writeCommonArea.
+   * Procedure B only: UDS 2E on Combination Meter DID 0250/0251 or MET-002/009 A0xx (`sendMetVariByApplied`).
+   * Reads current layout first, writes Applied+Option (two-did, full-cgdw, or custom-a0xx backup), then re-reads. Never writeCommonArea.
    */
   async writeSubaruMeter12ColumnCode(
     appliedModel: string,
     optionCode: string,
     protocol: CanProtocol = "6",
     securityKeyHex?: string,
+    options?: {
+      writeMode?: SubaruMeterWriteMode;
+      customA0xxWrites?: SubaruMeterA0xxWriteEntry[];
+    },
   ): Promise<SubaruMeter12ColumnWriteSessionResult> {
     this.requireAdapter();
     await this.waitLeave();
@@ -1346,7 +1382,10 @@ export class ObdBleSession {
       txHex: before.txHex,
       rxHex: before.rxHex,
       securityKeyHex,
+      writeMode: options?.writeMode,
+      customA0xxWrites: options?.customA0xxWrites,
     });
+
 
     let after: SubaruMeter12ColumnRead | null = null;
     try {
@@ -1356,6 +1395,34 @@ export class ObdBleSession {
     }
 
     return { ...write, before, after };
+  }
+
+  /**
+   * SSM4 EyeSight Work Support → Selection of Parameter (`ADA-031.srp`): `2E 35 01..10` from Y-Yw.
+   */
+  async writeSubaruEyesightVariantCode(
+    appliedModel: string,
+    optionCode: string,
+    protocol: CanProtocol = "6",
+    securityKeyHex?: string,
+    options?: {
+      writeMode?: SubaruEyesightWriteMode;
+      customWrites?: SubaruEyesightWriteEntry[];
+      txHex?: string;
+      rxHex?: string;
+    },
+  ): Promise<SubaruEyesightVariantWriteResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед записью EyeSight");
+    await this.ensureUdsProfile(protocol);
+    return writeSubaruEyesightVariantByApplied(
+      this.elm!,
+      appliedModel,
+      optionCode,
+      securityKeyHex,
+      options,
+    );
   }
 
   /**

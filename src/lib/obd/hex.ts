@@ -33,10 +33,13 @@ function responseScore(bytes: number[]): number {
       b === 0x50 ||
       b === 0x54 ||
       b === 0x58 ||
+      b === 0x59 ||
       b === 0x5a ||
       b === 0x61 ||
       b === 0x62 ||
+      b === 0x67 ||
       b === 0x6e ||
+      b === 0x71 ||
       b === 0x7b ||
       b === 0x7f
     ) {
@@ -81,11 +84,35 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
     const pci0 = Number.parseInt(rest[0]!, 16);
     const frameType = (pci0 >> 4) & 0x0f;
     if (frameType === 0 && pci0 > 0 && pci0 <= 7 && rest.length >= 1 + pci0) {
-      ath1Lines.push({
-        pciType: 0,
-        len: pci0,
-        dataHex: rest.slice(1, 1 + pci0).join(" "),
-      });
+      const nextSid = Number.parseInt(rest[1]!, 16);
+      if (
+        nextSid === 0x41 ||
+        nextSid === 0x43 ||
+        nextSid === 0x47 ||
+        nextSid === 0x49 ||
+        nextSid === 0x4a ||
+        nextSid === 0x50 ||
+        nextSid === 0x51 ||
+        nextSid === 0x54 ||
+        nextSid === 0x58 ||
+        nextSid === 0x59 ||
+        nextSid === 0x5a ||
+        nextSid === 0x61 ||
+        nextSid === 0x62 ||
+        nextSid === 0x67 ||
+        nextSid === 0x6e ||
+        nextSid === 0x6f ||
+        nextSid === 0x71 ||
+        nextSid === 0x7b ||
+        nextSid === 0x7e ||
+        nextSid === 0x7f
+      ) {
+        ath1Lines.push({
+          pciType: 0,
+          len: pci0,
+          dataHex: rest.slice(1, 1 + pci0).join(" "),
+        });
+      }
     } else if (frameType === 1 && rest.length >= 3) {
       const pci1 = Number.parseInt(rest[1]!, 16);
       const totalLen = ((pci0 & 0x0f) << 8) | pci1;
@@ -132,6 +159,7 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
   // Case 3: Raw ISO-TP frames without colons (ATH0 + ATS0/ATS1 on non-standard pairs like 620->504)
   // e.g. First Frame "10 4A 61 30 ..." or "104A6130...", Consecutive Frames "21 ...", "22 ...",
   // or Single Frame "07 61 31 5B 0D ..." / "046180..."
+  // Never run Case 3 if the line starts with a 3-nibble CAN header (odd total nibbles like "7E806410C1AF8").
   const rawIsoLines: { pciType: number; len?: number; seq?: number; dataHex: string }[] = [];
   for (const line of lines) {
     const compact = line.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
@@ -142,6 +170,7 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
     if (frameType === 0 && pci0 >= 2 && pci0 <= 7 && frameBytes.length >= 1 + pci0) {
       const nextSid = frameBytes[1]!;
       if (
+        nextSid === 0x41 ||
         nextSid === 0x43 ||
         nextSid === 0x47 ||
         nextSid === 0x4a ||
@@ -152,6 +181,7 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
         nextSid === 0x5a ||
         nextSid === 0x61 ||
         nextSid === 0x62 ||
+        nextSid === 0x67 ||
         nextSid === 0x6e ||
         nextSid === 0x71 ||
         nextSid === 0x7b ||
@@ -176,11 +206,16 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
           nextSid === 0x47 ||
           nextSid === 0x49 ||
           nextSid === 0x4a ||
+          nextSid === 0x50 ||
           nextSid === 0x58 ||
           nextSid === 0x59 ||
           nextSid === 0x5a ||
           nextSid === 0x61 ||
-          nextSid === 0x62)
+          nextSid === 0x62 ||
+          nextSid === 0x67 ||
+          nextSid === 0x6e ||
+          nextSid === 0x6f ||
+          nextSid === 0x71)
       ) {
         rawIsoLines.push({
           pciType: 1,
@@ -219,9 +254,18 @@ export function stripElmMultiline(raw: string): { cleaned: string; declaredLengt
  */
 export function extractHexTokens(text: string): number[] {
   const { cleaned } = stripElmMultiline(text);
+  const spaceTokens = cleaned.trim().split(/\s+/).filter(Boolean);
   const hex = cleaned.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
   if (hex.length < 2) return [];
   const aligned = bytesFromHex(hex, 0);
+  // Already byte-aligned without 3-nibble CAN header: never shift by 1 nibble!
+  if (
+    hex.length % 2 === 0 &&
+    spaceTokens.length >= 2 &&
+    spaceTokens.every((t) => /^[0-9A-Fa-f]{2}$/.test(t))
+  ) {
+    return aligned;
+  }
   const shifted = bytesFromHex(hex, 1);
   return responseScore(shifted) > responseScore(aligned) ? shifted : aligned;
 }
