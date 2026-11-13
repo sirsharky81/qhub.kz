@@ -183,6 +183,30 @@ describe("subaru-meter-variant", () => {
     ]);
   });
 
+  it("does not report success when only one MET-002 variant register is confirmed", async () => {
+    const elm = scriptedElm({
+      "2E10C2FF": "6E 10 C2",
+      "2EA00203": "6E A0 02",
+      "2EA01100": "7F 2E 22",
+      "2E10C200": "6E 10 C2",
+    });
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "0250", hex: "01 02 03 04" },
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+    });
+    expect(result.success).toBe(false);
+    expect(result.writtenDid).toBeNull();
+    expect(result.writtenHex).toBeNull();
+    expect(result.steps.join(" ")).toMatch(/частичная запись A002\/A011/);
+  });
+
   it("unlocks 27 03 -> 27 04 using FHIUtilityCtrlNK GetSecurityAccessSelKey(idx=11 LE, ctrl-mode1) after passcode 0205 when 2E 0250 returns NRC 31 or 2E 10C2 FF returns NRC 33", async () => {
     const seed = [0x12, 0x34, 0x56, 0x78];
     const expectedKey = computeSubaruSecurityKey4Byte(

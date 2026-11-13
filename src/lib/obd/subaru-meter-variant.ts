@@ -1283,10 +1283,14 @@ export async function writeSubaruMeter12ColumnCode(
             steps,
             `${txHex}→${rxHex} 2E 10C2 00 (закрытие вариантной записи MET-002 B26 C01)`,
           );
-          if (pA002.kind === "positive" || pA011.kind === "positive") {
+          if (pA002.kind === "positive" && pA011.kind === "positive") {
             writtenDid = "A002/A011";
             writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
             steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
+          } else if (pA002.kind === "positive" || pA011.kind === "positive") {
+            steps.push(
+              `${txHex}→${rxHex}: частичная запись A002/A011 — успех не подтверждён, проверьте конфигурацию и повторите процедуру.`,
+            );
           } else if (
             (pA002.kind === "negative" && pA002.nrc === 0x33) ||
             (pA011.kind === "negative" && pA011.nrc === 0x33)
