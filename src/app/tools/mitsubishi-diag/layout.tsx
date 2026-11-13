@@ -5,7 +5,7 @@ import { ObdScrollShell } from "../obd-diag/ObdScrollShell";
 
 export const dynamic = "force-dynamic";
 
-const ICON_BASE = "/tools/obd-diag";
+const ICON_BASE = "/tools/mitsubishi-diag";
 
 export const metadata: Metadata = {
   manifest: `${ICON_BASE}/manifest.json`,
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ffffff",
+  themeColor: "#059669",
   interactiveWidget: "resizes-visual",
 };
 
