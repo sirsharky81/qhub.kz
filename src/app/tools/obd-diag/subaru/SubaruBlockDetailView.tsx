@@ -14,7 +14,9 @@ import {
   formatSubaruUserValue,
   getSubaruBlockProfile,
   getSubaruBlockScanStatus,
+  getSubaruCandidateCanTargets,
   isSubaruTxSafeToClear,
+  type SubaruCanTargetPair,
   type SubaruFunctionTabId,
 } from "@/lib/obd/subaru-ssm4-modules";
 import { LiveMetricCards } from "../LiveMetricCards";
@@ -74,30 +76,21 @@ export function SubaruBlockDetailView({
   // Data Monitor state
   const [customListFilter, setCustomListFilter] = useState<string>("ALL");
   const [sigQuery, setSigQuery] = useState("");
-  const [pickedIds, setPickedIds] = useState<string[]>([]);
+  const [pickedIds, setPickedIds] = useState<string[]>(() =>
+    profile.signals.slice(0, 8).map((s) => s.id),
+  );
   const [liveActive, setLiveActive] = useState(false);
+  const [liveStatusNote, setLiveStatusNote] = useState<string | null>(null);
   const [liveValues, setLiveValues] = useState<Record<string, { text: string; numeric: number | null }>>({});
+  const [liveMinMax, setLiveMinMax] = useState<Record<string, { min: number; max: number }>>({});
   const [csvSamples, setCsvSamples] = useState<Array<{ t: number; values: Record<string, number | null> }>>([]);
   const liveStopRef = useRef(false);
-  const minMaxRef = useRef<Map<string, { min: number; max: number }>>(new Map());
-  const [minMaxTick, setMinMaxTick] = useState(0);
 
   // Customize state
   const [customizeValues, setCustomizeValues] = useState<Record<string, string>>({});
 
   // ECU Info state
   const [ecuInfoRows, setEcuInfoRows] = useState<EcuInfoRow[]>([]);
-
-  useEffect(() => {
-    setSelectedFn(null);
-    setActiveTab("dtc");
-    setConfirmClear(false);
-    liveStopRef.current = true;
-    setLiveActive(false);
-    setPickedIds(profile.signals.slice(0, 8).map((s) => s.id));
-    setEcuInfoRows([]);
-    setCustomizeValues({});
-  }, [system.id, profile.signals]);
 
   useEffect(() => {
     return () => {
@@ -160,19 +153,49 @@ export function SubaruBlockDetailView({
     if (!ready || pickedSignals.length === 0) return;
     liveStopRef.current = false;
     setLiveActive(true);
+    setLiveStatusNote(null);
+    setLiveMinMax({});
     setError(null);
-    minMaxRef.current.clear();
+    const localMinMax = new Map<string, { min: number; max: number }>();
 
-    try {
+    const candidates = getSubaruCandidateCanTargets(system.txHex, system.rxHex);
+    const openedSessions = new Map<string, SubaruCanTargetPair>();
+    const ensureSessionOpen = async (target: SubaruCanTargetPair) => {
+      const key = `${target.txHex}->${target.rxHex}`;
+      if (openedSessions.has(key)) return;
+      openedSessions.set(key, target);
       try {
-        await session.sendUds("6", system.txHex, system.rxHex, "10 03", false);
+        await session.sendUds("6", target.txHex, target.rxHex, "10 03", false);
       } catch {
         /* some ECUs don't require 10 03 for Mode 01 / 22 */
       }
+    };
+
+    try {
+      if (system.txHex.trim().toUpperCase() === "787") {
+        await session.prepareSubaruGateway();
+      }
+
+      let preferredTarget = candidates[0]!;
+      const resolvedTargetByReq = new Map<string, SubaruCanTargetPair | null>();
+      let passCount = 0;
 
       while (!liveStopRef.current) {
+        passCount++;
         const nextValues: Record<string, { text: string; numeric: number | null }> = {};
         const numericRow: Record<string, number | null> = {};
+        let positiveCount = 0;
+
+        if (passCount > 1) {
+          for (const activeTarget of openedSessions.values()) {
+            if (liveStopRef.current) break;
+            try {
+              await session.sendUds("6", activeTarget.txHex, activeTarget.rxHex, "3E 00", false);
+            } catch {
+              /* ignore keepalive errors */
+            }
+          }
+        }
 
         // Group identical requests (e.g. same DID/PID) to avoid duplicate CAN traffic
         const byReq = new Map<string, { reqSpaced: string; signals: Ssm4SignalDef[] }>();
@@ -187,35 +210,68 @@ export function SubaruBlockDetailView({
           }
         }
 
-        for (const group of byReq.values()) {
+        for (const [cleanReq, group] of byReq.entries()) {
           if (liveStopRef.current) break;
-          try {
-            const { parsed } = await session.sendUds(
-              "6",
-              system.txHex,
-              system.rxHex,
-              group.reqSpaced,
-              false,
-            );
+          const cachedTarget = resolvedTargetByReq.get(cleanReq);
+          // Skip requests that were unsupported on all candidate CAN addresses, re-probing every 10th pass
+          if (cachedTarget === null && passCount > 1 && passCount % 10 !== 0) {
             for (const sig of group.signals) {
-              const decoded =
-                parsed.kind === "positive"
-                  ? decodeSsm4SignalPayload(sig, parsed.payload)
-                  : null;
+              nextValues[sig.id] = { text: "—", numeric: null };
+              numericRow[sig.id] = null;
+            }
+            continue;
+          }
+
+          const tryOrder: SubaruCanTargetPair[] =
+            cachedTarget != null
+              ? [cachedTarget, ...candidates.filter((c) => c.txHex !== cachedTarget.txHex)]
+              : [preferredTarget, ...candidates.filter((c) => c.txHex !== preferredTarget.txHex)];
+
+          let matchedParsed: Awaited<ReturnType<typeof session.sendUds>>["parsed"] | null = null;
+          let matchedTarget: SubaruCanTargetPair | null = null;
+
+          for (const target of tryOrder) {
+            if (liveStopRef.current) break;
+            await ensureSessionOpen(target);
+            try {
+              const { parsed } = await session.sendUds(
+                "6",
+                target.txHex,
+                target.rxHex,
+                group.reqSpaced,
+                false,
+              );
+              if (parsed.kind === "positive") {
+                matchedParsed = parsed;
+                matchedTarget = target;
+                break;
+              }
+            } catch {
+              /* try next candidate CAN target */
+            }
+          }
+
+          if (matchedParsed && matchedTarget) {
+            resolvedTargetByReq.set(cleanReq, matchedTarget);
+            preferredTarget = matchedTarget;
+            for (const sig of group.signals) {
+              const decoded = decodeSsm4SignalPayload(sig, matchedParsed.payload);
+              if (decoded) positiveCount++;
               nextValues[sig.id] = {
                 text: decoded?.text ?? "—",
                 numeric: decoded?.numeric ?? null,
               };
               numericRow[sig.id] = decoded?.numeric ?? null;
               if (decoded?.numeric != null && !Number.isNaN(decoded.numeric)) {
-                const prev = minMaxRef.current.get(sig.id);
-                minMaxRef.current.set(sig.id, {
+                const prev = localMinMax.get(sig.id);
+                localMinMax.set(sig.id, {
                   min: prev ? Math.min(prev.min, decoded.numeric) : decoded.numeric,
                   max: prev ? Math.max(prev.max, decoded.numeric) : decoded.numeric,
                 });
               }
             }
-          } catch {
+          } else {
+            resolvedTargetByReq.set(cleanReq, null);
             for (const sig of group.signals) {
               nextValues[sig.id] = { text: "—", numeric: null };
               numericRow[sig.id] = null;
@@ -224,7 +280,12 @@ export function SubaruBlockDetailView({
         }
 
         if (liveStopRef.current) break;
-        setMinMaxTick((t) => t + 1);
+        setLiveStatusNote(
+          positiveCount === 0
+            ? "Блок не ответил на выбранные параметры (проверьте зажигание IG ON и условия работы)."
+            : null,
+        );
+        setLiveMinMax(Object.fromEntries(localMinMax.entries()));
         setLiveValues(nextValues);
         setCsvSamples((prev) => [...prev, { t: Date.now(), values: numericRow }].slice(-120));
         await new Promise((resolve) => setTimeout(resolve, 450));
@@ -234,6 +295,13 @@ export function SubaruBlockDetailView({
     } finally {
       liveStopRef.current = true;
       setLiveActive(false);
+      for (const activeTarget of openedSessions.values()) {
+        try {
+          await session.sendUds("6", activeTarget.txHex, activeTarget.rxHex, "10 01", false);
+        } catch {
+          /* ignore */
+        }
+      }
     }
   };
 
@@ -264,11 +332,22 @@ export function SubaruBlockDetailView({
     if (!ready) return;
     setBusy(true);
     setError(null);
+    const candidates = getSubaruCandidateCanTargets(system.txHex, system.rxHex);
+    const opened = new Map<string, SubaruCanTargetPair>();
     try {
-      try {
-        await session.sendUds("6", system.txHex, system.rxHex, "10 03", false);
-      } catch {
-        /* ignore */
+      if (system.txHex.trim().toUpperCase() === "787") {
+        await session.prepareSubaruGateway();
+      }
+      let preferred = candidates[0]!;
+      for (const c of candidates) {
+        try {
+          await session.sendUds("6", c.txHex, c.rxHex, "10 03", false);
+          opened.set(`${c.txHex}->${c.rxHex}`, c);
+          preferred = c;
+          break;
+        } catch {
+          /* try next candidate */
+        }
       }
 
       const probes: Array<{ label: string; cmd: string; sid: number; didHex: string }> = [
@@ -290,34 +369,48 @@ export function SubaruBlockDetailView({
 
       const out: EcuInfoRow[] = [];
       for (const p of probes) {
-        try {
-          const { parsed } = await session.sendUds("6", system.txHex, system.rxHex, p.cmd, false);
-          if (parsed.kind === "positive") {
-            out.push({
-              label: p.label,
-              didHex: p.didHex,
-              value: formatSubaruUserValue(parsed.payload, p.sid, system.txHex),
-            });
-          } else {
-            out.push({
-              label: p.label,
-              didHex: p.didHex,
-              value: parsed.kind === "negative" ? "Не поддерживается" : "Нет ответа",
-            });
+        const order = [preferred, ...candidates.filter((c) => c.txHex !== preferred.txHex)];
+        let resolvedValue: string | null = null;
+        let sawNegative = false;
+        for (const target of order) {
+          const key = `${target.txHex}->${target.rxHex}`;
+          if (!opened.has(key)) {
+            opened.set(key, target);
+            try {
+              await session.sendUds("6", target.txHex, target.rxHex, "10 03", false);
+            } catch {
+              /* ignore */
+            }
           }
-        } catch {
-          out.push({ label: p.label, didHex: p.didHex, value: "Нет ответа" });
+          try {
+            const { parsed } = await session.sendUds("6", target.txHex, target.rxHex, p.cmd, false);
+            if (parsed.kind === "positive") {
+              preferred = target;
+              resolvedValue = formatSubaruUserValue(parsed.payload, p.sid, target.txHex);
+              break;
+            }
+            if (parsed.kind === "negative") sawNegative = true;
+          } catch {
+            /* try next target */
+          }
         }
-      }
-      try {
-        await session.sendUds("6", system.txHex, system.rxHex, "10 01", false);
-      } catch {
-        /* ignore */
+        out.push({
+          label: p.label,
+          didHex: p.didHex,
+          value: resolvedValue ?? (sawNegative ? "Не поддерживается" : "Нет ответа"),
+        });
       }
       setEcuInfoRows(out);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка чтения ECU Info");
     } finally {
+      for (const target of opened.values()) {
+        try {
+          await session.sendUds("6", target.txHex, target.rxHex, "10 01", false);
+        } catch {
+          /* ignore */
+        }
+      }
       setBusy(false);
     }
   };
@@ -326,45 +419,73 @@ export function SubaruBlockDetailView({
     if (!ready || profile.customizeItems.length === 0) return;
     setBusy(true);
     setError(null);
+    const candidates = getSubaruCandidateCanTargets(system.txHex, system.rxHex);
+    const opened = new Map<string, SubaruCanTargetPair>();
     try {
-      try {
-        await session.sendUds("6", system.txHex, system.rxHex, "10 03", false);
-      } catch {
-        /* ignore */
+      if (system.txHex.trim().toUpperCase() === "787") {
+        await session.prepareSubaruGateway();
+      }
+      let preferred = candidates[0]!;
+      for (const c of candidates) {
+        try {
+          await session.sendUds("6", c.txHex, c.rxHex, "10 03", false);
+          opened.set(`${c.txHex}->${c.rxHex}`, c);
+          preferred = c;
+          break;
+        } catch {
+          /* try next candidate */
+        }
       }
 
       const uniqueDids = Array.from(new Set(profile.customizeItems.map((i) => i.didHex.toUpperCase())));
       const didResponses: Record<string, string> = {};
       for (const did of uniqueDids) {
-        try {
-          const { parsed } = await session.sendUds(
-            "6",
-            system.txHex,
-            system.rxHex,
-            `22 ${did.slice(0, 2)} ${did.slice(2)}`,
-            false,
-          );
-          didResponses[did] =
-            parsed.kind === "positive"
-              ? formatSubaruUserValue(parsed.payload, 0x22, system.txHex)
-              : "Нет ответа / отказ";
-        } catch {
-          didResponses[did] = "Ошибка чтения";
+        const order = [preferred, ...candidates.filter((c) => c.txHex !== preferred.txHex)];
+        let text = "Нет ответа / отказ";
+        for (const target of order) {
+          const key = `${target.txHex}->${target.rxHex}`;
+          if (!opened.has(key)) {
+            opened.set(key, target);
+            try {
+              await session.sendUds("6", target.txHex, target.rxHex, "10 03", false);
+            } catch {
+              /* ignore */
+            }
+          }
+          try {
+            const { parsed } = await session.sendUds(
+              "6",
+              target.txHex,
+              target.rxHex,
+              `22 ${did.slice(0, 2)} ${did.slice(2)}`,
+              false,
+            );
+            if (parsed.kind === "positive") {
+              preferred = target;
+              text = formatSubaruUserValue(parsed.payload, 0x22, target.txHex);
+              break;
+            }
+          } catch {
+            text = "Ошибка чтения";
+          }
         }
+        didResponses[did] = text;
       }
       const next: Record<string, string> = {};
       for (const item of profile.customizeItems) {
         next[item.id] = didResponses[item.didHex.toUpperCase()] ?? "—";
       }
       setCustomizeValues(next);
-      try {
-        await session.sendUds("6", system.txHex, system.rxHex, "10 01", false);
-      } catch {
-        /* ignore */
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка чтения Customize");
     } finally {
+      for (const target of opened.values()) {
+        try {
+          await session.sendUds("6", target.txHex, target.rxHex, "10 01", false);
+        } catch {
+          /* ignore */
+        }
+      }
       setBusy(false);
     }
   };
@@ -630,11 +751,16 @@ export function SubaruBlockDetailView({
             </div>
           </div>
 
+          {liveStatusNote && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {liveStatusNote}
+            </div>
+          )}
+
           {pickedSignals.length > 0 && (
             <LiveMetricCards
               items={pickedSignals.map((sig) => {
-                void minMaxTick;
-                const mm = minMaxRef.current.get(sig.id);
+                const mm = liveMinMax[sig.id];
                 return {
                   id: sig.id,
                   label: sig.nameRu || sig.nameEn,

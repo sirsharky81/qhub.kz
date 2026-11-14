@@ -2014,6 +2014,73 @@ export function getAllSubaruBlockProfiles(): SubaruBlockProfile[] {
   return SSM4_FULL_SYSTEMS.map(getSubaruBlockProfile);
 }
 
+export interface SubaruCanTargetPair {
+  txHex: string;
+  rxHex: string;
+}
+
+/**
+ * Resolves ordered candidate CAN (tx, rx) pairs for a Subaru logical system.
+ * On 2022–2026 SGP vehicles, Lineartronic CVT UDS (0x22 / 31 01) lives on 7A3→7AB
+ * while older models use 7E1→7E9; legacy Meter/BIU/EyeSight/Keyless also have alternates.
+ */
+export function getSubaruCandidateCanTargets(
+  txHex: string,
+  rxHex: string,
+): SubaruCanTargetPair[] {
+  const cleanTx = txHex.trim().toUpperCase();
+  const cleanRx = rxHex.trim().toUpperCase();
+  const primary: SubaruCanTargetPair = { txHex: cleanTx, rxHex: cleanRx };
+  if (cleanTx === "7E1") {
+    return [{ txHex: "7A3", rxHex: "7AB" }, primary];
+  }
+  if (cleanTx === "783") {
+    return [primary, { txHex: "7C0", rxHex: "7C8" }];
+  }
+  if (cleanTx === "752") {
+    return [primary, { txHex: "740", rxHex: "748" }];
+  }
+  if (cleanTx === "787") {
+    return [primary, { txHex: "784", rxHex: "78C" }];
+  }
+  if (cleanTx === "750") {
+    return [primary, { txHex: "7B4", rxHex: "7BC" }, { txHex: "751", rxHex: "759" }];
+  }
+  return [primary];
+}
+
+/**
+ * Picks the most informative DTC scan report for a logical SSM4 system across its
+ * primary and alternate physical CAN IDs (e.g. 7E1 + 7A3 for Transmission, 750 + 7B4 + 751 for Keyless).
+ */
+export function pickSubaruSystemReport(
+  system: Pick<Ssm4SystemEntry, "txHex">,
+  reportsByTx: Record<string, ModuleDtcReport>,
+): ModuleDtcReport | undefined {
+  const tx = system.txHex.trim().toUpperCase();
+  const keys =
+    tx === "7E1"
+      ? ["7E1", "7A3"]
+      : tx === "7E0"
+        ? ["7E0", "7A2"]
+        : tx === "750"
+          ? ["750", "7B4", "751"]
+          : [tx];
+
+  const candidates = keys
+    .map((k) => reportsByTx[k])
+    .filter((r): r is ModuleDtcReport => Boolean(r));
+  if (candidates.length === 0) return undefined;
+
+  return candidates.sort((a, b) => {
+    const rankDiff =
+      STATUS_SORT_RANK[getSubaruBlockScanStatus(a)] -
+      STATUS_SORT_RANK[getSubaruBlockScanStatus(b)];
+    if (rankDiff !== 0) return rankDiff;
+    return b.dtcs.length - a.dtcs.length;
+  })[0];
+}
+
 /**
  * Normalizes DTC clearability for Subaru blocks matching `obd-session.ts` `clearModuleDtcsSafe`:
  * EPS/SAS (746) & EyeSight (787) are strictly read-only to protect calibrations.

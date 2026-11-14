@@ -12,6 +12,7 @@ import {
   classifySubaruDtcStatus,
   decodeSubaruVinInfo,
   isSubaruTxSafeToClear,
+  pickSubaruSystemReport,
 } from "@/lib/obd/subaru-ssm4-modules";
 import { parseUdsResponse } from "@/lib/obd/uds";
 import { SubaruAllFaultsView } from "./subaru/SubaruAllFaultsView";
@@ -517,13 +518,14 @@ export function SubaruSsmPanel({
       {mainTab === "blocks" && (
         selectedSystem ? (
           <SubaruBlockDetailView
+            key={selectedSystem.id}
             system={selectedSystem}
             session={session}
             ready={ready}
             busy={busy}
             setBusy={setBusy}
             setError={setError}
-            report={reportsByTx[selectedSystem.txHex.toUpperCase()]}
+            report={pickSubaruSystemReport(selectedSystem, reportsByTx)}
             onScanSingle={(tx, rx, title) => void handleScanSingle(tx, rx, title)}
             onClearSingle={(tx, rx, title) => void handleClearSingle(tx, rx, title)}
             onBackToList={() => setSelectedSystemId(null)}

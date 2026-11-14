@@ -10,7 +10,9 @@ import {
   getAllSubaruBlockProfiles,
   getSubaruBlockProfile,
   getSubaruBlockScanStatus,
+  getSubaruCandidateCanTargets,
   isSubaruTxSafeToClear,
+  pickSubaruSystemReport,
   sortSubaruScanReports,
 } from "../subaru-ssm4-modules";
 
@@ -141,7 +143,55 @@ describe("subaru-ssm4-modules", () => {
     }
 
     expect(formatSubaruUserValue([0x10, 0x17, 0x55], 0x22, "7E1")).toBe("35 °C");
+    expect(formatSubaruUserValue([0x10, 0xd2, 0x5f], 0x22, "7A3")).toBe("45 °C");
+    expect(formatSubaruUserValue([0x11, 0x46, 0x03, 0x20], 0x22, "7A3")).toBe("800 об/мин");
+    expect(formatSubaruUserValue([0x12, 0xb5, 0x01, 0x90], 0x22, "7A3")).toBe("400 мА");
     expect(formatSubaruUserValue([0x10, 0x1b, 0x30, 0x34], 0x22, "783")).toBe("12.34 В");
     expect(formatSubaruUserValue([0x10, 0x41, 0xff, 0xe2], 0x22, "746")).toBe("-3.0° (вправо)");
+  });
+
+  it("resolves SGP alternate CAN targets (7E1 -> 7A3/7E1) and picks best CVT report", () => {
+    expect(getSubaruCandidateCanTargets("7E1", "7E9")).toEqual([
+      { txHex: "7A3", rxHex: "7AB" },
+      { txHex: "7E1", rxHex: "7E9" },
+    ]);
+    expect(getSubaruCandidateCanTargets("750", "758").map((t) => t.txHex)).toEqual([
+      "750",
+      "7B4",
+      "751",
+    ]);
+
+    const picked = pickSubaruSystemReport(
+      { txHex: "7E1" },
+      {
+        "7E1": {
+          txHex: "7E1",
+          rxHex: "7E9",
+          title: "TM",
+          safetyCritical: false,
+          canSafeClear: true,
+          responded: true,
+          systemName: null,
+          partNumber: null,
+          diagVersion: null,
+          dtcs: [],
+          rawStatus: "",
+        },
+        "7A3": {
+          txHex: "7A3",
+          rxHex: "7AB",
+          title: "TM2",
+          safetyCritical: false,
+          canSafeClear: true,
+          responded: true,
+          systemName: null,
+          partNumber: null,
+          diagVersion: null,
+          dtcs: [{ code: "P0841", active: false, description: "CVT press", statusByte: 0x28 }],
+          rawStatus: "",
+        },
+      },
+    );
+    expect(picked?.txHex).toBe("7A3");
   });
 });

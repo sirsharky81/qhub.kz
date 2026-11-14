@@ -6,6 +6,7 @@ import type { Ssm4Group } from "@/lib/obd/subaru-ssm4-catalog";
 import {
   getAllSubaruBlockProfiles,
   getSubaruBlockScanStatus,
+  pickSubaruSystemReport,
   type SubaruBlockProfile,
   type SubaruBlockScanStatus,
 } from "@/lib/obd/subaru-ssm4-modules";
@@ -94,7 +95,7 @@ export function SubaruBlockListView({ reportsByTx, onSelectBlock }: Props) {
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map((profile: SubaruBlockProfile) => {
           const { system, activeTests, workSupport, customizeItems, signals } = profile;
-          const report = reportsByTx[system.txHex.toUpperCase()];
+          const report = pickSubaruSystemReport(system, reportsByTx);
           const status = getSubaruBlockScanStatus(report);
           const badge = STATUS_DOT[status];
 

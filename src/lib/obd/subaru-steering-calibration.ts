@@ -3,6 +3,7 @@ import { extractHexTokens } from "./hex";
 import type { SasCalibrationResult } from "./mitsubishi-modules";
 import { formatSubaruUserValue } from "./subaru-decode";
 import { unlockSubaruCgwFilterRemove, unlockSubaruMeterSecurityAccess } from "./subaru-meter-variant";
+import { getSubaruCandidateCanTargets } from "./subaru-ssm4-modules";
 import { parseUdsResponse } from "./uds";
 
 const EPS_TX = 0x746;
@@ -557,8 +558,7 @@ export async function executeSubaruUdsProcedure(
 ): Promise<SubaruUdsProcedureResult> {
   const cleanTx = options.txHex.trim().toUpperCase();
   const cleanRx = options.rxHex.trim().toUpperCase();
-  const tx = Number.parseInt(cleanTx, 16);
-  const rx = Number.parseInt(cleanRx, 16);
+  const targets = getSubaruCandidateCanTargets(cleanTx, cleanRx);
   const steps: string[] = [];
   const decodedSummaries: string[] = [];
 
@@ -568,7 +568,7 @@ export async function executeSubaruUdsProcedure(
     } catch {
       /* gateway filter removal is optional on older platforms */
     }
-  } else if (tx !== 0x750) {
+  } else if (cleanTx !== "750") {
     try {
       await openSubaruModuleSession(elm, 0x750, 0x758);
       steps.push("750→758 (CGW): Расширенная сессия шлюза открыта (10 03)");
@@ -577,87 +577,102 @@ export async function executeSubaruUdsProcedure(
     }
   }
 
-  await openSubaruModuleSession(elm, tx, rx);
-  steps.push(`${cleanTx}→${cleanRx}: Открыта расширенная диагностическая сессия (10 03)`);
-
   let ok = false;
-  let saTried = false;
   const stopOnWrite = options.stopOnWriteSuccess ?? true;
 
-  try {
-    for (const rawPayload of options.payloads) {
-      const payloadHex = rawPayload.replace(/\s+/g, "").toUpperCase();
-      const label = payloadHex.replace(/(.{2})/g, "$1 ").trim();
-      const sid = Number.parseInt(payloadHex.slice(0, 2), 16);
-      try {
+  for (const target of targets) {
+    const tTx = target.txHex;
+    const tRx = target.rxHex;
+    const tx = Number.parseInt(tTx, 16);
+    const rx = Number.parseInt(tRx, 16);
+    try {
+      await openSubaruModuleSession(elm, tx, rx);
+      steps.push(`${tTx}→${tRx}: Открыта расширенная диагностическая сессия (10 03)`);
+    } catch (e) {
+      steps.push(
+        `${tTx}→${tRx}: нет ответа на 10 03 (${e instanceof Error ? e.message : String(e)})`,
+      );
+      continue;
+    }
+
+    let saTried = false;
+    try {
+      for (const rawPayload of options.payloads) {
+        const payloadHex = rawPayload.replace(/\s+/g, "").toUpperCase();
+        const label = payloadHex.replace(/(.{2})/g, "$1 ").trim();
+        const sid = Number.parseInt(payloadHex.slice(0, 2), 16);
         try {
-          await elm.sendPayload("3E00", 1_000);
-        } catch {
-          /* ignore */
-        }
-        let raw = await elm.sendPayload(payloadHex, 8_000);
-        let cleanRaw = raw.replace(/>/g, "").trim();
-        let parsed = parseUdsResponse(raw, sid);
-
-        if (
-          parsed.kind === "negative" &&
-          parsed.nrc === 0x33 &&
-          !saTried &&
-          (options.autoSecurityAccess ?? true)
-        ) {
-          saTried = true;
-          steps.push(`${cleanTx}→${cleanRx}: Получен NRC 33 (требуется SecurityAccess 0x27) — пробуем разблокировку…`);
-          const sa = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
-            preferNonMeterAes: cleanTx !== "783",
-            preferEcuKinds: options.preferEcuKinds,
-            maxAesAttempts: 12,
-          });
-          if (sa.unlocked) {
-            await openSubaruModuleSession(elm, tx, rx);
-            raw = await elm.sendPayload(payloadHex, 8_000);
-            cleanRaw = raw.replace(/>/g, "").trim();
-            parsed = parseUdsResponse(raw, sid);
+          try {
+            await elm.sendPayload("3E00", 1_000);
+          } catch {
+            /* ignore */
           }
-        }
+          let raw = await elm.sendPayload(payloadHex, 8_000);
+          let cleanRaw = raw.replace(/>/g, "").trim();
+          let parsed = parseUdsResponse(raw, sid);
 
-        steps.push(`${cleanTx}→${cleanRx}: Запрос ${label} → ${cleanRaw || "нет ответа"}`);
-        if (parsed.kind === "positive") {
-          const summary = formatSubaruUserValue(parsed.payload, sid, cleanTx);
-          if (summary) decodedSummaries.push(summary);
-        }
-
-        if (actionPayloadResponseOk(raw, payloadHex)) {
-          ok = true;
-          if (sid === 0x31 && payloadHex.startsWith("3101") && payloadHex.length >= 8) {
-            const rid = payloadHex.slice(4, 8);
-            try {
-              const rawPoll = await elm.sendPayload(`3103${rid}`, 5_000);
-              const cleanPoll = rawPoll.replace(/>/g, "").trim();
-              steps.push(
-                `${cleanTx}→${cleanRx}: Опрос результата 31 03 ${rid.slice(0, 2)} ${rid.slice(2, 4)} → ${cleanPoll || "нет ответа"}`,
-              );
-              const pollParsed = parseUdsResponse(rawPoll, 0x31);
-              if (pollParsed.kind === "positive") {
-                const pollSummary = formatSubaruUserValue(pollParsed.payload, 0x31, cleanTx);
-                if (pollSummary) decodedSummaries.push(pollSummary);
-              }
-            } catch {
-              /* optional on some ECUs */
+          if (
+            parsed.kind === "negative" &&
+            parsed.nrc === 0x33 &&
+            !saTried &&
+            (options.autoSecurityAccess ?? true)
+          ) {
+            saTried = true;
+            steps.push(`${tTx}→${tRx}: Получен NRC 33 (требуется SecurityAccess 0x27) — пробуем разблокировку…`);
+            const sa = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+              preferNonMeterAes: tTx !== "783",
+              preferEcuKinds: options.preferEcuKinds,
+              maxAesAttempts: 12,
+            });
+            if (sa.unlocked) {
+              await openSubaruModuleSession(elm, tx, rx);
+              raw = await elm.sendPayload(payloadHex, 8_000);
+              cleanRaw = raw.replace(/>/g, "").trim();
+              parsed = parseUdsResponse(raw, sid);
             }
           }
-          if (stopOnWrite && (sid === 0x31 || sid === 0x2f || sid === 0x14 || sid === 0x04)) {
-            break;
+
+          steps.push(`${tTx}→${tRx}: Запрос ${label} → ${cleanRaw || "нет ответа"}`);
+          if (parsed.kind === "positive") {
+            const summary = formatSubaruUserValue(parsed.payload, sid, tTx);
+            if (summary) decodedSummaries.push(summary);
           }
+
+          if (actionPayloadResponseOk(raw, payloadHex)) {
+            ok = true;
+            if (sid === 0x31 && payloadHex.startsWith("3101") && payloadHex.length >= 8) {
+              const rid = payloadHex.slice(4, 8);
+              try {
+                const rawPoll = await elm.sendPayload(`3103${rid}`, 5_000);
+                const cleanPoll = rawPoll.replace(/>/g, "").trim();
+                steps.push(
+                  `${tTx}→${tRx}: Опрос результата 31 03 ${rid.slice(0, 2)} ${rid.slice(2, 4)} → ${cleanPoll || "нет ответа"}`,
+                );
+                const pollParsed = parseUdsResponse(rawPoll, 0x31);
+                if (pollParsed.kind === "positive") {
+                  const pollSummary = formatSubaruUserValue(pollParsed.payload, 0x31, tTx);
+                  if (pollSummary) decodedSummaries.push(pollSummary);
+                }
+              } catch {
+                /* optional on some ECUs */
+              }
+            }
+            if (stopOnWrite && (sid === 0x31 || sid === 0x2f || sid === 0x14 || sid === 0x04)) {
+              break;
+            }
+          }
+        } catch (e) {
+          steps.push(
+            `${tTx}→${tRx}: Запрос ${label} → ошибка: ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
-      } catch (e) {
-        steps.push(
-          `${cleanTx}→${cleanRx}: Запрос ${label} → ошибка: ${e instanceof Error ? e.message : String(e)}`,
-        );
       }
+    } finally {
+      await closeSubaruModuleSession(elm);
+      steps.push(`${tTx}→${tRx}: Сессия завершена (10 01)`);
     }
-  } finally {
-    await closeSubaruModuleSession(elm);
-    steps.push(`${cleanTx}→${cleanRx}: Сессия завершена (10 01)`);
+
+    if (ok) break;
   }
 
   return {

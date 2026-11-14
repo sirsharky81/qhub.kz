@@ -354,11 +354,11 @@ export function SubaruAllFaultsView({
                         : "border-gray-200 bg-white"
               }`}
             >
-              <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span
-                      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.cls}`}
+                      className={`inline-flex shrink-0 items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.cls}`}
                     >
                       {badge.label}
                     </span>
@@ -384,7 +384,7 @@ export function SubaruAllFaultsView({
                 </div>
 
                 {/* Per-block actions */}
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5 sm:shrink-0">
                   <button
                     type="button"
                     disabled={!ready || busy || scanning}

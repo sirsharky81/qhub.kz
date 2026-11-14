@@ -62,6 +62,7 @@ import {
 } from "./subaru-eyesight-variant";
 import type { SubaruEyesightWriteEntry } from "./subaru-eyesight-backup";
 import {
+  unlockSubaruCgwFilterRemove,
   writeSubaruMeter12ColumnCode as executeSubaruMeter12ColumnWrite,
   type SubaruMeter12ColumnWriteResult,
   type SubaruMeterWriteMode,
@@ -73,7 +74,6 @@ import {
   type SubaruResProbeResult,
   type SubaruResRegistrationOptions,
   type SubaruResRegistrationResult,
-  type SubaruResSystemType,
 } from "./subaru-res-cm-registration";
 import { remedyForDtcCode } from "./dtc-remedies";
 import {
@@ -506,6 +506,23 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
     await this.ensureUdsProfile("6");
     return executeSubaruServiceAction(this.elm!, actionId);
+  }
+
+  /**
+   * Unlocks SGP Central Gateway SID filter (`763→76B` / `750→758` `31 01 02 0C` / `31 01 02 00`)
+   * so read-only queries to EyeSight (`787`) succeed cleanly.
+   */
+  async prepareSubaruGateway(): Promise<boolean> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    try {
+      const res = await unlockSubaruCgwFilterRemove(this.elm!, []);
+      return res.filterRemoved;
+    } catch {
+      return false;
+    }
   }
 
   /**

@@ -245,7 +245,29 @@ export function formatSubaruUserValue(
       const cvt = decodeSubaruCvtTempBytes(dataBytes);
       if (cvt) return formatSubaruTempText(cvt);
     }
+    if ((cleanTx === "7E1" || cleanTx === "7A3") && dataBytes.length >= 1) {
+      if (["10C8", "10C9", "126D", "1142", "1143"].includes(didHex)) {
+        return `${((dataBytes[0]! * 100) / 255).toFixed(1)}%`;
+      }
+      if (didHex === "1472") {
+        return `${dataBytes[0]!}%`;
+      }
+      if (didHex === "1471") {
+        const temp = decodeSubaruTemperatureBytes(dataBytes);
+        if (temp) return formatSubaruTempText(temp);
+      }
+      if (dataBytes.length >= 2 && ["10CB", "1146", "1138", "12E4"].includes(didHex)) {
+        return `${(dataBytes[0]! << 8) | dataBytes[1]!} об/мин`;
+      }
+      if (dataBytes.length >= 2 && ["1144", "1145", "113B", "113C", "12B2", "12B3", "12B4", "12B5"].includes(didHex)) {
+        return `${(dataBytes[0]! << 8) | dataBytes[1]!} мА`;
+      }
+    }
     if (cleanTx === "7A2" && ["1297", "1298", "10CB", "10CC"].includes(didHex)) {
+      const temp = decodeSubaruTemperatureBytes(dataBytes);
+      if (temp) return formatSubaruTempText(temp);
+    }
+    if (cleanTx === "7C4" && ["1221", "123D", "12AE"].includes(didHex)) {
       const temp = decodeSubaruTemperatureBytes(dataBytes);
       if (temp) return formatSubaruTempText(temp);
     }

@@ -5,7 +5,9 @@ import type { ObdBleSession } from "@/lib/obd/obd-session";
 import type { Ssm4SystemEntry } from "@/lib/obd/subaru-ssm4-catalog";
 import {
   formatSubaruUserValue,
+  getSubaruCandidateCanTargets,
   type SubaruActiveTestItem,
+  type SubaruCanTargetPair,
   type SubaruCancelCodeSpec,
   type SubaruWorkSupportItem,
 } from "@/lib/obd/subaru-ssm4-modules";
@@ -58,47 +60,63 @@ export function SubaruFunctionPageView({
     if (!ready || monitorList.length === 0) return;
     setBusy(true);
     setError(null);
+    const candidates = getSubaruCandidateCanTargets(system.txHex, system.rxHex);
+    const opened = new Map<string, SubaruCanTargetPair>();
     try {
-      try {
-        await session.sendUds("6", system.txHex, system.rxHex, "10 03", false);
-      } catch {
-        /* optional */
+      if (system.txHex.trim().toUpperCase() === "787") {
+        await session.prepareSubaruGateway();
       }
+      let preferred = candidates[0]!;
       const rows: Array<{ didHex: string; labelRu: string; text: string }> = [];
       for (const m of monitorList) {
         const cleanDid = m.didHex.replace(/\s+/g, "").toUpperCase();
         const isObd = cleanDid.startsWith("F4") && cleanDid.length === 4;
         const cmd = isObd ? `01 ${cleanDid.slice(2)}` : `22 ${cleanDid.slice(0, 2)} ${cleanDid.slice(2)}`;
         const sid = isObd ? 0x01 : 0x22;
-        try {
-          const { parsed } = await session.sendUds("6", system.txHex, system.rxHex, cmd, false);
-          rows.push({
-            didHex: cleanDid,
-            labelRu: m.labelRu,
-            text:
-              parsed.kind === "positive"
-                ? formatSubaruUserValue(parsed.payload, sid, system.txHex)
-                : parsed.kind === "negative"
-                  ? "Не поддерживается"
-                  : "Нет ответа",
-          });
-        } catch (err) {
-          rows.push({
-            didHex: cleanDid,
-            labelRu: m.labelRu,
-            text: err instanceof Error ? err.message : "Ошибка",
-          });
+        const order = [preferred, ...candidates.filter((c) => c.txHex !== preferred.txHex)];
+        let text = "Нет ответа";
+        let sawNegative = false;
+        let lastErr: string | null = null;
+        for (const target of order) {
+          const key = `${target.txHex}->${target.rxHex}`;
+          if (!opened.has(key)) {
+            opened.set(key, target);
+            try {
+              await session.sendUds("6", target.txHex, target.rxHex, "10 03", false);
+            } catch {
+              /* optional */
+            }
+          }
+          try {
+            const { parsed } = await session.sendUds("6", target.txHex, target.rxHex, cmd, false);
+            if (parsed.kind === "positive") {
+              preferred = target;
+              text = formatSubaruUserValue(parsed.payload, sid, target.txHex);
+              lastErr = null;
+              break;
+            }
+            if (parsed.kind === "negative") sawNegative = true;
+          } catch (err) {
+            lastErr = err instanceof Error ? err.message : "Ошибка";
+          }
         }
-      }
-      try {
-        await session.sendUds("6", system.txHex, system.rxHex, "10 01", false);
-      } catch {
-        /* ignore */
+        if (text === "Нет ответа") {
+          if (sawNegative) text = "Не поддерживается";
+          else if (lastErr) text = lastErr;
+        }
+        rows.push({ didHex: cleanDid, labelRu: m.labelRu, text });
       }
       setMonitorValues(rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось прочитать контрольные параметры");
     } finally {
+      for (const target of opened.values()) {
+        try {
+          await session.sendUds("6", target.txHex, target.rxHex, "10 01", false);
+        } catch {
+          /* ignore */
+        }
+      }
       setBusy(false);
     }
   };
@@ -172,37 +190,59 @@ export function SubaruFunctionPageView({
         });
       }
       if (item.monitorDids.length > 0) {
+        const candidates = getSubaruCandidateCanTargets(item.txHex, item.rxHex);
+        const opened = new Map<string, SubaruCanTargetPair>();
+        let preferred = candidates[0]!;
         try {
-          await session.sendUds("6", item.txHex, item.rxHex, "10 03", false);
-        } catch {
-          /* ignore */
-        }
-        const rows: Array<{ didHex: string; labelRu: string; text: string }> = [];
-        for (const m of item.monitorDids) {
-          const cleanDid = m.didHex.replace(/\s+/g, "").toUpperCase();
-          const isObd = cleanDid.startsWith("F4") && cleanDid.length === 4;
-          const cmd = isObd ? `01 ${cleanDid.slice(2)}` : `22 ${cleanDid.slice(0, 2)} ${cleanDid.slice(2)}`;
-          const sid = isObd ? 0x01 : 0x22;
-          try {
-            const { parsed } = await session.sendUds("6", item.txHex, item.rxHex, cmd, false);
-            rows.push({
-              didHex: cleanDid,
-              labelRu: m.labelRu,
-              text:
-                parsed.kind === "positive"
-                  ? formatSubaruUserValue(parsed.payload, sid, item.txHex)
-                  : "Нет ответа / отказ",
-            });
-          } catch {
-            rows.push({ didHex: cleanDid, labelRu: m.labelRu, text: "Ошибка" });
+          if (item.txHex.trim().toUpperCase() === "787") {
+            await session.prepareSubaruGateway();
           }
-        }
-        setMonitorValues(rows);
-        if (mode === "read") {
-          setResult({
-            success: rows.some((r) => !r.text.includes("Нет ответа") && !r.text.includes("Ошибка")),
-            summaries: rows.map((r) => `${r.labelRu}: ${r.text}`),
-          });
+          const rows: Array<{ didHex: string; labelRu: string; text: string }> = [];
+          for (const m of item.monitorDids) {
+            const cleanDid = m.didHex.replace(/\s+/g, "").toUpperCase();
+            const isObd = cleanDid.startsWith("F4") && cleanDid.length === 4;
+            const cmd = isObd ? `01 ${cleanDid.slice(2)}` : `22 ${cleanDid.slice(0, 2)} ${cleanDid.slice(2)}`;
+            const sid = isObd ? 0x01 : 0x22;
+            const order = [preferred, ...candidates.filter((c) => c.txHex !== preferred.txHex)];
+            let text = "Нет ответа / отказ";
+            for (const target of order) {
+              const key = `${target.txHex}->${target.rxHex}`;
+              if (!opened.has(key)) {
+                opened.set(key, target);
+                try {
+                  await session.sendUds("6", target.txHex, target.rxHex, "10 03", false);
+                } catch {
+                  /* ignore */
+                }
+              }
+              try {
+                const { parsed } = await session.sendUds("6", target.txHex, target.rxHex, cmd, false);
+                if (parsed.kind === "positive") {
+                  preferred = target;
+                  text = formatSubaruUserValue(parsed.payload, sid, target.txHex);
+                  break;
+                }
+              } catch {
+                text = "Ошибка";
+              }
+            }
+            rows.push({ didHex: cleanDid, labelRu: m.labelRu, text });
+          }
+          setMonitorValues(rows);
+          if (mode === "read") {
+            setResult({
+              success: rows.some((r) => !r.text.includes("Нет ответа") && !r.text.includes("Ошибка")),
+              summaries: rows.map((r) => `${r.labelRu}: ${r.text}`),
+            });
+          }
+        } finally {
+          for (const target of opened.values()) {
+            try {
+              await session.sendUds("6", target.txHex, target.rxHex, "10 01", false);
+            } catch {
+              /* ignore */
+            }
+          }
         }
       }
     } catch (err) {
