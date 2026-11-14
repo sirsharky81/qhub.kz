@@ -306,7 +306,7 @@ export const apps: App[] = [
       "Откройте .kon или .cuf с MMCodingWriter или после выгрузки в OBD Scanner. Справочник параметров обрабатывается на сервере QHub — битовые маски и структура блоков не отдаются клиенту. Режим сравнения A/B для переноса отдельных опций.",
     href: "/tools/etacs-coding",
     tags: ["tools"],
-    icon: "/tools/obd-diag/icon-192.png",
+    icon: "/tools/etacs-coding/icon-192.png",
     color: "from-amber-600/10 to-slate-600/5",
     author: "QHub",
     authorType: "qhub",

@@ -1,6 +1,6 @@
 {
-  "name": "QHub OBD Scanner",
-  "short_name": "OBD",
+  "name": "QHub Subaru Diagnostics",
+  "short_name": "Subaru Diag",
   "description": "vLinker BLE: коды OBD-II и live-параметры; Subaru / Mitsubishi диагностика",
   "start_url": "/tools/obd-diag?_pwa=1",
   "scope": "/tools/obd-diag",
@@ -20,6 +20,12 @@
       "src": "/tools/obd-diag/apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png"
+    },
+    {
+      "src": "/tools/obd-diag/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

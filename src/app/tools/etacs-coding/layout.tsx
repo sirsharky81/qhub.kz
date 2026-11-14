@@ -8,15 +8,16 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "ETACS Coding",
+    title: "Mitsubishi ETACS",
   },
   icons: {
-    icon: [{ url: "/tools/obd-diag/icon-192.png", sizes: "192x192", type: "image/png" }],
+    icon: [{ url: `${ICON_BASE}/icon-192.png`, sizes: "192x192", type: "image/png" }],
+    apple: [{ url: `${ICON_BASE}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" }],
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ffffff",
+  themeColor: "#c41e1e",
 };
 
 export default function EtacsCodingLayout({ children }: { children: ReactNode }) {
