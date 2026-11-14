@@ -6,6 +6,7 @@ import {
   SUBARU_ALL_DTC_TARGETS,
   classifySubaruDtcStatus,
   decodeSubaruVinInfo,
+  formatSubaruUserValue,
   getAllSubaruBlockProfiles,
   getSubaruBlockProfile,
   getSubaruBlockScanStatus,
@@ -114,5 +115,33 @@ describe("subaru-ssm4-modules", () => {
         p.workSupport.some((w) => /key registration|key deletion|remote engine start|telematics cm/i.test(w.nameEn)),
       ).toBe(false);
     }
+  });
+
+  it("hides DID, PID, .srp, and 3-digit CAN addresses from user-facing labels and formatted values", () => {
+    const forbiddenRe = /\b(DID|PID|7[0-9A-F]{2})\b|\.srp/i;
+    for (const target of SUBARU_ALL_DTC_TARGETS) {
+      expect(target.title).not.toMatch(forbiddenRe);
+    }
+    for (const p of getAllSubaruBlockProfiles()) {
+      for (const a of p.activeTests) {
+        expect(`${a.nameEn} ${a.nameRu} ${a.explanationRu}`).not.toMatch(forbiddenRe);
+        for (const m of a.monitorDids) {
+          expect(m.labelRu).not.toMatch(forbiddenRe);
+        }
+      }
+      for (const w of p.workSupport) {
+        expect(`${w.nameEn} ${w.nameRu} ${w.explanationRu}`).not.toMatch(forbiddenRe);
+        for (const m of w.liveDids ?? []) {
+          expect(m.labelRu).not.toMatch(forbiddenRe);
+        }
+      }
+      for (const c of p.cancelCodes) {
+        expect(`${c.nameEn} ${c.nameRu} ${c.explanationRu}`).not.toMatch(forbiddenRe);
+      }
+    }
+
+    expect(formatSubaruUserValue([0x10, 0x17, 0x55], 0x22, "7E1")).toBe("35 °C");
+    expect(formatSubaruUserValue([0x10, 0x1b, 0x30, 0x34], 0x22, "783")).toBe("12.34 В");
+    expect(formatSubaruUserValue([0x10, 0x41, 0xff, 0xe2], 0x22, "746")).toBe("-3.0° (вправо)");
   });
 });

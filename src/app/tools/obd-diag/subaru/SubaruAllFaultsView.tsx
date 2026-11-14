@@ -274,7 +274,7 @@ export function SubaruAllFaultsView({
             Очистить коды ошибок в блоке {confirmClearTx.title}?
           </div>
           <p className="text-[11px] text-red-800">
-            Будет отправлена команда UDS `14 FF FF FF` (и Mode 04 для ECM/TCM). Убедитесь, что зажигание ON и причина неисправности устранена.
+            Будет выполнена очистка памяти неисправностей блока. Убедитесь, что зажигание ON и причина неисправности устранена.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -306,7 +306,7 @@ export function SubaruAllFaultsView({
             Очистить ошибки во всех безопасных блоках ({counts.safeClearableFaulted})?
           </div>
           <p className="text-[11px] text-red-800">
-            Блоки EPS (746) и EyeSight (787) пропущены автоматически для защиты калибровок. После очистки будет выполнено повторное чтение.
+            Блоки EPS и EyeSight пропущены автоматически для защиты калибровок. После очистки будет выполнено повторное чтение.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -366,9 +366,6 @@ export function SubaruAllFaultsView({
                       {target.nameEn}{" "}
                       <span className="font-mono text-xs text-gray-500">({target.abbr})</span>
                     </h4>
-                    <span className="font-mono text-[11px] text-gray-400">
-                      {txHex}→{rxHex}
-                    </span>
                     <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
                       {target.group}
                     </span>
@@ -454,11 +451,6 @@ export function SubaruAllFaultsView({
                           >
                             {sev === "current" ? "Current" : "History"}
                           </span>
-                          {typeof dtc.statusByte === "number" && (
-                            <span className="font-mono text-[10px] text-gray-400">
-                              st 0x{dtc.statusByte.toString(16).padStart(2, "0").toUpperCase()}
-                            </span>
-                          )}
                           <span className="font-medium text-gray-800">
                             {dtc.description}
                           </span>

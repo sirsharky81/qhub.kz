@@ -11,12 +11,12 @@ import {
 } from "@/lib/obd/subaru-ssm4-catalog";
 import {
   classifySubaruDtcStatus,
+  formatSubaruUserValue,
   getSubaruBlockProfile,
   getSubaruBlockScanStatus,
   isSubaruTxSafeToClear,
   type SubaruFunctionTabId,
 } from "@/lib/obd/subaru-ssm4-modules";
-import { formatUdsPayload } from "@/lib/obd/uds";
 import { LiveMetricCards } from "../LiveMetricCards";
 import {
   SubaruFunctionPageView,
@@ -118,7 +118,7 @@ export function SubaruBlockDetailView({
     return profile.signals.filter((s) => {
       if (customListFilter !== "ALL" && s.customList !== customListFilter) return false;
       if (!q) return true;
-      return `${s.nameEn} ${s.nameRu} ${s.shortName} ${s.addressOrDid}`.toLowerCase().includes(q);
+      return `${s.nameEn} ${s.nameRu} ${s.shortName}`.toLowerCase().includes(q);
     });
   }, [profile.signals, customListFilter, sigQuery]);
 
@@ -272,19 +272,19 @@ export function SubaruBlockDetailView({
       }
 
       const probes: Array<{ label: string; cmd: string; sid: number; didHex: string }> = [
-        { label: "ECU Parts Number (F187)", cmd: "22 F1 87", sid: 0x22, didHex: "F187" },
-        { label: "Subaru Part Number (F18E)", cmd: "22 F1 8E", sid: 0x22, didHex: "F18E" },
-        { label: "Software Information (F189)", cmd: "22 F1 89", sid: 0x22, didHex: "F189" },
-        { label: "Calibration ID (F182)", cmd: "22 F1 82", sid: 0x22, didHex: "F182" },
-        { label: "Boot Software (F180)", cmd: "22 F1 80", sid: 0x22, didHex: "F180" },
-        { label: "System Name (F197)", cmd: "22 F1 97", sid: 0x22, didHex: "F197" },
-        { label: "VIN (F190)", cmd: "22 F1 90", sid: 0x22, didHex: "F190" },
-        { label: "IG Counter / Work Timer (101E)", cmd: "22 10 1E", sid: 0x22, didHex: "101E" },
+        { label: "ECU Parts Number", cmd: "22 F1 87", sid: 0x22, didHex: "F187" },
+        { label: "Subaru Part Number", cmd: "22 F1 8E", sid: 0x22, didHex: "F18E" },
+        { label: "Software Information", cmd: "22 F1 89", sid: 0x22, didHex: "F189" },
+        { label: "Calibration ID", cmd: "22 F1 82", sid: 0x22, didHex: "F182" },
+        { label: "Boot Software", cmd: "22 F1 80", sid: 0x22, didHex: "F180" },
+        { label: "System Name", cmd: "22 F1 97", sid: 0x22, didHex: "F197" },
+        { label: "VIN", cmd: "22 F1 90", sid: 0x22, didHex: "F190" },
+        { label: "Счётчик запусков и таймер IG", cmd: "22 10 1E", sid: 0x22, didHex: "101E" },
       ];
       if (system.txHex === "7E0" || system.txHex === "7E1") {
         probes.push(
-          { label: "OBD Calibration ID (09 04)", cmd: "09 04", sid: 0x09, didHex: "0904" },
-          { label: "OBD CVN (09 06)", cmd: "09 06", sid: 0x09, didHex: "0906" },
+          { label: "OBD Calibration ID", cmd: "09 04", sid: 0x09, didHex: "0904" },
+          { label: "OBD CVN", cmd: "09 06", sid: 0x09, didHex: "0906" },
         );
       }
 
@@ -296,13 +296,13 @@ export function SubaruBlockDetailView({
             out.push({
               label: p.label,
               didHex: p.didHex,
-              value: formatUdsPayload(parsed.payload, p.sid, system.txHex),
+              value: formatSubaruUserValue(parsed.payload, p.sid, system.txHex),
             });
           } else {
             out.push({
               label: p.label,
               didHex: p.didHex,
-              value: parsed.kind === "negative" ? `Не поддерживается (${parsed.nrcText ?? "NRC"})` : "Нет ответа",
+              value: parsed.kind === "negative" ? "Не поддерживается" : "Нет ответа",
             });
           }
         } catch {
@@ -346,7 +346,7 @@ export function SubaruBlockDetailView({
           );
           didResponses[did] =
             parsed.kind === "positive"
-              ? formatUdsPayload(parsed.payload, 0x22, system.txHex)
+              ? formatSubaruUserValue(parsed.payload, 0x22, system.txHex)
               : "Нет ответа / отказ";
         } catch {
           didResponses[did] = "Ошибка чтения";
@@ -387,9 +387,6 @@ export function SubaruBlockDetailView({
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="rounded bg-gray-900 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
               {system.abbr}
-            </span>
-            <span className="font-mono text-[11px] text-gray-500">
-              {system.txHex}→{system.rxHex}
             </span>
             <span className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
               {system.group}
@@ -454,7 +451,7 @@ export function SubaruBlockDetailView({
                 F1 DTC · Диагностические коды неисправностей
               </h4>
               <p className="text-[11px] text-gray-500">
-                Считывает текущие (Current) и сохранённые (History) ошибки блока {system.txHex}.
+                Считывает текущие (Current) и сохранённые (History) ошибки выбранного блока.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -488,7 +485,7 @@ export function SubaruBlockDetailView({
           {confirmClear && (
             <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs space-y-2">
               <div className="font-bold text-red-950">
-                Очистить ошибки в блоке {system.nameEn} ({system.txHex})?
+                Очистить ошибки в блоке {system.nameEn}?
               </div>
               <div className="flex gap-2">
                 <button
@@ -709,14 +706,11 @@ export function SubaruBlockDetailView({
                           {sig.nameRu || sig.nameEn}
                         </span>
                       </span>
-                      <span className="shrink-0 font-mono text-[10px] text-gray-400">
-                        {sig.protocol === "obd-01"
-                          ? `PID ${sig.addressOrDid}`
-                          : sig.protocol === "uds-22"
-                            ? `DID ${sig.addressOrDid}`
-                            : `SSM ${sig.addressOrDid}`}
-                        {sig.unit ? ` · ${sig.unit}` : ""}
-                      </span>
+                      {sig.unit ? (
+                        <span className="shrink-0 font-mono text-[10px] text-gray-500">
+                          {sig.unit}
+                        </span>
+                      ) : null}
                     </label>
                   );
                 })}
@@ -793,7 +787,7 @@ export function SubaruBlockDetailView({
               <div>
                 <div className="text-xs font-bold text-gray-900">ECU Parts Number</div>
                 <div className="text-[11px] text-gray-600">
-                  Номер детали и аппаратная идентификация блока (DID F187 / F18E)
+                  Номер детали и аппаратная идентификация блока
                 </div>
               </div>
               <span className="shrink-0 text-xs font-semibold text-gray-900">Открыть →</span>
@@ -809,7 +803,7 @@ export function SubaruBlockDetailView({
               <div>
                 <div className="text-xs font-bold text-gray-900">Software information</div>
                 <div className="text-[11px] text-gray-600">
-                  Версия ПО, CalID и CVN прошивки блока (DID F189 / F182)
+                  Версия ПО, CalID и CVN прошивки блока
                 </div>
               </div>
               <span className="shrink-0 text-xs font-semibold text-gray-900">Открыть →</span>
@@ -823,14 +817,7 @@ export function SubaruBlockDetailView({
                 className="flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left transition hover:border-gray-900 hover:bg-white"
               >
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-gray-900">{ws.nameEn}</span>
-                    {ws.srpRef && (
-                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-800">
-                        {ws.srpRef}
-                      </span>
-                    )}
-                  </div>
+                  <div className="text-xs font-bold text-gray-900">{ws.nameEn}</div>
                   <div className="text-[11px] text-gray-600">{ws.nameRu}</div>
                 </div>
                 <span className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-900">
@@ -851,7 +838,7 @@ export function SubaruBlockDetailView({
                 F6 Customize · Настройки персонализации блока {system.abbr}
               </h4>
               <p className="text-[11px] text-gray-500">
-                Считывает текущие настройки блока по UDS DID и показывает доступные в SSM4 варианты.
+                Считывает текущие настройки блока и показывает доступные в SSM4 варианты.
               </p>
             </div>
             {profile.customizeItems.length > 0 && (
@@ -868,7 +855,7 @@ export function SubaruBlockDetailView({
 
           {profile.customizeItems.length === 0 ? (
             <p className="text-xs text-gray-500">
-              Параметры Customize для данного подмодуля объединены в основном блоке (например, BIU 752 или A/C 7C4).
+              Параметры Customize для данного подмодуля объединены в основном блоке (например, BIU или A/C).
             </p>
           ) : (
             <div className="space-y-2">
@@ -877,14 +864,9 @@ export function SubaruBlockDetailView({
                   key={item.id}
                   className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2 text-xs"
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <div className="font-bold text-gray-900">{item.nameEn}</div>
-                      <div className="text-[11px] text-gray-600">{item.nameRu}</div>
-                    </div>
-                    <span className="font-mono text-[10px] text-gray-400">
-                      DID {item.didHex}
-                    </span>
+                  <div>
+                    <div className="font-bold text-gray-900">{item.nameEn}</div>
+                    <div className="text-[11px] text-gray-600">{item.nameRu}</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {item.options.map((opt) => (
@@ -918,7 +900,7 @@ export function SubaruBlockDetailView({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h4 className="text-sm font-bold text-gray-900">
-                F10 ECU Info · Паспорт блока {system.nameEn} ({system.txHex})
+                F10 ECU Info · Паспорт блока {system.nameEn}
               </h4>
               <p className="text-[11px] text-gray-500">
                 ECU Parts Number, Software Information, Calibration ID, VIN и счётчик IG.

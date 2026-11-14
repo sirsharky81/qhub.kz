@@ -44,7 +44,7 @@ export function SubaruBlockListView({ reportsByTx, onSelectBlock }: Props) {
     return profiles.filter((p) => {
       if (group !== "ALL" && p.system.group !== group) return false;
       if (!q) return true;
-      return `${p.system.abbr} ${p.system.nameEn} ${p.system.nameRu} ${p.system.txHex}`
+      return `${p.system.abbr} ${p.system.nameEn} ${p.system.nameRu}`
         .toLowerCase()
         .includes(q);
     });
@@ -69,7 +69,7 @@ export function SubaruBlockListView({ reportsByTx, onSelectBlock }: Props) {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Поиск блока (Engine, TM, BIU, EyeSight, 783…)"
+            placeholder="Поиск блока (Engine, TM, BIU, EyeSight…)"
             className="w-full sm:max-w-xs rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none"
           />
           <div className="flex flex-wrap gap-1.5">
@@ -112,8 +112,8 @@ export function SubaruBlockListView({ reportsByTx, onSelectBlock }: Props) {
                       <span className="rounded bg-gray-900 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">
                         {system.abbr}
                       </span>
-                      <span className="font-mono text-[10px] text-gray-400">
-                        {system.txHex}→{system.rxHex}
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
+                        {system.group}
                       </span>
                     </div>
                     <h4 className="mt-1 text-sm font-bold text-gray-900 group-hover:text-emerald-800">

@@ -150,3 +150,132 @@ export function cvtTempBand(tempC: number): {
   if (tempC <= 85) return { id: "learn", labelRu: "Окно адаптации вариатора (65–85 °C)" };
   return { id: "hot", labelRu: "Выше рабочего окна обучения" };
 }
+
+/**
+ * Formats a UDS/OBD positive payload into a user-friendly string without exposing
+ * internal CAN addresses, DID numbers, or PID numbers.
+ */
+export function formatSubaruUserValue(
+  payload: number[],
+  requestSid: number,
+  txHex: string,
+): string {
+  const cleanTx = txHex.trim().toUpperCase();
+  if (requestSid === 0x31) return "Процедура подтверждена";
+  if (requestSid === 0x2f) return "Команда приводу подтверждена";
+  if (requestSid === 0x14 || requestSid === 0x04) return "Память ошибок очищена";
+
+  if (requestSid === 0x09 && payload.length >= 2) {
+    const pid = payload[0]!;
+    if (pid === 0x02) {
+      const ascii = payload
+        .slice(2)
+        .map((b) => (b >= 0x30 && b <= 0x5a ? String.fromCharCode(b) : ""))
+        .join("")
+        .trim();
+      return ascii || "Получено";
+    }
+    if (pid === 0x04) {
+      const parts = payload
+        .slice(2)
+        .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "\0"))
+        .join("")
+        .split(/\0+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 3);
+      return parts.length > 0 ? parts.join(" · ") : "Получено";
+    }
+    if (pid === 0x06) {
+      const cvnBytes = payload.slice(2);
+      const chunks: string[] = [];
+      for (let i = 0; i + 3 < cvnBytes.length; i += 4) {
+        chunks.push(
+          cvnBytes
+            .slice(i, i + 4)
+            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+            .join(""),
+        );
+      }
+      return chunks.length > 0 ? chunks.join(" · ") : "Получено";
+    }
+  }
+
+  if (requestSid === 0x01 && payload.length >= 2) {
+    const pid = payload[0]!;
+    const data = payload.slice(1);
+    if (pid === 0x05 && data.length >= 1) return `${data[0]! - 40} °C`;
+    if (pid === 0x0c && data.length >= 2) {
+      return `${Math.round(((data[0]! << 8) | data[1]!) / 4)} об/мин`;
+    }
+    if (pid === 0x23 && data.length >= 2) {
+      return `${((data[0]! << 8) | data[1]!) * 10} кПа`;
+    }
+    if (pid === 0x42 && data.length >= 2) {
+      return `${(((data[0]! << 8) | data[1]!) / 1000).toFixed(2)} В`;
+    }
+  }
+
+  if (requestSid === 0x22 && payload.length >= 3) {
+    const didHex = payload
+      .slice(0, 2)
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+    const dataBytes = payload.slice(2);
+
+    if (didHex === "101E" && dataBytes.length === 6) {
+      const w0 = (dataBytes[0]! << 8) | dataBytes[1]!;
+      const ticks = (dataBytes[4]! << 8) | dataBytes[5]!;
+      return `Запусков: ${w0} · таймер зажигания: ${(ticks / 10).toFixed(1)} с`;
+    }
+    if ((didHex === "101B" || didHex === "1019") && dataBytes.length === 2) {
+      const mv = (dataBytes[0]! << 8) | dataBytes[1]!;
+      return `${(mv / 1000).toFixed(2)} В`;
+    }
+    if (cleanTx === "746" && didHex === "1041" && dataBytes.length === 2) {
+      const u16 = (dataBytes[0]! << 8) | dataBytes[1]!;
+      const s16 = u16 >= 0x8000 ? u16 - 0x10000 : u16;
+      const deg = (s16 / 10).toFixed(1);
+      return s16 === 0 ? "ровно 0.0°" : s16 < 0 ? `${deg}° (вправо)` : `+${deg}° (влево)`;
+    }
+    if (cleanTx === "752" && ["1021", "1022", "1023", "1024"].includes(didHex)) {
+      const tpms = decodeSubaruTpmsBytes(dataBytes);
+      if (tpms) return formatSubaruTpmsText(tpms);
+    }
+    if ((cleanTx === "7E1" || cleanTx === "7A3") && (didHex === "1017" || didHex === "10D2")) {
+      const cvt = decodeSubaruCvtTempBytes(dataBytes);
+      if (cvt) return formatSubaruTempText(cvt);
+    }
+    if (cleanTx === "7A2" && ["1297", "1298", "10CB", "10CC"].includes(didHex)) {
+      const temp = decodeSubaruTemperatureBytes(dataBytes);
+      if (temp) return formatSubaruTempText(temp);
+    }
+    if (cleanTx === "783" && (didHex === "1041" || didHex === "1042") && dataBytes.length === 1) {
+      return `${Math.round((dataBytes[0]! * 100) / 255)}%`;
+    }
+
+    const ascii = dataBytes
+      .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (ascii.length >= 3 && /[A-Za-z0-9]{3}/.test(ascii)) {
+      return ascii;
+    }
+
+    if (dataBytes.length === 1) {
+      return `${dataBytes[0]!}`;
+    }
+    if (dataBytes.length === 2) {
+      return `${(dataBytes[0]! << 8) | dataBytes[1]!}`;
+    }
+    return dataBytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+  }
+
+  const printable = payload
+    .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " "))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (printable.length >= 4 && /[A-Za-z0-9]{3}/.test(printable)) return printable;
+  return "Получено";
+}

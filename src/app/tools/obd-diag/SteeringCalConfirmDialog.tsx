@@ -36,9 +36,7 @@ export function SteeringCalConfirmDialog({ brand, open, onCancel, onConfirm }: P
             </>
           ) : (
             <>
-              Блок ABS/VDC (<span className="font-mono text-xs text-emerald-700">7B0 → 7B8</span>)
-              выполнит режим «VDC Sensor Midpoint» (как в SSM: нуль датчика угла и G-сенсора). Угол
-              контролируется на EPS <span className="font-mono text-xs">746 · DID 1041</span>.
+              Блок ABS/VDC выполнит режим «VDC Sensor Midpoint» (как в SSM: нуль датчика угла и G-сенсора). Текущий угол руля контролируется по датчику EPS.
             </>
           )}
         </p>

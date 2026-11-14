@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import type { ObdBleSession } from "@/lib/obd/obd-session";
-import { formatUdsPayload } from "@/lib/obd/uds";
 import type { Ssm4SystemEntry } from "@/lib/obd/subaru-ssm4-catalog";
-import type {
-  SubaruActiveTestItem,
-  SubaruCancelCodeSpec,
-  SubaruWorkSupportItem,
+import {
+  formatSubaruUserValue,
+  type SubaruActiveTestItem,
+  type SubaruCancelCodeSpec,
+  type SubaruWorkSupportItem,
 } from "@/lib/obd/subaru-ssm4-modules";
 import { SteeringCalConfirmDialog } from "../SteeringCalConfirmDialog";
 
@@ -45,7 +45,6 @@ export function SubaruFunctionPageView({
   const [result, setResult] = useState<{
     success: boolean;
     summaries: string[];
-    steps: string[];
   } | null>(null);
 
   const monitorList =
@@ -78,9 +77,9 @@ export function SubaruFunctionPageView({
             labelRu: m.labelRu,
             text:
               parsed.kind === "positive"
-                ? formatUdsPayload(parsed.payload, sid, system.txHex)
+                ? formatSubaruUserValue(parsed.payload, sid, system.txHex)
                 : parsed.kind === "negative"
-                  ? `Отказ: ${parsed.nrcText ?? "NRC"}`
+                  ? "Не поддерживается"
                   : "Нет ответа",
           });
         } catch (err) {
@@ -98,7 +97,7 @@ export function SubaruFunctionPageView({
       }
       setMonitorValues(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось прочитать контрольные DID");
+      setError(err instanceof Error ? err.message : "Не удалось прочитать контрольные параметры");
     } finally {
       setBusy(false);
     }
@@ -117,7 +116,6 @@ export function SubaruFunctionPageView({
             res.finalAngleDeg != null
               ? [`Итоговый угол руля: ${res.finalAngleDeg.toFixed(1)}°`]
               : [],
-          steps: res.steps,
         });
       } else if (item.payloads && item.payloads.length > 0) {
         const res = await session.runSubaruUdsProcedure({
@@ -131,7 +129,6 @@ export function SubaruFunctionPageView({
         setResult({
           success: res.success,
           summaries: res.decodedSummaries,
-          steps: res.steps,
         });
       }
     } catch (err) {
@@ -160,7 +157,6 @@ export function SubaruFunctionPageView({
         setResult({
           success: res.success,
           summaries: res.decodedSummaries,
-          steps: res.steps,
         });
       } else if (mode === "off" && item.offPayloads?.length) {
         const res = await session.runSubaruUdsProcedure({
@@ -173,7 +169,6 @@ export function SubaruFunctionPageView({
         setResult({
           success: res.success,
           summaries: res.decodedSummaries,
-          steps: res.steps,
         });
       }
       if (item.monitorDids.length > 0) {
@@ -195,7 +190,7 @@ export function SubaruFunctionPageView({
               labelRu: m.labelRu,
               text:
                 parsed.kind === "positive"
-                  ? formatUdsPayload(parsed.payload, sid, item.txHex)
+                  ? formatSubaruUserValue(parsed.payload, sid, item.txHex)
                   : "Нет ответа / отказ",
             });
           } catch {
@@ -207,7 +202,6 @@ export function SubaruFunctionPageView({
           setResult({
             success: rows.some((r) => !r.text.includes("Нет ответа") && !r.text.includes("Ошибка")),
             summaries: rows.map((r) => `${r.labelRu}: ${r.text}`),
-            steps: rows.map((r) => `${item.txHex} DID ${r.didHex} → ${r.text}`),
           });
         }
       }
@@ -234,7 +228,6 @@ export function SubaruFunctionPageView({
       setResult({
         success: res.success,
         summaries: res.decodedSummaries,
-        steps: res.steps,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка чтения Cancel Code");
@@ -266,14 +259,9 @@ export function SubaruFunctionPageView({
             <span className="rounded bg-gray-900 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
               {badgeLabel}
             </span>
-            <span className="font-mono text-[11px] text-gray-500">
-              {system.txHex}→{system.rxHex}
+            <span className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
+              {system.abbr}
             </span>
-            {selectedFn.kind === "work-support" && selectedFn.item.srpRef && (
-              <span className="rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-800">
-                {selectedFn.item.srpRef}
-              </span>
-            )}
           </div>
         </div>
 
@@ -330,10 +318,7 @@ export function SubaruFunctionPageView({
                     key={m.didHex}
                     className="rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs"
                   >
-                    <div className="flex items-center justify-between text-[10px] text-gray-400">
-                      <span>{m.labelRu}</span>
-                      <span className="font-mono">DID {m.didHex}</span>
-                    </div>
+                    <div className="text-[10px] text-gray-500">{m.labelRu}</div>
                     <div className="mt-0.5 font-mono text-xs font-bold text-gray-900">
                       {val?.text ?? "—"}
                     </div>
@@ -428,7 +413,7 @@ export function SubaruFunctionPageView({
           </div>
           <p className="text-amber-900">
             Проверьте все условия (Conditions) выше. Процедура отправит сервисную команду в блок{" "}
-            <span className="font-mono font-bold">{selectedFn.item.txHex}</span>.
+            <span className="font-semibold">{system.nameEn}</span>.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -477,7 +462,7 @@ export function SubaruFunctionPageView({
           <div className="font-bold">
             {result.success
               ? "Процедура выполнена / ответ получен"
-              : "Блок не подтвердил процедуру (см. детали ниже)"}
+              : "Блок не подтвердил процедуру. Проверьте условия выполнения (зажигание ON, двигатель заглушен, селектор P)."}
           </div>
           {result.summaries.length > 0 && (
             <ul className="space-y-1 font-mono text-[11px] font-semibold">
@@ -488,14 +473,6 @@ export function SubaruFunctionPageView({
               ))}
             </ul>
           )}
-          <details open={!result.success} className="pt-1">
-            <summary className="cursor-pointer text-[11px] font-semibold opacity-80">
-              Протокол обмена UDS ({result.steps.length} шагов)
-            </summary>
-            <pre className="mt-1.5 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg bg-white/90 p-2 font-mono text-[10px] text-gray-800 border border-gray-200">
-              {result.steps.join("\n")}
-            </pre>
-          </details>
         </div>
       )}
     </div>

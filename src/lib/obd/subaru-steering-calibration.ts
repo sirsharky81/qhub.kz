@@ -1,8 +1,9 @@
 import type { Elm327Client } from "./elm327";
 import { extractHexTokens } from "./hex";
 import type { SasCalibrationResult } from "./mitsubishi-modules";
+import { formatSubaruUserValue } from "./subaru-decode";
 import { unlockSubaruCgwFilterRemove, unlockSubaruMeterSecurityAccess } from "./subaru-meter-variant";
-import { formatUdsPayload, parseUdsResponse } from "./uds";
+import { parseUdsResponse } from "./uds";
 
 const EPS_TX = 0x746;
 const EPS_RX = 0x74e;
@@ -621,7 +622,7 @@ export async function executeSubaruUdsProcedure(
 
         steps.push(`${cleanTx}→${cleanRx}: Запрос ${label} → ${cleanRaw || "нет ответа"}`);
         if (parsed.kind === "positive") {
-          const summary = formatUdsPayload(parsed.payload, sid, cleanTx);
+          const summary = formatSubaruUserValue(parsed.payload, sid, cleanTx);
           if (summary) decodedSummaries.push(summary);
         }
 
@@ -637,7 +638,7 @@ export async function executeSubaruUdsProcedure(
               );
               const pollParsed = parseUdsResponse(rawPoll, 0x31);
               if (pollParsed.kind === "positive") {
-                const pollSummary = formatUdsPayload(pollParsed.payload, 0x31, cleanTx);
+                const pollSummary = formatSubaruUserValue(pollParsed.payload, 0x31, cleanTx);
                 if (pollSummary) decodedSummaries.push(pollSummary);
               }
             } catch {

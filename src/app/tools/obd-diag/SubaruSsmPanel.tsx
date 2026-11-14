@@ -246,7 +246,7 @@ export function SubaruSsmPanel({
         }));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Ошибка опроса блока ${txHex}`);
+      setError(err instanceof Error ? err.message : `Ошибка опроса блока «${title}»`);
     } finally {
       setBusy(false);
     }
@@ -257,8 +257,8 @@ export function SubaruSsmPanel({
     setBusy(true);
     setError(null);
     try {
-      const msg = await session.clearModuleDtcsSafe("6", txHex, rxHex);
-      setStatusMsg(msg);
+      await session.clearModuleDtcsSafe("6", txHex, rxHex);
+      setStatusMsg(`Ошибки блока «${title}» успешно очищены.`);
       // Re-scan single module immediately after clear
       const txNum = Number.parseInt(txHex, 16);
       const rxNum = Number.parseInt(rxHex, 16);
@@ -286,7 +286,7 @@ export function SubaruSsmPanel({
         }));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Ошибка очистки DTC в блоке ${txHex}`);
+      setError(err instanceof Error ? err.message : `Ошибка очистки DTC в блоке «${title}»`);
     } finally {
       setBusy(false);
     }
@@ -345,20 +345,19 @@ export function SubaruSsmPanel({
 
   const handleExportCsv = () => {
     const rows = [
-      ["VIN", "Model", "Module", "TX", "Status", "Code", "Severity", "Description", "PartNumber"],
+      ["VIN", "Model", "Module", "Status", "Code", "Severity", "Description", "PartNumber"],
     ];
     for (const target of SUBARU_ALL_DTC_TARGETS) {
       const txHex = target.tx.toString(16).toUpperCase();
       const rep = reportsByTx[txHex];
       if (!rep) continue;
       if (!rep.responded) {
-        rows.push([vin ?? "", currentVehicle.nameRu, target.nameEn, txHex, "Not Detected", "", "", "", ""]);
+        rows.push([vin ?? "", currentVehicle.nameRu, target.nameEn, "Not Detected", "", "", "", ""]);
       } else if (rep.dtcs.length === 0) {
         rows.push([
           vin ?? "",
           currentVehicle.nameRu,
           target.nameEn,
-          txHex,
           "No DTC",
           "",
           "",
@@ -371,7 +370,6 @@ export function SubaruSsmPanel({
             vin ?? "",
             currentVehicle.nameRu,
             target.nameEn,
-            txHex,
             "Fault",
             d.code,
             classifySubaruDtcStatus(d) === "current" ? "Current" : "History",
