@@ -1,7 +1,8 @@
 import type { Elm327Client } from "./elm327";
 import { extractHexTokens } from "./hex";
 import type { SasCalibrationResult } from "./mitsubishi-modules";
-import { parseUdsResponse } from "./uds";
+import { unlockSubaruCgwFilterRemove, unlockSubaruMeterSecurityAccess } from "./subaru-meter-variant";
+import { formatUdsPayload, parseUdsResponse } from "./uds";
 
 const EPS_TX = 0x746;
 const EPS_RX = 0x74e;
@@ -532,6 +533,140 @@ function actionPayloadResponseOk(raw: string, requestHex: string): boolean {
   return parsed.kind === "positive";
 }
 
+export interface SubaruUdsProcedureResult extends SasCalibrationResult {
+  decodedSummaries: string[];
+}
+
+/**
+ * Executes an arbitrary Subaru UDS/SSM4 Work Support or Active Test payload sequence
+ * with optional CGW FilterRemove (`763`/`750`), TesterPresent (`3E 00`), automatic
+ * SecurityAccess (`0x27`) retry on `NRC 33`, and `31 03` polling after `31 01`.
+ */
+export async function executeSubaruUdsProcedure(
+  elm: Elm327Client,
+  options: {
+    txHex: string;
+    rxHex: string;
+    payloads: readonly string[];
+    stopOnWriteSuccess?: boolean;
+    requireCgwFilterRemove?: boolean;
+    autoSecurityAccess?: boolean;
+    preferEcuKinds?: readonly number[];
+  },
+): Promise<SubaruUdsProcedureResult> {
+  const cleanTx = options.txHex.trim().toUpperCase();
+  const cleanRx = options.rxHex.trim().toUpperCase();
+  const tx = Number.parseInt(cleanTx, 16);
+  const rx = Number.parseInt(cleanRx, 16);
+  const steps: string[] = [];
+  const decodedSummaries: string[] = [];
+
+  if (options.requireCgwFilterRemove || cleanTx === "787") {
+    try {
+      await unlockSubaruCgwFilterRemove(elm, steps);
+    } catch {
+      /* gateway filter removal is optional on older platforms */
+    }
+  } else if (tx !== 0x750) {
+    try {
+      await openSubaruModuleSession(elm, 0x750, 0x758);
+      steps.push("750→758 (CGW): Расширенная сессия шлюза открыта (10 03)");
+    } catch {
+      /* Gateway may not require explicit 10 03 */
+    }
+  }
+
+  await openSubaruModuleSession(elm, tx, rx);
+  steps.push(`${cleanTx}→${cleanRx}: Открыта расширенная диагностическая сессия (10 03)`);
+
+  let ok = false;
+  let saTried = false;
+  const stopOnWrite = options.stopOnWriteSuccess ?? true;
+
+  try {
+    for (const rawPayload of options.payloads) {
+      const payloadHex = rawPayload.replace(/\s+/g, "").toUpperCase();
+      const label = payloadHex.replace(/(.{2})/g, "$1 ").trim();
+      const sid = Number.parseInt(payloadHex.slice(0, 2), 16);
+      try {
+        try {
+          await elm.sendPayload("3E00", 1_000);
+        } catch {
+          /* ignore */
+        }
+        let raw = await elm.sendPayload(payloadHex, 8_000);
+        let cleanRaw = raw.replace(/>/g, "").trim();
+        let parsed = parseUdsResponse(raw, sid);
+
+        if (
+          parsed.kind === "negative" &&
+          parsed.nrc === 0x33 &&
+          !saTried &&
+          (options.autoSecurityAccess ?? true)
+        ) {
+          saTried = true;
+          steps.push(`${cleanTx}→${cleanRx}: Получен NRC 33 (требуется SecurityAccess 0x27) — пробуем разблокировку…`);
+          const sa = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+            preferNonMeterAes: cleanTx !== "783",
+            preferEcuKinds: options.preferEcuKinds,
+            maxAesAttempts: 12,
+          });
+          if (sa.unlocked) {
+            await openSubaruModuleSession(elm, tx, rx);
+            raw = await elm.sendPayload(payloadHex, 8_000);
+            cleanRaw = raw.replace(/>/g, "").trim();
+            parsed = parseUdsResponse(raw, sid);
+          }
+        }
+
+        steps.push(`${cleanTx}→${cleanRx}: Запрос ${label} → ${cleanRaw || "нет ответа"}`);
+        if (parsed.kind === "positive") {
+          const summary = formatUdsPayload(parsed.payload, sid, cleanTx);
+          if (summary) decodedSummaries.push(summary);
+        }
+
+        if (actionPayloadResponseOk(raw, payloadHex)) {
+          ok = true;
+          if (sid === 0x31 && payloadHex.startsWith("3101") && payloadHex.length >= 8) {
+            const rid = payloadHex.slice(4, 8);
+            try {
+              const rawPoll = await elm.sendPayload(`3103${rid}`, 5_000);
+              const cleanPoll = rawPoll.replace(/>/g, "").trim();
+              steps.push(
+                `${cleanTx}→${cleanRx}: Опрос результата 31 03 ${rid.slice(0, 2)} ${rid.slice(2, 4)} → ${cleanPoll || "нет ответа"}`,
+              );
+              const pollParsed = parseUdsResponse(rawPoll, 0x31);
+              if (pollParsed.kind === "positive") {
+                const pollSummary = formatUdsPayload(pollParsed.payload, 0x31, cleanTx);
+                if (pollSummary) decodedSummaries.push(pollSummary);
+              }
+            } catch {
+              /* optional on some ECUs */
+            }
+          }
+          if (stopOnWrite && (sid === 0x31 || sid === 0x2f || sid === 0x14 || sid === 0x04)) {
+            break;
+          }
+        }
+      } catch (e) {
+        steps.push(
+          `${cleanTx}→${cleanRx}: Запрос ${label} → ошибка: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+  } finally {
+    await closeSubaruModuleSession(elm);
+    steps.push(`${cleanTx}→${cleanRx}: Сессия завершена (10 01)`);
+  }
+
+  return {
+    success: ok,
+    steps,
+    decodedSummaries,
+    finalAngleDeg: null,
+  };
+}
+
 /**
  * Executes a Subaru calibration, adaptation, or reset routine from `SUBARU_SERVICE_ACTIONS`.
  */
@@ -551,67 +686,15 @@ export async function executeSubaruServiceAction(
     };
   }
 
-  const tx = Number.parseInt(spec.txHex, 16);
-  const rx = Number.parseInt(spec.rxHex, 16);
-  const steps: string[] = [];
-
-  // Central Gateway (750 -> 758) wake/session check per SSM4 cgwCommConnect / cgwSidFilterRemove
-  if (tx !== 0x750) {
-    try {
-      await openSubaruModuleSession(elm, 0x750, 0x758);
-      steps.push("750→758 (CGW): Расширенная сессия шлюза открыта (10 03)");
-    } catch {
-      /* Gateway may not require explicit 10 03 */
-    }
-  }
-
-  await openSubaruModuleSession(elm, tx, rx);
-  steps.push(`${spec.txHex}→${spec.rxHex}: Открыта расширенная диагностическая сессия (10 03)`);
-
-  let ok = false;
-  try {
-    for (const payloadHex of spec.candidatePayloads) {
-      const label = payloadHex.replace(/(.{2})/g, "$1 ").trim();
-      const sid = Number.parseInt(payloadHex.slice(0, 2), 16);
-      try {
-        // Send TesterPresent (3E 00) before long RoutineControl per SSM4 AVCKeepAliveThreadP5
-        try {
-          await elm.sendPayload("3E00", 1_000);
-        } catch {
-          /* ignore */
-        }
-        const raw = await elm.sendPayload(payloadHex, 8_000);
-        const cleanRaw = raw.replace(/>/g, "").trim();
-        steps.push(`${spec.txHex}→${spec.rxHex}: Запрос ${label} → ${cleanRaw || "нет ответа"}`);
-        if (actionPayloadResponseOk(raw, payloadHex)) {
-          ok = true;
-          // Per SSM4 .srp scripts: after 31 01 <RID> returns 71 01 <RID>, automatically poll 31 03 <RID>
-          if (sid === 0x31 && payloadHex.startsWith("3101") && payloadHex.length >= 8) {
-            const rid = payloadHex.slice(4, 8);
-            try {
-              const rawPoll = await elm.sendPayload(`3103${rid}`, 5_000);
-              steps.push(
-                `${spec.txHex}→${spec.rxHex}: Опрос результата 31 03 ${rid.slice(0, 2)} ${rid.slice(2, 4)} → ${rawPoll.replace(/>/g, "").trim() || "нет ответа"}`,
-              );
-            } catch {
-              /* optional on some ECUs */
-            }
-          }
-          // Stop on first accepted write/routine command (0x31, 0x2F, 0x14, 0x04); continue reading if 0x22/0x10
-          if (sid === 0x31 || sid === 0x2f || sid === 0x14 || sid === 0x04) {
-            break;
-          }
-        }
-      } catch (e) {
-        steps.push(
-          `${spec.txHex}→${spec.rxHex}: Запрос ${label} → ошибка: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-    }
-  } finally {
-    await closeSubaruModuleSession(elm);
-    steps.push(`${spec.txHex}→${spec.rxHex}: Сессия завершена (10 01)`);
-  }
+  const res = await executeSubaruUdsProcedure(elm, {
+    txHex: spec.txHex,
+    rxHex: spec.rxHex,
+    payloads: spec.candidatePayloads,
+    requireCgwFilterRemove: spec.txHex === "787",
+    autoSecurityAccess: true,
+  });
+  const steps = [...res.steps];
+  let ok = res.success;
 
   // Fallback for immo-key-count-check: if 7B4 (H-type SGP) did not respond, probe 751 (D-type) and 752 (BIU)
   if (!ok && actionId === "immo-key-count-check") {

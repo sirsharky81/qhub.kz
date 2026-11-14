@@ -37,7 +37,9 @@ import type { TpmsDidRecipe, TpmsRoutineResult } from "./mitsubishi-tpms-registr
 import {
   calibrateSubaruSteeringZero,
   executeSubaruServiceAction,
+  executeSubaruUdsProcedure,
   type SubaruServiceActionId,
+  type SubaruUdsProcedureResult,
 } from "./subaru-steering-calibration";
 import { readSubaruCvtFluidTemp, type SubaruCvtFluidReading } from "./subaru-cvt-read";
 import {
@@ -504,6 +506,25 @@ export class ObdBleSession {
     if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
     await this.ensureUdsProfile("6");
     return executeSubaruServiceAction(this.elm!, actionId);
+  }
+
+  /**
+   * Executes an arbitrary Subaru UDS/SSM4 Work Support, Active Test, or Cancel Code sequence.
+   */
+  async runSubaruUdsProcedure(options: {
+    txHex: string;
+    rxHex: string;
+    payloads: readonly string[];
+    stopOnWriteSuccess?: boolean;
+    requireCgwFilterRemove?: boolean;
+    autoSecurityAccess?: boolean;
+    preferEcuKinds?: readonly number[];
+  }): Promise<SubaruUdsProcedureResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) await this.elm!.stopMonitor();
+    await this.ensureUdsProfile("6");
+    return executeSubaruUdsProcedure(this.elm!, options);
   }
 
   /**
