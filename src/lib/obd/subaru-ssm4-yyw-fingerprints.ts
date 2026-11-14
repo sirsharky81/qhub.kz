@@ -897,8 +897,9 @@ for (const p of SSM4_YYW_FINGERPRINTS) {
 export function fingerprintFromEyesightDids(didHexById: Record<string, string>): string {
   return SSM4_YYW_FP_DID_KEYS.map((k) => {
     const raw = (didHexById[k] ?? didHexById[k.toLowerCase()] ?? "").trim().toUpperCase();
+    if (!raw || raw === "--" || raw === "ABSENT") return "__";
     const tok = (raw.split(/\s+/)[0] ?? "").slice(0, 2);
-    return tok.length === 2 ? tok : "__";
+    return /^[0-9A-F]{2}$/.test(tok) ? tok : "__";
   }).join("");
 }
 

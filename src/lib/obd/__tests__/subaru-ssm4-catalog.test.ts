@@ -570,5 +570,17 @@ describe("subaru-ssm4-catalog", () => {
       { did: "3502", car: "20", catalog: "30" },
       { did: "3509", car: "C3", catalog: "D3" },
     ]);
+
+    // Unread EyeSight DIDs ("--") must be treated as unread slots, not 16 false mismatches
+    const emptyDump = Object.fromEntries(
+      Array.from({ length: 16 }, (_, i) => [
+        `35${(i + 1).toString(16).padStart(2, "0").toUpperCase()}`,
+        "--",
+      ]),
+    );
+    const emptyDiff = diffEyesightAgainstAppliedCatalog("BTAEYR8", emptyDump);
+    expect(emptyDiff[0]?.diffs).toEqual([]);
+    expect(emptyDiff[0]?.unreadSlots).toBe(16);
+    expect(emptyDiff[0]?.identical).toBe(false);
   });
 });

@@ -1202,7 +1202,9 @@ export default function SubaruCodingClient() {
                                 {row.diffs.length === 0
                                   ? row.identical
                                     ? "совпадает целиком (16/16)"
-                                    : "прочитанные байты совпали"
+                                    : row.unreadSlots >= 16
+                                      ? "нет данных с EyeSight (0/16)"
+                                      : "прочитанные байты совпали"
                                   : row.diffs
                                       .map((d) => `${d.did}: авто ${d.car} / Y-Yw ${d.catalog}`)
                                       .join("; ")}

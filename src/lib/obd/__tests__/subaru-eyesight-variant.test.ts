@@ -240,4 +240,73 @@ describe("subaru-eyesight-variant (ADA-031 / ADA-032)", () => {
     expect(res.success).toBe(true);
     expect(elm.sent).toContain(`2704${expectedKey}`);
   });
+
+  it("escalates to AES CGW (31 01 02 00) and ADA-032 SecurityAccess when fast CGW or initial 35xx reads yield 0 DIDs", async () => {
+    const seedCgw = Array.from({ length: 16 }, (_, i) => i + 1);
+    const cgwDef = SUBARU_SGP_AES128_KEYS.find((k) => k.id === "CTRL_CGW_0251_1")!;
+    const cgwKeyBytes = cgwDef.keyHex.match(/../g)!.map((h) => Number.parseInt(h, 16));
+    const expectedCgwKey = computeSubaruSecurityKey16ByteAesEcb(seedCgw, cgwKeyBytes)
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    const seedEs = [
+      0xf8, 0xee, 0x16, 0x09, 0xec, 0x9a, 0xb9, 0x1c,
+      0x83, 0x58, 0x06, 0x0f, 0xde, 0xbc, 0x3e, 0x06,
+    ];
+    const esDef = SUBARU_SGP_AES128_KEYS.find((k) => k.id === "CTRL_0002_0251_1")!;
+    const esKeyBytes = esDef.keyHex.match(/../g)!.map((h) => Number.parseInt(h, 16));
+    const expectedEsKey = computeSubaruSecurityKey16ByteAesEcb(seedEs, esKeyBytes)
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    const usBytes = getSsm4YywWriteDids("BTAEYR8", "U45D")!;
+    let unlockedCgw = false;
+    let unlockedEs = false;
+    const sent: string[] = [];
+    const elm: SubaruMeterWriteLink = {
+      async sendCommand(cmd: string) {
+        sent.push(cmd.replace(/\s+/g, "").toUpperCase());
+        return "OK";
+      },
+      async setCanHeader() {},
+      async sendPayload(hex: string) {
+        const key = hex.replace(/\s+/g, "").toUpperCase();
+        sent.push(key);
+        if (key === "1003") return "50 03";
+        if (key === "1001") return "50 01";
+        if (key === "3E00") return "7E 00";
+        if (key === "3101020C") return "7F 31 33";
+        if (key === "220251") return "62 02 51 01";
+        if (key === "2707") return "67 07 " + seedCgw.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+        if (key === `2708${expectedCgwKey}`) {
+          unlockedCgw = true;
+          return "67 08";
+        }
+        if (key === "31010200") return unlockedCgw ? "71 01 02 00" : "7F 31 33";
+        if (key === "2703") {
+          return unlockedCgw
+            ? "67 03 " + seedEs.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")
+            : "NO DATA";
+        }
+        if (key === `2704${expectedEsKey}`) {
+          unlockedEs = true;
+          return "67 04";
+        }
+        const match22 = key.match(/^22(35[0-9A-F]{2})$/);
+        if (match22) {
+          if (!unlockedEs) return "NO DATA";
+          const found = usBytes.find((u) => u.did === match22[1]);
+          return found ? `62 ${found.did.slice(0, 2)} ${found.did.slice(2)} ${found.byteHex}` : "NO DATA";
+        }
+        return "NO DATA";
+      },
+    };
+
+    const res = await readSubaruEyesight35xxDids(elm, { didHexList: SSM4_YYW_FP_DID_KEYS });
+    expect(res.cgwFilterRemoved).toBe(true);
+    expect(Object.keys(res.didMap)).toHaveLength(16);
+    expect(res.didMap["3502"]).toBe("20");
+    expect(sent).toContain("31010200");
+    expect(sent).toContain(`2704${expectedEsKey}`);
+  });
 });

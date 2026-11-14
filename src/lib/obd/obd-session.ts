@@ -1273,7 +1273,7 @@ export class ObdBleSession {
     let securityAccessRequired = false;
 
     try {
-      await this.elm!.sendCommand("ATST20");
+      await this.elm!.sendCommand("ATSTFF");
     } catch {
       /* ignore */
     }
@@ -1762,13 +1762,21 @@ export class ObdBleSession {
         }
 
         // Try reading UDS 19 02 FF when the module answered in UDS or when KWP 18 00 was not supported
+        let uds19ReadPositive = false;
         if (!kwpReadPositive && (responded || target.mode03Fallback || !allowMitsubishiKwp)) {
           try {
             const raw19 = await this.udsExchange(target.tx, target.rx, "1902FF", 1_400);
             const p19 = parseUdsResponse(raw19, 0x19);
             if (p19.kind === "positive") {
               responded = true;
-              const parsedDtcs: ParsedUdsDtc[] = parseUdsDtcs1902(p19.payload);
+              uds19ReadPositive = true;
+              const rawParsedDtcs: ParsedUdsDtc[] = parseUdsDtcs1902(p19.payload);
+              // SSM4 only shows Current (0x01 testFailed) and History (0x08 confirmedDTC);
+              // unconfirmed/incomplete status bits (e.g. 0x02, 0x04, 0x10, 0x20, 0x40, 0x50) are filtered out.
+              const parsedDtcs =
+                onlyBrand === "subaru"
+                  ? rawParsedDtcs.filter((d) => (d.statusByte & 0x09) !== 0)
+                  : rawParsedDtcs;
               for (const d of parsedDtcs) {
                 if (!dtcs.some((existing) => existing.code === d.code)) {
                   dtcs.push({
@@ -1827,9 +1835,14 @@ export class ObdBleSession {
           }
         }
 
-        // Supplement with OBD Mode 03 (stored) and Mode 07 (pending) on ECM/TCM (7E0/7E1)
+        // Supplement with OBD Mode 03 (stored) and Mode 07 (pending) on ECM/TCM (7E0/7E1).
+        // For Subaru, skip Mode 03 if UDS 19 02 already succeeded, and skip Mode 07 Pending so unconfirmed codes do not appear as History.
         const isObdPowertrain = Boolean(target.mode03Fallback) || target.tx === 0x7e0 || target.tx === 0x7e1;
-        if (isObdPowertrain || (responded && rawStatus.startsWith("UDS 19 02:"))) {
+        const shouldRunObd03 =
+          onlyBrand === "subaru"
+            ? isObdPowertrain && !uds19ReadPositive
+            : isObdPowertrain || (responded && rawStatus.startsWith("UDS 19 02:"));
+        if (shouldRunObd03) {
           try {
             const raw03 = await this.udsExchange(target.tx, target.rx, "03", 1_400);
             const p03 = parseUdsResponse(raw03, 0x03);
@@ -1856,7 +1869,7 @@ export class ObdBleSession {
           } catch {
             /* ignore */
           }
-          if (isObdPowertrain) {
+          if (isObdPowertrain && onlyBrand !== "subaru") {
             try {
               const raw07 = await this.udsExchange(target.tx, target.rx, "07", 1_200);
               const p07 = parseUdsResponse(raw07, 0x07);

@@ -189,22 +189,37 @@ export async function readSubaruEyesight35xxDids(
 
       for (let i = 0; i < didList.length; i++) {
         const didHex = didList[i]!.toUpperCase();
+        // Skip legacy 3091..309D DIDs when SGP 3501..3510 already answered
+        if (/^309[1-9A-D]$/.test(didHex) && score >= 8) continue;
         try {
-          let raw = await elm.sendPayload(`22${didHex}`, 1_200);
+          let raw = await elm.sendPayload(`22${didHex}`, 1_800);
           let res = parseSingleDidBodyHex(raw, didHex);
           if (!res.ok && res.nrc === 0x33 && (options?.unlockIfNrc33 ?? true) && !triedSaOnTarget) {
             triedSaOnTarget = true;
             steps.push(`${txHex}→${rxHex}: 22 ${didHex} → NRC 33, выполняем SecurityAccess (ADA-032 C11)…`);
             const kv = await readEyesightKeyVersionByte(elm);
-            const u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+            let u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
               userKeyHex: options?.securityKeyHex,
               keyVersionByte: kv,
               preferNonMeterAes: true,
               preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
               maxAesAttempts: 16,
             });
+            if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
+              steps.push(`${txHex}→${rxHex}: 27 xx → NO DATA — пробуем полную AES-разблокировку CGW (31 01 02 00)…`);
+              const cgwSa = await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
+              if (cgwSa.filterRemoved) cgwFilterRemoved = true;
+              await openEyesightSession(elm, target.tx, target.rx);
+              u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+                userKeyHex: options?.securityKeyHex,
+                keyVersionByte: kv,
+                preferNonMeterAes: true,
+                preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+                maxAesAttempts: 16,
+              });
+            }
             if (u.unlocked) {
-              raw = await elm.sendPayload(`22${didHex}`, 1_200);
+              raw = await elm.sendPayload(`22${didHex}`, 1_800);
               res = parseSingleDidBodyHex(raw, didHex);
             } else {
               securityAccessRequired = true;
@@ -222,6 +237,59 @@ export async function readSubaruEyesight35xxDids(
           }
         } catch {
           /* ignore */
+        }
+      }
+
+      // If 35xx returned 0 hits on 787 and we haven't tried proactive ADA-032 SecurityAccess + AES CGW unlock yet, escalate now.
+      if (score === 0 && !triedSaOnTarget && target.tx === 0x787) {
+        triedSaOnTarget = true;
+        steps.push(`${txHex}→${rxHex}: 3501..3510 не ответили — пробуем ADA-032 SecurityAccess и CGW 31 01 02 00…`);
+        if (options?.withCgw !== false && !cgwFilterRemoved) {
+          const cgwSa = await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
+          if (cgwSa.filterRemoved) cgwFilterRemoved = true;
+        }
+        await openEyesightSession(elm, target.tx, target.rx);
+        const kv = await readEyesightKeyVersionByte(elm);
+        let u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+          userKeyHex: options?.securityKeyHex,
+          keyVersionByte: kv,
+          preferNonMeterAes: true,
+          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+          maxAesAttempts: 16,
+        });
+        if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
+          const cgwSa = await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
+          if (cgwSa.filterRemoved) cgwFilterRemoved = true;
+          await openEyesightSession(elm, target.tx, target.rx);
+          u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+            userKeyHex: options?.securityKeyHex,
+            keyVersionByte: kv,
+            preferNonMeterAes: true,
+            preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+            maxAesAttempts: 16,
+          });
+        }
+        if (u.unlocked) {
+          for (const didHexRaw of didList) {
+            const didHex = didHexRaw.toUpperCase();
+            if (/^309[1-9A-D]$/.test(didHex) && score >= 8) continue;
+            try {
+              const raw = await elm.sendPayload(`22${didHex}`, 1_800);
+              const res = parseSingleDidBodyHex(raw, didHex);
+              if (!res.ok) continue;
+              didMap[didHex] = res.hex;
+              if (
+                (SSM4_YYW_FP_DID_KEYS as readonly string[]).includes(didHex) ||
+                /^309[1-9A-D]$/.test(didHex)
+              ) {
+                score++;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        } else {
+          securityAccessRequired = true;
         }
       }
 
@@ -419,13 +487,26 @@ export async function writeSubaruEyesightVariantByApplied(
   if (keyVer != null) {
     steps.push(`${txHex}→${rxHex}: версия ключа 22 02 51 → ${keyVer.toString(16).padStart(2, "0").toUpperCase()}`);
   }
-  const initialUnlock = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+  let initialUnlock = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
     userKeyHex: securityKeyHex,
     keyVersionByte: keyVer,
     preferNonMeterAes: true,
     preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
     maxAesAttempts: 16,
   });
+  if (!initialUnlock.unlocked && !initialUnlock.seedHex) {
+    steps.push(`${txHex}→${rxHex}: 27 xx → NO DATA — эскалация CGW (27 07/08 + 31 01 02 00)…`);
+    const cgwSa = await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
+    if (cgwSa.filterRemoved) cgwFilterRemoved = true;
+    await openEyesightSession(elm, tx, rx);
+    initialUnlock = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+      userKeyHex: securityKeyHex,
+      keyVersionByte: keyVer,
+      preferNonMeterAes: true,
+      preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+      maxAesAttempts: 16,
+    });
+  }
 
   let saUnlocked = initialUnlock.unlocked;
   let triedRetrySa = saUnlocked;

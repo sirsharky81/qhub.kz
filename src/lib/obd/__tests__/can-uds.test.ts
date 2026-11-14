@@ -1150,5 +1150,85 @@ describe("sendUds gate", () => {
     expect(parsed.payload[0]).toBe(0x07);
     expect(parsed.payload[1]).toBe(0xf8);
   });
+
+  it("filters unconfirmed/incomplete UDS DTCs (like nocturnal B14A1 on 7C4) and skips Mode 07 pending on Subaru scan", async () => {
+    const link = new FakeLink();
+    const origWrite = link.writeLine.bind(link);
+    let currentHeader = "";
+    link.writeLine = async (line: string) => {
+      if (line.startsWith("ATSH")) {
+        currentHeader = line.slice(4).trim().toUpperCase();
+      }
+      if (line === "1003") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "50 03\r>";
+        return;
+      }
+      if (line === "1001") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "50 01\r>";
+        return;
+      }
+      if (line === "1902FF") {
+        link.written.push(line);
+        if (currentHeader === "7C4") {
+          // B14A1 (94 A1 00) with status 0x20 (testFailedSinceLastClear, NOT confirmed 0x08 / current 0x01)
+          // plus B14A2 (94 A2 00) with status 0x50 (not completed)
+          (link as unknown as { pending: string }).pending +=
+            "59 02 FF 94 A1 00 20 94 A2 00 50\r>";
+          return;
+        }
+        if (currentHeader === "7E0") {
+          // 7E0 has no UDS DTCs, only an unconfirmed 0x04 pending DTC
+          (link as unknown as { pending: string }).pending += "59 02 FF 01 71 00 04\r>";
+          return;
+        }
+        if (currentHeader === "787") {
+          // Real confirmed History DTC B2802 (A8 02 00 28 -> bit 3 confirmedDTC set)
+          (link as unknown as { pending: string }).pending += "59 02 FF A8 02 00 28\r>";
+          return;
+        }
+        (link as unknown as { pending: string }).pending += "59 02 FF\r>";
+        return;
+      }
+      if (line === "07") {
+        link.written.push(line);
+        // Should NOT be turned into History on Subaru
+        (link as unknown as { pending: string }).pending += "47 01 01 71\r>";
+        return;
+      }
+      if (line === "22F197" || line === "22F18E") {
+        link.written.push(line);
+        (link as unknown as { pending: string }).pending += "7F 22 31\r>";
+        return;
+      }
+      await origWrite(line);
+    };
+
+    const session = new ObdBleSession();
+    const s = session as unknown as { elm: Elm327Client; phase: string };
+    s.elm = new Elm327Client(link);
+    s.phase = "vehicle";
+
+    const reports = await session.scanAllModuleDtcs(
+      "6",
+      undefined,
+      undefined,
+      [
+        { tx: 0x7e0, rx: 0x7e8, title: "Engine", safetyCritical: false, canSafeClear: true, mode03Fallback: true },
+        { tx: 0x7c4, rx: 0x7cc, title: "Air Conditioner", safetyCritical: false, canSafeClear: true },
+        { tx: 0x787, rx: 0x78f, title: "EyeSight", safetyCritical: true, canSafeClear: false },
+      ],
+      "subaru",
+    );
+
+    const egi = reports.find((r) => r.txHex === "7E0");
+    const ac = reports.find((r) => r.txHex === "7C4");
+    const es = reports.find((r) => r.txHex === "787");
+    expect(egi?.dtcs).toEqual([]);
+    expect(ac?.dtcs).toEqual([]);
+    expect(es?.dtcs.map((d) => d.code)).toEqual(["B2802"]);
+    expect(link.written).not.toContain("07");
+  });
 });
 
