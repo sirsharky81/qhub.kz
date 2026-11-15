@@ -36,6 +36,7 @@ import {
   matchSsm4VehicleByVin,
   parseSubaru12ColumnFromAscii,
   resolveCanadianOptionCodesForSubaru,
+  resolveDualXModeRecommendation,
 } from "../subaru-ssm4-catalog";
 
 describe("subaru-ssm4-catalog", () => {
@@ -163,6 +164,31 @@ describe("subaru-ssm4-catalog", () => {
     expect(SUBARU_CANADIAN_OPTION_PRESETS[0]?.canadianOptionCodeC0).toBe("C0QF");
     expect(SUBARU_METER_VARIANT_READ_FACTS.a002Map["03"]).toBe("C0");
     expect(SUBARU_CANADIAN_OPTION_PRESETS.length).toBeGreaterThanOrEqual(5);
+
+    // Dual X-Mode verified cgdw recommendations
+    const limXt24 = resolveDualXModeRecommendation("BTAEYJ8", "U44G");
+    expect(limXt24).toMatchObject({
+      supported: true,
+      alreadyHasDualXMode: false,
+      currentXModeLabelRu: "Single X-Mode",
+      appliedModel: "BTAEYR8",
+      canadianOptionCode: "C0QF",
+      validInCgdw: true,
+      validInEyesightYyw: true,
+      requiresFullWrite: true,
+    });
+
+    const lim25C = resolveDualXModeRecommendation("BT9CYDL", "U54G");
+    expect(lim25C.appliedModel).toBe("BT9EYTL");
+    expect(lim25C.canadianOptionCode).toBe("C5QF");
+    expect(lim25C.validInCgdw).toBe(true);
+
+    const wild24 = resolveDualXModeRecommendation("BTAEYR8", "U45D");
+    expect(wild24.alreadyHasDualXMode).toBe(true);
+    expect(wild24.canadianOptionCode).toBe("C0QF");
+
+    const legacySedan = resolveDualXModeRecommendation("BWAEYV8", "U4DC");
+    expect(legacySedan.supported).toBe(false);
   });
 
   it("accepts SIA Outback WMI 4S4 in the SSM4 chkDigit1to3 table and rejects unknown WMI", () => {

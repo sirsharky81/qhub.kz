@@ -14,6 +14,7 @@ import {
 } from "./subaru-ssm4-cgdw-pairs";
 import {
   eyesightDestinationHintFrom3502,
+  lookupSsm4YywFingerprint,
   matchSsm4OptionFromEyesightDids,
   SSM4_YYW_FP_DID_KEYS,
 } from "./subaru-ssm4-yyw-fingerprints";
@@ -5924,6 +5925,34 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
       "SSM4 cgdw: BTAEYR8 принимает US U45D/U4TD/U45J и CA C0QF/C0RF. Шильдик может показывать U45L, но в таблице SSM4 U45L нет — для °C пишите C0QF (или C0RF).",
   },
   {
+    id: "bt-outback-limited-xt-24t-2024",
+    modelSeriesRu: "Outback VI (BT · 2024 MY)",
+    years: "2024–2025",
+    trimRu: "Limited XT 2.4T (BTAEYJ8 · Single → Dual: BTAEYR8+C0QF)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690 + EyeSight)",
+    appliedModel: "BTAEYJ8",
+    usOptionCodeExamples: ["U44G", "U4SG"],
+    canadianOptionCodeC0: "C04G",
+    canadianOptionCodeC5: "C0SG",
+    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
+    featuresRu:
+      "Штатно °C без изменения X-Mode: BTAEYJ8+C04G. Чтобы добавить Dual X-Mode, выберите BTAEYR8+C0QF в режиме «Все DID как SSM4 (cgdw)».",
+  },
+  {
+    id: "bt-outback-touring-xt-24t-2024",
+    modelSeriesRu: "Outback VI (BT · 2024 MY)",
+    years: "2024–2025",
+    trimRu: "Touring XT 2.4T (BTAEYK8 · Single → Dual: BTAEYR8+C0QF)",
+    engineRu: "FA24 2.4L Turbo (CVT TR690 + EyeSight)",
+    appliedModel: "BTAEYK8",
+    usOptionCodeExamples: ["U4SG"],
+    canadianOptionCodeC0: "C0SG",
+    canadianOptionCodeC5: "C0SG",
+    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
+    featuresRu:
+      "Штатно °C: BTAEYK8+C0SG. Для добавления Dual X-Mode используйте BTAEYR8+C0QF в режиме «Все DID как SSM4 (cgdw)».",
+  },
+  {
     id: "bt-outback-wilderness-24t-2023",
     modelSeriesRu: "Outback VI (BT · 2023 MY)",
     years: "2023",
@@ -5989,7 +6018,7 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     canadianOptionCodeC0: "C04G",
     canadianOptionCodeC5: "C04G",
     xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
-    featuresRu: "SSM4: BTACYK8 + U44G или C04G.",
+    featuresRu: "SSM4: BTACYK8 + U44G или C04G. Для Dual X-Mode выберите BTACYH8+C0QF или BTACYR8+C0QF.",
   },
   {
     id: "bt-outback-onyx-25i",
@@ -6005,7 +6034,74 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     featuresRu:
       "SSM4: BT9EYTL + U5QD/U5RD/U5QJ или C5QF/C5RF. Dual X-Mode — 6-й знак T; C05D в каталоге нет.",
   },
+  {
+    id: "bt-outback-limited-25i-2024",
+    modelSeriesRu: "Outback VI (BT · 2024 MY)",
+    years: "2024–2025",
+    trimRu: "2.5i Limited (BT9EYDL · Single → Dual: BT9EYTL+C5QF)",
+    engineRu: "FB25D 2.5L DI (CVT)",
+    appliedModel: "BT9EYDL",
+    usOptionCodeExamples: ["U54E", "U54G", "U5SG"],
+    canadianOptionCodeC0: "C54G",
+    canadianOptionCodeC5: "C5SG",
+    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
+    featuresRu:
+      "Штатно °C: BT9EYDL+C54G. Для добавления Dual X-Mode выберите BT9EYTL+C5QF в режиме «Все DID как SSM4 (cgdw)».",
+  },
+  {
+    id: "sk-forester-sport-onyx",
+    modelSeriesRu: "Forester V (SK · 2024 MY)",
+    years: "2022–2024",
+    trimRu: "Sport / Limited / Onyx (6-й знак H/D = Dual X-Mode)",
+    engineRu: "FB25D 2.5L DI (CVT)",
+    appliedModel: "SK9EYHL",
+    usOptionCodeExamples: ["U5GR"],
+    canadianOptionCodeC0: "C5GR",
+    canadianOptionCodeC5: "C5GR",
+    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
+    featuresRu: "SSM4 cgdw/Y-Yw: SK9EYHL+U5GR (US) или C5GR (CA °C + Dual X-Mode).",
+  },
+  {
+    id: "gu-crosstrek-onyx-25",
+    modelSeriesRu: "Crosstrek (GU · 2024 MY)",
+    years: "2024–2025",
+    trimRu: "2.5i Onyx / Sport (GU9AYTL · 6-й знак T = Dual X-Mode)",
+    engineRu: "FB25D 2.5L DI (CVT)",
+    appliedModel: "GU9AYTL",
+    usOptionCodeExamples: ["U5LF", "U5NH"],
+    canadianOptionCodeC0: "C5LF",
+    canadianOptionCodeC5: "C5NH",
+    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
+    featuresRu: "SSM4 cgdw/Y-Yw: GU9AYTL+C5LF / C5NH (°C + Dual X-Mode). Для Single X-Mode (GU9AYCL) используйте «Все DID».",
+  },
+  {
+    id: "wm-ascent-onyx-24t",
+    modelSeriesRu: "Ascent / Evoltis (WM · 2024 MY)",
+    years: "2024–2025",
+    trimRu: "Onyx / Limited 2.4T (WMAEYC8 · Dual X-Mode)",
+    engineRu: "FA24 2.4L Turbo (CVT)",
+    appliedModel: "WMAEYC8",
+    usOptionCodeExamples: ["U4DK", "U4FL"],
+    canadianOptionCodeC0: "C0JL",
+    canadianOptionCodeC5: "C0JL",
+    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
+    featuresRu: "SSM4 cgdw/Y-Yw: WMAEYC8+C0JL (°C + Dual X-Mode).",
+  },
 ];
+
+export interface SubaruDualXModeRecommendation {
+  supported: boolean;
+  alreadyHasDualXMode: boolean;
+  currentXModeLabelRu: "Dual X-Mode" | "Single X-Mode" | "Без X-Mode";
+  appliedModel: string;
+  canadianOptionCode: string;
+  usOptionCode: string | null;
+  validInCgdw: boolean;
+  validInEyesightYyw: boolean;
+  requiresFullWrite: boolean;
+  noteRu: string;
+}
+
 export interface SubaruAppliedModelAnalysis {
   appliedModel: string;
   optionCode: string;
@@ -6027,6 +6123,7 @@ export interface SubaruAppliedModelAnalysis {
   canadianOptionCodeC0: string;
   canadianOptionCodeC5: string;
   dualXModeAppliedModelSuggestion: string;
+  dualXModeRecommendation: SubaruDualXModeRecommendation;
 }
 
 /**
@@ -6337,6 +6434,8 @@ export function decodeSubaruAppliedModel12Columns(
       ? `${app.slice(0, 5)}${dualGrade}${app.slice(6, 7)}`
       : app;
 
+  const dualXModeRecommendation = resolveDualXModeRecommendation(app, opt);
+
   return {
     appliedModel: app,
     optionCode: opt,
@@ -6356,6 +6455,131 @@ export function decodeSubaruAppliedModel12Columns(
     canadianOptionCodeC0,
     canadianOptionCodeC5,
     dualXModeAppliedModelSuggestion,
+    dualXModeRecommendation,
+  };
+}
+
+/**
+ * Resolves a verified SSM4 cgdw (and Y-Yw where available) Applied Model + Canadian Option Code
+ * that enables **Dual X-Mode** alongside metric °C / km/h units.
+ */
+export function resolveDualXModeRecommendation(
+  appliedModelInput: string,
+  optionCodeInput = "",
+): SubaruDualXModeRecommendation {
+  const app = appliedModelInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const opt = optionCodeInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const series = app.slice(0, 3);
+  const rev = app.slice(3, 4);
+  const grade = app.slice(5, 6);
+
+  const isSedan = series.startsWith("BW") || series.startsWith("BN") || series.startsWith("GK");
+  if (isSedan || app.length !== 7) {
+    return {
+      supported: false,
+      alreadyHasDualXMode: false,
+      currentXModeLabelRu: "Без X-Mode",
+      appliedModel: app || "—",
+      canadianOptionCode: opt || "—",
+      usOptionCode: null,
+      validInCgdw: false,
+      validInEyesightYyw: false,
+      requiresFullWrite: false,
+      noteRu: isSedan
+        ? "На седанах (Legacy BW/BN, Impreza GK) режим X-Mode отсутствует."
+        : "Введите 7-значный Applied Model для расчёта Dual X-Mode.",
+    };
+  }
+
+  const isDualNow =
+    (series === "BTA" && (grade === "R" || grade === "H")) ||
+    (series === "BT9" && grade === "T") ||
+    (series === "GU9" && ["T", "R", "P", "S", "U"].includes(grade)) ||
+    (series === "SK9" && ["H", "D", "9", "B", "E", "A"].includes(grade)) ||
+    (series === "WMA" && ["B", "C", "D", "E", "6"].includes(grade));
+
+  const currentXModeLabelRu: SubaruDualXModeRecommendation["currentXModeLabelRu"] = isDualNow
+    ? "Dual X-Mode"
+    : (series === "GU9" && (grade === "C" || grade === "D")) ||
+        (series === "GU7" && (grade === "A" || grade === "B")) ||
+        (series === "SK9" && grade === "1")
+      ? "Без X-Mode"
+      : "Single X-Mode";
+
+  const candidateModels: string[] = [];
+  if (series === "BTA") {
+    if (isDualNow) candidateModels.push(app);
+    candidateModels.push(
+      `BTA${rev}YR8`,
+      `BTA${rev}YH8`,
+      "BTAEYR8",
+      "BTADYR8",
+      "BTACYR8",
+      "BTACYH8",
+      "BTAAYH8",
+    );
+  } else if (series === "BT9") {
+    if (isDualNow) candidateModels.push(app);
+    candidateModels.push(`BT9${rev}YTL`, "BT9EYTL", "BT9DYTL");
+  } else if (series === "SK9") {
+    if (isDualNow) candidateModels.push(app);
+    candidateModels.push(`SK9${rev}YHL`, `SK9${rev}YDL`, "SK9EYHL", "SK9DYHL");
+  } else if (series === "GU9") {
+    if (isDualNow) candidateModels.push(app);
+    candidateModels.push(`GU9${rev}YTL`, `GU9${rev}YRL`, "GU9AYTL");
+  } else if (series === "WMA") {
+    if (isDualNow) candidateModels.push(app);
+    candidateModels.push(`WMA${rev}YC8`, `WMA${rev}YE8`, `WMA${rev}YB8`, "WMAEYC8");
+  } else {
+    candidateModels.push(app);
+  }
+
+  let pickedApp = candidateModels[0] ?? app;
+  let pickedCa = "";
+  let pickedUs: string | null = null;
+  let validInCgdw = false;
+
+  for (const cand of [...new Set(candidateModels)]) {
+    const opts = listSsm4CgdwOptionsForAppliedModel(cand);
+    if (opts.length === 0) continue;
+    const caOpt =
+      opts.find((o) => o.optionCode.startsWith("C0"))?.optionCode ??
+      opts.find((o) => o.optionCode.startsWith("C5"))?.optionCode;
+    const usOpt =
+      opts.find((o) => o.optionCode.startsWith("U4"))?.optionCode ??
+      opts.find((o) => o.optionCode.startsWith("U5"))?.optionCode ??
+      null;
+    if (caOpt) {
+      pickedApp = cand;
+      pickedCa = caOpt;
+      pickedUs = usOpt;
+      validInCgdw = true;
+      break;
+    }
+  }
+
+  if (!pickedCa) {
+    const fallbackCan = resolveCanadianOptionCodesForSubaru(pickedApp, opt);
+    pickedCa = fallbackCan.primaryC0;
+  }
+
+  const validInEyesightYyw = Boolean(lookupSsm4YywFingerprint(pickedApp, pickedCa));
+
+  const noteRu = isDualNow
+    ? `У модели ${app} уже активен Dual X-Mode (6-й знак «${grade}»). Для °C/км/ч в SSM4 используйте ${pickedApp} + ${pickedCa}.`
+    : `Чтобы добавить Dual X-Mode вместе с °C/км/ч, выберите ${pickedApp} + ${pickedCa} и режим записи приборки «Все DID как SSM4 (cgdw)» (обновит байт A007).`;
+
+  return {
+    supported: true,
+    alreadyHasDualXMode: isDualNow,
+    currentXModeLabelRu,
+    appliedModel: pickedApp,
+    canadianOptionCode: pickedCa,
+    usOptionCode: pickedUs,
+    validInCgdw,
+    validInEyesightYyw,
+    requiresFullWrite: !isDualNow,
+    noteRu,
   };
 }
 
@@ -6377,6 +6601,8 @@ export interface SubaruDumpCodeMatch {
   inferredRegion: "CANADA (C0 / C5 — °C, км/ч)" | "USA (U4 / U5 / U6 — °F, мили)" | "UNKNOWN";
   inferredAppliedModel: string;
   inferredOptionCode: string;
+  /** Verified SSM4 cgdw Applied+Option recommendation with Dual X-Mode + °C/km/h. */
+  dualXModeRecommendation?: SubaruDualXModeRecommendation;
   explanationRu: string;
 }
 
@@ -6657,6 +6883,7 @@ export function extractAppliedModelAndOptionCodeFromDump(
       inferredRegion: actualRegion,
       inferredAppliedModel: baseApp,
       inferredOptionCode: actualOpt,
+      dualXModeRecommendation: resolveDualXModeRecommendation(baseApp, actualOpt),
       explanationRu: `Прямое совпадение ASCII в ${sourceDid}: ${baseApp} + ${actualOpt}. По cgdw SSM4 для °C: ${baseApp} + ${resolvedCan.primaryC0}${resolvedCan.secondaryAlt !== resolvedCan.primaryC0 ? ` (альт. ${resolvedCan.secondaryAlt})` : ""}.`,
     };
   }
@@ -6721,6 +6948,7 @@ export function extractAppliedModelAndOptionCodeFromDump(
     inferredRegion: actualRegion,
     inferredAppliedModel: baseApp,
     inferredOptionCode: actualOpt,
+    dualXModeRecommendation: resolveDualXModeRecommendation(baseApp, actualOpt),
     explanationRu: `${regSourceText} ${vinSourceText} Для °C/км/ч: ${baseApp} + ${canC0}.`,
   };
 }

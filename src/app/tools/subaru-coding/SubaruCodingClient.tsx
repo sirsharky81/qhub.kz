@@ -22,6 +22,7 @@ import {
   diffMeterAgainstAppliedCatalog,
   getSsm4CgdwWriteDids,
   getSsm4YywWriteDids,
+  resolveDualXModeRecommendation,
 } from "@/lib/obd/subaru-ssm4-catalog";
 import {
   buildSubaruEyesightBackup,
@@ -79,6 +80,7 @@ export default function SubaruCodingClient() {
   const [optionCodeInput, setOptionCodeInput] = useState("U45D");
   const [stickerOptionInput, setStickerOptionInput] = useState("U45L");
   const [meterWriteMode, setMeterWriteMode] = useState<"two-did" | "full-cgdw">("two-did");
+  const [presetDualOnly, setPresetDualOnly] = useState(false);
   const [meter12Read, setMeter12Read] = useState<SubaruMeter12ColumnRead | null>(null);
   const [loadedBackup, setLoadedBackup] = useState<SubaruMeterBackupFile | null>(null);
   const [backupNotice, setBackupNotice] = useState<string | null>(null);
@@ -919,7 +921,7 @@ export default function SubaruCodingClient() {
                 </div>
               )}
               {meter12Read && (
-                <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 sm:col-span-2">
+                <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3">
                   <div className="text-[10px] font-bold uppercase text-emerald-900">
                     Рекомендуемый канадский код (°C, км/ч)
                   </div>
@@ -931,6 +933,53 @@ export default function SubaruCodingClient() {
                   </div>
                 </div>
               )}
+              {meter12Read &&
+                (() => {
+                  const dx =
+                    meter12Read.match.dualXModeRecommendation ??
+                    resolveDualXModeRecommendation(
+                      meter12Read.match.actualAppliedModel,
+                      meter12Read.match.actualOptionCode,
+                    );
+                  if (!dx.supported) return null;
+                  return (
+                    <div
+                      className={`rounded-xl border p-3 ${
+                        dx.alreadyHasDualXMode
+                          ? "border-teal-300 bg-teal-50"
+                          : "border-cyan-300 bg-cyan-50"
+                      } ${eyesightRead ? "" : "sm:col-span-2"}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] font-bold uppercase text-cyan-950">
+                          {dx.alreadyHasDualXMode
+                            ? "X-Mode статус (Dual X-Mode)"
+                            : "Рекомендация °C + Dual X-Mode"}
+                        </div>
+                        <span className="rounded bg-white/80 px-1.5 py-0.5 font-mono text-[9px] font-bold text-cyan-900 border border-cyan-200">
+                          {dx.currentXModeLabelRu}
+                        </span>
+                      </div>
+                      <div className="mt-1 font-mono text-base font-bold text-cyan-950">
+                        {dx.appliedModel} + {dx.canadianOptionCode}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-cyan-900">{dx.noteRu}</div>
+                      {!dx.alreadyHasDualXMode && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAppliedModelInput(dx.appliedModel);
+                            setOptionCodeInput(dx.canadianOptionCode);
+                            setMeterWriteMode("full-cgdw");
+                          }}
+                          className="mt-2 rounded-lg bg-cyan-800 hover:bg-cyan-900 px-3 py-1.5 text-[11px] font-bold text-white"
+                        >
+                          Подставить {dx.appliedModel} + {dx.canadianOptionCode} (Dual X-Mode · Все DID)
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
             </div>
           )}
 
@@ -1527,15 +1576,51 @@ export default function SubaruCodingClient() {
 
           {appliedModelAnalysis.valid && (
             <div
-              className={`rounded-xl border px-3 py-2 text-[11px] ${
+              className={`rounded-xl border px-3 py-2.5 text-[11px] space-y-1.5 ${
                 appliedModelAnalysis.validInSsm4Cgdw
                   ? "border-emerald-200 bg-emerald-50 text-emerald-900"
                   : "border-amber-300 bg-amber-50 text-amber-950"
               }`}
             >
-              {appliedModelAnalysis.validInSsm4Cgdw
-                ? `Пара в каталоге SSM4 cgdw: OK. Допустимые Option: ${appliedModelAnalysis.cgdwOptionCodes.join(", ") || "—"}.`
-                : `Пары ${appliedModelAnalysis.appliedModel}+${appliedModelAnalysis.optionCode} нет в cgdw SSM4 — запись может быть отклонена. Для °C используйте ${appliedModelAnalysis.canadianOptionCodeC0}. Dual X-Mode = 6-й знак Applied (${appliedModelAnalysis.gradeChar}), не Option Code.`}
+              <div>
+                {appliedModelAnalysis.validInSsm4Cgdw
+                  ? `Пара в каталоге SSM4 cgdw: OK. Допустимые Option: ${appliedModelAnalysis.cgdwOptionCodes.join(", ") || "—"}.`
+                  : `Пары ${appliedModelAnalysis.appliedModel}+${appliedModelAnalysis.optionCode} нет в cgdw SSM4 — запись может быть отклонена. Для °C используйте ${appliedModelAnalysis.canadianOptionCodeC0}. Dual X-Mode = 6-й знак Applied (${appliedModelAnalysis.gradeChar}), не Option Code.`}
+              </div>
+              {appliedModelAnalysis.dualXModeRecommendation.supported && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/10 pt-1.5">
+                  <span>
+                    Режим X-Mode:{" "}
+                    <strong>{appliedModelAnalysis.dualXModeRecommendation.currentXModeLabelRu}</strong>
+                    {!appliedModelAnalysis.dualXModeRecommendation.alreadyHasDualXMode && (
+                      <>
+                        {" "}
+                        · для <strong>Dual X-Mode + °C</strong> используйте{" "}
+                        <code className="font-mono font-bold">
+                          {appliedModelAnalysis.dualXModeRecommendation.appliedModel}+
+                          {appliedModelAnalysis.dualXModeRecommendation.canadianOptionCode}
+                        </code>{" "}
+                        и режим «Все DID как SSM4 (cgdw)»
+                      </>
+                    )}
+                  </span>
+                  {!appliedModelAnalysis.dualXModeRecommendation.alreadyHasDualXMode && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const dx = appliedModelAnalysis.dualXModeRecommendation;
+                        setAppliedModelInput(dx.appliedModel);
+                        setOptionCodeInput(dx.canadianOptionCode);
+                        setMeterWriteMode("full-cgdw");
+                      }}
+                      className="rounded-lg bg-cyan-800 hover:bg-cyan-900 px-2.5 py-1 text-[10px] font-bold text-white"
+                    >
+                      + Добавить Dual X-Mode ({appliedModelAnalysis.dualXModeRecommendation.appliedModel}+
+                      {appliedModelAnalysis.dualXModeRecommendation.canadianOptionCode})
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1690,9 +1775,40 @@ export default function SubaruCodingClient() {
           )}
 
           {/* Presets Table */}
-          <div className="space-y-1.5">
-            <div className="text-xs font-bold text-gray-700">
-              Справочник замен из SSM4 cgdw (нажмите — подставить Applied + канадский Option):
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-bold text-gray-700">
+                  Справочник замен из SSM4 cgdw (нажмите — подставить Applied + канадский Option):
+                </div>
+                <div className="text-[11px] text-gray-500">
+                  При выборе пресета с <strong>Dual X-Mode</strong> автоматически включается режим «Все DID как SSM4 (cgdw)» для записи байта X-Mode (A007).
+                </div>
+              </div>
+              <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setPresetDualOnly(false)}
+                  className={`rounded-md px-2.5 py-1 font-semibold ${
+                    !presetDualOnly
+                      ? "bg-gray-900 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Все ({SUBARU_CANADIAN_OPTION_PRESETS.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPresetDualOnly(true)}
+                  className={`rounded-md px-2.5 py-1 font-semibold ${
+                    presetDualOnly
+                      ? "bg-cyan-800 text-white"
+                      : "text-gray-700 hover:bg-cyan-50"
+                  }`}
+                >
+                  Только Dual X-Mode
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="w-full text-left text-[11px]">
@@ -1700,36 +1816,83 @@ export default function SubaruCodingClient() {
                   <tr>
                     <th className="px-2.5 py-1.5">Модель</th>
                     <th className="px-2.5 py-1.5">Комплектация</th>
+                    <th className="px-2.5 py-1.5">X-Mode</th>
                     <th className="px-2.5 py-1.5">Applied Model</th>
                     <th className="px-2.5 py-1.5">США</th>
                     <th className="px-2.5 py-1.5">Канада (°C)</th>
+                    <th className="px-2.5 py-1.5">Dual X-Mode апгрейд</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {SUBARU_CANADIAN_OPTION_PRESETS.map((preset) => (
-                    <tr
-                      key={preset.id}
-                      onClick={() => {
-                        setAppliedModelInput(preset.appliedModel);
-                        setOptionCodeInput(preset.canadianOptionCodeC0);
-                      }}
-                      className="cursor-pointer hover:bg-emerald-50"
-                    >
-                      <td className="px-2.5 py-1.5 font-semibold text-gray-800">
-                        {preset.modelSeriesRu} <span className="text-gray-500">({preset.years})</span>
-                      </td>
-                      <td className="px-2.5 py-1.5 text-gray-700">{preset.trimRu}</td>
-                      <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700">
-                        {preset.appliedModel}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono text-gray-500">
-                        {preset.usOptionCodeExamples.join(", ")}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700">
-                        {preset.canadianOptionCodeC0}
-                      </td>
-                    </tr>
-                  ))}
+                  {SUBARU_CANADIAN_OPTION_PRESETS.filter(
+                    (preset) => !presetDualOnly || preset.xModeTypeRu.startsWith("Dual"),
+                  ).map((preset) => {
+                    const isDual = preset.xModeTypeRu.startsWith("Dual");
+                    const dx = resolveDualXModeRecommendation(
+                      preset.appliedModel,
+                      preset.canadianOptionCodeC0,
+                    );
+                    const hasUpgrade = dx.supported && !dx.alreadyHasDualXMode;
+                    return (
+                      <tr
+                        key={preset.id}
+                        onClick={() => {
+                          setAppliedModelInput(preset.appliedModel);
+                          setOptionCodeInput(preset.canadianOptionCodeC0);
+                          if (isDual) setMeterWriteMode("full-cgdw");
+                        }}
+                        className="cursor-pointer hover:bg-emerald-50"
+                      >
+                        <td className="px-2.5 py-1.5 font-semibold text-gray-800">
+                          {preset.modelSeriesRu}{" "}
+                          <span className="text-gray-500">({preset.years})</span>
+                        </td>
+                        <td className="px-2.5 py-1.5 text-gray-700">{preset.trimRu}</td>
+                        <td className="px-2.5 py-1.5 whitespace-nowrap">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                              isDual
+                                ? "bg-cyan-100 text-cyan-900"
+                                : "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {isDual ? "Dual X-Mode" : "Single X-Mode"}
+                          </span>
+                        </td>
+                        <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700">
+                          {preset.appliedModel}
+                        </td>
+                        <td className="px-2.5 py-1.5 font-mono text-gray-500">
+                          {preset.usOptionCodeExamples.join(", ")}
+                        </td>
+                        <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700">
+                          {preset.canadianOptionCodeC0}
+                        </td>
+                        <td className="px-2.5 py-1.5 whitespace-nowrap">
+                          {hasUpgrade ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setAppliedModelInput(dx.appliedModel);
+                                setOptionCodeInput(dx.canadianOptionCode);
+                                setMeterWriteMode("full-cgdw");
+                              }}
+                              className="rounded border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-900"
+                            >
+                              → {dx.appliedModel}+{dx.canadianOptionCode}
+                            </button>
+                          ) : isDual ? (
+                            <span className="text-[10px] font-semibold text-teal-700">
+                              ✓ Включён
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
