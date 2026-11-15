@@ -344,4 +344,70 @@ describe("subaru-eyesight-variant (ADA-031 / ADA-032)", () => {
     expect(Object.keys(res.didMap)).toHaveLength(16);
     expect(res.didMap["3502"]).toBe("20");
   });
+
+  it("unlocks 787 via ATFCSM0 when 787 rejects 30 08 0A FlowControl on 27 03", async () => {
+    const seedEs = [
+      0xf8, 0xee, 0x16, 0x09, 0xec, 0x9a, 0xb9, 0x1c,
+      0x83, 0x58, 0x06, 0x0f, 0xde, 0xbc, 0x3e, 0x06,
+    ];
+    const esDef = SUBARU_SGP_AES128_KEYS.find((k) => k.id === "CTRL_0002_0251_32")!;
+    const expectedKey = computeSubaruSecurityKey16ByteAesEcb(
+      seedEs,
+      esDef.keyHex.match(/../g)!.map((h) => Number.parseInt(h, 16)),
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    const usBytes = getSsm4YywWriteDids("BTAEYR8", "U45D")!;
+    let fcMode = "1";
+    let currentTx = 0;
+    let unlocked = false;
+    const elm: SubaruMeterWriteLink = {
+      async sendCommand(cmd) {
+        const c = cmd.replace(/\s+/g, "").toUpperCase();
+        if (c === "ATFCSM0") fcMode = "0";
+        if (c === "ATFCSM1") fcMode = "1";
+        return "OK";
+      },
+      async setCanHeader(tx) {
+        currentTx = tx;
+      },
+      async sendPayload(hex) {
+        const key = hex.replace(/\s+/g, "").toUpperCase();
+        if (currentTx === 0x763) {
+          if (key === "1003") return "50 03";
+          if (key === "3101020C") return "71 01 02 0C";
+          if (key === "1001") return "50 01";
+          return "NO DATA";
+        }
+        if (currentTx === 0x787) {
+          if (key === "1003") return "50 03";
+          if (key === "1001") return "50 01";
+          if (key === "3E00") return "7E 00";
+          if (key === "220251") return "62 02 51 20";
+          if (key === "2703") {
+            if (fcMode === "0") {
+              return "67 03 " + seedEs.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+            }
+            return "NO DATA";
+          }
+          if (key === `2704${expectedKey}`) {
+            unlocked = true;
+            return "67 04";
+          }
+          const m = key.match(/^22(35[0-9A-F]{2})$/);
+          if (m) {
+            if (!unlocked) return "7F 22 33";
+            const found = usBytes.find((u) => u.did === m[1]);
+            return found ? `62 ${found.did.slice(0, 2)} ${found.did.slice(2)} ${found.byteHex}` : "NO DATA";
+          }
+        }
+        return "NO DATA";
+      },
+    };
+
+    const res = await readSubaruEyesight35xxDids(elm, { didHexList: SSM4_YYW_FP_DID_KEYS });
+    expect(Object.keys(res.didMap)).toHaveLength(16);
+    expect(res.didMap["3502"]).toBe("20");
+  });
 });

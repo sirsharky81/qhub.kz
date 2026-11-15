@@ -3,9 +3,11 @@ import {
   SUBARU_METER_SECURITY_KEY_TABLES,
   SUBARU_METER_WRITE_ALLOWED_DESTINATIONS,
   SUBARU_METER_WRITE_DIDS,
+  SUBARU_SGP_AES128_KEYS,
   buildSubaruMeter12ColumnWritePlan,
   computeSubaruSecurityKey16ByteAesEcb,
   computeSubaruSecurityKey4Byte,
+  unlockSubaruCgwFilterRemove,
   writeSubaruMeter12ColumnCode,
   type SubaruMeterWriteLink,
 } from "../subaru-meter-variant";
@@ -552,5 +554,53 @@ describe("subaru-meter-variant", () => {
     expect(sentEsc).toContain(`763:2708${cgwKeyHex}`);
     expect(sentEsc).toContain("763:31010200");
     expect(sentEsc).toContain(`783:2704${meterKey}`);
+  });
+
+  it("prioritizes CGW/Chassis KeyVersion=3 keys (0x01/0x0F) ahead of Meter CTRL_MET_0251_3 (0x12) on 763", async () => {
+    const seed = [
+      0xf8, 0xbd, 0x6d, 0xb6, 0xe1, 0x23, 0xb7, 0x2e,
+      0x35, 0x85, 0x5c, 0x80, 0xbb, 0xaf, 0x9f, 0x51,
+    ];
+    const key01 = SUBARU_SGP_AES128_KEYS.find((k) => k.id === "12265_0251_3")!;
+    const expected01 = computeSubaruSecurityKey16ByteAesEcb(
+      seed,
+      key01.keyHex.match(/../g)!.map((h) => Number.parseInt(h, 16)),
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    const sent: string[] = [];
+    let activeTx = 0;
+    const elm: SubaruMeterWriteLink = {
+      async sendCommand() {
+        return "OK";
+      },
+      async setCanHeader(tx) {
+        activeTx = tx;
+      },
+      async sendPayload(hex) {
+        const k = hex.replace(/\s+/g, "").toUpperCase();
+        sent.push(`${activeTx.toString(16)}:${k}`);
+        if (activeTx !== 0x763) return "NO DATA";
+        if (k === "1003") return "50 03";
+        if (k === "1001") return "50 01";
+        if (k === "220250") return "62 02 50 01";
+        if (k === "220251") return "62 02 51 03";
+        if (k === "2707") return "67 07 " + seed.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+        if (k === `2708${expected01}`) return "67 08";
+        if (k === "31010200") return "71 01 02 00";
+        return "7F 27 35";
+      },
+    };
+
+    const steps: string[] = [];
+    const res = await unlockSubaruCgwFilterRemove(elm, steps, {
+      requireSecurityAccess: true,
+      targetTxs: [0x763],
+    });
+
+    expect(res.filterRemoved).toBe(true);
+    expect(sent).toContain(`763:2708${expected01}`);
+    expect(steps.some((s) => s.includes("CTRL_MET_0251_3"))).toBe(false);
   });
 });

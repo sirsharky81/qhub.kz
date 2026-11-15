@@ -159,6 +159,136 @@ async function readEyesightKeyVersionByte(elm: SubaruMeterWriteLink): Promise<nu
   return null;
 }
 
+async function readEyesightAlgoByte(elm: SubaruMeterWriteLink): Promise<number | null> {
+  try {
+    const raw = await elm.sendPayload("220250", 1_200);
+    const p = parseUdsResponse(raw, 0x22);
+    if (p.kind === "positive" && p.payload.length >= 3) {
+      return p.payload[2] ?? p.payload[p.payload.length - 1] ?? null;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function probeEyesight27FallbackAndDiag(
+  elm: SubaruMeterWriteLink,
+  tx: number,
+  rx: number,
+  steps: string[],
+  options: { userKeyHex?: string; keyVersionByte: number | null },
+): Promise<{ unlocked: boolean }> {
+  const txHex = tx.toString(16).toUpperCase();
+  const rxHex = rx.toString(16).toUpperCase();
+
+  // 1) Verify multi-frame ISO-TP works on 787->78F via 22 F1 8E
+  try {
+    const rawF18E = await elm.sendPayload("22F18E", 1_500);
+    const pF18E = parseUdsResponse(rawF18E, 0x22);
+    steps.push(
+      `${txHex}→${rxHex}: проверка multi-frame 22 F1 8E → ${
+        pF18E.kind === "positive"
+          ? `OK (${pF18E.payload.length - 2} байт)`
+          : rawF18E.replace(/>/g, "").trim() || "NO DATA"
+      }`,
+    );
+  } catch {
+    /* ignore */
+  }
+
+  // 2) Try ATFCSM0 (ELM default Flow Control) in case 787 rejected 30 08 0A for 67 03
+  try {
+    await elm.sendCommand("ATFCSM0");
+    await elm.sendPayload("1003", 1_500);
+    const rawFc0 = await elm.sendPayload("2703", 2_500);
+    const pFc0 = parseUdsResponse(rawFc0, 0x27);
+    const cleanFc0 = rawFc0.replace(/>/g, "").trim();
+    steps.push(`${txHex}→${rxHex}: тест 27 03 (ATFCSM0) → ${cleanFc0 || "NO DATA"}`);
+    if (pFc0.kind === "positive") {
+      const u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+        userKeyHex: options.userKeyHex,
+        keyVersionByte: options.keyVersionByte,
+        preferNonMeterAes: true,
+        preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+        maxAesAttempts: 32,
+      });
+      if (u.unlocked) return { unlocked: true };
+    }
+  } catch {
+    /* ignore */
+  } finally {
+    try {
+      await elm.sendCommand(`ATFCSH${tx.toString(16).padStart(3, "0").toUpperCase()}`);
+      await elm.sendCommand("ATFCSD30080A");
+      await elm.sendCommand("ATFCSM1");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 3) Raw CAN sniff on 27 03 (ATH1 + ATAR) to distinguish CGW-drop vs malformed ISO-TP
+  try {
+    await elm.sendCommand("ATH1");
+    await elm.sendCommand("ATS1");
+    await elm.sendCommand("ATAR");
+    await elm.setCanHeader(tx, undefined);
+    const rawCan = await elm.sendPayload("2703", 1_800);
+    steps.push(
+      `${txHex} (raw ATH1 27 03): ${rawCan.replace(/>/g, "").replace(/\s+/g, " ").trim() || "NO DATA (шина молчит — фильтр CGW активен)"}`,
+    );
+  } catch {
+    /* ignore */
+  } finally {
+    try {
+      await elm.sendCommand("ATH0");
+    } catch {
+      /* ignore */
+    }
+    await openEyesightSession(elm, tx, rx);
+  }
+
+  // 4) Try 763: 10 03 -> 31 01 02 0C WITHOUT sending 10 01 on CGW (in case 10 01 re-enables 27 filter)
+  try {
+    await openEyesightSession(elm, 0x763, 0x76b);
+    const raw31 = await elm.sendPayload("3101020C", 2_500);
+    const p31 = parseUdsResponse(raw31, 0x31);
+    steps.push(
+      `763→76B: тест 31 01 02 0C (без 10 01) → ${raw31.replace(/>/g, "").trim() || "NO DATA"}`,
+    );
+    if (p31.kind === "positive") {
+      await openEyesightSession(elm, tx, rx);
+      const rawSeedKeep = await elm.sendPayload("2703", 2_500);
+      const pKeep = parseUdsResponse(rawSeedKeep, 0x27);
+      steps.push(
+        `${txHex}→${rxHex}: 27 03 при открытой 763 → ${rawSeedKeep.replace(/>/g, "").trim() || "NO DATA"}`,
+      );
+      if (pKeep.kind === "positive") {
+        const u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+          userKeyHex: options.userKeyHex,
+          keyVersionByte: options.keyVersionByte,
+          preferNonMeterAes: true,
+          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+          maxAesAttempts: 32,
+        });
+        if (u.unlocked) return { unlocked: true };
+      }
+      // Close 763 session cleanly
+      try {
+        await openEyesightSession(elm, 0x763, 0x76b);
+        await elm.sendPayload("1001", 800);
+      } catch {
+        /* ignore */
+      }
+      await openEyesightSession(elm, tx, rx);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return { unlocked: false };
+}
+
 function parseSingleDidBodyHex(raw: string, didHex: string): { ok: boolean; hex: string; nrc?: number } {
   const parsed = parseUdsResponse(raw, 0x22);
   if (parsed.kind === "negative") {
@@ -266,6 +396,10 @@ export async function readSubaruEyesight35xxDids(
       }
 
       if (options?.unlockBeforeRead) {
+        const algo = await readEyesightAlgoByte(elm);
+        if (algo != null) {
+          steps.push(`${txHex}→${rxHex}: 22 02 50 → Algo=${algo} (0x${algo.toString(16).padStart(2, "0").toUpperCase()})`);
+        }
         const kv = await readEyesightKeyVersionByte(elm);
         if (kv != null) {
           steps.push(`${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`);
@@ -291,6 +425,10 @@ export async function readSubaruEyesight35xxDids(
           if (!res.ok && res.nrc === 0x33 && (options?.unlockIfNrc33 ?? true) && !triedSaOnTarget) {
             triedSaOnTarget = true;
             steps.push(`${txHex}→${rxHex}: 22 ${didHex} → NRC 33, выполняем SecurityAccess (ADA-032 C11)…`);
+            const algo = await readEyesightAlgoByte(elm);
+            if (algo != null) {
+              steps.push(`${txHex}→${rxHex}: 22 02 50 → Algo=${algo} (0x${algo.toString(16).padStart(2, "0").toUpperCase()})`);
+            }
             const kv = await readEyesightKeyVersionByte(elm);
             if (kv != null) {
               steps.push(`${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`);
@@ -302,6 +440,15 @@ export async function readSubaruEyesight35xxDids(
               preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
               maxAesAttempts: 32,
             });
+            if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
+              const diag = await probeEyesight27FallbackAndDiag(elm, target.tx, target.rx, steps, {
+                userKeyHex: options?.securityKeyHex,
+                keyVersionByte: kv,
+              });
+              if (diag.unlocked) {
+                u = { unlocked: true, seedHex: null };
+              }
+            }
             if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
               steps.push(`${txHex}→${rxHex}: 27 xx → NO DATA — пробуем полную AES-разблокировку CGW (763/750 · 31 01 02 00)…`);
               const cgwSa763 = await unlockSubaruCgwFilterRemove(elm, steps, {

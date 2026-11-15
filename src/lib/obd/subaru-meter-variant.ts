@@ -803,6 +803,20 @@ export async function unlockSubaruCgwFilterRemove(
       }
     }
 
+    let cgwAlgoByte: number | null = null;
+    try {
+      const raw0250 = await elm.sendPayload("220250", 1_500);
+      const p0250 = parseUdsResponse(raw0250, 0x22);
+      if (p0250.kind === "positive" && p0250.payload.length >= 3) {
+        cgwAlgoByte = p0250.payload[2] ?? p0250.payload[p0250.payload.length - 1] ?? null;
+        steps.push(
+          `${label}: 22 0250 → Algo=${cgwAlgoByte} (0x${(cgwAlgoByte ?? 0).toString(16).toUpperCase().padStart(2, "0")})`,
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+
     let cgwKeyVersion: number | null = null;
     try {
       const raw0251 = await elm.sendPayload("220251", 1_500);
@@ -817,13 +831,22 @@ export async function unlockSubaruCgwFilterRemove(
       /* ignore */
     }
 
+    // Never let Meter keys (0x12/0x10/0x11) sort ahead of CGW/Body/Chassis keys (0x04/0x01/0x0f/0x06/0x07)
+    const cgwEcuKindPriority = [
+      0x04, 0x06, 0x07, 0x01, 0x0f, 0x08, 0x09, 0x0a, 0x0c, 0x0d, 0x0e, 0x00,
+      0x05, 0x02, 0x03, 0x10, 0x11, 0x12,
+    ];
+    const kindRank = (kind: number): number => {
+      const idx = cgwEcuKindPriority.indexOf(kind);
+      return idx === -1 ? 999 : idx;
+    };
     const orderedKeys = [...cgwAesKeys].sort((a, b) => {
       if (cgwKeyVersion != null) {
         const aMatch = a.keyVersion === cgwKeyVersion ? 0 : 1;
         const bMatch = b.keyVersion === cgwKeyVersion ? 0 : 1;
         if (aMatch !== bMatch) return aMatch - bMatch;
       }
-      return 0;
+      return kindRank(a.ecuKind) - kindRank(b.ecuKind);
     });
 
     let cgwSecurityUnlocked = false;
@@ -889,6 +912,9 @@ export async function unlockSubaruCgwFilterRemove(
           break;
         }
         if (pKey.kind === "negative" && (pKey.nrc === 0x36 || pKey.nrc === 0x37)) {
+          steps.push(
+            `${label}: шлюз заблокировал SecurityAccess (NRC ${pKey.nrc.toString(16).toUpperCase()}) — выключите зажигание IG OFF на 15 с и снова включите IG ON`,
+          );
           break;
         }
       }
