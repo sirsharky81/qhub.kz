@@ -748,7 +748,7 @@ const CGW_FILTER_ROUTINES_SA = ["31010200", "3101020C", "31011201"] as const;
 export async function unlockSubaruCgwFilterRemove(
   elm: SubaruMeterWriteLink,
   steps: string[],
-  options: { requireSecurityAccess?: boolean } = {},
+  options: { requireSecurityAccess?: boolean; targetTxs?: readonly number[] } = {},
 ): Promise<{ filterRemoved: boolean; gatewayLabel: string | null }> {
   const cgwAesKeys = [...SUBARU_SGP_AES128_KEYS].sort((a, b) => {
     const aCgw = a.ecuKind === 0x04 || a.ecuKind === 0x06 || a.ecuKind === 0x07 ? 0 : 1;
@@ -756,7 +756,11 @@ export async function unlockSubaruCgwFilterRemove(
     return aCgw - bCgw;
   });
 
-  for (const gw of CGW_FILTER_TARGETS) {
+  const targets = options.targetTxs?.length
+    ? CGW_FILTER_TARGETS.filter((gw) => options.targetTxs!.includes(gw.tx))
+    : CGW_FILTER_TARGETS;
+
+  for (const gw of targets) {
     const label = gw.label;
     try {
       await openMeterSession(elm, gw.tx, gw.rx);
@@ -855,7 +859,7 @@ export async function unlockSubaruCgwFilterRemove(
       );
       if (seedBytes.length !== 16) continue;
 
-      const maxKeyAttempts = Math.min(orderedKeys.length, 10);
+      const maxKeyAttempts = Math.min(orderedKeys.length, 16);
       for (let i = 0; i < maxKeyAttempts; i++) {
         const aes = orderedKeys[i]!;
         if (i > 0) {

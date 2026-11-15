@@ -309,4 +309,39 @@ describe("subaru-eyesight-variant (ADA-031 / ADA-032)", () => {
     expect(sent).toContain("31010200");
     expect(sent).toContain(`2704${expectedEsKey}`);
   });
+
+  it("discovers alternate EyeSight CAN address (e.g. 7B7→7BF) when 787 and 784 are silent", async () => {
+    const usBytes = getSsm4YywWriteDids("BTAEYR8", "U45D")!;
+    let currentTx = 0;
+    const elm: SubaruMeterWriteLink = {
+      async sendCommand() {
+        return "OK";
+      },
+      async setCanHeader(tx: number) {
+        currentTx = tx;
+      },
+      async sendPayload(hex: string) {
+        const key = hex.replace(/\s+/g, "").toUpperCase();
+        if (currentTx === 0x763 && key === "1003") return "50 03";
+        if (currentTx === 0x763 && key === "3101020C") return "71 01 02 0C";
+        if (currentTx === 0x763 && key === "1001") return "50 01";
+        if (currentTx === 0x7b7) {
+          if (key === "1003") return "50 03";
+          if (key === "1001") return "50 01";
+          const m = key.match(/^22(35[0-9A-F]{2})$/);
+          if (m) {
+            const found = usBytes.find((u) => u.did === m[1]);
+            return found ? `62 ${found.did.slice(0, 2)} ${found.did.slice(2)} ${found.byteHex}` : "NO DATA";
+          }
+        }
+        return "NO DATA";
+      },
+    };
+
+    const res = await readSubaruEyesight35xxDids(elm, { didHexList: SSM4_YYW_FP_DID_KEYS });
+    expect(res.tx).toBe(0x7b7);
+    expect(res.rx).toBe(0x7bf);
+    expect(Object.keys(res.didMap)).toHaveLength(16);
+    expect(res.didMap["3502"]).toBe("20");
+  });
 });

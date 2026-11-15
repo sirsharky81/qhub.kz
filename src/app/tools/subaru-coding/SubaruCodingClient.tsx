@@ -100,6 +100,7 @@ export default function SubaruCodingClient() {
     useState<SubaruEyesightBackupFile | null>(null);
   const [eyesightBackupNotice, setEyesightBackupNotice] = useState<string | null>(null);
   const eyesightBackupFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [eyesightLogCopied, setEyesightLogCopied] = useState(false);
   const [eyesightWriteResult, setEyesightWriteResult] =
     useState<SubaruEyesightVariantWriteResult | null>(null);
   const [eyesightWritePending, setEyesightWritePending] = useState<{
@@ -172,13 +173,6 @@ export default function SubaruCodingClient() {
     return diffEyesightAgainstAppliedCatalog(model, didHexById);
   }, [eyesightRead, meter12Read, appliedModelInput]);
 
-  const closestEyesightCatalogRow = useMemo(() => {
-    if (!eyesightCatalogDiff.length) return null;
-    return eyesightCatalogDiff.reduce((best, row) =>
-      row.diffs.length < best.diffs.length ? row : best,
-    );
-  }, [eyesightCatalogDiff]);
-
   const eyesightReadStats = useMemo(() => {
     if (!eyesightRead) return null;
     const present35xx = eyesightRead.dids.filter(
@@ -192,6 +186,14 @@ export default function SubaruCodingClient() {
     ).length;
     return { present35xx, absent35xx, legacy309x };
   }, [eyesightRead]);
+
+  const closestEyesightCatalogRow = useMemo(() => {
+    if (!eyesightCatalogDiff.length) return null;
+    if (!eyesightReadStats || eyesightReadStats.present35xx === 0) return null;
+    return eyesightCatalogDiff.reduce((best, row) =>
+      row.diffs.length < best.diffs.length ? row : best,
+    );
+  }, [eyesightCatalogDiff, eyesightReadStats]);
 
   const loadedEyesightBackupDiff = useMemo(() => {
     if (!loadedEyesightBackup || !eyesightRead) return null;
@@ -347,6 +349,14 @@ export default function SubaruCodingClient() {
         meter12SecurityKeyInput.trim() || undefined,
       );
       setEyesightRead(result);
+      if (!meter12Read) {
+        if (result.match.appliedModel && result.match.appliedModel.length === 7) {
+          setAppliedModelInput(result.match.appliedModel);
+        }
+        if (result.match.optionCode && result.match.optionCode.length === 4) {
+          setOptionCodeInput(result.match.optionCode);
+        }
+      }
       try {
         const autoBackup = buildSubaruEyesightBackup(result, hintApp, stickerOptionInput);
         localStorage.setItem(
@@ -845,28 +855,82 @@ export default function SubaruCodingClient() {
             </div>
           </div>
 
-          {meter12Read && (
+          {(meter12Read || eyesightRead) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
-                <div className="text-[10px] font-bold uppercase text-amber-900">
-                  Приборка (cgdw → A0xx)
+              {meter12Read && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-amber-900">
+                    Приборка (cgdw → A0xx)
+                  </div>
+                  <div className="mt-1 font-mono text-base font-bold text-gray-900">
+                    {meter12Read.match.actualAppliedModel} + {meter12Read.match.actualOptionCode}
+                  </div>
+                  <div className="text-[11px] text-amber-900">{meter12Read.match.actualRegion}</div>
                 </div>
-                <div className="mt-1 font-mono text-base font-bold text-gray-900">
-                  {meter12Read.match.actualAppliedModel} + {meter12Read.match.actualOptionCode}
+              )}
+              {eyesightRead && (
+                <div
+                  className={`rounded-xl border p-3 ${
+                    eyesightReadStats && eyesightReadStats.present35xx > 0
+                      ? "border-violet-300 bg-violet-50"
+                      : "border-rose-300 bg-rose-50"
+                  }`}
+                >
+                  <div
+                    className={`text-[10px] font-bold uppercase ${
+                      eyesightReadStats && eyesightReadStats.present35xx > 0
+                        ? "text-violet-900"
+                        : "text-rose-900"
+                    }`}
+                  >
+                    EyeSight (Y-Yw → 35xx)
+                  </div>
+                  {eyesightReadStats && eyesightReadStats.present35xx > 0 ? (
+                    <>
+                      <div className="mt-1 font-mono text-base font-bold text-gray-900">
+                        {(eyesightRead.match.appliedModel ??
+                          meter12Read?.match.actualAppliedModel ??
+                          appliedModelInput) ||
+                          "—"}{" "}
+                        + {eyesightRead.match.optionCode ?? "—"}
+                      </div>
+                      <div className="text-[11px] text-violet-900">
+                        {eyesightRead.match.destinationHint} (3502={eyesightRead.match.byte3502 ?? "—"}) ·{" "}
+                        {eyesightReadStats.present35xx}/16 DID
+                        {closestEyesightCatalogRow
+                          ? closestEyesightCatalogRow.diffs.length === 0
+                            ? " · 100% в Y-Yw"
+                            : ` · отличий от ${closestEyesightCatalogRow.optionCode}: ${closestEyesightCatalogRow.diffs.length}`
+                          : ""}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mt-1 font-mono text-sm font-bold text-rose-950">
+                        Не считан (0/16 DID)
+                      </div>
+                      <div className="text-[11px] text-rose-800">
+                        {eyesightRead.securityAccessRequired
+                          ? "Требуется SecurityAccess / разблокировка CGW — см. журнал ниже"
+                          : "EyeSight не ответил на 3501..3510 — см. журнал ниже"}
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div className="text-[11px] text-amber-900">{meter12Read.match.actualRegion}</div>
-              </div>
-              <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3">
-                <div className="text-[10px] font-bold uppercase text-emerald-900">
-                  Рекомендуемый канадский код (°C, км/ч)
+              )}
+              {meter12Read && (
+                <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 sm:col-span-2">
+                  <div className="text-[10px] font-bold uppercase text-emerald-900">
+                    Рекомендуемый канадский код (°C, км/ч)
+                  </div>
+                  <div className="mt-1 font-mono text-base font-bold text-emerald-900">
+                    {meter12Read.match.actualAppliedModel} + {meter12Read.match.recommendedCanadianOptionC0}
+                  </div>
+                  <div className="text-[11px] text-emerald-800">
+                    Альтернатива PZEV: {meter12Read.match.recommendedCanadianOptionC5}
+                  </div>
                 </div>
-                <div className="mt-1 font-mono text-base font-bold text-emerald-900">
-                  {meter12Read.match.actualAppliedModel} + {meter12Read.match.recommendedCanadianOptionC0}
-                </div>
-                <div className="text-[11px] text-emerald-800">
-                  Альтернатива PZEV: {meter12Read.match.recommendedCanadianOptionC5}
-                </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -1135,15 +1199,15 @@ export default function SubaruCodingClient() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div className="rounded-lg border border-violet-200 bg-white p-2.5">
                   <div className="text-[10px] font-bold uppercase text-violet-800">
-                    Распознано из Y-Yw
+                    Распознано из Y-Yw (Model + Option)
                   </div>
-                  <div className="mt-0.5 font-mono font-bold text-gray-900">
-                    {(eyesightRead.match.appliedModel ?? "—")} +{" "}
-                    {(eyesightRead.match.optionCode ?? "—")}
+                  <div className="mt-0.5 font-mono text-sm font-bold text-gray-900">
+                    {eyesightReadStats && eyesightReadStats.present35xx > 0
+                      ? `${eyesightRead.match.appliedModel ?? meter12Read?.match.actualAppliedModel ?? appliedModelInput ?? "—"} + ${eyesightRead.match.optionCode ?? "—"}`
+                      : "— + — (нет данных с блока)"}
                   </div>
                   <div className="text-[11px] text-violet-900">
-                    DID 3502 → {eyesightRead.match.destinationHint} (байт{" "}
-                    {eyesightRead.match.byte3502 ?? "—"})
+                    {eyesightRead.match.explanationRu}
                   </div>
                 </div>
                 <div className="rounded-lg border border-violet-200 bg-white p-2.5 font-mono text-[10px] text-gray-800 break-all">
@@ -1164,11 +1228,17 @@ export default function SubaruCodingClient() {
                     {eyesightRead.match.appliedModel ||
                       meter12Read?.match.actualAppliedModel ||
                       appliedModelInput}
-                    {closestEyesightCatalogRow && (
-                      <span className="ml-1.5 font-normal text-gray-600">
-                        (ближе всего: <strong className="font-mono">{closestEyesightCatalogRow.optionCode}</strong>, отличий: {closestEyesightCatalogRow.diffs.length})
+                    {eyesightReadStats && eyesightReadStats.present35xx === 0 ? (
+                      <span className="ml-1.5 font-semibold text-rose-700">
+                        (блок не отдал DID 0/16 — ниже показан только эталон справочника)
                       </span>
-                    )}
+                    ) : closestEyesightCatalogRow ? (
+                      <span className="ml-1.5 font-normal text-gray-600">
+                        ({closestEyesightCatalogRow.diffs.length === 0 ? "точное совпадение" : "ближе всего"}:{" "}
+                        <strong className="font-mono">{closestEyesightCatalogRow.optionCode}</strong>, отличий:{" "}
+                        {closestEyesightCatalogRow.diffs.length})
+                      </span>
+                    ) : null}
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-[11px]">
@@ -1183,31 +1253,41 @@ export default function SubaruCodingClient() {
                           const isClosest =
                             closestEyesightCatalogRow &&
                             closestEyesightCatalogRow.optionCode === row.optionCode;
+                          const isExactMatch =
+                            Boolean(isClosest) && row.diffs.length === 0 && row.identical;
                           return (
                             <tr
                               key={row.optionCode}
                               className={`border-t border-gray-100 align-top ${
-                                isClosest ? "bg-violet-50/70" : ""
+                                isExactMatch
+                                  ? "bg-emerald-50/70"
+                                  : isClosest
+                                    ? "bg-violet-50/70"
+                                    : ""
                               }`}
                             >
                               <td className="px-2 py-1 font-mono font-bold whitespace-nowrap">
                                 {row.optionCode}
-                                {isClosest && (
+                                {isExactMatch ? (
+                                  <span className="ml-1 rounded bg-emerald-200 px-1 py-0.5 text-[9px] text-emerald-950">
+                                    совпадает 16/16
+                                  </span>
+                                ) : isClosest ? (
                                   <span className="ml-1 rounded bg-violet-200 px-1 py-0.5 text-[9px] text-violet-950">
                                     ближе всего
                                   </span>
-                                )}
+                                ) : null}
                               </td>
                               <td className="px-2 py-1 font-mono">
-                                {row.diffs.length === 0
-                                  ? row.identical
-                                    ? "совпадает целиком (16/16)"
-                                    : row.unreadSlots >= 16
-                                      ? "нет данных с EyeSight (0/16)"
+                                {row.unreadSlots >= 16
+                                  ? "нет данных с EyeSight (0/16)"
+                                  : row.diffs.length === 0
+                                    ? row.identical
+                                      ? "совпадает целиком (16/16)"
                                       : "прочитанные байты совпали"
-                                  : row.diffs
-                                      .map((d) => `${d.did}: авто ${d.car} / Y-Yw ${d.catalog}`)
-                                      .join("; ")}
+                                    : row.diffs
+                                        .map((d) => `${d.did}: авто ${d.car} / Y-Yw ${d.catalog}`)
+                                        .join("; ")}
                               </td>
                             </tr>
                           );
@@ -1219,11 +1299,28 @@ export default function SubaruCodingClient() {
               )}
 
               {eyesightRead.steps && eyesightRead.steps.length > 0 && (
-                <details className="text-[10px] text-gray-700">
+                <details
+                  open={eyesightReadStats?.present35xx === 0}
+                  className="text-[10px] text-gray-700"
+                >
                   <summary className="cursor-pointer font-semibold text-violet-900">
                     Журнал чтения EyeSight ({eyesightRead.steps.length})
                   </summary>
-                  <ul className="mt-1 space-y-0.5 font-mono pl-3">
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const txt = (eyesightRead.steps ?? []).join("\n");
+                        void navigator.clipboard?.writeText(txt);
+                        setEyesightLogCopied(true);
+                        setTimeout(() => setEyesightLogCopied(false), 2000);
+                      }}
+                      className="rounded border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-900 hover:bg-violet-50"
+                    >
+                      {eyesightLogCopied ? "Скопировано ✓" : "Копировать журнал"}
+                    </button>
+                  </div>
+                  <ul className="mt-1 max-h-48 overflow-y-auto space-y-0.5 font-mono pl-3">
                     {eyesightRead.steps.map((s, idx) => (
                       <li key={idx}>• {s}</li>
                     ))}
