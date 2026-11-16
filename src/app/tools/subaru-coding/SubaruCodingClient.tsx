@@ -873,14 +873,16 @@ export default function SubaruCodingClient() {
               {eyesightRead && (
                 <div
                   className={`rounded-xl border p-3 ${
-                    eyesightReadStats && eyesightReadStats.present35xx > 0
+                    eyesightReadStats &&
+                    (eyesightReadStats.present35xx > 0 || eyesightReadStats.legacy309x > 0)
                       ? "border-violet-300 bg-violet-50"
                       : "border-rose-300 bg-rose-50"
                   }`}
                 >
                   <div
                     className={`text-[10px] font-bold uppercase ${
-                      eyesightReadStats && eyesightReadStats.present35xx > 0
+                      eyesightReadStats &&
+                      (eyesightReadStats.present35xx > 0 || eyesightReadStats.legacy309x > 0)
                         ? "text-violet-900"
                         : "text-rose-900"
                     }`}
@@ -904,6 +906,15 @@ export default function SubaruCodingClient() {
                             ? " · 100% в Y-Yw"
                             : ` · отличий от ${closestEyesightCatalogRow.optionCode}: ${closestEyesightCatalogRow.diffs.length}`
                           : ""}
+                      </div>
+                    </>
+                  ) : eyesightReadStats && eyesightReadStats.legacy309x > 0 ? (
+                    <>
+                      <div className="mt-1 font-mono text-base font-bold text-gray-900">
+                        Legacy EyeSight ({eyesightReadStats.legacy309x}/13 DID)
+                      </div>
+                      <div className="text-[11px] text-violet-900">
+                        Считаны вариантные DID 3091..309D (3501..3510 блоком не поддерживаются)
                       </div>
                     </>
                   ) : (
@@ -1261,10 +1272,18 @@ export default function SubaruCodingClient() {
                 </div>
                 <div className="rounded-lg border border-violet-200 bg-white p-2.5 font-mono text-[10px] text-gray-800 break-all">
                   <div className="font-sans text-[10px] font-bold uppercase text-violet-800 mb-0.5">
-                    Считанные 16 DID (3501..3510)
+                    {eyesightReadStats &&
+                    eyesightReadStats.present35xx === 0 &&
+                    eyesightReadStats.legacy309x > 0
+                      ? "Считанные legacy DID (3091..309D)"
+                      : "Считанные 16 DID (3501..3510)"}
                   </div>
-                  {eyesightRead.dids
-                    .filter((d) => /^35(0[1-9A-F]|10)$/.test(d.did))
+                  {(eyesightReadStats &&
+                  eyesightReadStats.present35xx === 0 &&
+                  eyesightReadStats.legacy309x > 0
+                    ? eyesightRead.dids.filter((d) => /^309[1-9A-D]$/.test(d.did))
+                    : eyesightRead.dids.filter((d) => /^35(0[1-9A-F]|10)$/.test(d.did))
+                  )
                     .map((d) => `${d.did}=${d.hex}`)
                     .join(" ")}
                 </div>

@@ -1074,21 +1074,26 @@ export async function unlockSubaruMeterSecurityAccess(
     preferNonMeterAes?: boolean;
     preferEcuKinds?: readonly number[];
     maxAesAttempts?: number;
+    seedPairs?: readonly { seedSub: string; keySub: string; level: number }[];
+    stopOnSeedNoData?: boolean;
   } = {},
-): Promise<{ unlocked: boolean; seedHex: string | null }> {
+): Promise<{ unlocked: boolean; seedHex: string | null; lockedOut?: boolean }> {
   const txHex = tx.toString(16).toUpperCase();
   const rxHex = rx.toString(16).toUpperCase();
   const cleanUserKey = (options.userKeyHex ?? "").replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
   let lastSeedHex: string | null = null;
+  let lockedOut = false;
 
-  const basePairs = [
-    { seedSub: "2703", keySub: "2704", level: 3 as const },
-    { seedSub: "2701", keySub: "2702", level: 1 as const },
-    { seedSub: "2705", keySub: "2706", level: 5 as const },
-    { seedSub: "2707", keySub: "2708", level: 7 as const },
-    { seedSub: "2709", keySub: "270A", level: 9 as const },
-    { seedSub: "2761", keySub: "2762", level: 0x61 as const },
-  ];
+  const basePairs = options.seedPairs?.length
+    ? [...options.seedPairs]
+    : [
+        { seedSub: "2703", keySub: "2704", level: 3 as const },
+        { seedSub: "2701", keySub: "2702", level: 1 as const },
+        { seedSub: "2705", keySub: "2706", level: 5 as const },
+        { seedSub: "2707", keySub: "2708", level: 7 as const },
+        { seedSub: "2709", keySub: "270A", level: 9 as const },
+        { seedSub: "2761", keySub: "2762", level: 0x61 as const },
+      ];
   const extraPairs = [
     { seedSub: "2711", keySub: "2712", level: 0x11 as const },
     { seedSub: "270B", keySub: "270C", level: 0x0b as const },
@@ -1098,7 +1103,7 @@ export async function unlockSubaruMeterSecurityAccess(
     { seedSub: "2721", keySub: "2722", level: 0x21 as const },
   ];
   const pairQueue: { seedSub: string; keySub: string; level: number }[] = [...basePairs];
-  let extraQueued = false;
+  let extraQueued = Boolean(options.seedPairs?.length);
 
   for (let pIdx = 0; pIdx < pairQueue.length; pIdx++) {
     const pair = pairQueue[pIdx]!;
@@ -1115,14 +1120,24 @@ export async function unlockSubaruMeterSecurityAccess(
     const pSeed = parseUdsResponse(rawSeed, 0x27);
     const cleanSeed = rawSeed.replace(/>/g, "").trim();
     if (pSeed.kind !== "positive" || pSeed.payload.length < 2) {
-      if (pSeed.kind === "negative" && !extraQueued) {
-        extraQueued = true;
-        pairQueue.push(...extraPairs);
-      }
       steps.push(
         `${txHex}→${rxHex}: запрос Seed ${pair.seedSub.slice(0, 2)} ${pair.seedSub.slice(2)} → ${cleanSeed || "нет ответа"}` +
           (pSeed.kind === "negative" ? ` (${pSeed.nrcText ?? "NRC"})` : ""),
       );
+      if (pSeed.kind === "negative" && (pSeed.nrc === 0x36 || pSeed.nrc === 0x37)) {
+        lockedOut = true;
+        steps.push(
+          `${txHex}→${rxHex}: ЭБУ заблокировал SecurityAccess (${pSeed.nrc === 0x36 ? "NRC 36 — исчерпаны попытки" : "NRC 37 — не истекла задержка"}). Выключите зажигание (IG OFF) на 15 с и снова включите IG ON (или подождите 10–15 с).`,
+        );
+        break;
+      }
+      if (pSeed.kind === "empty" && options.stopOnSeedNoData) {
+        break;
+      }
+      if (pSeed.kind === "negative" && !extraQueued) {
+        extraQueued = true;
+        pairQueue.push(...extraPairs);
+      }
       continue;
     }
 
@@ -1243,6 +1258,10 @@ export async function unlockSubaruMeterSecurityAccess(
       }
       // If ECU locked out with NRC 36 (exceededNumberOfAttempts) or NRC 37 (requiredTimeDelayNotExpired), stop trying keys immediately
       if (pKey.kind === "negative" && (pKey.nrc === 0x36 || pKey.nrc === 0x37)) {
+        lockedOut = true;
+        steps.push(
+          `${txHex}→${rxHex}: ЭБУ заблокировал SecurityAccess (${pKey.nrc === 0x36 ? "NRC 36 — исчерпаны попытки" : "NRC 37 — не истекла задержка"}). Выключите зажигание (IG OFF) на 15 с и снова включите IG ON (или подождите 10–15 с).`,
+        );
         break;
       }
       // For 16-byte AES SGP modules, limit unkeyed probes (default 4) unless ECU returned NRC 36/37
@@ -1254,7 +1273,7 @@ export async function unlockSubaruMeterSecurityAccess(
     break;
   }
 
-  return { unlocked: false, seedHex: lastSeedHex };
+  return { unlocked: false, seedHex: lastSeedHex, lockedOut };
 }
 
 async function sendWriteWithRetry(
