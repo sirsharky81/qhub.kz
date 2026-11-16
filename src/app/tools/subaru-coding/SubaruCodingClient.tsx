@@ -990,6 +990,15 @@ export default function SubaruCodingClient() {
                           : ""}
                       </div>
                     </>
+                  ) : eyesightReadStats && eyesightReadStats.legacy309x > 0 ? (
+                    <>
+                      <div className="mt-1 font-mono text-base font-bold text-gray-900">
+                        Legacy EyeSight ({eyesightReadStats.legacy309x}/13 DID)
+                      </div>
+                      <div className="text-[11px] text-violet-900">
+                        Считаны вариантные DID 3091..309D (3501..3510 блоком не поддерживаются)
+                      </div>
+                    </>
                   ) : (
                     <>
                       <div className="mt-1 font-mono text-sm font-bold text-rose-950">
