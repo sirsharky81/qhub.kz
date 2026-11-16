@@ -76,14 +76,19 @@ async function openEyesightSession(
   } catch {
     /* ignore */
   }
-  await elm.setCanHeader(tx, options?.clearRxFilter ? undefined : rx);
   if (options?.clearRxFilter) {
+    try {
+      await elm.clearRxFilter?.();
+    } catch {
+      /* ignore */
+    }
     try {
       await elm.sendCommand("ATAR");
     } catch {
       /* ignore */
     }
   }
+  await elm.setCanHeader(tx, options?.clearRxFilter ? undefined : rx);
   const txHex = tx.toString(16).padStart(3, "0").toUpperCase();
   try {
     await elm.sendCommand(`ATFCSH${txHex}`);
@@ -120,6 +125,7 @@ async function probeEyesightWithOpenRx(
   try {
     await elm.sendCommand("ATH1");
     await elm.sendCommand("ATS1");
+    await elm.clearRxFilter?.();
     await elm.sendCommand("ATAR");
     await elm.setCanHeader(tx, undefined);
     const raw10 = await elm.sendPayload("1003", 1_500);
@@ -172,39 +178,101 @@ async function readEyesightAlgoByte(elm: SubaruMeterWriteLink): Promise<number |
   return null;
 }
 
-async function probeEyesight27FallbackAndDiag(
+async function probeEyesightMultiFrame(
+  elm: SubaruMeterWriteLink,
+  txHex: string,
+  rxHex: string,
+  steps: string[],
+): Promise<void> {
+  const probes: { payload: string; sid: number; label: string }[] = [
+    { payload: "22F182", sid: 0x22, label: "22 F1 82" },
+    { payload: "22F187", sid: 0x22, label: "22 F1 87" },
+    { payload: "22F197", sid: 0x22, label: "22 F1 97" },
+    { payload: "22F181", sid: 0x22, label: "22 F1 81" },
+    { payload: "22F18E", sid: 0x22, label: "22 F1 8E" },
+    { payload: "1902FF", sid: 0x19, label: "19 02 FF" },
+  ];
+  const notes: string[] = [];
+  for (const probe of probes) {
+    try {
+      const raw = await elm.sendPayload(probe.payload, 1_500);
+      const parsed = parseUdsResponse(raw, probe.sid);
+      const clean = raw.replace(/>/g, "").replace(/\s+/g, " ").trim() || "NO DATA";
+      if (parsed.kind === "positive") {
+        steps.push(
+          `${txHex}→${rxHex}: проверка multi-frame ${probe.label} → OK (${parsed.payload.length} байт: ${clean})`,
+        );
+        return;
+      }
+      notes.push(`${probe.label}→${clean}`);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (notes.length > 0) {
+    steps.push(`${txHex}→${rxHex}: проверка multi-frame (${notes.join(", ")})`);
+  }
+}
+
+async function probeEyesightRawCan2703(
+  elm: SubaruMeterWriteLink,
+  tx: number,
+  rx: number,
+  steps: string[],
+  contextLabel: string,
+): Promise<void> {
+  const txHex = tx.toString(16).toUpperCase();
+  try {
+    await elm.sendCommand("ATCAF0");
+    await elm.sendCommand("ATH1");
+    await elm.sendCommand("ATS1");
+    await elm.clearRxFilter?.();
+    await elm.sendCommand("ATAR");
+    await elm.setCanHeader(tx, undefined);
+    const rawZeroPad = await elm.sendPayload("0227030000000000", 1_500);
+    const cleanZero = rawZeroPad.replace(/>/g, "").replace(/\s+/g, " ").trim();
+    steps.push(
+      `${txHex} (raw ATCAF0+ATH1 02 27 03 00..${contextLabel ? ` · ${contextLabel}` : ""}): ${cleanZero || "NO DATA"}`,
+    );
+    if (!cleanZero || /^NO DATA$/i.test(cleanZero)) {
+      const rawAaPad = await elm.sendPayload("022703AAAAAAAAAA", 1_200);
+      const cleanAa = rawAaPad.replace(/>/g, "").replace(/\s+/g, " ").trim();
+      if (cleanAa && !/^NO DATA$/i.test(cleanAa)) {
+        steps.push(`${txHex} (raw ATCAF0+ATH1 02 27 03 AA..): ${cleanAa}`);
+      }
+    }
+  } catch {
+    /* ignore */
+  } finally {
+    try {
+      await elm.sendCommand("ATCAF1");
+      await elm.sendCommand("ATH0");
+    } catch {
+      /* ignore */
+    }
+    await openEyesightSession(elm, tx, rx);
+  }
+}
+
+async function testEyesightFlowControl2703(
   elm: SubaruMeterWriteLink,
   tx: number,
   rx: number,
   steps: string[],
   options: { userKeyHex?: string; keyVersionByte: number | null },
+  contextLabel?: string,
 ): Promise<{ unlocked: boolean }> {
   const txHex = tx.toString(16).toUpperCase();
   const rxHex = rx.toString(16).toUpperCase();
-
-  // 1) Verify multi-frame ISO-TP works on 787->78F via 22 F1 8E
-  try {
-    const rawF18E = await elm.sendPayload("22F18E", 1_500);
-    const pF18E = parseUdsResponse(rawF18E, 0x22);
-    steps.push(
-      `${txHex}→${rxHex}: проверка multi-frame 22 F1 8E → ${
-        pF18E.kind === "positive"
-          ? `OK (${pF18E.payload.length - 2} байт)`
-          : rawF18E.replace(/>/g, "").trim() || "NO DATA"
-      }`,
-    );
-  } catch {
-    /* ignore */
-  }
-
-  // 2) Try ATFCSM0 (ELM default Flow Control) in case 787 rejected 30 08 0A for 67 03
   try {
     await elm.sendCommand("ATFCSM0");
     await elm.sendPayload("1003", 1_500);
     const rawFc0 = await elm.sendPayload("2703", 2_500);
     const pFc0 = parseUdsResponse(rawFc0, 0x27);
     const cleanFc0 = rawFc0.replace(/>/g, "").trim();
-    steps.push(`${txHex}→${rxHex}: тест 27 03 (ATFCSM0) → ${cleanFc0 || "NO DATA"}`);
+    steps.push(
+      `${txHex}→${rxHex}: тест 27 03 (ATFCSM0${contextLabel ? ` · ${contextLabel}` : ""}) → ${cleanFc0 || "NO DATA"}`,
+    );
     if (pFc0.kind === "positive") {
       const u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
         userKeyHex: options.userKeyHex,
@@ -214,6 +282,27 @@ async function probeEyesight27FallbackAndDiag(
         maxAesAttempts: 32,
       });
       if (u.unlocked) return { unlocked: true };
+    }
+
+    // Also test BS=0, STmin=10ms (30 00 0A) in case ECU dislikes BS=8 (30 08 0A) and STmin=0 (30 00 00)
+    await elm.sendCommand(`ATFCSH${tx.toString(16).padStart(3, "0").toUpperCase()}`);
+    await elm.sendCommand("ATFCSD30000A");
+    await elm.sendCommand("ATFCSM1");
+    const rawFc0A = await elm.sendPayload("2703", 1_800);
+    const pFc0A = parseUdsResponse(rawFc0A, 0x27);
+    const cleanFc0A = rawFc0A.replace(/>/g, "").trim();
+    if (cleanFc0A && !/^NO DATA$/i.test(cleanFc0A)) {
+      steps.push(`${txHex}→${rxHex}: тест 27 03 (30 00 0A) → ${cleanFc0A}`);
+      if (pFc0A.kind === "positive") {
+        const u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+          userKeyHex: options.userKeyHex,
+          keyVersionByte: options.keyVersionByte,
+          preferNonMeterAes: true,
+          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+          maxAesAttempts: 32,
+        });
+        if (u.unlocked) return { unlocked: true };
+      }
     }
   } catch {
     /* ignore */
@@ -226,27 +315,28 @@ async function probeEyesight27FallbackAndDiag(
       /* ignore */
     }
   }
+  return { unlocked: false };
+}
 
-  // 3) Raw CAN sniff on 27 03 (ATH1 + ATAR) to distinguish CGW-drop vs malformed ISO-TP
-  try {
-    await elm.sendCommand("ATH1");
-    await elm.sendCommand("ATS1");
-    await elm.sendCommand("ATAR");
-    await elm.setCanHeader(tx, undefined);
-    const rawCan = await elm.sendPayload("2703", 1_800);
-    steps.push(
-      `${txHex} (raw ATH1 27 03): ${rawCan.replace(/>/g, "").replace(/\s+/g, " ").trim() || "NO DATA (шина молчит — фильтр CGW активен)"}`,
-    );
-  } catch {
-    /* ignore */
-  } finally {
-    try {
-      await elm.sendCommand("ATH0");
-    } catch {
-      /* ignore */
-    }
-    await openEyesightSession(elm, tx, rx);
-  }
+async function probeEyesight27FallbackAndDiag(
+  elm: SubaruMeterWriteLink,
+  tx: number,
+  rx: number,
+  steps: string[],
+  options: { userKeyHex?: string; keyVersionByte: number | null },
+): Promise<{ unlocked: boolean }> {
+  const txHex = tx.toString(16).toUpperCase();
+  const rxHex = rx.toString(16).toUpperCase();
+
+  // 1) Verify multi-frame ISO-TP works on 787->78F via F182/F187/F197/F181/F18E/1902FF
+  await probeEyesightMultiFrame(elm, txHex, rxHex, steps);
+
+  // 2) Try ATFCSM0 (ELM default Flow Control) & 30 00 0A in case 787 rejected 30 08 0A for 67 03
+  const fcRes = await testEyesightFlowControl2703(elm, tx, rx, steps, options);
+  if (fcRes.unlocked) return { unlocked: true };
+
+  // 3) True raw CAN sniff on 27 03 (ATCAF0 + ATH1 + ATAR) to distinguish CGW-drop vs malformed ISO-TP
+  await probeEyesightRawCan2703(elm, tx, rx, steps, "до AES-CGW");
 
   // 4) Try 763: 10 03 -> 31 01 02 0C WITHOUT sending 10 01 on CGW (in case 10 01 re-enables 27 filter)
   try {
@@ -287,6 +377,145 @@ async function probeEyesight27FallbackAndDiag(
   }
 
   return { unlocked: false };
+}
+
+async function closeKeptOpenGateways(
+  elm: SubaruMeterWriteLink,
+  keptGateways: readonly { tx: number; rx: number }[],
+): Promise<void> {
+  for (const gw of keptGateways) {
+    try {
+      await elm.setCanHeader(gw.tx, gw.rx);
+      await elm.sendPayload("1001", 800);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function escalateCgwKeepOpenAndUnlockEyesight(
+  elm: SubaruMeterWriteLink,
+  tx: number,
+  rx: number,
+  steps: string[],
+  options: {
+    userKeyHex?: string;
+    keyVersionByte: number | null;
+    maxAesAttempts: number;
+    keptGateways: { tx: number; rx: number }[];
+    triedAltGateways: { done: boolean };
+  },
+): Promise<{ unlocked: boolean; seedHex: string | null; cgwFilterRemoved: boolean }> {
+  const txHex = tx.toString(16).toUpperCase();
+  const rxHex = rx.toString(16).toUpperCase();
+  let cgwFilterRemoved = false;
+
+  const trackKept = (gw: {
+    keptOpen: boolean;
+    gatewayTx: number | null;
+    gatewayRx: number | null;
+  }) => {
+    if (
+      gw.keptOpen &&
+      gw.gatewayTx != null &&
+      gw.gatewayRx != null &&
+      !options.keptGateways.some((k) => k.tx === gw.gatewayTx)
+    ) {
+      options.keptGateways.push({ tx: gw.gatewayTx, rx: gw.gatewayRx });
+    }
+  };
+
+  steps.push(
+    `${txHex}→${rxHex}: 27 xx → NO DATA — полная AES-разблокировка CGW 763 (27 07/08 + 31 01 02 00 без 10 01)…`,
+  );
+  const cgwSa763 = await unlockSubaruCgwFilterRemove(elm, steps, {
+    requireSecurityAccess: true,
+    targetTxs: [0x763],
+    keepGatewayOpen: true,
+  });
+  if (cgwSa763.filterRemoved) cgwFilterRemoved = true;
+  trackKept(cgwSa763);
+
+  await openEyesightSession(elm, tx, rx);
+  let u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+    userKeyHex: options.userKeyHex,
+    keyVersionByte: options.keyVersionByte,
+    preferNonMeterAes: true,
+    preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+    maxAesAttempts: options.maxAesAttempts,
+  });
+  if (u.unlocked || u.seedHex) {
+    return { ...u, cgwFilterRemoved };
+  }
+
+  // While 763 is still kept open in 10 03 + 67 08, test ATFCSM0 & true raw ATCAF0 sniff
+  if (cgwSa763.filterRemoved) {
+    const fcKeep = await testEyesightFlowControl2703(
+      elm,
+      tx,
+      rx,
+      steps,
+      { userKeyHex: options.userKeyHex, keyVersionByte: options.keyVersionByte },
+      "763 открыта",
+    );
+    if (fcKeep.unlocked) {
+      return { unlocked: true, seedHex: null, cgwFilterRemoved };
+    }
+    await probeEyesightRawCan2703(elm, tx, rx, steps, "763 открыта");
+
+    // Also test 31 01 12 01 and 31 01 02 0C inside 763's 67 08 session (keep open, no 10 01)
+    const cgwExtra = await unlockSubaruCgwFilterRemove(elm, steps, {
+      requireSecurityAccess: true,
+      targetTxs: [0x763],
+      keepGatewayOpen: true,
+      routines: ["31011201", "3101020C"],
+    });
+    trackKept(cgwExtra);
+    if (cgwExtra.filterRemoved) {
+      cgwFilterRemoved = true;
+      await openEyesightSession(elm, tx, rx);
+      const rawProbe = await elm.sendPayload("2703", 2_000);
+      const pProbe = parseUdsResponse(rawProbe, 0x27);
+      steps.push(
+        `${txHex}→${rxHex}: 27 03 после доп. рутины CGW → ${rawProbe.replace(/>/g, "").trim() || "NO DATA"}`,
+      );
+      if (pProbe.kind !== "empty") {
+        u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+          userKeyHex: options.userKeyHex,
+          keyVersionByte: options.keyVersionByte,
+          preferNonMeterAes: true,
+          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+          maxAesAttempts: options.maxAesAttempts,
+        });
+        if (u.unlocked || u.seedHex) {
+          return { ...u, cgwFilterRemoved };
+        }
+      }
+    }
+  }
+
+  // Fallback: probe alternate gateway addresses (750, 765) once, and only retry 787 27 xx if one actually unlocked
+  if (!options.triedAltGateways.done) {
+    options.triedAltGateways.done = true;
+    const cgwAlt = await unlockSubaruCgwFilterRemove(elm, steps, {
+      targetTxs: [0x750, 0x765],
+      keepGatewayOpen: true,
+    });
+    trackKept(cgwAlt);
+    if (cgwAlt.filterRemoved) {
+      cgwFilterRemoved = true;
+      await openEyesightSession(elm, tx, rx);
+      u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+        userKeyHex: options.userKeyHex,
+        keyVersionByte: options.keyVersionByte,
+        preferNonMeterAes: true,
+        preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+        maxAesAttempts: options.maxAesAttempts,
+      });
+    }
+  }
+
+  return { ...u, cgwFilterRemoved };
 }
 
 function parseSingleDidBodyHex(raw: string, didHex: string): { ok: boolean; hex: string; nrc?: number } {
@@ -351,7 +580,8 @@ export async function readSubaruEyesight35xxDids(
   ];
 
   let best: { tx: number; rx: number; didMap: Record<string, string>; score: number } | null = null;
-  let triedGateway750 = false;
+  const keptGateways: { tx: number; rx: number }[] = [];
+  const triedAltGateways = { done: false };
 
   const tryReadAllDidsOnOpenTarget = async (
     target: { tx: number; rx: number },
@@ -379,170 +609,153 @@ export async function readSubaruEyesight35xxDids(
     return hits;
   };
 
-  for (const target of targets) {
-    const txHex = target.tx.toString(16).toUpperCase();
-    const rxHex = target.rx.toString(16).toUpperCase();
-    const didMap: Record<string, string> = {};
-    let score = 0;
-    let triedSaOnTarget = false;
+  try {
+    for (const target of targets) {
+      const txHex = target.tx.toString(16).toUpperCase();
+      const rxHex = target.rx.toString(16).toUpperCase();
+      const didMap: Record<string, string> = {};
+      let score = 0;
+      let triedSaOnTarget = false;
 
-    try {
-      const sess = await openEyesightSession(elm, target.tx, target.rx);
-      steps.push(`${txHex}→${rxHex}: 10 03 → ${sess.raw || "NO DATA"}`);
       try {
-        await elm.sendPayload("3E00", 600);
-      } catch {
-        /* ignore */
-      }
-
-      if (options?.unlockBeforeRead) {
-        const algo = await readEyesightAlgoByte(elm);
-        if (algo != null) {
-          steps.push(`${txHex}→${rxHex}: 22 02 50 → Algo=${algo} (0x${algo.toString(16).padStart(2, "0").toUpperCase()})`);
-        }
-        const kv = await readEyesightKeyVersionByte(elm);
-        if (kv != null) {
-          steps.push(`${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`);
-        }
-        triedSaOnTarget = true;
-        const u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
-          userKeyHex: options.securityKeyHex,
-          keyVersionByte: kv,
-          preferNonMeterAes: true,
-          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-          maxAesAttempts: 32,
-        });
-        if (!u.unlocked) securityAccessRequired = true;
-      }
-
-      for (let i = 0; i < didList.length; i++) {
-        const didHex = didList[i]!.toUpperCase();
-        // Skip legacy 3091..309D DIDs when SGP 3501..3510 already answered
-        if (/^309[1-9A-D]$/.test(didHex) && score >= 8) continue;
+        const sess = await openEyesightSession(elm, target.tx, target.rx);
+        steps.push(`${txHex}→${rxHex}: 10 03 → ${sess.raw || "NO DATA"}`);
         try {
-          let raw = await elm.sendPayload(`22${didHex}`, 1_800);
-          let res = parseSingleDidBodyHex(raw, didHex);
-          if (!res.ok && res.nrc === 0x33 && (options?.unlockIfNrc33 ?? true) && !triedSaOnTarget) {
-            triedSaOnTarget = true;
-            steps.push(`${txHex}→${rxHex}: 22 ${didHex} → NRC 33, выполняем SecurityAccess (ADA-032 C11)…`);
-            const algo = await readEyesightAlgoByte(elm);
-            if (algo != null) {
-              steps.push(`${txHex}→${rxHex}: 22 02 50 → Algo=${algo} (0x${algo.toString(16).padStart(2, "0").toUpperCase()})`);
-            }
-            const kv = await readEyesightKeyVersionByte(elm);
-            if (kv != null) {
-              steps.push(`${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`);
-            }
-            let u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
-              userKeyHex: options?.securityKeyHex,
-              keyVersionByte: kv,
-              preferNonMeterAes: true,
-              preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-              maxAesAttempts: 32,
-            });
-            if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
-              const diag = await probeEyesight27FallbackAndDiag(elm, target.tx, target.rx, steps, {
-                userKeyHex: options?.securityKeyHex,
-                keyVersionByte: kv,
-              });
-              if (diag.unlocked) {
-                u = { unlocked: true, seedHex: null };
+          await elm.sendPayload("3E00", 600);
+        } catch {
+          /* ignore */
+        }
+
+        if (options?.unlockBeforeRead) {
+          const algo = await readEyesightAlgoByte(elm);
+          if (algo != null) {
+            steps.push(
+              `${txHex}→${rxHex}: 22 02 50 → Algo=${algo} (0x${algo.toString(16).padStart(2, "0").toUpperCase()})`,
+            );
+          }
+          const kv = await readEyesightKeyVersionByte(elm);
+          if (kv != null) {
+            steps.push(
+              `${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`,
+            );
+          }
+          triedSaOnTarget = true;
+          const u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+            userKeyHex: options.securityKeyHex,
+            keyVersionByte: kv,
+            preferNonMeterAes: true,
+            preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+            maxAesAttempts: 32,
+          });
+          if (!u.unlocked) securityAccessRequired = true;
+        }
+
+        for (let i = 0; i < didList.length; i++) {
+          const didHex = didList[i]!.toUpperCase();
+          // Skip legacy 3091..309D DIDs when SGP 3501..3510 already answered
+          if (/^309[1-9A-D]$/.test(didHex) && score >= 8) continue;
+          try {
+            let raw = await elm.sendPayload(`22${didHex}`, 1_800);
+            let res = parseSingleDidBodyHex(raw, didHex);
+            if (!res.ok && res.nrc === 0x33 && (options?.unlockIfNrc33 ?? true) && !triedSaOnTarget) {
+              triedSaOnTarget = true;
+              steps.push(`${txHex}→${rxHex}: 22 ${didHex} → NRC 33, выполняем SecurityAccess (ADA-032 C11)…`);
+              const algo = await readEyesightAlgoByte(elm);
+              if (algo != null) {
+                steps.push(
+                  `${txHex}→${rxHex}: 22 02 50 → Algo=${algo} (0x${algo.toString(16).padStart(2, "0").toUpperCase()})`,
+                );
               }
-            }
-            if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
-              steps.push(`${txHex}→${rxHex}: 27 xx → NO DATA — пробуем полную AES-разблокировку CGW (763/750 · 31 01 02 00)…`);
-              const cgwSa763 = await unlockSubaruCgwFilterRemove(elm, steps, {
-                requireSecurityAccess: true,
-                targetTxs: [0x763],
-              });
-              if (cgwSa763.filterRemoved) cgwFilterRemoved = true;
-              await openEyesightSession(elm, target.tx, target.rx);
-              u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+              const kv = await readEyesightKeyVersionByte(elm);
+              if (kv != null) {
+                steps.push(
+                  `${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`,
+                );
+              }
+              let u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
                 userKeyHex: options?.securityKeyHex,
                 keyVersionByte: kv,
                 preferNonMeterAes: true,
                 preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
                 maxAesAttempts: 32,
               });
-              if (!u.unlocked && !u.seedHex && !triedGateway750) {
-                triedGateway750 = true;
-                const cgw750 = await unlockSubaruCgwFilterRemove(elm, steps, {
-                  targetTxs: [0x750],
-                });
-                if (cgw750.filterRemoved) cgwFilterRemoved = true;
-                await openEyesightSession(elm, target.tx, target.rx);
-                u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+              if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
+                const diag = await probeEyesight27FallbackAndDiag(elm, target.tx, target.rx, steps, {
                   userKeyHex: options?.securityKeyHex,
                   keyVersionByte: kv,
-                  preferNonMeterAes: true,
-                  preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-                  maxAesAttempts: 32,
                 });
+                if (diag.unlocked) {
+                  u = { unlocked: true, seedHex: null };
+                }
               }
-            }
-            if (u.unlocked) {
-              raw = await elm.sendPayload(`22${didHex}`, 1_800);
-              res = parseSingleDidBodyHex(raw, didHex);
-            } else {
+              if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
+                const esc = await escalateCgwKeepOpenAndUnlockEyesight(
+                  elm,
+                  target.tx,
+                  target.rx,
+                  steps,
+                  {
+                    userKeyHex: options?.securityKeyHex,
+                    keyVersionByte: kv,
+                    maxAesAttempts: 32,
+                    keptGateways,
+                    triedAltGateways,
+                  },
+                );
+                if (esc.cgwFilterRemoved) cgwFilterRemoved = true;
+                u = { unlocked: esc.unlocked, seedHex: esc.seedHex };
+              }
+              if (u.unlocked) {
+                raw = await elm.sendPayload(`22${didHex}`, 1_800);
+                res = parseSingleDidBodyHex(raw, didHex);
+              } else {
+                securityAccessRequired = true;
+              }
+            } else if (!res.ok && res.nrc === 0x33) {
               securityAccessRequired = true;
             }
-          } else if (!res.ok && res.nrc === 0x33) {
-            securityAccessRequired = true;
+            if (!res.ok) continue;
+            didMap[didHex] = res.hex;
+            if (
+              (SSM4_YYW_FP_DID_KEYS as readonly string[]).includes(didHex) ||
+              /^309[1-9A-D]$/.test(didHex)
+            ) {
+              score++;
+            }
+          } catch {
+            /* ignore */
           }
-          if (!res.ok) continue;
-          didMap[didHex] = res.hex;
-          if (
-            (SSM4_YYW_FP_DID_KEYS as readonly string[]).includes(didHex) ||
-            /^309[1-9A-D]$/.test(didHex)
-          ) {
-            score++;
-          }
-        } catch {
-          /* ignore */
         }
-      }
 
-      // If 35xx returned 0 hits on 787 and we haven't tried proactive ADA-032 SecurityAccess + 763/750 CGW unlock yet, escalate now.
-      if (score === 0 && !triedSaOnTarget && target.tx === 0x787) {
-        triedSaOnTarget = true;
-        steps.push(`${txHex}→${rxHex}: 3501..3510 не ответили — пробуем ADA-032 SecurityAccess и CGW 763/750…`);
-        if (options?.withCgw !== false && !cgwFilterRemoved) {
-          const cgwSa = await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
-          if (cgwSa.filterRemoved) cgwFilterRemoved = true;
-        }
-        await openEyesightSession(elm, target.tx, target.rx);
-        const kv = await readEyesightKeyVersionByte(elm);
-        if (kv != null) {
-          steps.push(`${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`);
-        }
-        let u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
-          userKeyHex: options?.securityKeyHex,
-          keyVersionByte: kv,
-          preferNonMeterAes: true,
-          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-          maxAesAttempts: 32,
-        });
-        if (!u.unlocked && !u.seedHex && options?.withCgw !== false) {
-          const cgwSa763 = await unlockSubaruCgwFilterRemove(elm, steps, {
-            requireSecurityAccess: true,
-            targetTxs: [0x763],
-          });
-          if (cgwSa763.filterRemoved) cgwFilterRemoved = true;
+        // If 35xx returned 0 hits on 787 and we haven't tried proactive ADA-032 SecurityAccess + 763/750 CGW unlock yet, escalate now.
+        if (score === 0 && !triedSaOnTarget && target.tx === 0x787) {
+          triedSaOnTarget = true;
+          steps.push(`${txHex}→${rxHex}: 3501..3510 не ответили — пробуем ADA-032 SecurityAccess и CGW 763/750…`);
           await openEyesightSession(elm, target.tx, target.rx);
-          u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
-            userKeyHex: options?.securityKeyHex,
-            keyVersionByte: kv,
-            preferNonMeterAes: true,
-            preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-            maxAesAttempts: 32,
-          });
-          if (!u.unlocked && !u.seedHex && !triedGateway750) {
-            triedGateway750 = true;
-            const cgw750 = await unlockSubaruCgwFilterRemove(elm, steps, {
-              targetTxs: [0x750],
-            });
-            if (cgw750.filterRemoved) cgwFilterRemoved = true;
-            await openEyesightSession(elm, target.tx, target.rx);
+          const kv = await readEyesightKeyVersionByte(elm);
+          if (kv != null) {
+            steps.push(
+              `${txHex}→${rxHex}: 22 02 51 → KeyVersion=${kv} (0x${kv.toString(16).padStart(2, "0").toUpperCase()})`,
+            );
+          }
+          let u: { unlocked: boolean; seedHex: string | null } = { unlocked: false, seedHex: null };
+          if (options?.withCgw !== false) {
+            const esc = await escalateCgwKeepOpenAndUnlockEyesight(
+              elm,
+              target.tx,
+              target.rx,
+              steps,
+              {
+                userKeyHex: options?.securityKeyHex,
+                keyVersionByte: kv,
+                maxAesAttempts: 32,
+                keptGateways,
+                triedAltGateways,
+              },
+            );
+            if (esc.cgwFilterRemoved) cgwFilterRemoved = true;
+            u = { unlocked: esc.unlocked, seedHex: esc.seedHex };
+          } else {
             u = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
               userKeyHex: options?.securityKeyHex,
               keyVersionByte: kv,
@@ -551,109 +764,111 @@ export async function readSubaruEyesight35xxDids(
               maxAesAttempts: 32,
             });
           }
-        }
-        if (u.unlocked) {
-          score = await tryReadAllDidsOnOpenTarget(target, didMap);
-        } else {
-          securityAccessRequired = true;
-        }
-      }
-
-      try {
-        await elm.sendPayload("1001", 600);
-      } catch {
-        /* ignore */
-      }
-      steps.push(`${target.label}: считано variant DID ${score}/${SSM4_YYW_FP_DID_KEYS.length}`);
-      if (!best || score > best.score) {
-        best = { tx: target.tx, rx: target.rx, didMap, score };
-      }
-      if (score >= 8) break;
-    } catch (e) {
-      steps.push(`${txHex}→${rxHex}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  // Last-resort CAN ID auto-discovery if both 787 and 784 yielded 0/16 variant DIDs
-  if ((!best || best.score === 0) && options?.withCgw !== false) {
-    const open787 = await probeEyesightWithOpenRx(elm, 0x787, steps);
-    if (open787 && open787.rx !== 0x78f) {
-      const discovered = { tx: 0x787, rx: open787.rx };
-      const didMap: Record<string, string> = {};
-      await openEyesightSession(elm, discovered.tx, discovered.rx);
-      const kv = await readEyesightKeyVersionByte(elm);
-      const u = await unlockSubaruMeterSecurityAccess(elm, discovered.tx, discovered.rx, steps, {
-        userKeyHex: options?.securityKeyHex,
-        keyVersionByte: kv,
-        preferNonMeterAes: true,
-        preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-        maxAesAttempts: 32,
-      });
-      if (u.unlocked) {
-        const hits = await tryReadAllDidsOnOpenTarget(discovered, didMap);
-        if (hits > 0) best = { ...discovered, didMap, score: hits };
-      }
-      try {
-        await elm.sendPayload("1001", 500);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (!best || best.score === 0) {
-      try {
-        await elm.sendCommand("ATST19");
-      } catch {
-        /* ignore */
-      }
-      try {
-        for (const cand of EYESIGHT_DISCOVERY_CANDIDATES) {
-          try {
-            const sess = await openEyesightSession(elm, cand.tx, cand.rx);
-            if (!sess.ok) continue;
-            const probe3501 = await elm.sendPayload("223501", 900);
-            const p3501 = parseSingleDidBodyHex(probe3501, "3501");
-            steps.push(`${cand.label}: откликнулся на 10 03 (22 3501 → ${probe3501.replace(/>/g, "").trim()})`);
-            if (p3501.ok || p3501.nrc === 0x33) {
-              const didMap: Record<string, string> = {};
-              if (p3501.nrc === 0x33) {
-                const kv = await readEyesightKeyVersionByte(elm);
-                await unlockSubaruMeterSecurityAccess(elm, cand.tx, cand.rx, steps, {
-                  userKeyHex: options?.securityKeyHex,
-                  keyVersionByte: kv,
-                  preferNonMeterAes: true,
-                  preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-                  maxAesAttempts: 32,
-                });
-              }
-              const hits = await tryReadAllDidsOnOpenTarget(cand, didMap);
-              if (hits > 0) {
-                best = { tx: cand.tx, rx: cand.rx, didMap, score: hits };
-                try {
-                  await elm.sendPayload("1001", 500);
-                } catch {
-                  /* ignore */
-                }
-                break;
-              }
-            }
-            try {
-              await elm.sendPayload("1001", 400);
-            } catch {
-              /* ignore */
-            }
-          } catch {
-            /* ignore */
+          if (u.unlocked) {
+            score = await tryReadAllDidsOnOpenTarget(target, didMap);
+          } else {
+            securityAccessRequired = true;
           }
         }
-      } finally {
+
         try {
-          await elm.sendCommand("ATSTFF");
+          await elm.sendPayload("1001", 600);
+        } catch {
+          /* ignore */
+        }
+        steps.push(`${target.label}: считано variant DID ${score}/${SSM4_YYW_FP_DID_KEYS.length}`);
+        if (!best || score > best.score) {
+          best = { tx: target.tx, rx: target.rx, didMap, score };
+        }
+        if (score >= 8) break;
+      } catch (e) {
+        steps.push(`${txHex}→${rxHex}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // Last-resort CAN ID auto-discovery if both 787 and 784 yielded 0/16 variant DIDs
+    if ((!best || best.score === 0) && options?.withCgw !== false) {
+      const open787 = await probeEyesightWithOpenRx(elm, 0x787, steps);
+      if (open787 && open787.rx !== 0x78f) {
+        const discovered = { tx: 0x787, rx: open787.rx };
+        const didMap: Record<string, string> = {};
+        await openEyesightSession(elm, discovered.tx, discovered.rx);
+        const kv = await readEyesightKeyVersionByte(elm);
+        const u = await unlockSubaruMeterSecurityAccess(elm, discovered.tx, discovered.rx, steps, {
+          userKeyHex: options?.securityKeyHex,
+          keyVersionByte: kv,
+          preferNonMeterAes: true,
+          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+          maxAesAttempts: 32,
+        });
+        if (u.unlocked) {
+          const hits = await tryReadAllDidsOnOpenTarget(discovered, didMap);
+          if (hits > 0) best = { ...discovered, didMap, score: hits };
+        }
+        try {
+          await elm.sendPayload("1001", 500);
         } catch {
           /* ignore */
         }
       }
+
+      if (!best || best.score === 0) {
+        try {
+          await elm.sendCommand("ATST19");
+        } catch {
+          /* ignore */
+        }
+        try {
+          for (const cand of EYESIGHT_DISCOVERY_CANDIDATES) {
+            try {
+              const sess = await openEyesightSession(elm, cand.tx, cand.rx);
+              if (!sess.ok) continue;
+              const probe3501 = await elm.sendPayload("223501", 900);
+              const p3501 = parseSingleDidBodyHex(probe3501, "3501");
+              steps.push(`${cand.label}: откликнулся на 10 03 (22 3501 → ${probe3501.replace(/>/g, "").trim()})`);
+              if (p3501.ok || p3501.nrc === 0x33) {
+                const didMap: Record<string, string> = {};
+                if (p3501.nrc === 0x33) {
+                  const kv = await readEyesightKeyVersionByte(elm);
+                  await unlockSubaruMeterSecurityAccess(elm, cand.tx, cand.rx, steps, {
+                    userKeyHex: options?.securityKeyHex,
+                    keyVersionByte: kv,
+                    preferNonMeterAes: true,
+                    preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+                    maxAesAttempts: 32,
+                  });
+                }
+                const hits = await tryReadAllDidsOnOpenTarget(cand, didMap);
+                if (hits > 0) {
+                  best = { tx: cand.tx, rx: cand.rx, didMap, score: hits };
+                  try {
+                    await elm.sendPayload("1001", 500);
+                  } catch {
+                    /* ignore */
+                  }
+                  break;
+                }
+              }
+              try {
+                await elm.sendPayload("1001", 400);
+              } catch {
+                /* ignore */
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        } finally {
+          try {
+            await elm.sendCommand("ATSTFF");
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     }
+  } finally {
+    await closeKeptOpenGateways(elm, keptGateways);
   }
 
   if (!best) {
@@ -827,104 +1042,119 @@ export async function writeSubaruEyesightVariantByApplied(
   let securityAccessRequired = false;
   let writtenCount = 0;
 
-  await openEyesightSession(elm, tx, rx);
-  steps.push(`${txHex}→${rxHex}: расширенная сессия EyeSight открыта (10 03)`);
+  const keptGateways: { tx: number; rx: number }[] = [];
+  const triedAltGateways = { done: false };
+  const afterDidMap: Record<string, string> = {};
+  const mismatchedDids: string[] = [];
+  let verifiedCount = 0;
 
-  // ADA-031 Block B01 C11: run SecurityAccessExecute right after 10 03 (before 2E 35 01..10)
-  const keyVer = await readEyesightKeyVersionByte(elm);
-  if (keyVer != null) {
-    steps.push(`${txHex}→${rxHex}: версия ключа 22 02 51 → ${keyVer.toString(16).padStart(2, "0").toUpperCase()}`);
-  }
-  let initialUnlock = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
-    userKeyHex: securityKeyHex,
-    keyVersionByte: keyVer,
-    preferNonMeterAes: true,
-    preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-    maxAesAttempts: 16,
-  });
-  if (!initialUnlock.unlocked && !initialUnlock.seedHex) {
-    steps.push(`${txHex}→${rxHex}: 27 xx → NO DATA — эскалация CGW (27 07/08 + 31 01 02 00)…`);
-    const cgwSa = await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
-    if (cgwSa.filterRemoved) cgwFilterRemoved = true;
+  try {
     await openEyesightSession(elm, tx, rx);
-    initialUnlock = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+    steps.push(`${txHex}→${rxHex}: расширенная сессия EyeSight открыта (10 03)`);
+
+    // ADA-031 Block B01 C11: run SecurityAccessExecute right after 10 03 (before 2E 35 01..10)
+    const keyVer = await readEyesightKeyVersionByte(elm);
+    if (keyVer != null) {
+      steps.push(
+        `${txHex}→${rxHex}: версия ключа 22 02 51 → ${keyVer.toString(16).padStart(2, "0").toUpperCase()}`,
+      );
+    }
+    let initialUnlock = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
       userKeyHex: securityKeyHex,
       keyVersionByte: keyVer,
       preferNonMeterAes: true,
       preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
       maxAesAttempts: 16,
     });
-  }
-
-  let saUnlocked = initialUnlock.unlocked;
-  let triedRetrySa = saUnlocked;
-
-  for (const item of writeTargets) {
-    const payload = `2E${item.did}${item.byteHex}`;
-    let raw = await elm.sendPayload(payload, 2_500);
-    let parsed = parseUdsResponse(raw, 0x2e);
-    if (parsed.kind === "negative" && parsed.nrc === 0x33 && !triedRetrySa) {
-      triedRetrySa = true;
-      steps.push(`${txHex}: 2E ${item.did} ${item.byteHex} → NRC 33, повтор SecurityAccess…`);
-      const u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+    if (!initialUnlock.unlocked && !initialUnlock.seedHex) {
+      const diag = await probeEyesight27FallbackAndDiag(elm, tx, rx, steps, {
         userKeyHex: securityKeyHex,
         keyVersionByte: keyVer,
-        preferNonMeterAes: true,
-        preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
-        maxAesAttempts: 16,
       });
-      if (u.unlocked) {
-        saUnlocked = true;
-        raw = await elm.sendPayload(payload, 2_500);
-        parsed = parseUdsResponse(raw, 0x2e);
+      if (diag.unlocked) {
+        initialUnlock = { unlocked: true, seedHex: null };
       }
     }
-    const clean = raw.replace(/>/g, "").trim() || "нет ответа";
-    steps.push(
-      `${txHex}: 2E ${item.did} ${item.byteHex} → ${clean}` +
-        (parsed.kind === "negative" ? ` (${parsed.nrcText ?? "NRC"})` : ""),
-    );
-    if (parsed.kind === "positive") {
-      writtenCount++;
-    } else if (parsed.kind === "negative" && parsed.nrc === 0x33) {
-      securityAccessRequired = true;
+    if (!initialUnlock.unlocked && !initialUnlock.seedHex) {
+      const esc = await escalateCgwKeepOpenAndUnlockEyesight(elm, tx, rx, steps, {
+        userKeyHex: securityKeyHex,
+        keyVersionByte: keyVer,
+        maxAesAttempts: 16,
+        keptGateways,
+        triedAltGateways,
+      });
+      if (esc.cgwFilterRemoved) cgwFilterRemoved = true;
+      initialUnlock = { unlocked: esc.unlocked, seedHex: esc.seedHex };
     }
-  }
 
-  // ADA-031 Blocks B08-B09: re-read all written DIDs inside the session before 10 01 and compare byte-by-byte
-  const afterDidMap: Record<string, string> = {};
-  const mismatchedDids: string[] = [];
-  let verifiedCount = 0;
+    let saUnlocked = initialUnlock.unlocked;
+    let triedRetrySa = saUnlocked;
 
-  const verifyDids =
-    writeMode === "region-only"
-      ? [...SSM4_YYW_FP_DID_KEYS]
-      : writeTargets.map((w) => w.did);
+    for (const item of writeTargets) {
+      const payload = `2E${item.did}${item.byteHex}`;
+      let raw = await elm.sendPayload(payload, 2_500);
+      let parsed = parseUdsResponse(raw, 0x2e);
+      if (parsed.kind === "negative" && parsed.nrc === 0x33 && !triedRetrySa) {
+        triedRetrySa = true;
+        steps.push(`${txHex}: 2E ${item.did} ${item.byteHex} → NRC 33, повтор SecurityAccess…`);
+        const u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+          userKeyHex: securityKeyHex,
+          keyVersionByte: keyVer,
+          preferNonMeterAes: true,
+          preferEcuKinds: [0x03, 0x02, 0x05, 0x0f, 0x01, 0x0d, 0x0e, 0x0c],
+          maxAesAttempts: 16,
+        });
+        if (u.unlocked) {
+          saUnlocked = true;
+          raw = await elm.sendPayload(payload, 2_500);
+          parsed = parseUdsResponse(raw, 0x2e);
+        }
+      }
+      const clean = raw.replace(/>/g, "").trim() || "нет ответа";
+      steps.push(
+        `${txHex}: 2E ${item.did} ${item.byteHex} → ${clean}` +
+          (parsed.kind === "negative" ? ` (${parsed.nrcText ?? "NRC"})` : ""),
+      );
+      if (parsed.kind === "positive") {
+        writtenCount++;
+      } else if (parsed.kind === "negative" && parsed.nrc === 0x33) {
+        securityAccessRequired = true;
+      }
+    }
 
-  for (const didHex of verifyDids) {
+    // ADA-031 Blocks B08-B09: re-read all written DIDs inside the session before 10 01 and compare byte-by-byte
+    const verifyDids =
+      writeMode === "region-only"
+        ? [...SSM4_YYW_FP_DID_KEYS]
+        : writeTargets.map((w) => w.did);
+
+    for (const didHex of verifyDids) {
+      try {
+        const raw = await elm.sendPayload(`22${didHex}`, 1_200);
+        const res = parseSingleDidBodyHex(raw, didHex);
+        if (res.ok) afterDidMap[didHex] = res.hex;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    for (const item of writeTargets) {
+      const got = (afterDidMap[item.did] ?? "").split(/\s+/)[0]?.slice(0, 2) ?? "";
+      if (got === item.byteHex) {
+        verifiedCount++;
+      } else {
+        mismatchedDids.push(`${item.did} (ожидали ${item.byteHex}, считали ${got || "--"})`);
+      }
+    }
+
     try {
-      const raw = await elm.sendPayload(`22${didHex}`, 1_200);
-      const res = parseSingleDidBodyHex(raw, didHex);
-      if (res.ok) afterDidMap[didHex] = res.hex;
+      await elm.sendPayload("1001", 800);
+      steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
     } catch {
       /* ignore */
     }
-  }
-
-  for (const item of writeTargets) {
-    const got = (afterDidMap[item.did] ?? "").split(/\s+/)[0]?.slice(0, 2) ?? "";
-    if (got === item.byteHex) {
-      verifiedCount++;
-    } else {
-      mismatchedDids.push(`${item.did} (ожидали ${item.byteHex}, считали ${got || "--"})`);
-    }
-  }
-
-  try {
-    await elm.sendPayload("1001", 800);
-    steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
-  } catch {
-    /* ignore */
+  } finally {
+    await closeKeptOpenGateways(elm, keptGateways);
   }
 
   if (mismatchedDids.length > 0) {
