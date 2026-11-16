@@ -603,4 +603,16 @@ describe("subaru-meter-variant", () => {
     expect(sent).toContain(`763:2708${expected01}`);
     expect(steps.some((s) => s.includes("CTRL_MET_0251_3"))).toBe(false);
   });
+
+  it("blocks writes to excluded models requiring cluster disassembly (e.g. BTAAYR8 2020MY / WMABY28)", async () => {
+    const elm = scriptedElm({});
+    const res = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAAYH8",
+      optionCode: "C0IC",
+      writeMode: "two-did",
+    });
+    expect(res.success).toBe(false);
+    expect(elm.sent).toHaveLength(0);
+    expect(res.steps.some((s) => s.includes("без разбора"))).toBe(true);
+  });
 });

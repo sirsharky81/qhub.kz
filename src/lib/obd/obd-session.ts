@@ -53,7 +53,10 @@ import {
   type SubaruEyesightVariantMatch,
   type SubaruMeterEyesightCompare,
 } from "./subaru-ssm4-catalog";
-import { SSM4_YYW_FP_DID_KEYS } from "./subaru-ssm4-yyw-fingerprints";
+import {
+  getSsm4YywDidKeysForSchema,
+  type EyesightDidSchema,
+} from "./subaru-ssm4-yyw-fingerprints";
 import {
   readSubaruEyesight35xxDids,
   writeSubaruEyesightVariantByApplied,
@@ -1302,6 +1305,7 @@ export class ObdBleSession {
         didHexList: SUBARU_EYESIGHT_VARIANT_READ_DIDS,
         securityKeyHex,
         unlockIfNrc33: true,
+        hintAppliedModel,
       });
 
       cgwFilterRemoved = probe.cgwFilterRemoved;
@@ -1309,11 +1313,12 @@ export class ObdBleSession {
       txHex = probe.tx.toString(16).toUpperCase();
       rxHex = probe.rx.toString(16).toUpperCase();
       const activeTxHex = txHex;
+      const expectedSchemaKeys = getSsm4YywDidKeysForSchema(probe.detectedSchema);
 
       for (const didHex of SUBARU_EYESIGHT_VARIANT_READ_DIDS) {
         const rawHex = probe.didMap[didHex.toUpperCase()];
         if (!rawHex) {
-          if ((SSM4_YYW_FP_DID_KEYS as readonly string[]).includes(didHex.toUpperCase())) {
+          if (expectedSchemaKeys.includes(didHex.toUpperCase())) {
             dids.push({
               did: didHex,
               label: resolveDidLabel(didHex, activeTxHex) ?? `DID ${didHex}`,
@@ -1436,7 +1441,7 @@ export class ObdBleSession {
   }
 
   /**
-   * SSM4 EyeSight Work Support → Selection of Parameter (`ADA-031.srp`): `2E 35 01..10` from Y-Yw.
+   * SSM4 EyeSight Work Support → Selection of Parameter (`ADA-031.srp` 3501..3510 / legacy `3091..309D`): writes DIDs from Y-Yw.
    */
   async writeSubaruEyesightVariantCode(
     appliedModel: string,
@@ -1448,6 +1453,7 @@ export class ObdBleSession {
       customWrites?: SubaruEyesightWriteEntry[];
       txHex?: string;
       rxHex?: string;
+      detectedSchema?: EyesightDidSchema;
     },
   ): Promise<SubaruEyesightVariantWriteResult> {
     this.requireAdapter();

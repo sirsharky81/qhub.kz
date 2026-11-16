@@ -1,6 +1,10 @@
 import {
+  detectEyesightSchemaFromDids,
+  getSsm4YywDidKeysForSchema,
   SSM4_YYW_FP_DID_KEYS,
+  SSM4_YYW_LEGACY_FP_DID_KEYS,
   summarizeEyesightCatalogComparison,
+  type EyesightDidSchema,
   type Ssm4EyesightCatalogSummary,
   type SubaruEyesightVariantMatch,
 } from "./subaru-ssm4-catalog";
@@ -9,23 +13,10 @@ export const SUBARU_EYESIGHT_BACKUP_FORMAT = "qhub-subaru-eyesight-backup-v1" as
 
 export const SUBARU_EYESIGHT_WRITABLE_DIDS = [
   ...SSM4_YYW_FP_DID_KEYS,
-  "3091",
-  "3092",
-  "3093",
-  "3094",
-  "3095",
-  "3096",
-  "3097",
-  "3098",
-  "3099",
-  "309A",
-  "309B",
-  "309C",
-  "309D",
+  ...SSM4_YYW_LEGACY_FP_DID_KEYS,
 ] as const;
 
 const WRITABLE_EYESIGHT_SET = new Set<string>(SUBARU_EYESIGHT_WRITABLE_DIDS);
-const YYW_35XX_SET = new Set<string>(SSM4_YYW_FP_DID_KEYS);
 
 export interface SubaruEyesightDidEntry {
   did: string;
@@ -113,6 +104,10 @@ export function buildSubaruEyesightBackup(
       .replace(/[^A-Z0-9]/g, "")
       .slice(0, 4) || null;
 
+  const schema: EyesightDidSchema =
+    read.match.schema ?? detectEyesightSchemaFromDids(didMap, appliedModel);
+  const expectedSchemaKeys = new Set<string>(getSsm4YywDidKeysForSchema(schema));
+
   const restore35xxDids: SubaruEyesightWriteEntry[] = [];
   const absentSet = new Set<string>();
   const seen = new Set<string>();
@@ -122,7 +117,7 @@ export function buildSubaruEyesightBackup(
     if (!isWritableEyesightVariantDid(did)) continue;
     const rawHex = entry.hex.trim().toUpperCase();
     if (!rawHex || rawHex === "--" || rawHex === "ABSENT") {
-      if (YYW_35XX_SET.has(did)) absentSet.add(did);
+      if (expectedSchemaKeys.has(did)) absentSet.add(did);
       continue;
     }
     const firstByte = (rawHex.split(/\s+/)[0] ?? "").slice(0, 2);
@@ -132,7 +127,7 @@ export function buildSubaruEyesightBackup(
     }
   }
 
-  for (const did of YYW_35XX_SET) {
+  for (const did of expectedSchemaKeys) {
     if (!seen.has(did) && !absentSet.has(did)) {
       const v = didMap[did];
       if (!v || v === "--") absentSet.add(did);

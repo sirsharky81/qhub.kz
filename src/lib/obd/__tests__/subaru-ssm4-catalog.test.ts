@@ -14,6 +14,10 @@ import {
   SSM4_VEHICLES,
   SUBARU_CANADIAN_OPTION_PRESETS,
   SUBARU_EYESIGHT_VARIANT_READ_DIDS,
+  checkSubaruObdConversionSupport,
+  explainEyesightOptionInput,
+  getSsm4YywSchemaForModel,
+  SSM4_YYW_LEGACY_FP_DID_KEYS,
   SUBARU_METER_12COLUMN_READ_DIDS,
   SUBARU_METER_SSM4_MHZ_READ_DIDS,
   SUBARU_METER_VARIANT_SAFE_PATH,
@@ -608,5 +612,152 @@ describe("subaru-ssm4-catalog", () => {
     expect(emptyDiff[0]?.diffs).toEqual([]);
     expect(emptyDiff[0]?.unreadSlots).toBe(16);
     expect(emptyDiff[0]?.identical).toBe(false);
+  });
+
+  it("supports legacy 13-DID 3091..309D EyeSight (BTACYR8) + SSM4 wildcard masks (**_ / 5X_ / ***)", () => {
+    expect(getSsm4YywSchemaForModel("BTACYR8")).toBe("309x");
+    expect(getSsm4YywSchemaForModel("BTAEYR8")).toBe("35xx");
+    expect(getSsm4YywSchemaForModel("BT9ALDL")).toBe("35xx");
+
+    // BTACYR8 wildcard resolution: C0QF -> C0**_, U45D -> U4**_, U45X -> U45X_ (exact priority!)
+    const ca = lookupSsm4YywFingerprint("BTACYR8", "C0QF");
+    expect(ca?.optionCode).toBe("C0**_");
+    expect(ca?.schema).toBe("309x");
+    const caWrites = getSsm4YywWriteDids("BTACYR8", "C0QF");
+    expect(caWrites).toHaveLength(13);
+    expect(caWrites?.find((w) => w.did === "3094")?.byteHex).toBe("03");
+    expect(caWrites?.find((w) => w.did === "309D")?.byteHex).toBe("08");
+
+    const us5d = lookupSsm4YywFingerprint("BTACYR8", "U45D");
+    expect(us5d?.optionCode).toBe("U4**_");
+    const us5dWrites = getSsm4YywWriteDids("BTACYR8", "U45D");
+    expect(us5dWrites?.find((w) => w.did === "3094")?.byteHex).toBe("02");
+    expect(us5dWrites?.find((w) => w.did === "309D")?.byteHex).toBe("08");
+
+    const us5x = lookupSsm4YywFingerprint("BTACYR8", "U45X");
+    expect(us5x?.optionCode).toBe("U45X_");
+    const us5xWrites = getSsm4YywWriteDids("BTACYR8", "U45X");
+    expect(us5xWrites?.find((w) => w.did === "3094")?.byteHex).toBe("02");
+    expect(us5xWrites?.find((w) => w.did === "309D")?.byteHex).toBe("00");
+
+    // 16-DID wildcard (GC7Y BT9ALDL + KSPJ -> KS**_) & 3-char digit-5th (BN9F47C + RIC / ZZZ -> ***)
+    expect(lookupSsm4YywFingerprint("BT9ALDL", "KSPJ")?.optionCode).toBe("KS**_");
+    expect(lookupSsm4YywFingerprint("BN9F47C", "RIC")?.optionCode).toBe("RIC");
+    expect(lookupSsm4YywFingerprint("BN9F47C", "ZZZ")?.optionCode).toBe("***");
+
+    // Reverse match 13 DIDs from BTACYR8 Canada -> C0**_ & compare vs meter C0QF
+    const caMap = yywFingerprintToDidByteMap(ca!.fp, "309x");
+    const extracted = extractEyesightVariantFromDids(
+      SSM4_YYW_LEGACY_FP_DID_KEYS.map((did) => ({ did, hex: caMap[did]! })),
+      null,
+    );
+    expect(extracted.schema).toBe("309x");
+    expect(extracted.appliedModel).toBe("BTACYR8");
+    expect(extracted.optionCode).toBe("C0**_");
+    expect(extracted.destinationDid).toBe("3094");
+    expect(extracted.destinationByte).toBe("03");
+    expect(extracted.destinationHint).toBe("CANADA");
+
+    const cmpMatch = compareMeterAndEyesightVariants(
+      {
+        actualAppliedModel: "BTACYR8",
+        actualOptionCode: "C0QF",
+        actualRegion: "CANADA (C0 / C5 — °C, км/ч)",
+      },
+      extracted,
+    );
+    expect(cmpMatch.optionCodesMatch).toBe(true);
+    expect(cmpMatch.regionsAligned).toBe(true);
+
+    const cmpMismatch = compareMeterAndEyesightVariants(
+      {
+        actualAppliedModel: "BTACYR8",
+        actualOptionCode: "U45D",
+        actualRegion: "USA (U4 / U5 / U6 — °F, мили)",
+      },
+      extracted,
+    );
+    expect(cmpMismatch.optionCodesMatch).toBe(false);
+    expect(cmpMismatch.regionsAligned).toBe(false);
+
+    const guide = explainEyesightOptionInput("BTACYR8", "C0QF", ["U45D", "U45X", "C0QF"]);
+    expect(guide.didCount).toBe(13);
+    expect(guide.didRange).toBe("3091..309D");
+    expect(guide.destinationDid).toBe("3094");
+    expect(guide.hasWildcards).toBe(true);
+    expect(guide.resolvedCatalogOption).toBe("C0**_");
+    expect(guide.resolvedByWildcard).toBe(true);
+    expect(guide.recommendedCanadaInput).toBe("C0QF");
+  });
+
+  it("enforces Subaru OBD conversion compatibility rules (excludes models requiring cluster disassembly)", () => {
+    // Excluded (require disassembly)
+    expect(checkSubaruObdConversionSupport("WMAAY28").allowObdWrite).toBe(false);
+    expect(checkSubaruObdConversionSupport("WMABY28").allowObdWrite).toBe(false);
+    expect(checkSubaruObdConversionSupport("BTAAYR8").allowObdWrite).toBe(false);
+    expect(checkSubaruObdConversionSupport("BW9AY2L").allowObdWrite).toBe(false);
+    expect(checkSubaruObdConversionSupport("GK7DY1E").allowObdWrite).toBe(false);
+    expect(checkSubaruObdConversionSupport("VAGF4M8").allowObdWrite).toBe(false);
+    expect(checkSubaruObdConversionSupport("SJ9AY1C").allowObdWrite).toBe(false);
+
+    // Supported via OBD without disassembly
+    expect(checkSubaruObdConversionSupport("WMACYC8")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("BTACYR8")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("BN9EY2C")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("BS9EYFC")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("SK9CYHL")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("GT7CY1E")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("GK7EY1E")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("VBHBYE6")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("ZD8AYB8")).toMatchObject({
+      status: "supported",
+      allowObdWrite: true,
+    });
+
+    // Native display setting (2023+ BT/BW/WM, 2024+ GU/VB, 2025+ SL) - allowed with info notice
+    expect(checkSubaruObdConversionSupport("BTAEYR8")).toMatchObject({
+      status: "native-display-setting",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("BTADYR8")).toMatchObject({
+      status: "native-display-setting",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("WMAEYC8")).toMatchObject({
+      status: "native-display-setting",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("GU9AYTL")).toMatchObject({
+      status: "native-display-setting",
+      allowObdWrite: true,
+    });
+    expect(checkSubaruObdConversionSupport("SL9AY1L")).toMatchObject({
+      status: "native-display-setting",
+      allowObdWrite: true,
+    });
   });
 });

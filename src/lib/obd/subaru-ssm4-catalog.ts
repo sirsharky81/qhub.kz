@@ -13,11 +13,16 @@ import {
   resolveSsm4CanadianOptionsFromCgdw,
 } from "./subaru-ssm4-cgdw-pairs";
 import {
+  detectEyesightSchemaFromDids,
+  doesSsm4YywOptionMatchPattern,
+  eyesightDestinationHintFrom3094,
   eyesightDestinationHintFrom3502,
+  isSsm4YywWildcardOption,
   lookupSsm4YywFingerprint,
   matchSsm4OptionFromEyesightDids,
   SSM4_YYW_FP_DID_KEYS,
 } from "./subaru-ssm4-yyw-fingerprints";
+import type { EyesightDidSchema } from "./subaru-ssm4-yyw-fingerprints";
 import { decodeUdsDidSupportBitmap, formatUdsPayload, isUdsBitmapDid } from "./uds";
 
 export {
@@ -40,18 +45,33 @@ export type {
   Ssm4MeterCatalogSummary,
 } from "./subaru-ssm4-cgdw-fingerprints";
 export {
+  detectEyesightSchemaFromDids,
   diffEyesightAgainstAppliedCatalog,
+  doesSsm4YywOptionMatchPattern,
+  explainEyesightOptionInput,
+  eyesightDestinationHintFrom3094,
   eyesightDestinationHintFrom3502,
+  getSsm4YywDidKeysForSchema,
+  getSsm4YywExpectedOpDigits,
+  getSsm4YywSchemaForModel,
   getSsm4YywWriteDids,
+  isSsm4YywWildcardOption,
+  listSsm4YywOptionsForAppliedModel,
+  lookupSsm4YywFingerprint,
   matchSsm4OptionFromEyesightDids,
   summarizeEyesightCatalogComparison,
   SSM4_YYW_FP_DID_KEYS,
+  SSM4_YYW_LEGACY_FP_DID_KEYS,
   fingerprintFromEyesightDids,
+  yywFingerprintToDidByteMap,
 } from "./subaru-ssm4-yyw-fingerprints";
 export type {
+  EyesightDidSchema,
+  EyesightOptionInputGuide,
   Ssm4EyesightAppliedRowDiff,
   Ssm4EyesightCatalogByteDiff,
   Ssm4EyesightCatalogSummary,
+  Ssm4YywFingerprint,
 } from "./subaru-ssm4-yyw-fingerprints";
 
 export type Ssm4Group = "Powertrain" | "Chassis" | "Body";
@@ -6087,7 +6107,368 @@ export const SUBARU_CANADIAN_OPTION_PRESETS: readonly SubaruCanadianPreset[] = [
     xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
     featuresRu: "SSM4 cgdw/Y-Yw: WMAEYC8+C0JL (°C + Dual X-Mode).",
   },
+  {
+    id: "wm-ascent-2021-c",
+    modelSeriesRu: "Ascent (WM · с поколения C / 21 МГ)",
+    years: "2021–2022",
+    trimRu: "Limited / Touring 2.4T (WMACYC8 · Dual X-Mode)",
+    engineRu: "FA24 2.4L Turbo (CVT)",
+    appliedModel: "WMACYC8",
+    usOptionCodeExamples: ["U4CE", "U4HF"],
+    canadianOptionCodeC0: "C0HF",
+    canadianOptionCodeC5: "C0HF",
+    xModeTypeRu: "Dual X-Mode (SNOW/DIRT + DEEP SNOW/MUD)",
+    featuresRu: "OBD поддерживается с поколения C (2021 МГ): WMACYC8+C0HF. Поколения A/B (19–20 МГ) не поддерживаются без разбора.",
+  },
+  {
+    id: "bs-outback-v-bn-bs",
+    modelSeriesRu: "Outback V / Legacy V (BS / BN)",
+    years: "2015–2019",
+    trimRu: "2.5i Limited / Touring (BS9EYFC · все BN/BS)",
+    engineRu: "FB25 2.5L (CVT)",
+    appliedModel: "BS9EYFC",
+    usOptionCodeExamples: ["U5QX"],
+    canadianOptionCodeC0: "C5KI",
+    canadianOptionCodeC5: "C5KI",
+    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
+    featuresRu: "OBD поддерживается на всех BN/BS. В базе cgdw: BS9EYFC+C5KI.",
+  },
+  {
+    id: "bw-legacy-vi-2022",
+    modelSeriesRu: "Legacy VI (BW · с поколения B / 21+ МГ)",
+    years: "2021–2022",
+    trimRu: "2.5i Premium / Limited (BW9CY3L)",
+    engineRu: "FB25D 2.5L DI (CVT)",
+    appliedModel: "BW9CY3L",
+    usOptionCodeExamples: ["U5CX", "U5DX", "U5DB"],
+    canadianOptionCodeC0: "C5DF",
+    canadianOptionCodeC5: "C5DF",
+    xModeTypeRu: "Без X-Mode (Sedan / Impreza)",
+    featuresRu: "OBD поддерживается с поколения B (2021 МГ). Поколение A (2020 МГ) не переводится без разбора.",
+  },
+  {
+    id: "gt-crosstrek-all",
+    modelSeriesRu: "Crosstrek / Impreza Wagon (GT)",
+    years: "2018–2023",
+    trimRu: "2.0i Base / Premium (GT7CY1E · все GT)",
+    engineRu: "FB20D 2.0L DI (CVT)",
+    appliedModel: "GT7CY1E",
+    usOptionCodeExamples: ["U5MB"],
+    canadianOptionCodeC0: "C5MB",
+    canadianOptionCodeC5: "C5MB",
+    xModeTypeRu: "Single X-Mode (SNOW/DIRT)",
+    featuresRu: "OBD поддерживается на всех GT: GT7CY1E+C5MB.",
+  },
+  {
+    id: "gk-impreza-sedan-e",
+    modelSeriesRu: "Impreza Sedan (GK · с поколения E / 21+ МГ)",
+    years: "2021–2023",
+    trimRu: "2.0i Sedan (GK7EY1E)",
+    engineRu: "FB20D 2.0L DI (CVT)",
+    appliedModel: "GK7EY1E",
+    usOptionCodeExamples: ["U5MX"],
+    canadianOptionCodeC0: "C5MX",
+    canadianOptionCodeC5: "C5MX",
+    xModeTypeRu: "Без X-Mode (Sedan / Impreza)",
+    featuresRu: "OBD поддерживается с поколения E (2021 МГ): GK7EY1E+C5MX. Поколения A..D (до 20 МГ) не поддерживаются без разбора.",
+  },
+  {
+    id: "vb-wrx-2022-b",
+    modelSeriesRu: "WRX / Levorg (VB / VN · с поколения B / 22+ МГ)",
+    years: "2022–2023",
+    trimRu: "WRX 2.4T (VBHBYE6)",
+    engineRu: "FA24 2.4L Turbo (6MT / SPT)",
+    appliedModel: "VBHBYE6",
+    usOptionCodeExamples: ["U4XD"],
+    canadianOptionCodeC0: "C0BD",
+    canadianOptionCodeC5: "C0XD",
+    xModeTypeRu: "Без X-Mode (Sedan / Impreza)",
+    featuresRu: "OBD поддерживается с поколения B (2022 МГ): VBHBYE6+C0BD / C0XD.",
+  },
+  {
+    id: "zd-brz-all",
+    modelSeriesRu: "BRZ / Toyota GR86 (ZD / ZN)",
+    years: "2022–2024",
+    trimRu: "2.4L (ZD8AYB8 · все ZD / ZN)",
+    engineRu: "FA24D 2.4L (AT / MT)",
+    appliedModel: "ZD8AYB8",
+    usOptionCodeExamples: ["U4AX"],
+    canadianOptionCodeC0: "C0AX",
+    canadianOptionCodeC5: "C0AX",
+    xModeTypeRu: "Без X-Mode (Sedan / Impreza)",
+    featuresRu: "OBD поддерживается на всех ZD8 / ZN8: ZD8AYB8+C0AX.",
+  },
 ];
+
+export type SubaruObdConversionStatus =
+  | "supported"
+  | "native-display-setting"
+  | "unsupported-needs-disassembly";
+
+export interface SubaruObdConversionSupport {
+  status: SubaruObdConversionStatus;
+  allowObdWrite: boolean;
+  bodyCode: string;
+  generationChar: string;
+  ruleTitleRu: string;
+  reasonRu: string;
+}
+
+export const SUBARU_OBD_SUPPORTED_MODELS_SUMMARY = {
+  obdSupported: [
+    "Ascent (WM) — с 21 МГ (с поколения C: WMAC, WMAD, …)",
+    "Legacy / Outback — все BN / BS и BW / BT с 21 МГ (с поколения B)",
+    "Forester — все SK (2019–2024 МГ)",
+    "Impreza Wagon / Crosstrek — все GT",
+    "Impreza Sedan (GK) — с 21 МГ (с поколения E: GK*E, GK*F, GK*G)",
+    "WRX / Levorg (VB / VN) — с 22 МГ (с поколения B: VB*B, VN*B, …)",
+    "BRZ (ZD) и Toyota GR86 (ZN) — все ZD8 / ZN8",
+  ],
+  nativeDisplaySetting: [
+    "Ascent / Legacy / Outback — с 2023 МГ (°F/°C уже переключается в настройках дисплея; OBD нужен только для смены региона EyeSight/приборки или Dual X-Mode)",
+    "Impreza / Crosstrek / WRX / Levorg — с 2024 МГ (в настройках дисплея)",
+    "Forester — с 2025 МГ, кузов SL (в настройках дисплея)",
+  ],
+  excludedNeedsDisassembly: [
+    "Ascent (WM) до 21 МГ (поколения A, B)",
+    "Legacy / Outback (BW / BT) 20 МГ (поколение A)",
+    "Impreza Sedan (GK) до 21 МГ (поколения A, B, C, D)",
+    "WRX / Levorg до 22 МГ (VA, VM и VB/VN поколение A)",
+    "Forester до SK (SJ, SH, SG), Impreza/XV до GT (GP, GJ), Legacy/Outback BM/BR, BRZ/86 ZC/ZN6",
+  ],
+} as const;
+
+/**
+ * Checks whether a Subaru Applied Model (4th char = generation / revision letter in Body Model)
+ * can have °F → °C converted via OBD without cluster disassembly, or already has a factory display toggle,
+ * or requires cluster disassembly / EEPROM programmer (excluded from OBD service writes).
+ */
+export function checkSubaruObdConversionSupport(
+  appliedModelInput: string,
+): SubaruObdConversionSupport {
+  const app = appliedModelInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const bodyCode = app.slice(0, 2);
+  const series3 = app.slice(0, 3);
+  const gen = app.slice(3, 4);
+
+  if (app.length !== 7) {
+    return {
+      status: "unsupported-needs-disassembly",
+      allowObdWrite: false,
+      bodyCode: bodyCode || "—",
+      generationChar: gen || "—",
+      ruleTitleRu: "Неполный Applied Model",
+      reasonRu:
+        "Введите 7-значный код Applied Model (4-й знак — поколение кузова) для проверки поддержки OBD-кодирования.",
+    };
+  }
+
+  // 1. Legacy / Outback BN & BS (all generations)
+  if (bodyCode === "BN" || bodyCode === "BS") {
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: "Legacy / Outback V (BN/BS) — OBD поддерживается",
+      reasonRu: "Все поколения кузовов BN/BS поддерживают смену региона по OBD без разбора щитка.",
+    };
+  }
+
+  // 2. Legacy / Outback VI (BW/BT): gen A (2020MY) needs disassembly; B+ supported; D+ (2023+) has native display toggle
+  if (bodyCode === "BW" || bodyCode === "BT") {
+    if (gen === "A") {
+      return {
+        status: "unsupported-needs-disassembly",
+        allowObdWrite: false,
+        bodyCode,
+        generationChar: gen,
+        ruleTitleRu: `${series3} поколение A (2020 МГ) — без разбора не меняется`,
+        reasonRu:
+          "Legacy/Outback BW/BT поддерживаются по OBD только с 21 МГ (с 4-го знака «B»). Поколение «A» (2020 МГ) требует разбора щитка/программатора и в сервисе отключено.",
+      };
+    }
+    if (gen >= "D") {
+      return {
+        status: "native-display-setting",
+        allowObdWrite: true,
+        bodyCode,
+        generationChar: gen,
+        ruleTitleRu: `${series3} поколение ${gen} (2023+ МГ) — есть переключатель в дисплее`,
+        reasonRu:
+          "На Legacy/Outback с 2023 МГ (поколения D/E+) °F ↔ °C переключается в настройках дисплея без прошивки. OBD-запись здесь нужна только для смены региона EyeSight/приборки или Dual X-Mode.",
+      };
+    }
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: `Legacy / Outback VI (${series3} поколение ${gen}) — OBD поддерживается`,
+      reasonRu:
+        "Legacy/Outback BW/BT с 21 МГ (поколение B и выше) поддерживают перевод °F → °C по OBD без разбора.",
+    };
+  }
+
+  // 3. Ascent (WM): gen A, B (19-20MY) need disassembly; C, D (21-22MY) OBD; E+ (23+) native display toggle
+  if (bodyCode === "WM") {
+    if (gen === "A" || gen === "B") {
+      return {
+        status: "unsupported-needs-disassembly",
+        allowObdWrite: false,
+        bodyCode,
+        generationChar: gen,
+        ruleTitleRu: `Ascent WM поколение ${gen} (до 21 МГ) — без разбора не меняется`,
+        reasonRu:
+          "Ascent (WM) поддерживается по OBD только с 21 МГ (с 4-го знака «C»). Поколения A и B (2019–2020 МГ) без разбора не меняются и в сервисе отключены.",
+      };
+    }
+    if (gen >= "E") {
+      return {
+        status: "native-display-setting",
+        allowObdWrite: true,
+        bodyCode,
+        generationChar: gen,
+        ruleTitleRu: `Ascent WM поколение ${gen} (2023+ МГ) — есть переключатель в дисплее`,
+        reasonRu:
+          "На Ascent с 2023 МГ (поколение E+) °F ↔ °C переключается в настройках дисплея. OBD-запись нужна только для полной смены региона или Dual X-Mode.",
+      };
+    }
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: `Ascent WM поколение ${gen} (21–22 МГ) — OBD поддерживается`,
+      reasonRu: "Ascent (WM) с 21 МГ (с поколения C) поддерживается по OBD без разбора.",
+    };
+  }
+
+  // 4. Forester SK (all) vs SL (2025+ native display)
+  if (bodyCode === "SK") {
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: "Forester V (SK) — OBD поддерживается",
+      reasonRu: "Все поколения Forester SK поддерживают перевод °F → °C по OBD без разбора.",
+    };
+  }
+  if (bodyCode === "SL") {
+    return {
+      status: "native-display-setting",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: "Forester VI (SL, 2025+ МГ) — есть переключатель в дисплее",
+      reasonRu: "На Forester SL с 2025 МГ единицы °F ↔ °C переключаются в настройках дисплея.",
+    };
+  }
+
+  // 5. Impreza Wagon / Crosstrek GT (all) & GU (2024+ native display)
+  if (bodyCode === "GT") {
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: "Impreza Wagon / Crosstrek (GT) — OBD поддерживается",
+      reasonRu: "Все поколения кузова GT поддерживают перевод °F → °C по OBD без разбора.",
+    };
+  }
+  if (bodyCode === "GU") {
+    return {
+      status: "native-display-setting",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: "Impreza / Crosstrek (GU, 2024+ МГ) — есть переключатель в дисплее",
+      reasonRu:
+        "На Crosstrek/Impreza GU с 2024 МГ единицы °F ↔ °C переключаются в настройках дисплея; OBD-запись доступна для смены региона или Dual X-Mode.",
+    };
+  }
+
+  // 6. Impreza Sedan GK: E+ (2021MY+) supported; A..D need disassembly
+  if (bodyCode === "GK") {
+    if (gen < "E") {
+      return {
+        status: "unsupported-needs-disassembly",
+        allowObdWrite: false,
+        bodyCode,
+        generationChar: gen,
+        ruleTitleRu: `Impreza Sedan GK поколение ${gen} (до 21 МГ) — без разбора не меняется`,
+        reasonRu:
+          "Impreza Sedan (GK) поддерживается по OBD только с 21 МГ (с 4-го знака «E»). Поколения A..D без разбора щитка не меняются и в сервисе отключены.",
+      };
+    }
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: `Impreza Sedan GK поколение ${gen} (21+ МГ) — OBD поддерживается`,
+      reasonRu: "Impreza Sedan (GK) с 21 МГ (с поколения E) поддерживается по OBD без разбора.",
+    };
+  }
+
+  // 7. WRX / Levorg VB & VN: B+ (2022MY+) supported; D+ (2024+) native display; A unsupported
+  if (bodyCode === "VB" || bodyCode === "VN") {
+    if (gen < "B") {
+      return {
+        status: "unsupported-needs-disassembly",
+        allowObdWrite: false,
+        bodyCode,
+        generationChar: gen,
+        ruleTitleRu: `WRX / Levorg ${bodyCode} поколение ${gen} (до 22 МГ) — без разбора не меняется`,
+        reasonRu:
+          "WRX/Levorg (VB/VN) поддерживаются по OBD только с 22 МГ (с 4-го знака «B»). Поколение A без разбора не переводится и в сервисе отключено.",
+      };
+    }
+    if (gen >= "D") {
+      return {
+        status: "native-display-setting",
+        allowObdWrite: true,
+        bodyCode,
+        generationChar: gen,
+        ruleTitleRu: `WRX / Levorg ${bodyCode} поколение ${gen} (2024+ МГ) — есть переключатель в дисплее`,
+        reasonRu:
+          "На WRX/Levorg с 2024 МГ единицы °F ↔ °C доступны в настройках дисплея; OBD-запись доступна при необходимости смены региона.",
+      };
+    }
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: `WRX / Levorg ${bodyCode} поколение ${gen} (22+ МГ) — OBD поддерживается`,
+      reasonRu: "WRX/Levorg (VB/VN) с 22 МГ (с поколения B) поддерживается по OBD без разбора.",
+    };
+  }
+
+  // 8. BRZ ZD / Toyota GR86 ZN (all ZD8/ZN8)
+  if (bodyCode === "ZD" || bodyCode === "ZN") {
+    return {
+      status: "supported",
+      allowObdWrite: true,
+      bodyCode,
+      generationChar: gen,
+      ruleTitleRu: "BRZ (ZD) / GR86 (ZN) — OBD поддерживается",
+      reasonRu: "Все поколения ZD / ZN поддерживают смену региона по OBD без разбора.",
+    };
+  }
+
+  // All older / other bodies (SJ, SH, GP, GJ, VA, VM, BM, BR, ZC, etc.)
+  return {
+    status: "unsupported-needs-disassembly",
+    allowObdWrite: false,
+    bodyCode,
+    generationChar: gen,
+    ruleTitleRu: `Кузов ${series3} — без разбора щитка не меняется`,
+    reasonRu:
+      `Модель ${app} (кузов ${bodyCode}) не входит в перечень моделей для перевода по OBD без разбора (BN/BS, BW/BT с B, WM с C, SK, GT, GK с E, VB/VN с B, ZD/ZN) — требуется разбор щитка / программатор.`,
+  };
+}
 
 export interface SubaruDualXModeRecommendation {
   supported: boolean;
@@ -6124,6 +6505,7 @@ export interface SubaruAppliedModelAnalysis {
   canadianOptionCodeC5: string;
   dualXModeAppliedModelSuggestion: string;
   dualXModeRecommendation: SubaruDualXModeRecommendation;
+  obdConversionSupport: SubaruObdConversionSupport;
 }
 
 /**
@@ -6435,6 +6817,7 @@ export function decodeSubaruAppliedModel12Columns(
       : app;
 
   const dualXModeRecommendation = resolveDualXModeRecommendation(app, opt);
+  const obdConversionSupport = checkSubaruObdConversionSupport(app);
 
   return {
     appliedModel: app,
@@ -6456,6 +6839,7 @@ export function decodeSubaruAppliedModel12Columns(
     canadianOptionCodeC5,
     dualXModeAppliedModelSuggestion,
     dualXModeRecommendation,
+    obdConversionSupport,
   };
 }
 
@@ -6959,12 +7343,16 @@ export interface SubaruEyesightVariantMatch {
   unique: boolean;
   candidates: string[];
   fp: string;
+  schema?: EyesightDidSchema;
   destinationHint: "USA" | "CANADA" | "UNKNOWN";
+  destinationDid?: "3502" | "3094";
+  destinationByte?: string | null;
   byte3502: string | null;
+  byte3094?: string | null;
   explanationRu: string;
 }
 
-/** Decode EyeSight 787 DID 35xx dump via Y-YwPHBWHoZ.mLW fingerprint. */
+/** Decode EyeSight 787/784 DID 35xx (16 DID) or legacy 309x (13 DID) dump via Y-YwPHBWHoZ.mLW fingerprint. */
 export function extractEyesightVariantFromDids(
   dids: { did: string; hex: string }[],
   hintAppliedModel?: string | null,
@@ -6973,8 +7361,17 @@ export function extractEyesightVariantFromDids(
   for (const d of dids) {
     didMap[d.did.toUpperCase()] = d.hex.trim().toUpperCase();
   }
+  const schema = detectEyesightSchemaFromDids(didMap, hintAppliedModel);
   const byte3502 = didMap["3502"]?.split(/\s+/)[0] ?? null;
-  const destinationHint = eyesightDestinationHintFrom3502(byte3502);
+  const byte3094 = didMap["3094"]?.split(/\s+/)[0] ?? null;
+  const valid3502 = byte3502 && /^[0-9A-F]{2}$/.test(byte3502) ? byte3502 : null;
+  const valid3094 = byte3094 && /^[0-9A-F]{2}$/.test(byte3094) ? byte3094 : null;
+  const destinationDid: "3502" | "3094" = schema === "309x" ? "3094" : "3502";
+  const destinationByte = schema === "309x" ? valid3094 : valid3502;
+  const destinationHint =
+    schema === "309x"
+      ? eyesightDestinationHintFrom3094(valid3094)
+      : eyesightDestinationHintFrom3502(valid3502);
   const matched = matchSsm4OptionFromEyesightDids(hintAppliedModel, didMap);
   if (!matched) {
     return {
@@ -6983,24 +7380,39 @@ export function extractEyesightVariantFromDids(
       unique: false,
       candidates: [],
       fp: "",
+      schema,
       destinationHint,
-      byte3502,
-      explanationRu: byte3502
-        ? `EyeSight 3502=${byte3502} (${destinationHint}), но полный отпечаток 35xx не совпал с Y-Yw.`
-        : "EyeSight не ответил на вариантные DID 3501..3510.",
+      destinationDid,
+      destinationByte,
+      byte3502: valid3502,
+      byte3094: valid3094,
+      explanationRu: destinationByte
+        ? `EyeSight ${destinationDid}=${destinationByte} (${destinationHint}), но полный отпечаток ${schema} не совпал с Y-Yw.`
+        : "EyeSight не ответил на вариантные DID 3501..3510 / 3091..309D.",
     };
   }
+  const activeSchema = matched.schema;
+  const activeDestDid: "3502" | "3094" = activeSchema === "309x" ? "3094" : "3502";
+  const activeDestByte = activeSchema === "309x" ? valid3094 : valid3502;
+  const activeDestHint =
+    activeSchema === "309x"
+      ? eyesightDestinationHintFrom3094(valid3094)
+      : eyesightDestinationHintFrom3502(valid3502);
   return {
     appliedModel: matched.appliedModel,
     optionCode: matched.optionCode,
     unique: matched.unique,
     candidates: matched.candidates,
     fp: matched.fp,
-    destinationHint,
-    byte3502,
+    schema: activeSchema,
+    destinationHint: activeDestHint,
+    destinationDid: activeDestDid,
+    destinationByte: activeDestByte,
+    byte3502: valid3502,
+    byte3094: valid3094,
     explanationRu: matched.unique
-      ? `EyeSight 35xx→Y-Yw: ${matched.appliedModel ?? hintAppliedModel ?? "?"} + ${matched.optionCode} (3502=${byte3502 ?? "—"} → ${destinationHint}).`
-      : `EyeSight 35xx неоднозначно: ${matched.candidates.join(", ")} (взят ${matched.optionCode}).`,
+      ? `EyeSight ${activeSchema}→Y-Yw: ${matched.appliedModel ?? hintAppliedModel ?? "?"} + ${matched.optionCode} (${activeDestDid}=${activeDestByte ?? "—"} → ${activeDestHint}).`
+      : `EyeSight ${activeSchema} неоднозначно: ${matched.candidates.join(", ")} (взят ${matched.optionCode}).`,
   };
 }
 
@@ -7018,7 +7430,7 @@ export interface SubaruMeterEyesightCompare {
   detailRu: string;
 }
 
-/** Compare meter cgdw Option vs EyeSight Y-Yw Option / destination. */
+/** Compare meter cgdw Option vs EyeSight Y-Yw Option / destination (supports wildcard Y-Yw masks like C0**_). */
 export function compareMeterAndEyesightVariants(
   meter: Pick<SubaruDumpCodeMatch, "actualAppliedModel" | "actualOptionCode" | "actualRegion">,
   eyesight: SubaruEyesightVariantMatch,
@@ -7028,7 +7440,13 @@ export function compareMeterAndEyesightVariants(
   const meterApp = meter.actualAppliedModel.toUpperCase();
   const esApp = eyesight.appliedModel?.toUpperCase() ?? null;
 
-  const optionCodesMatch = esOpt ? meterOpt === esOpt : null;
+  const matchedViaWildcard = Boolean(
+    esOpt &&
+      esOpt !== meterOpt &&
+      isSsm4YywWildcardOption(esOpt) &&
+      doesSsm4YywOptionMatchPattern(esApp || meterApp, esOpt, meterOpt),
+  );
+  const optionCodesMatch = esOpt ? esOpt === meterOpt || matchedViaWildcard : null;
   const appliedModelsMatch = esApp ? meterApp === esApp : null;
 
   const meterIsCa =
@@ -7044,15 +7462,18 @@ export function compareMeterAndEyesightVariants(
   if (eyesight.destinationHint === "CANADA") regionsAligned = meterIsCa;
   else if (eyesight.destinationHint === "USA") regionsAligned = meterIsUs;
 
+  const destDidLabel = eyesight.destinationDid ?? "3502";
   let verdictRu: string;
   if (optionCodesMatch === true && (appliedModelsMatch === true || appliedModelsMatch === null)) {
-    verdictRu = "Совпадают: приборка и EyeSight указывают на один и тот же Option Code.";
+    verdictRu = matchedViaWildcard
+      ? `Совпадают: приборка ${meterOpt} соответствует маске EyeSight ${esOpt}.`
+      : "Совпадают: приборка и EyeSight указывают на один и тот же Option Code.";
   } else if (optionCodesMatch === false) {
     verdictRu = `Расхождение Option: приборка ${meterOpt}, EyeSight ${esOpt}.`;
   } else if (regionsAligned === false) {
-    verdictRu = `Регионы не сходятся: приборка ${meter.actualRegion}, EyeSight 3502→${eyesight.destinationHint}.`;
+    verdictRu = `Регионы не сходятся: приборка ${meter.actualRegion}, EyeSight ${destDidLabel}→${eyesight.destinationHint}.`;
   } else if (esOpt == null) {
-    verdictRu = "EyeSight вариант не распознан — сравнить Option нельзя (проверьте 787 / 35xx).";
+    verdictRu = "EyeSight вариант не распознан — сравнить Option нельзя (проверьте 787 / 35xx / 309x).";
   } else {
     verdictRu = "Частичное совпадение — см. детали.";
   }

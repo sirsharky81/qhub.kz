@@ -14,7 +14,12 @@ import {
   computeSubaruSecurityKey16ByteAesEcb,
   type SubaruMeterWriteLink,
 } from "../subaru-meter-variant";
-import { getSsm4YywWriteDids, SSM4_YYW_FP_DID_KEYS } from "../subaru-ssm4-catalog";
+import {
+  getSsm4YywWriteDids,
+  SSM4_YYW_FP_DID_KEYS,
+  SSM4_YYW_LEGACY_FP_DID_KEYS,
+  SUBARU_EYESIGHT_VARIANT_READ_DIDS,
+} from "../subaru-ssm4-catalog";
 
 function scriptedElm(replies: Record<string, string | string[]>): SubaruMeterWriteLink & {
   sent: string[];
@@ -409,5 +414,108 @@ describe("subaru-eyesight-variant (ADA-031 / ADA-032)", () => {
     const res = await readSubaruEyesight35xxDids(elm, { didHexList: SSM4_YYW_FP_DID_KEYS });
     expect(Object.keys(res.didMap)).toHaveLength(16);
     expect(res.didMap["3502"]).toBe("20");
+  });
+
+  it("auto-detects and reads 13 legacy DIDs (3091..309D) for BTACYR8 when 3501..3510 return NRC 31", async () => {
+    const caBytes = getSsm4YywWriteDids("BTACYR8", "C0QF")!;
+    expect(caBytes).toHaveLength(13);
+
+    const replies: Record<string, string> = {
+      "3101020C": "71 01 02 0C",
+    };
+    for (const did of SSM4_YYW_FP_DID_KEYS) {
+      replies[`22${did}`] = "7F 22 31";
+    }
+    for (const item of caBytes) {
+      replies[`22${item.did}`] = `62 ${item.did.slice(0, 2)} ${item.did.slice(2)} ${item.byteHex}`;
+    }
+
+    const elm = scriptedElm(replies);
+    const res = await readSubaruEyesight35xxDids(elm, {
+      didHexList: SUBARU_EYESIGHT_VARIANT_READ_DIDS,
+    });
+
+    expect(res.detectedSchema).toBe("309x");
+    expect(Object.keys(res.didMap)).toHaveLength(13);
+    expect(res.didMap["3094"]).toBe("03");
+    expect(res.didMap["309D"]).toBe("08");
+  });
+
+  it("writes 13 legacy DIDs (3091..309D) via wildcard (C0QF -> C0**_) and region-only 3094, plus 1:1 backup", async () => {
+    const caBytes = getSsm4YywWriteDids("BTACYR8", "C0QF")!;
+    expect(caBytes).toHaveLength(13);
+
+    const replies: Record<string, string> = {
+      "3101020C": "71 01 02 0C",
+      "2703": "67 03 " + "00 ".repeat(16).trim(),
+      "2E309403": "6E 30 94",
+    };
+    for (const item of caBytes) {
+      replies[`2E${item.did}${item.byteHex}`] = `6E ${item.did.slice(0, 2)} ${item.did.slice(2)}`;
+      replies[`22${item.did}`] = `62 ${item.did.slice(0, 2)} ${item.did.slice(2)} ${item.byteHex}`;
+    }
+
+    const elmFull = scriptedElm(replies);
+    const resFull = await writeSubaruEyesightVariantByApplied(elmFull, "BTACYR8", "C0QF", undefined, {
+      writeMode: "full-yyw",
+    });
+    expect(resFull.success).toBe(true);
+    expect(resFull.targetCount).toBe(13);
+    expect(resFull.verifiedCount).toBe(13);
+    expect(elmFull.sent.filter((s) => s.startsWith("2E309"))).toHaveLength(13);
+    expect(elmFull.sent).toContain("2E309403");
+    expect(elmFull.sent).toContain("2E309D08");
+
+    const elmReg = scriptedElm(replies);
+    const resReg = await writeSubaruEyesightVariantByApplied(elmReg, "BTACYR8", "C0QF", undefined, {
+      writeMode: "region-only",
+    });
+    expect(resReg.success).toBe(true);
+    expect(resReg.targetCount).toBe(1);
+    expect(resReg.verifiedCount).toBe(1);
+    expect(elmReg.sent.filter((s) => s.startsWith("2E"))).toEqual(["2E309403"]);
+
+    const backup = buildSubaruEyesightBackup(
+      {
+        capturedAt: "2026-11-16T00:00:00.000Z",
+        vin: "4S4BTGPD2N3000001",
+        txHex: "787",
+        rxHex: "78F",
+        dids: SSM4_YYW_LEGACY_FP_DID_KEYS.map((did) => ({
+          did,
+          label: `DID ${did}`,
+          hex: caBytes.find((c) => c.did === did)!.byteHex,
+          decoded: "",
+        })),
+        match: {
+          appliedModel: "BTACYR8",
+          optionCode: "C0**_",
+          unique: true,
+          candidates: ["BTACYR8+C0**_"],
+          fp: "0A06050301000C0403060D0308",
+          schema: "309x",
+          destinationHint: "CANADA",
+          destinationDid: "3094",
+          destinationByte: "03",
+          byte3502: null,
+          byte3094: "03",
+          explanationRu: "",
+        },
+      },
+      "BTACYR8",
+      "C0QF",
+    );
+    expect(backup.restore35xxDids).toHaveLength(13);
+    expect(backup.absent35xxDids).toEqual([]);
+  });
+
+  it("blocks EyeSight writes to excluded models requiring disassembly (e.g. BTAAYH8 / WMABY28)", async () => {
+    const elm = scriptedElm({});
+    const res = await writeSubaruEyesightVariantByApplied(elm, "BTAAYH8", "C0IC", undefined, {
+      writeMode: "region-only",
+    });
+    expect(res.success).toBe(false);
+    expect(elm.sent).toHaveLength(0);
+    expect(res.steps.some((s) => s.includes("без разбора"))).toBe(true);
   });
 });

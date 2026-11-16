@@ -17,11 +17,16 @@ import {
 } from "@/lib/obd/obd-session";
 import {
   SUBARU_CANADIAN_OPTION_PRESETS,
+  SUBARU_OBD_SUPPORTED_MODELS_SUMMARY,
+  checkSubaruObdConversionSupport,
   decodeSubaruAppliedModel12Columns,
   diffEyesightAgainstAppliedCatalog,
   diffMeterAgainstAppliedCatalog,
+  explainEyesightOptionInput,
   getSsm4CgdwWriteDids,
+  getSsm4YywSchemaForModel,
   getSsm4YywWriteDids,
+  isSsm4YywWildcardOption,
   resolveDualXModeRecommendation,
 } from "@/lib/obd/subaru-ssm4-catalog";
 import {
@@ -186,12 +191,32 @@ export default function SubaruCodingClient() {
     const legacy309x = eyesightRead.dids.filter(
       (d) => /^309[1-9A-D]$/.test(d.did) && d.hex !== "--",
     ).length;
-    return { present35xx, absent35xx, legacy309x };
+    const absent309x = eyesightRead.dids.filter(
+      (d) => /^309[1-9A-D]$/.test(d.did) && d.hex === "--",
+    ).length;
+    const activeSchema =
+      eyesightRead.match.schema ??
+      (legacy309x > 0 && present35xx === 0 ? "309x" : "35xx");
+    const activePresent = activeSchema === "309x" ? legacy309x : present35xx;
+    const activeAbsent = activeSchema === "309x" ? absent309x : absent35xx;
+    const activeTotal = activeSchema === "309x" ? 13 : 16;
+    const didRangeLabel = activeSchema === "309x" ? "3091..309D" : "3501..3510";
+    return {
+      present35xx,
+      absent35xx,
+      legacy309x,
+      absent309x,
+      activeSchema,
+      activePresent,
+      activeAbsent,
+      activeTotal,
+      didRangeLabel,
+    };
   }, [eyesightRead]);
 
   const closestEyesightCatalogRow = useMemo(() => {
     if (!eyesightCatalogDiff.length) return null;
-    if (!eyesightReadStats || eyesightReadStats.present35xx === 0) return null;
+    if (!eyesightReadStats || eyesightReadStats.activePresent === 0) return null;
     return eyesightCatalogDiff.reduce((best, row) =>
       row.diffs.length < best.diffs.length ? row : best,
     );
@@ -202,16 +227,50 @@ export default function SubaruCodingClient() {
     return diffBackupVsLiveEyesight(loadedEyesightBackup, eyesightRead.dids);
   }, [loadedEyesightBackup, eyesightRead]);
 
+  const modalEyesightInputGuide = useMemo(() => {
+    if (!eyesightWritePending) return null;
+    return explainEyesightOptionInput(
+      eyesightWritePending.appliedModel,
+      eyesightWritePending.optionCode,
+    );
+  }, [eyesightWritePending]);
+
+  const modalEyesightSupport = useMemo(() => {
+    if (!eyesightWritePending) return null;
+    return checkSubaruObdConversionSupport(eyesightWritePending.appliedModel);
+  }, [eyesightWritePending]);
+
+  const modalMeterSupport = useMemo(() => {
+    if (!meter12WritePending) return null;
+    return checkSubaruObdConversionSupport(meter12WritePending.appliedModel);
+  }, [meter12WritePending]);
+
   const modalPlannedEyesightPreview = useMemo(() => {
     if (!eyesightWritePending) return [];
     if (eyesightWritePending.writeMode === "custom-35xx") {
       return (eyesightWritePending.customWrites ?? []).map((w) => `${w.did}=${w.byteHex}`);
     }
+    const schema =
+      getSsm4YywSchemaForModel(eyesightWritePending.appliedModel) ??
+      eyesightRead?.match.schema ??
+      "35xx";
     if (eyesightWritePending.writeMode === "region-only") {
       const list = getSsm4YywWriteDids(
         eyesightWritePending.appliedModel,
         eyesightWritePending.optionCode,
       );
+      if (schema === "309x") {
+        const b3094 = list?.find((w) => w.did === "3094")?.byteHex;
+        if (b3094) return [`3094=${b3094}`];
+        const dest = eyesightWritePending.optionCode.slice(0, 2);
+        const fallback =
+          dest === "C0" || dest === "C5"
+            ? "03"
+            : dest === "U4" || dest === "U5" || dest === "U7"
+              ? "02"
+              : null;
+        return fallback ? [`3094=${fallback}`] : [];
+      }
       const b3502 = list?.find((w) => w.did === "3502")?.byteHex;
       if (b3502) return [`3502=${b3502}`];
       const dest = eyesightWritePending.optionCode.slice(0, 2);
@@ -224,7 +283,7 @@ export default function SubaruCodingClient() {
       eyesightWritePending.optionCode,
     );
     return (list ?? []).map((w) => `${w.did}=${w.byteHex}`);
-  }, [eyesightWritePending]);
+  }, [eyesightWritePending, eyesightRead]);
 
   const { transport, ready: transportReady } = useObdTransportKind();
 
@@ -310,6 +369,16 @@ export default function SubaruCodingClient() {
     [appliedModelInput, optionCodeInput],
   );
 
+  const eyesightInputGuide = useMemo(
+    () =>
+      explainEyesightOptionInput(
+        appliedModelInput || meter12Read?.match.actualAppliedModel || "BTAEYR8",
+        optionCodeInput,
+        appliedModelAnalysis.cgdwOptionCodes,
+      ),
+    [appliedModelInput, meter12Read, optionCodeInput, appliedModelAnalysis.cgdwOptionCodes],
+  );
+
   const ready = phase !== "idle";
 
   const handleReadMeter12Column = useCallback(async () => {
@@ -355,8 +424,19 @@ export default function SubaruCodingClient() {
         if (result.match.appliedModel && result.match.appliedModel.length === 7) {
           setAppliedModelInput(result.match.appliedModel);
         }
-        if (result.match.optionCode && result.match.optionCode.length === 4) {
+        if (
+          result.match.optionCode &&
+          result.match.optionCode.length === 4 &&
+          !isSsm4YywWildcardOption(result.match.optionCode)
+        ) {
           setOptionCodeInput(result.match.optionCode);
+        } else if (result.match.appliedModel && result.match.optionCode) {
+          const guide = explainEyesightOptionInput(result.match.appliedModel, result.match.optionCode);
+          if (result.match.destinationHint === "CANADA" && guide.recommendedCanadaInput) {
+            setOptionCodeInput(guide.recommendedCanadaInput);
+          } else if (result.match.destinationHint === "USA" && guide.recommendedUsInputs[0]) {
+            setOptionCodeInput(guide.recommendedUsInputs[0]);
+          }
         }
       }
       try {
@@ -614,6 +694,7 @@ export default function SubaruCodingClient() {
           customWrites: pending.customWrites,
           txHex: eyesightRead?.txHex,
           rxHex: eyesightRead?.rxHex,
+          detectedSchema: eyesightRead?.match.schema,
         },
       );
       setEyesightWriteResult(result);
@@ -826,7 +907,7 @@ export default function SubaruCodingClient() {
                 Перевод с °F на °C
               </h2>
               <p className="text-xs text-gray-500">
-                SSM4 спрашивает Applied Model как ключ к cgdw (приборка A0xx) и Y-Yw (EyeSight 35xx) — в ЭБУ уходит маска, не ASCII 7+4.
+                SSM4 спрашивает Applied Model как ключ к cgdw (приборка A0xx) и Y-Yw (EyeSight 35xx / 309x) — в ЭБУ уходит маска, не ASCII 7+4.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -873,21 +954,21 @@ export default function SubaruCodingClient() {
               {eyesightRead && (
                 <div
                   className={`rounded-xl border p-3 ${
-                    eyesightReadStats && eyesightReadStats.present35xx > 0
+                    eyesightReadStats && eyesightReadStats.activePresent > 0
                       ? "border-violet-300 bg-violet-50"
                       : "border-rose-300 bg-rose-50"
                   }`}
                 >
                   <div
                     className={`text-[10px] font-bold uppercase ${
-                      eyesightReadStats && eyesightReadStats.present35xx > 0
+                      eyesightReadStats && eyesightReadStats.activePresent > 0
                         ? "text-violet-900"
                         : "text-rose-900"
                     }`}
                   >
-                    EyeSight (Y-Yw → 35xx)
+                    EyeSight (Y-Yw → {eyesightReadStats?.didRangeLabel ?? "3501..3510"})
                   </div>
-                  {eyesightReadStats && eyesightReadStats.present35xx > 0 ? (
+                  {eyesightReadStats && eyesightReadStats.activePresent > 0 ? (
                     <>
                       <div className="mt-1 font-mono text-base font-bold text-gray-900">
                         {(eyesightRead.match.appliedModel ??
@@ -897,8 +978,11 @@ export default function SubaruCodingClient() {
                         + {eyesightRead.match.optionCode ?? "—"}
                       </div>
                       <div className="text-[11px] text-violet-900">
-                        {eyesightRead.match.destinationHint} (3502={eyesightRead.match.byte3502 ?? "—"}) ·{" "}
-                        {eyesightReadStats.present35xx}/16 DID
+                        {eyesightRead.match.destinationHint} (
+                        {eyesightRead.match.destinationDid ??
+                          (eyesightReadStats.activeSchema === "309x" ? "3094" : "3502")}
+                        ={eyesightRead.match.destinationByte ?? eyesightRead.match.byte3502 ?? "—"}) ·{" "}
+                        {eyesightReadStats.activePresent}/{eyesightReadStats.activeTotal} DID
                         {closestEyesightCatalogRow
                           ? closestEyesightCatalogRow.diffs.length === 0
                             ? " · 100% в Y-Yw"
@@ -909,12 +993,12 @@ export default function SubaruCodingClient() {
                   ) : (
                     <>
                       <div className="mt-1 font-mono text-sm font-bold text-rose-950">
-                        Не считан (0/16 DID)
+                        Не считан (0/{eyesightReadStats?.activeTotal ?? 16} DID)
                       </div>
                       <div className="text-[11px] text-rose-800">
                         {eyesightRead.securityAccessRequired
                           ? "Требуется SecurityAccess / разблокировка CGW — см. журнал ниже"
-                          : "EyeSight не ответил на 3501..3510 — см. журнал ниже"}
+                          : `EyeSight не ответил на ${eyesightReadStats?.didRangeLabel ?? "3501..3510"} — см. журнал ниже`}
                       </div>
                     </>
                   )}
@@ -1196,7 +1280,8 @@ export default function SubaruCodingClient() {
                     {(meterEyesightCompare.compare.eyesightOption ?? "—")}
                   </code>
                   {" "}
-                  (3502→{meterEyesightCompare.compare.eyesightRegion})
+                  ({meterEyesightCompare.eyesight.match.destinationDid ?? "3502"}→
+                  {meterEyesightCompare.compare.eyesightRegion})
                 </div>
               </div>
               <div className="text-[11px] text-gray-700">{meterEyesightCompare.compare.detailRu}</div>
@@ -1204,7 +1289,7 @@ export default function SubaruCodingClient() {
                 <div className="flex flex-wrap gap-2 pt-1">
                   <button
                     type="button"
-                    disabled={!ready || busy}
+                    disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
                     onClick={() => {
                       const targetOpt =
                         meterEyesightCompare.compare.meterOption.startsWith("C")
@@ -1227,20 +1312,22 @@ export default function SubaruCodingClient() {
             </div>
           )}
 
-          {/* EyeSight ADA-032 Full Read vs Y-Yw Catalog + Backup & ADA-031 Sync */}
+          {/* EyeSight ADA-032 / Legacy 309x Full Read vs Y-Yw Catalog + Backup & Sync */}
           {eyesightRead && (
             <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-bold text-violet-950">
-                  EyeSight {eyesightRead.txHex}→{eyesightRead.rxHex} (ADA-032 Confirm on Parameter · Y-Yw)
+                  EyeSight {eyesightRead.txHex}→{eyesightRead.rxHex} (
+                  {eyesightReadStats?.activeSchema === "309x"
+                    ? "Legacy 3091..309D · Y-Yw"
+                    : "ADA-032 Confirm on Parameter · Y-Yw"}
+                  )
                 </div>
                 {eyesightReadStats && (
                   <span className="rounded-md bg-white px-2 py-0.5 font-mono text-[10px] text-violet-900 border border-violet-200">
-                    3501..3510: {eyesightReadStats.present35xx}/16 · Пропуски (--):{" "}
-                    {eyesightReadStats.absent35xx}
-                    {eyesightReadStats.legacy309x > 0
-                      ? ` · Legacy 309x: ${eyesightReadStats.legacy309x}/13`
-                      : ""}
+                    {eyesightReadStats.didRangeLabel}: {eyesightReadStats.activePresent}/
+                    {eyesightReadStats.activeTotal} · Пропуски (--):{" "}
+                    {eyesightReadStats.activeAbsent}
                   </span>
                 )}
               </div>
@@ -1251,7 +1338,7 @@ export default function SubaruCodingClient() {
                     Распознано из Y-Yw (Model + Option)
                   </div>
                   <div className="mt-0.5 font-mono text-sm font-bold text-gray-900">
-                    {eyesightReadStats && eyesightReadStats.present35xx > 0
+                    {eyesightReadStats && eyesightReadStats.activePresent > 0
                       ? `${eyesightRead.match.appliedModel ?? meter12Read?.match.actualAppliedModel ?? appliedModelInput ?? "—"} + ${eyesightRead.match.optionCode ?? "—"}`
                       : "— + — (нет данных с блока)"}
                   </div>
@@ -1261,10 +1348,15 @@ export default function SubaruCodingClient() {
                 </div>
                 <div className="rounded-lg border border-violet-200 bg-white p-2.5 font-mono text-[10px] text-gray-800 break-all">
                   <div className="font-sans text-[10px] font-bold uppercase text-violet-800 mb-0.5">
-                    Считанные 16 DID (3501..3510)
+                    Считанные {eyesightReadStats?.activeTotal ?? 16} DID (
+                    {eyesightReadStats?.didRangeLabel ?? "3501..3510"})
                   </div>
                   {eyesightRead.dids
-                    .filter((d) => /^35(0[1-9A-F]|10)$/.test(d.did))
+                    .filter((d) =>
+                      eyesightReadStats?.activeSchema === "309x"
+                        ? /^309[1-9A-D]$/.test(d.did)
+                        : /^35(0[1-9A-F]|10)$/.test(d.did),
+                    )
                     .map((d) => `${d.did}=${d.hex}`)
                     .join(" ")}
                 </div>
@@ -1277,9 +1369,9 @@ export default function SubaruCodingClient() {
                     {eyesightRead.match.appliedModel ||
                       meter12Read?.match.actualAppliedModel ||
                       appliedModelInput}
-                    {eyesightReadStats && eyesightReadStats.present35xx === 0 ? (
+                    {eyesightReadStats && eyesightReadStats.activePresent === 0 ? (
                       <span className="ml-1.5 font-semibold text-rose-700">
-                        (блок не отдал DID 0/16 — ниже показан только эталон справочника)
+                        (блок не отдал DID 0/{eyesightReadStats.activeTotal} — ниже показан только эталон справочника)
                       </span>
                     ) : closestEyesightCatalogRow ? (
                       <span className="ml-1.5 font-normal text-gray-600">
@@ -1293,8 +1385,10 @@ export default function SubaruCodingClient() {
                     <table className="w-full text-left text-[11px]">
                       <thead className="text-gray-600">
                         <tr>
-                          <th className="px-2 py-1">Option</th>
-                          <th className="px-2 py-1">Отличия от EyeSight (3501..3510)</th>
+                          <th className="px-2 py-1">Option (Y-Yw)</th>
+                          <th className="px-2 py-1">
+                            Отличия от EyeSight ({eyesightReadStats?.didRangeLabel ?? "3501..3510"})
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1304,6 +1398,7 @@ export default function SubaruCodingClient() {
                             closestEyesightCatalogRow.optionCode === row.optionCode;
                           const isExactMatch =
                             Boolean(isClosest) && row.diffs.length === 0 && row.identical;
+                          const totalSlots = eyesightReadStats?.activeTotal ?? 16;
                           return (
                             <tr
                               key={row.optionCode}
@@ -1319,7 +1414,7 @@ export default function SubaruCodingClient() {
                                 {row.optionCode}
                                 {isExactMatch ? (
                                   <span className="ml-1 rounded bg-emerald-200 px-1 py-0.5 text-[9px] text-emerald-950">
-                                    совпадает 16/16
+                                    совпадает {totalSlots}/{totalSlots}
                                   </span>
                                 ) : isClosest ? (
                                   <span className="ml-1 rounded bg-violet-200 px-1 py-0.5 text-[9px] text-violet-950">
@@ -1328,11 +1423,11 @@ export default function SubaruCodingClient() {
                                 ) : null}
                               </td>
                               <td className="px-2 py-1 font-mono">
-                                {row.unreadSlots >= 16
-                                  ? "нет данных с EyeSight (0/16)"
+                                {row.unreadSlots >= totalSlots
+                                  ? `нет данных с EyeSight (0/${totalSlots})`
                                   : row.diffs.length === 0
                                     ? row.identical
-                                      ? "совпадает целиком (16/16)"
+                                      ? `совпадает целиком (${totalSlots}/${totalSlots})`
                                       : "прочитанные байты совпали"
                                     : row.diffs
                                         .map((d) => `${d.did}: авто ${d.car} / Y-Yw ${d.catalog}`)
@@ -1349,7 +1444,7 @@ export default function SubaruCodingClient() {
 
               {eyesightRead.steps && eyesightRead.steps.length > 0 && (
                 <details
-                  open={eyesightReadStats?.present35xx === 0}
+                  open={eyesightReadStats?.activePresent === 0}
                   className="text-[10px] text-gray-700"
                 >
                   <summary className="cursor-pointer font-semibold text-violet-900">
@@ -1384,12 +1479,13 @@ export default function SubaruCodingClient() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-xs font-bold text-violet-950">
-                  3. EyeSight (787) — синхронизация региона, загрузка ADA-031 и бэкап
+                  3. EyeSight (787) — синхронизация региона, загрузка{" "}
+                  {eyesightInputGuide.schema === "309x" ? "Legacy (13 DID)" : "ADA-031 (16 DID)"} и бэкап
                 </div>
                 <p className="text-[11px] text-violet-900">
                   {eyesightWriteMode === "full-yyw"
-                    ? "Полный режим SSM4 ADA-031 Selection of Parameter: пишет все 16 DID (3501..350A + ReadWriteDidListData 350B..3510) из Y-Yw и побайтово проверяет результат."
-                    : "Безопасный минимум (только регион): меняет только DID 3502 (20/21=США, 30/31=Канада), сохраняя заводские 3501 и 3503..3510."}
+                    ? `Полный режим SSM4 Selection of Parameter: пишет все ${eyesightInputGuide.didCount} DID (${eyesightInputGuide.didRange}) из Y-Yw с поддержкой масок (* / _) и побайтово проверяет результат.`
+                    : `Безопасный минимум (только регион): меняет только DID ${eyesightInputGuide.destinationDid} (${eyesightInputGuide.schema === "309x" ? "02=США, 03=Канада" : "20/21=США, 30/31=Канада"}), сохраняя остальные заводские байты.`}
                 </p>
               </div>
               <div className="inline-flex rounded-lg border border-violet-300 bg-white p-0.5 text-[11px]">
@@ -1402,7 +1498,7 @@ export default function SubaruCodingClient() {
                       : "text-gray-700 hover:bg-violet-50"
                   }`}
                 >
-                  Все 16 DID как SSM4 (ADA-031)
+                  Все {eyesightInputGuide.didCount} DID как SSM4 ({eyesightInputGuide.didRange})
                 </button>
                 <button
                   type="button"
@@ -1413,15 +1509,25 @@ export default function SubaruCodingClient() {
                       : "text-gray-700 hover:bg-violet-50"
                   }`}
                 >
-                  Только регион (3502)
+                  Только регион ({eyesightInputGuide.destinationDid})
                 </button>
               </div>
+            </div>
+
+            <div className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-[11px] text-violet-950 space-y-1">
+              <div className="font-bold">
+                Подсказка для EyeSight ({eyesightInputGuide.appliedModel || "—"}):{" "}
+                <span className="font-mono text-violet-800">
+                  {eyesightInputGuide.didRange} ({eyesightInputGuide.didCount} DID)
+                </span>
+              </div>
+              <div className="text-violet-900 leading-relaxed">{eyesightInputGuide.hintRu}</div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={!ready || busy}
+                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
                 onClick={() =>
                   openEyesightWriteModal(
                     appliedModelAnalysis.appliedModel || "BTAEYR8",
@@ -1434,7 +1540,7 @@ export default function SubaruCodingClient() {
               </button>
               <button
                 type="button"
-                disabled={!ready || busy}
+                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
                 onClick={() => {
                   const fromCgdw = appliedModelAnalysis.cgdwOptionCodes.find((c) => c.startsWith("U"));
                   openEyesightWriteModal(
@@ -1448,7 +1554,7 @@ export default function SubaruCodingClient() {
               </button>
               <button
                 type="button"
-                disabled={!ready || busy}
+                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
                 onClick={() => openEyesightWriteModal(appliedModelInput, optionCodeInput)}
                 className="rounded-xl bg-gray-900 hover:bg-gray-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
               >
@@ -1574,6 +1680,27 @@ export default function SubaruCodingClient() {
             </label>
           </div>
 
+          {appliedModelAnalysis.appliedModel.length === 7 &&
+            appliedModelAnalysis.obdConversionSupport.status !== "supported" && (
+              <div
+                className={`rounded-xl border px-3 py-2.5 text-[11px] space-y-1 ${
+                  appliedModelAnalysis.obdConversionSupport.status ===
+                  "unsupported-needs-disassembly"
+                    ? "border-rose-300 bg-rose-50 text-rose-950"
+                    : "border-sky-300 bg-sky-50 text-sky-950"
+                }`}
+              >
+                <div className="font-bold">
+                  {appliedModelAnalysis.obdConversionSupport.status ===
+                  "unsupported-needs-disassembly"
+                    ? "⛔ Модель исключена из OBD-сервиса: "
+                    : "ℹ️ "}
+                  {appliedModelAnalysis.obdConversionSupport.ruleTitleRu}
+                </div>
+                <div>{appliedModelAnalysis.obdConversionSupport.reasonRu}</div>
+              </div>
+            )}
+
           {appliedModelAnalysis.valid && (
             <div
               className={`rounded-xl border px-3 py-2.5 text-[11px] space-y-1.5 ${
@@ -1663,7 +1790,7 @@ export default function SubaruCodingClient() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={!ready || busy}
+                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
                 onClick={() =>
                   openMeterWriteModal(
                     appliedModelAnalysis.appliedModel || "BTAEYR8",
@@ -1676,7 +1803,7 @@ export default function SubaruCodingClient() {
               </button>
               <button
                 type="button"
-                disabled={!ready || busy}
+                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
                 onClick={() => {
                   const fromCgdw = appliedModelAnalysis.cgdwOptionCodes.find((c) => c.startsWith("U"));
                   if (fromCgdw) {
@@ -1696,7 +1823,7 @@ export default function SubaruCodingClient() {
               </button>
               <button
                 type="button"
-                disabled={!ready || busy}
+                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
                 onClick={() => openMeterWriteModal(appliedModelInput, optionCodeInput)}
                 className="rounded-xl bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-bold text-white disabled:opacity-40"
               >
@@ -1773,6 +1900,42 @@ export default function SubaruCodingClient() {
               </ul>
             </div>
           )}
+
+          {/* Supported OBD Models vs Excluded / Native Display Reference */}
+          <details className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-[11px] text-slate-800">
+            <summary className="cursor-pointer font-bold text-slate-900">
+              Какие модели Subaru меняются без разбора по OBD (а какие исключены / имеют переключатель в дисплее)
+            </summary>
+            <div className="mt-2.5 grid grid-cols-1 md:grid-cols-3 gap-2.5">
+              <div className="rounded-lg border border-emerald-200 bg-white p-2.5 space-y-1">
+                <div className="font-bold text-emerald-900">✓ Без разбора через OBD (поддерживаются)</div>
+                <ul className="list-disc pl-4 space-y-0.5 text-slate-700">
+                  {SUBARU_OBD_SUPPORTED_MODELS_SUMMARY.obdSupported.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                <p className="pt-1 text-[10px] text-slate-500">
+                  4-й символ Applied Model / Body Model — буквенное «поколение» (порядковый год выпуска кузова).
+                </p>
+              </div>
+              <div className="rounded-lg border border-sky-200 bg-white p-2.5 space-y-1">
+                <div className="font-bold text-sky-900">ℹ️ Есть переключатель °F/°C в настройках дисплея</div>
+                <ul className="list-disc pl-4 space-y-0.5 text-slate-700">
+                  {SUBARU_OBD_SUPPORTED_MODELS_SUMMARY.nativeDisplaySetting.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-lg border border-rose-200 bg-white p-2.5 space-y-1">
+                <div className="font-bold text-rose-900">⛔ Исключены (не меняются без разбора)</div>
+                <ul className="list-disc pl-4 space-y-0.5 text-slate-700">
+                  {SUBARU_OBD_SUPPORTED_MODELS_SUMMARY.excludedNeedsDisassembly.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </details>
 
           {/* Presets Table */}
           <div className="space-y-2">
@@ -1924,13 +2087,25 @@ export default function SubaruCodingClient() {
               {eyesightWritePending.writeMode === "custom-35xx"
                 ? "Восстановление оригинала EyeSight из бэкапа"
                 : eyesightWritePending.writeMode === "region-only"
-                  ? "EyeSight — запись только региона (DID 3502)"
-                  : "EyeSight — Selection of Parameter (SSM4 ADA-031 · 16 DID)"}
+                  ? `EyeSight — запись только региона (DID ${modalEyesightInputGuide?.destinationDid ?? "3502"})`
+                  : `EyeSight — Selection of Parameter (SSM4 ${modalEyesightInputGuide?.didRange ?? "3501..3510"} · ${modalEyesightInputGuide?.didCount ?? 16} DID)`}
             </div>
             <p className="text-[11px] text-gray-700 leading-relaxed">
               Запись Vehicle Model Registration в блок EyeSight ({eyesightRead?.txHex ?? "787"}).
               Перед записью снимается CGW FilterRemove, затем выполняется 10 03 → SecurityAccess (27 03/04) → 2E → повторная сверка (B09).
             </p>
+            {modalEyesightInputGuide && eyesightWritePending.writeMode !== "custom-35xx" && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/70 px-2.5 py-1.5 text-[10px] text-violet-950 leading-relaxed">
+                {modalEyesightInputGuide.hintRu}
+              </div>
+            )}
+            {modalEyesightSupport &&
+              eyesightWritePending.writeMode !== "custom-35xx" &&
+              !modalEyesightSupport.allowObdWrite && (
+                <div className="rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-[10px] text-rose-900 leading-relaxed">
+                  ⛔ {modalEyesightSupport.ruleTitleRu}: {modalEyesightSupport.reasonRu}
+                </div>
+              )}
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="text-[11px] font-semibold text-gray-700">Applied Model:</span>
@@ -1967,7 +2142,15 @@ export default function SubaruCodingClient() {
             </div>
             <div className="rounded-lg bg-violet-50 p-2.5 font-mono text-xs text-violet-950 border border-violet-200 space-y-1">
               <div>Applied Model : <strong>{eyesightWritePending.appliedModel}</strong></div>
-              <div>Option Code   : <strong>{eyesightWritePending.optionCode}</strong></div>
+              <div>
+                Option Code   : <strong>{eyesightWritePending.optionCode}</strong>
+                {modalEyesightInputGuide?.resolvedCatalogOption &&
+                  modalEyesightInputGuide.resolvedCatalogOption !== eyesightWritePending.optionCode && (
+                    <span className="ml-1.5 text-[10px] font-sans text-violet-800">
+                      (маска Y-Yw: <strong>{modalEyesightInputGuide.resolvedCatalogOption}</strong>)
+                    </span>
+                  )}
+              </div>
               {modalPlannedEyesightPreview.length > 0 ? (
                 <div className="max-h-24 overflow-y-auto text-[10px] text-violet-900 pt-1 border-t border-violet-200">
                   Будет записано ({modalPlannedEyesightPreview.length} DID):{" "}
@@ -1975,7 +2158,7 @@ export default function SubaruCodingClient() {
                 </div>
               ) : (
                 <div className="text-[11px] text-rose-700 font-sans">
-                  Внимание: для {eyesightWritePending.appliedModel}+{eyesightWritePending.optionCode} нет строки в Y-Yw — выберите режим «Только регион (3502)» или код из Y-Yw.
+                  Внимание: для {eyesightWritePending.appliedModel}+{eyesightWritePending.optionCode} нет строки в Y-Yw — выберите режим «Только регион ({modalEyesightInputGuide?.destinationDid ?? "3502"})» или код из Y-Yw.
                 </div>
               )}
             </div>
@@ -1991,8 +2174,12 @@ export default function SubaruCodingClient() {
                 type="button"
                 disabled={
                   eyesightWritePending.appliedModel.trim().length !== 7 ||
-                  eyesightWritePending.optionCode.trim().length !== 4 ||
-                  modalPlannedEyesightPreview.length === 0
+                  eyesightWritePending.optionCode.trim().length <
+                    (modalEyesightInputGuide?.expectedOptionLength ?? 4) ||
+                  modalPlannedEyesightPreview.length === 0 ||
+                  (eyesightWritePending.writeMode !== "custom-35xx" &&
+                    modalEyesightSupport != null &&
+                    !modalEyesightSupport.allowObdWrite)
                 }
                 onClick={() => void executeEyesightVariantWrite()}
                 className="rounded-xl bg-violet-900 hover:bg-violet-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
@@ -2083,6 +2270,13 @@ export default function SubaruCodingClient() {
                   Внимание: для {meter12WritePending.appliedModel}+{meter12WritePending.optionCode} нет строки в справочнике cgdw — выберите режим «Только 2 DID» или код из таблицы.
                 </div>
               )}
+              {meter12WritePending.writeMode !== "custom-a0xx" &&
+                modalMeterSupport &&
+                !modalMeterSupport.allowObdWrite && (
+                  <div className="text-[11px] text-rose-700 font-sans pt-1 border-t border-rose-200">
+                    ⛔ {modalMeterSupport.ruleTitleRu}: {modalMeterSupport.reasonRu}
+                  </div>
+                )}
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button
@@ -2097,7 +2291,10 @@ export default function SubaruCodingClient() {
                 disabled={
                   meter12WritePending.appliedModel.trim().length !== 7 ||
                   meter12WritePending.optionCode.trim().length !== 4 ||
-                  modalPlannedA0xxPreview.length === 0
+                  modalPlannedA0xxPreview.length === 0 ||
+                  (meter12WritePending.writeMode !== "custom-a0xx" &&
+                    modalMeterSupport != null &&
+                    !modalMeterSupport.allowObdWrite)
                 }
                 onClick={() => void executeMeter12Write()}
                 className="rounded-xl bg-blue-900 hover:bg-blue-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"

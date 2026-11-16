@@ -7,6 +7,7 @@ export interface SubaruMeterWriteLink {
 }
 import {
   asciiFromSubaruDidHex,
+  checkSubaruObdConversionSupport,
   decodeSubaruAppliedModel12Columns,
   getSsm4CgdwWriteDids,
   parseSubaru12ColumnFromAscii,
@@ -1224,6 +1225,22 @@ export async function writeSubaruMeter12ColumnCode(
     input.currentDids ?? [],
   );
   const steps: string[] = [plan.reasonRu];
+
+  if (writeMode !== "custom-a0xx") {
+    const support = checkSubaruObdConversionSupport(input.appliedModel);
+    if (!support.allowObdWrite) {
+      steps.push(`${support.ruleTitleRu}: ${support.reasonRu}`);
+      return {
+        success: false,
+        steps,
+        plan,
+        writtenDid: null,
+        writtenHex: null,
+        securityAccessRequired: false,
+        seedHex: null,
+      };
+    }
+  }
   const preferredTx = input.txHex ? Number.parseInt(input.txHex, 16) : NaN;
   const preferredRx = input.rxHex ? Number.parseInt(input.rxHex, 16) : NaN;
   const targets =

@@ -1,12 +1,19 @@
 import {
-  SSM4_YYW_FP_DID_KEYS,
+  detectEyesightSchemaFromDids,
+  getSsm4YywDidKeysForSchema,
+  getSsm4YywSchemaForModel,
   getSsm4YywWriteDids,
+  isSsm4YywWildcardOption,
   lookupSsm4YywFingerprint,
+  SSM4_YYW_FP_DID_KEYS,
+  SSM4_YYW_LEGACY_FP_DID_KEYS,
+  type EyesightDidSchema,
 } from "./subaru-ssm4-yyw-fingerprints";
 import {
   isWritableEyesightVariantDid,
   type SubaruEyesightWriteEntry,
 } from "./subaru-eyesight-backup";
+import { checkSubaruObdConversionSupport } from "./subaru-ssm4-catalog";
 import {
   unlockSubaruCgwFilterRemove,
   unlockSubaruMeterSecurityAccess,
@@ -318,16 +325,31 @@ export async function readSubaruEyesight35xxDids(
     securityKeyHex?: string;
     unlockIfNrc33?: boolean;
     unlockBeforeRead?: boolean;
+    hintAppliedModel?: string | null;
   },
 ): Promise<{
   tx: number;
   rx: number;
   didMap: Record<string, string>;
+  detectedSchema: EyesightDidSchema;
   cgwFilterRemoved: boolean;
   securityAccessRequired: boolean;
 }> {
   const steps = options?.steps ?? [];
-  const didList = options?.didHexList ?? SSM4_YYW_FP_DID_KEYS;
+  const rawDidList = options?.didHexList ?? [
+    ...SSM4_YYW_FP_DID_KEYS,
+    ...SSM4_YYW_LEGACY_FP_DID_KEYS,
+  ];
+  const hintSchema = getSsm4YywSchemaForModel(options?.hintAppliedModel);
+  const didList =
+    hintSchema === "309x"
+      ? [
+          ...rawDidList.filter((d) => /^309[1-9A-D]$/i.test(d)),
+          ...rawDidList.filter((d) => !/^309[1-9A-D]$/i.test(d)),
+        ]
+      : [...rawDidList];
+  const sgpDidSet = new Set<string>(SSM4_YYW_FP_DID_KEYS);
+  const legacyDidSet = new Set<string>(SSM4_YYW_LEGACY_FP_DID_KEYS);
   let cgwFilterRemoved = false;
   let securityAccessRequired = false;
 
@@ -338,7 +360,7 @@ export async function readSubaruEyesight35xxDids(
       if (cgw.filterRemoved) {
         steps.push(`${cgw.gatewayLabel ?? "CGW"}: фильтр снят — опрос EyeSight (ADA-032)`);
       } else {
-        steps.push("CGW: фильтр не снят (35xx на 787 могут не отвечать)");
+        steps.push("CGW: фильтр не снят (35xx/309x на 787 могут не отвечать)");
       }
     } catch (e) {
       steps.push(`CGW FilterRemove: ${e instanceof Error ? e.message : String(e)}`);
@@ -350,40 +372,46 @@ export async function readSubaruEyesight35xxDids(
     { tx: 0x784, rx: 0x78c, label: "784→78C (legacy EyeSight)" },
   ];
 
-  let best: { tx: number; rx: number; didMap: Record<string, string>; score: number } | null = null;
+  let best: {
+    tx: number;
+    rx: number;
+    didMap: Record<string, string>;
+    score: number;
+    score35xx: number;
+    score309x: number;
+  } | null = null;
   let triedGateway750 = false;
 
   const tryReadAllDidsOnOpenTarget = async (
     target: { tx: number; rx: number },
     didMap: Record<string, string>,
-  ): Promise<number> => {
-    let hits = 0;
+  ): Promise<{ total: number; score35xx: number; score309x: number }> => {
+    let score35xx = 0;
+    let score309x = 0;
     for (const didHexRaw of didList) {
       const didHex = didHexRaw.toUpperCase();
-      if (/^309[1-9A-D]$/.test(didHex) && hits >= 8) continue;
+      if (legacyDidSet.has(didHex) && score35xx >= 8) continue;
+      if (sgpDidSet.has(didHex) && score309x >= 8) continue;
       try {
         const raw = await elm.sendPayload(`22${didHex}`, 1_800);
         const res = parseSingleDidBodyHex(raw, didHex);
         if (!res.ok) continue;
         didMap[didHex] = res.hex;
-        if (
-          (SSM4_YYW_FP_DID_KEYS as readonly string[]).includes(didHex) ||
-          /^309[1-9A-D]$/.test(didHex)
-        ) {
-          hits++;
-        }
+        if (sgpDidSet.has(didHex)) score35xx++;
+        else if (legacyDidSet.has(didHex)) score309x++;
       } catch {
         /* ignore */
       }
     }
-    return hits;
+    return { total: score35xx + score309x, score35xx, score309x };
   };
 
   for (const target of targets) {
     const txHex = target.tx.toString(16).toUpperCase();
     const rxHex = target.rx.toString(16).toUpperCase();
     const didMap: Record<string, string> = {};
-    let score = 0;
+    let score35xx = 0;
+    let score309x = 0;
     let triedSaOnTarget = false;
 
     try {
@@ -417,8 +445,9 @@ export async function readSubaruEyesight35xxDids(
 
       for (let i = 0; i < didList.length; i++) {
         const didHex = didList[i]!.toUpperCase();
-        // Skip legacy 3091..309D DIDs when SGP 3501..3510 already answered
-        if (/^309[1-9A-D]$/.test(didHex) && score >= 8) continue;
+        // Skip opposite variant DID group once the active generation (35xx or 309x) already answered
+        if (legacyDidSet.has(didHex) && score35xx >= 8) continue;
+        if (sgpDidSet.has(didHex) && score309x >= 8) continue;
         try {
           let raw = await elm.sendPayload(`22${didHex}`, 1_800);
           let res = parseSingleDidBodyHex(raw, didHex);
@@ -491,21 +520,19 @@ export async function readSubaruEyesight35xxDids(
           }
           if (!res.ok) continue;
           didMap[didHex] = res.hex;
-          if (
-            (SSM4_YYW_FP_DID_KEYS as readonly string[]).includes(didHex) ||
-            /^309[1-9A-D]$/.test(didHex)
-          ) {
-            score++;
-          }
+          if (sgpDidSet.has(didHex)) score35xx++;
+          else if (legacyDidSet.has(didHex)) score309x++;
         } catch {
           /* ignore */
         }
       }
 
-      // If 35xx returned 0 hits on 787 and we haven't tried proactive ADA-032 SecurityAccess + 763/750 CGW unlock yet, escalate now.
+      let score = score35xx + score309x;
+
+      // If 35xx/309x returned 0 hits on 787 and we haven't tried proactive ADA-032 SecurityAccess + 763/750 CGW unlock yet, escalate now.
       if (score === 0 && !triedSaOnTarget && target.tx === 0x787) {
         triedSaOnTarget = true;
-        steps.push(`${txHex}→${rxHex}: 3501..3510 не ответили — пробуем ADA-032 SecurityAccess и CGW 763/750…`);
+        steps.push(`${txHex}→${rxHex}: 3501..3510 / 3091..309D не ответили — пробуем SecurityAccess и CGW 763/750…`);
         if (options?.withCgw !== false && !cgwFilterRemoved) {
           const cgwSa = await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
           if (cgwSa.filterRemoved) cgwFilterRemoved = true;
@@ -553,7 +580,10 @@ export async function readSubaruEyesight35xxDids(
           }
         }
         if (u.unlocked) {
-          score = await tryReadAllDidsOnOpenTarget(target, didMap);
+          const readRes = await tryReadAllDidsOnOpenTarget(target, didMap);
+          score = readRes.total;
+          score35xx = readRes.score35xx;
+          score309x = readRes.score309x;
         } else {
           securityAccessRequired = true;
         }
@@ -564,9 +594,13 @@ export async function readSubaruEyesight35xxDids(
       } catch {
         /* ignore */
       }
-      steps.push(`${target.label}: считано variant DID ${score}/${SSM4_YYW_FP_DID_KEYS.length}`);
+      steps.push(
+        score309x > 0 && score35xx === 0
+          ? `${target.label}: считано legacy variant DID ${score309x}/${SSM4_YYW_LEGACY_FP_DID_KEYS.length} (3091..309D)`
+          : `${target.label}: считано variant DID ${score35xx}/${SSM4_YYW_FP_DID_KEYS.length}`,
+      );
       if (!best || score > best.score) {
-        best = { tx: target.tx, rx: target.rx, didMap, score };
+        best = { tx: target.tx, rx: target.rx, didMap, score, score35xx, score309x };
       }
       if (score >= 8) break;
     } catch (e) {
@@ -574,7 +608,7 @@ export async function readSubaruEyesight35xxDids(
     }
   }
 
-  // Last-resort CAN ID auto-discovery if both 787 and 784 yielded 0/16 variant DIDs
+  // Last-resort CAN ID auto-discovery if both 787 and 784 yielded 0 variant DIDs
   if ((!best || best.score === 0) && options?.withCgw !== false) {
     const open787 = await probeEyesightWithOpenRx(elm, 0x787, steps);
     if (open787 && open787.rx !== 0x78f) {
@@ -590,8 +624,16 @@ export async function readSubaruEyesight35xxDids(
         maxAesAttempts: 32,
       });
       if (u.unlocked) {
-        const hits = await tryReadAllDidsOnOpenTarget(discovered, didMap);
-        if (hits > 0) best = { ...discovered, didMap, score: hits };
+        const readRes = await tryReadAllDidsOnOpenTarget(discovered, didMap);
+        if (readRes.total > 0) {
+          best = {
+            ...discovered,
+            didMap,
+            score: readRes.total,
+            score35xx: readRes.score35xx,
+            score309x: readRes.score309x,
+          };
+        }
       }
       try {
         await elm.sendPayload("1001", 500);
@@ -613,10 +655,21 @@ export async function readSubaruEyesight35xxDids(
             if (!sess.ok) continue;
             const probe3501 = await elm.sendPayload("223501", 900);
             const p3501 = parseSingleDidBodyHex(probe3501, "3501");
-            steps.push(`${cand.label}: откликнулся на 10 03 (22 3501 → ${probe3501.replace(/>/g, "").trim()})`);
-            if (p3501.ok || p3501.nrc === 0x33) {
+            const probe3091 =
+              !p3501.ok && p3501.nrc !== 0x33
+                ? await elm.sendPayload("223091", 900)
+                : "";
+            const p3091 = probe3091
+              ? parseSingleDidBodyHex(probe3091, "3091")
+              : { ok: false, hex: "", nrc: undefined };
+            steps.push(
+              `${cand.label}: откликнулся на 10 03 (22 3501 → ${probe3501.replace(/>/g, "").trim()}` +
+                (probe3091 ? `, 22 3091 → ${probe3091.replace(/>/g, "").trim()}` : "") +
+                ")",
+            );
+            if (p3501.ok || p3501.nrc === 0x33 || p3091.ok || p3091.nrc === 0x33) {
               const didMap: Record<string, string> = {};
-              if (p3501.nrc === 0x33) {
+              if (p3501.nrc === 0x33 || p3091.nrc === 0x33) {
                 const kv = await readEyesightKeyVersionByte(elm);
                 await unlockSubaruMeterSecurityAccess(elm, cand.tx, cand.rx, steps, {
                   userKeyHex: options?.securityKeyHex,
@@ -626,9 +679,16 @@ export async function readSubaruEyesight35xxDids(
                   maxAesAttempts: 32,
                 });
               }
-              const hits = await tryReadAllDidsOnOpenTarget(cand, didMap);
-              if (hits > 0) {
-                best = { tx: cand.tx, rx: cand.rx, didMap, score: hits };
+              const readRes = await tryReadAllDidsOnOpenTarget(cand, didMap);
+              if (readRes.total > 0) {
+                best = {
+                  tx: cand.tx,
+                  rx: cand.rx,
+                  didMap,
+                  score: readRes.total,
+                  score35xx: readRes.score35xx,
+                  score309x: readRes.score309x,
+                };
                 try {
                   await elm.sendPayload("1001", 500);
                 } catch {
@@ -657,12 +717,21 @@ export async function readSubaruEyesight35xxDids(
   }
 
   if (!best) {
-    return { tx: 0x787, rx: 0x78f, didMap: {}, cgwFilterRemoved, securityAccessRequired };
+    return {
+      tx: 0x787,
+      rx: 0x78f,
+      didMap: {},
+      detectedSchema: hintSchema ?? "35xx",
+      cgwFilterRemoved,
+      securityAccessRequired,
+    };
   }
+  const detectedSchema = detectEyesightSchemaFromDids(best.didMap, options?.hintAppliedModel);
   return {
     tx: best.tx,
     rx: best.rx,
     didMap: best.didMap,
+    detectedSchema,
     cgwFilterRemoved,
     securityAccessRequired,
   };
@@ -676,7 +745,7 @@ function infer3502RegionByte(
   optionCode: string,
 ): string | null {
   const row = lookupSsm4YywFingerprint(appliedModel, optionCode);
-  if (row && row.fp.length >= 4) {
+  if (row && row.schema === "35xx" && row.fp.length >= 4) {
     return row.fp.slice(2, 4).toUpperCase();
   }
   const dest = optionCode.trim().toUpperCase().slice(0, 2);
@@ -688,10 +757,28 @@ function infer3502RegionByte(
 }
 
 /**
- * SSM4 ADA-031 (`Selection of Parameter` / Vehicle Model Registration) on EyeSight 787→78F (or 784→78C).
+ * Resolve 3094 Destination byte for legacy `3091..309D` `region-only` mode (`02`=US, `03`=CA).
+ */
+function infer3094RegionByte(
+  appliedModel: string,
+  optionCode: string,
+): string | null {
+  const row = lookupSsm4YywFingerprint(appliedModel, optionCode);
+  if (row && row.schema === "309x" && row.fp.length >= 8) {
+    return row.fp.slice(6, 8).toUpperCase();
+  }
+  const dest = optionCode.trim().toUpperCase().slice(0, 2);
+  if (dest === "C0" || dest === "C5") return "03";
+  if (dest === "U4" || dest === "U5" || dest === "U7") return "02";
+  return null;
+}
+
+/**
+ * SSM4 ADA-031 (`Selection of Parameter`, 16 DID `3501..3510`) / legacy ADA-002/038 (`3091..309D`, 13 DID)
+ * on EyeSight 787→78F (or 784→78C).
  * Supports:
- * - `full-yyw` (default): writes all 16 DIDs (`3501..3510`, exact ADA-031 + `ReadWriteDidListData`) from Y-Yw and verifies every byte.
- * - `region-only`: writes only `3502` (Destination region byte: `20/21`=US, `30/31`=CA), preserving `3501, 3503..3510`.
+ * - `full-yyw` (default): writes all 16 DIDs (`3501..3510`) or 13 legacy DIDs (`3091..309D`) from Y-Yw (with wildcard support) and verifies every byte.
+ * - `region-only`: writes only `3502` (`20/21`=US, `30/31`=CA) for SGP or `3094` (`02`=US, `03`=CA) for legacy, preserving all other DIDs.
  * - `custom-35xx`: writes exact saved 1-byte variant DIDs (`3501..3510` / `3091..309D`) for 1:1 original backup restoration.
  */
 export async function writeSubaruEyesightVariantByApplied(
@@ -704,17 +791,40 @@ export async function writeSubaruEyesightVariantByApplied(
     customWrites?: SubaruEyesightWriteEntry[];
     txHex?: string;
     rxHex?: string;
+    detectedSchema?: EyesightDidSchema;
   },
 ): Promise<SubaruEyesightVariantWriteResult> {
   const app = appliedModel.trim().toUpperCase();
   const opt = optionCode.trim().toUpperCase();
   const writeMode: SubaruEyesightWriteMode = options?.writeMode ?? "full-yyw";
+  const modelSchema = getSsm4YywSchemaForModel(app) ?? options?.detectedSchema ?? "35xx";
 
   const steps: string[] = [
-    `SSM4 ADA-031 Selection of Parameter (${writeMode}): ${app}+${opt} (Y-YwPHBWHoZ.mLW)`,
+    `SSM4 Selection of Parameter (${writeMode}, ${modelSchema}): ${app}+${opt} (Y-YwPHBWHoZ.mLW)`,
   ];
 
+  if (writeMode !== "custom-35xx") {
+    const support = checkSubaruObdConversionSupport(app);
+    if (!support.allowObdWrite) {
+      return {
+        success: false,
+        writeMode,
+        steps: [...steps, `${support.ruleTitleRu}: ${support.reasonRu}`],
+        appliedModel: app,
+        optionCode: opt,
+        writtenCount: 0,
+        targetCount: 0,
+        verifiedCount: 0,
+        mismatchedDids: [],
+        afterDidMap: {},
+        securityAccessRequired: false,
+        cgwFilterRemoved: false,
+      };
+    }
+  }
+
   let writeTargets: { did: string; byteHex: string }[] = [];
+  let activeSchema: EyesightDidSchema = modelSchema;
 
   if (writeMode === "custom-35xx") {
     const rawList = options?.customWrites ?? [];
@@ -755,38 +865,64 @@ export async function writeSubaruEyesightVariantByApplied(
       }
       writeTargets.push({ did, byteHex });
     }
-    steps.push(`Восстановление оригинала EyeSight 1:1: подготовлено ${writeTargets.length} DID.`);
+    activeSchema = writeTargets.some((w) => /^309[1-9A-D]$/.test(w.did)) ? "309x" : "35xx";
+    steps.push(`Восстановление оригинала EyeSight 1:1 (${activeSchema}): подготовлено ${writeTargets.length} DID.`);
   } else if (writeMode === "region-only") {
-    const b3502 = infer3502RegionByte(app, opt);
-    if (!b3502) {
-      return {
-        success: false,
-        writeMode,
-        steps: [...steps, `Не удалось определить байт региона 3502 для ${app}+${opt}.`],
-        appliedModel: app,
-        optionCode: opt,
-        writtenCount: 0,
-        targetCount: 0,
-        verifiedCount: 0,
-        mismatchedDids: [],
-        afterDidMap: {},
-        securityAccessRequired: false,
-        cgwFilterRemoved: false,
-      };
+    if (modelSchema === "309x") {
+      const b3094 = infer3094RegionByte(app, opt);
+      if (!b3094) {
+        return {
+          success: false,
+          writeMode,
+          steps: [...steps, `Не удалось определить байт региона 3094 для ${app}+${opt}.`],
+          appliedModel: app,
+          optionCode: opt,
+          writtenCount: 0,
+          targetCount: 0,
+          verifiedCount: 0,
+          mismatchedDids: [],
+          afterDidMap: {},
+          securityAccessRequired: false,
+          cgwFilterRemoved: false,
+        };
+      }
+      writeTargets = [{ did: "3094", byteHex: b3094 }];
+      steps.push(
+        `Безопасный минимум (только регион legacy): пишется DID 3094=${b3094}, остальные DID (3091..3093, 3095..309D) сохраняются.`,
+      );
+    } else {
+      const b3502 = infer3502RegionByte(app, opt);
+      if (!b3502) {
+        return {
+          success: false,
+          writeMode,
+          steps: [...steps, `Не удалось определить байт региона 3502 для ${app}+${opt}.`],
+          appliedModel: app,
+          optionCode: opt,
+          writtenCount: 0,
+          targetCount: 0,
+          verifiedCount: 0,
+          mismatchedDids: [],
+          afterDidMap: {},
+          securityAccessRequired: false,
+          cgwFilterRemoved: false,
+        };
+      }
+      writeTargets = [{ did: "3502", byteHex: b3502 }];
+      steps.push(
+        `Безопасный минимум (только регион): пишется DID 3502=${b3502}, остальные DID (3501, 3503..3510) сохраняются.`,
+      );
     }
-    writeTargets = [{ did: "3502", byteHex: b3502 }];
-    steps.push(
-      `Безопасный минимум (только регион): пишется DID 3502=${b3502}, остальные DID (3501, 3503..3510) сохраняются.`,
-    );
   } else {
+    const matchedRow = lookupSsm4YywFingerprint(app, opt);
     const yywDids = getSsm4YywWriteDids(app, opt);
-    if (!yywDids || yywDids.length === 0) {
+    if (!matchedRow || !yywDids || yywDids.length === 0) {
       return {
         success: false,
         writeMode,
         steps: [
           ...steps,
-          `Пары ${app}+${opt} нет в справочнике Y-YwPHBWHoZ.mLW. Полная запись всех 16 DID невозможна — выберите код из Y-Yw (например C0QF/U45D), режим «Только регион (3502)» или бэкап.`,
+          `Пары ${app}+${opt} нет в справочнике Y-YwPHBWHoZ.mLW. Полная запись всех DID невозможна — выберите код из Y-Yw (например C0QF/U45D), режим «Только регион (${modelSchema === "309x" ? "3094" : "3502"})» или бэкап.`,
         ],
         appliedModel: app,
         optionCode: opt,
@@ -799,9 +935,16 @@ export async function writeSubaruEyesightVariantByApplied(
         cgwFilterRemoved: false,
       };
     }
+    activeSchema = matchedRow.schema;
     writeTargets = yywDids;
+    const wildcardNote =
+      matchedRow.optionCode !== opt && isSsm4YywWildcardOption(matchedRow.optionCode)
+        ? ` (через маску Y-Yw ${matchedRow.optionCode})`
+        : "";
     steps.push(
-      `Полная запись SSM4 ADA-031: подготовлено ${writeTargets.length} DID (3501..350A + ReadWriteDidListData 350B..3510).`,
+      activeSchema === "309x"
+        ? `Полная запись SSM4 legacy (3091..309D)${wildcardNote}: подготовлено ${writeTargets.length} DID.`
+        : `Полная запись SSM4 ADA-031${wildcardNote}: подготовлено ${writeTargets.length} DID (3501..350A + ReadWriteDidListData 350B..3510).`,
     );
   }
 
@@ -898,7 +1041,7 @@ export async function writeSubaruEyesightVariantByApplied(
 
   const verifyDids =
     writeMode === "region-only"
-      ? [...SSM4_YYW_FP_DID_KEYS]
+      ? [...getSsm4YywDidKeysForSchema(activeSchema)]
       : writeTargets.map((w) => w.did);
 
   for (const didHex of verifyDids) {
