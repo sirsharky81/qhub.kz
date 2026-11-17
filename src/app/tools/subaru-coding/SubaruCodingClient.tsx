@@ -375,8 +375,15 @@ export default function SubaruCodingClient() {
         appliedModelInput || meter12Read?.match.actualAppliedModel || "BTAEYR8",
         optionCodeInput,
         appliedModelAnalysis.cgdwOptionCodes,
+        eyesightRead?.match.schema ?? null,
       ),
-    [appliedModelInput, meter12Read, optionCodeInput, appliedModelAnalysis.cgdwOptionCodes],
+    [
+      appliedModelInput,
+      meter12Read,
+      optionCodeInput,
+      appliedModelAnalysis.cgdwOptionCodes,
+      eyesightRead?.match.schema,
+    ],
   );
 
   const ready = phase !== "idle";
@@ -421,17 +428,34 @@ export default function SubaruCodingClient() {
       );
       setEyesightRead(result);
       if (!meter12Read) {
-        if (result.match.appliedModel && result.match.appliedModel.length === 7) {
-          setAppliedModelInput(result.match.appliedModel);
+        const currentInputSchema = getSsm4YywSchemaForModel(appliedModelInput);
+        const firstCandidateApp =
+          result.match.candidates[0]?.split("+")[0]?.trim().toUpperCase() ?? null;
+        const resolvedApp =
+          result.match.appliedModel && result.match.appliedModel.length === 7
+            ? result.match.appliedModel
+            : firstCandidateApp &&
+                firstCandidateApp.length === 7 &&
+                currentInputSchema !== result.match.schema
+              ? firstCandidateApp
+              : null;
+        if (resolvedApp) {
+          setAppliedModelInput(resolvedApp);
         }
+        const effectiveApp = resolvedApp ?? appliedModelInput;
         if (
           result.match.optionCode &&
           result.match.optionCode.length === 4 &&
           !isSsm4YywWildcardOption(result.match.optionCode)
         ) {
           setOptionCodeInput(result.match.optionCode);
-        } else if (result.match.appliedModel && result.match.optionCode) {
-          const guide = explainEyesightOptionInput(result.match.appliedModel, result.match.optionCode);
+        } else if (effectiveApp && result.match.optionCode) {
+          const guide = explainEyesightOptionInput(
+            effectiveApp,
+            result.match.optionCode,
+            undefined,
+            result.match.schema,
+          );
           if (result.match.destinationHint === "CANADA" && guide.recommendedCanadaInput) {
             setOptionCodeInput(guide.recommendedCanadaInput);
           } else if (result.match.destinationHint === "USA" && guide.recommendedUsInputs[0]) {
@@ -1531,6 +1555,21 @@ export default function SubaruCodingClient() {
                 </span>
               </div>
               <div className="text-violet-900 leading-relaxed">{eyesightInputGuide.hintRu}</div>
+              {eyesightReadStats &&
+                eyesightReadStats.activePresent > 0 &&
+                eyesightRead &&
+                eyesightRead.match.schema !== eyesightInputGuide.schema && (
+                  <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-950">
+                    Считанный с машины EyeSight использует схему{" "}
+                    <strong>
+                      {eyesightRead.match.schema === "309x"
+                        ? "309x (13 DID: 3091..309D)"
+                        : "35xx (16 DID: 3501..3510)"}
+                    </strong>
+                    , а в поле ниже выбран {eyesightInputGuide.appliedModel} (
+                    {eyesightInputGuide.schema}). Выберите свой код кузова в таблице или введите 7-значный Applied Model со стойки B.
+                  </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -2032,7 +2071,22 @@ export default function SubaruCodingClient() {
                           </span>
                         </td>
                         <td className="px-2.5 py-1.5 font-mono font-bold text-emerald-700">
-                          {preset.appliedModel}
+                          <div>{preset.appliedModel}</div>
+                          {(() => {
+                            const esSchema = getSsm4YywSchemaForModel(preset.appliedModel);
+                            if (!esSchema) return null;
+                            return (
+                              <span
+                                className={`mt-0.5 inline-block rounded px-1 py-0.2 font-sans text-[9px] font-semibold ${
+                                  esSchema === "309x"
+                                    ? "bg-violet-100 text-violet-900"
+                                    : "bg-slate-100 text-slate-700"
+                                }`}
+                              >
+                                {esSchema === "309x" ? "ES 309x · 13 DID" : "ES 35xx · 16 DID"}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-2.5 py-1.5 font-mono text-gray-500">
                           {preset.usOptionCodeExamples.join(", ")}

@@ -760,4 +760,35 @@ describe("subaru-ssm4-catalog", () => {
       allowObdWrite: true,
     });
   });
+
+  it("includes 2021-2022 2.5L pre-facelift presets valid in cgdw and EyeSight 309x", () => {
+    const preFaceliftIds = [
+      "bt-outback-limited-25i-2022",
+      "bt-outback-premium-25i-2022",
+      "bt-outback-base-25i-2022",
+      "bt-outback-limited-25i-2021",
+      "bt-outback-premium-25i-2021",
+      "sk-forester-sport-2022",
+      "sk-forester-premium-2022",
+      "sk-forester-sport-2021",
+    ];
+    for (const id of preFaceliftIds) {
+      const preset = SUBARU_CANADIAN_OPTION_PRESETS.find((p) => p.id === id);
+      expect(preset, id).toBeDefined();
+      const decoded = decodeSubaruAppliedModel12Columns(
+        preset!.appliedModel,
+        preset!.canadianOptionCodeC0,
+      );
+      expect(decoded.validInSsm4Cgdw, `${id} cgdw`).toBe(true);
+      expect(decoded.obdConversionSupport.allowObdWrite, `${id} obd`).toBe(true);
+      const esGuide = explainEyesightOptionInput(
+        preset!.appliedModel,
+        preset!.canadianOptionCodeC0,
+        decoded.cgdwOptionCodes,
+      );
+      expect(esGuide.schema, `${id} ES schema`).toBe("309x");
+      expect(esGuide.didCount, `${id} ES didCount`).toBe(13);
+      expect(esGuide.resolvedCatalogOption, `${id} ES option`).toBeTruthy();
+    }
+  });
 });

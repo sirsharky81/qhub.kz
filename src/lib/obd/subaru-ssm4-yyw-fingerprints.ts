@@ -4212,11 +4212,12 @@ export function explainEyesightOptionInput(
   appliedModel: string,
   optionCodeInput?: string | null,
   cgdwOptionCodes?: readonly string[],
+  detectedSchemaOverride?: EyesightDidSchema | null,
 ): EyesightOptionInputGuide {
   const app = appliedModel.trim().toUpperCase();
   const opt = (optionCodeInput ?? "").trim().toUpperCase();
   const schema = getSsm4YywSchemaForModel(app);
-  const resolvedSchema: EyesightDidSchema = schema ?? "35xx";
+  const resolvedSchema: EyesightDidSchema = schema ?? detectedSchemaOverride ?? "35xx";
   const didRange = resolvedSchema === "309x" ? "3091..309D" : "3501..3510";
   const didCount = resolvedSchema === "309x" ? 13 : 16;
   const destinationDid = resolvedSchema === "309x" ? "3094" : "3502";
