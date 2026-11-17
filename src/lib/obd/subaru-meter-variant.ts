@@ -1496,6 +1496,7 @@ export async function writeSubaruMeter12ColumnCode(
   let writtenDid: string | null = null;
   let writtenHex: string | null = null;
   let lastSeedHex: string | null = null;
+  let partialA0xxWrite = false;
   const skip0250Candidates = forceA0xxPath || hasA002Snapshot;
 
   for (const target of targets) {
@@ -1734,7 +1735,10 @@ export async function writeSubaruMeter12ColumnCode(
             `${txHex}→${rxHex} 2E 10C2 00 (закрытие вариантной записи MET-002 B26 C01)`,
           );
 
-          if (okA0xx.length > 0) {
+          const okDidSet = new Set(okA0xx.map((x) => x.did));
+          const failedA0xx = a0xxWritePlan.filter((w) => !okDidSet.has(w.did)).map((w) => w.did);
+
+          if (okA0xx.length === a0xxWritePlan.length && a0xxWritePlan.length > 0) {
             if (writeMode === "two-did") {
               writtenDid = "A002/A011";
               writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
@@ -1746,6 +1750,13 @@ export async function writeSubaruMeter12ColumnCode(
                 `${txHex}→${rxHex}: записано ${okA0xx.length} из ${a0xxWritePlan.length} вариантных A0xx DID${nrc31A0xx.length ? ` (NRC 31 на: ${nrc31A0xx.join(", ")})` : ""}.`,
               );
             }
+          } else if (okA0xx.length > 0) {
+            partialA0xxWrite = true;
+            writtenHex = okA0xx.map((x) => `${x.did}=${x.byteHex}`).join(" ");
+            steps.push(
+              `${txHex}→${rxHex}: частичная запись A0xx (${okA0xx.length}/${a0xxWritePlan.length}: ${writtenHex}; не записаны: ${failedA0xx.join(", ")}). Успех не подтверждён, другие CAN-адреса не пробуются.`,
+            );
+            if (sawNrc33OnA0xx) securityAccessRequired = true;
           } else if (sawNrc33OnA0xx) {
             securityAccessRequired = true;
           }
@@ -1756,10 +1767,10 @@ export async function writeSubaruMeter12ColumnCode(
       steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
     }
 
-    if (writtenDid || securityAccessRequired) break;
+    if (writtenDid || securityAccessRequired || partialA0xxWrite) break;
   }
 
-  if (!writtenDid && !securityAccessRequired) {
+  if (!writtenDid && !securityAccessRequired && !partialA0xxWrite) {
     steps.push(
       "Приборка не подтвердила 2E 0250/0251. Проверьте IG ON, адрес 783 и что DID — ASCII, а не битовая маска.",
     );

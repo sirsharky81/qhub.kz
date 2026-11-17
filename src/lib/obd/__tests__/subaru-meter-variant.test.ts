@@ -192,6 +192,51 @@ describe("subaru-meter-variant", () => {
     ]);
   });
 
+  it("does not report success or try another meter target after a partial A002/A011 write", async () => {
+    const headers: number[] = [];
+    const sent: string[] = [];
+    const elm: SubaruMeterWriteLink = {
+      async sendCommand(cmd) {
+        sent.push(cmd.replace(/\s+/g, "").toUpperCase());
+        return "OK";
+      },
+      async setCanHeader(tx) {
+        headers.push(tx);
+      },
+      async sendPayload(hex) {
+        const k = hex.replace(/\s+/g, "").toUpperCase();
+        sent.push(k);
+        if (k === "1003") return "50 03";
+        if (k === "1001") return "50 01";
+        if (k === "3E00") return "7E 00";
+        if (k === "3101020C") return "71 01 02 0C";
+        if (k === "2210C2") return "62 10 C2 FF";
+        if (k === "2E10C2FF") return "6E 10 C2";
+        if (k === "2EA00203") return "6E A0 02";
+        if (k === "2EA01100") return "7F 2E 31";
+        if (k === "2E10C200") return "6E 10 C2";
+        return "NO DATA";
+      },
+    };
+
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.writtenDid).toBeNull();
+    expect(result.writtenHex).toBe("A002=03");
+    expect(result.steps.join(" ")).toMatch(/частичная запись A0xx/);
+    expect(headers).not.toContain(0x7c0);
+  });
+
   it("unlocks 27 03 -> 27 04 using FHIUtilityCtrlNK GetSecurityAccessSelKey(idx=11 LE, ctrl-mode1) after passcode 0205 when 2E 0250 returns NRC 31 or 2E 10C2 FF returns NRC 33", async () => {
     const seed = [0x12, 0x34, 0x56, 0x78];
     const expectedKey = computeSubaruSecurityKey4Byte(
