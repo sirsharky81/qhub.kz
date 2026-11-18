@@ -1474,13 +1474,13 @@ async function sendCodingWritePdu(
         }
       }
 
-      // Set a single fixed timeout `ATST06` (24ms) with `ATAT0` for the First Frame and intermediate CFs:
-      // - 24ms is plenty to capture both the initial Flow Control (`30 08 0A`, arrives in ~2ms) and the
-      //   second Flow Control (`FC2: 30 08 0A` after the 8th CF `28...`, arrives in ~2–5ms)!
-      // - For CFs `21..27` where the ECU sends nothing, ELM waits 24ms and prints `NO DATA\r>`, which
-      //   simultaneously satisfies the ECU's `STmin = 10ms` (0x0A) requirement with ZERO `ATST` switching!
+      // Set a single fixed timeout `ATST0A` (40ms) with `ATAT0` for the First Frame and intermediate CFs:
+      // - 40ms gives plenty of margin for both the initial Flow Control (`30 08 0A`, arrives in ~2ms) and the
+      //   second Flow Control (`FC2: 30 08 0A` after the 8th CF `28...`), even on slower CAN/BLE bridges.
+      // - For CFs `21..27` where the ECU sends nothing, ELM waits 40ms and prints `NO DATA\r>`, which
+      //   satisfies `STmin = 10ms` (0x0A) with ZERO `ATST` switching and stays well inside ISO-TP N_Cr (1000ms).
       try {
-        await elm.sendCommand("ATST06", 2_000, { quietMs: 3, allowBarePrompt: true });
+        await elm.sendCommand("ATST0A", 2_000, { quietMs: 3, allowBarePrompt: true });
       } catch {
         /* ignore */
       }
@@ -1502,6 +1502,7 @@ async function sendCodingWritePdu(
       const ffCleanDiag = ffResp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
       let fc2CleanDiag = "";
       let cf1CleanDiag = "";
+      let cfErrDiag = "";
 
       for (let i = 1; i < frames.length; i++) {
         const isLast = i === frames.length - 1;
@@ -1509,10 +1510,10 @@ async function sendCodingWritePdu(
 
         if (isLast) {
           // CRITICAL: Send the final Consecutive Frame (`29...` for .cuf or `2D...` for .kon)
-          // IMMEDIATELY with `ATST06` still active and ZERO prior `AT` commands!
+          // IMMEDIATELY with `ATST0A` still active and ZERO prior `AT` commands!
           // Sending `ATST96` or `ATSTFF` before `2D...` / `29...` resets the CAN transceiver state
           // on `vLinker MC-IOS` in the middle of the ISO-TP stream (exactly why PR #142 removed it!).
-          // If the ECU takes >24ms to flash EEPROM and `2D...` returns `NO DATA` (or `7F 3B 78`),
+          // If the ECU takes >40ms to flash EEPROM and `2D...` returns `NO DATA` (or `7F 3B 78`),
           // we set `ATST64` AFTER `2D...` has already been transmitted on the CAN bus and poll with `01 3E`!
           let cfResp = await elm.sendPayload(frames[i]!, 8_000, { quietMs: 15 });
           let cfTokens = extractHexTokens(cfResp);
@@ -1544,7 +1545,7 @@ async function sendCodingWritePdu(
           lastReply = cfResp;
         } else if (isBlockBoundary) {
           // 8th Consecutive Frame (`28...` when BS=8): sent immediately with NO prior AT command!
-          // With `ATAT0` + `ATST06` (24ms), ELM transmits `28...` and captures the ECU's second Flow Control (`30 08 0A`)!
+          // With `ATAT0` + `ATST0A` (40ms), ELM transmits `28...` and captures the ECU's second Flow Control (`30 08 0A`)!
           const fc2Resp = await elm.sendPayload(frames[i]!, 3_000, {
             quietMs: 2,
             allowBarePrompt: true,
@@ -1568,23 +1569,32 @@ async function sendCodingWritePdu(
             quietMs: 2,
             allowBarePrompt: true,
           });
+          const cfClean = cfResp.replace(/>/g, "").replace(/\s+/g, " ").trim();
           if (i === 1) {
-            cf1CleanDiag = cfResp.replace(/>/g, "").replace(/\s+/g, " ").trim().slice(0, 14);
+            cf1CleanDiag = cfClean.slice(0, 14);
           }
           const cfTokens = extractHexTokens(cfResp);
           if (hasNegativeResponseForService(cfTokens, writeSvc) !== null) {
             return cfResp;
           }
+          if (
+            !cfErrDiag &&
+            (isElmSyntaxRejection(cfResp) || /(?:ERROR|STOPPED|BUFFER FULL|BUS BUSY)/i.test(cfClean)) &&
+            cfClean !== ""
+          ) {
+            cfErrDiag = `CF${i}:${cfClean.slice(0, 16)}`;
+          }
           cfsSentInCurrentBlock++;
         }
       }
 
-      // If final CF returned NO DATA, include HW-TX, FF, CF1, and FC2 diagnostics
+      // If final CF returned NO DATA, include HW-TX, FF, CF1, CF error, and FC2 diagnostics
       if (isNoDataOrEmptyReply(lastReply) && !isNoDataOrEmptyReply(ffResp)) {
         const hwPart = hwTxDiag ? `${hwTxDiag} / ` : "";
         const cf1Part = cf1CleanDiag ? ` / CF1:${cf1CleanDiag}` : "";
+        const cfErrPart = cfErrDiag ? ` / ${cfErrDiag}` : "";
         const fc2Part = fc2CleanDiag ? ` / FC2:${fc2CleanDiag}` : "";
-        lastReply = `${hwPart}FF:${ffCleanDiag}${cf1Part}${fc2Part} -> CF:NO DATA`;
+        lastReply = `${hwPart}FF:${ffCleanDiag}${cf1Part}${cfErrPart}${fc2Part} -> CF:NO DATA`;
       }
     }
     return lastReply;

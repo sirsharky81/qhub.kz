@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   backupFileName,
+  canUseSaveFilePicker,
   cleanCodingFileStem,
   detectCodingExtension,
   ensureCodingFileName,
@@ -81,5 +82,29 @@ describe("saveEtacsPayload & parseKon roundtrip", () => {
     const parsed = parseKon(withNewline);
     expect(parsed.vin).toBe("MMEMCY1XXNH003447");
     expect(parsed.ecuId).toBe("8637C671");
+  });
+});
+
+describe("canUseSaveFilePicker platform guard", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("disables showSaveFilePicker on Android Chrome so DocumentsUI does not rename .kon/.cuf to .bin", () => {
+    vi.stubGlobal("window", { isSecureContext: true, showSaveFilePicker: () => {} });
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 15; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36",
+    });
+    expect(canUseSaveFilePicker()).toBe(false);
+  });
+
+  it("keeps showSaveFilePicker enabled on Desktop browsers", () => {
+    vi.stubGlobal("window", { isSecureContext: true, showSaveFilePicker: () => {} });
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+    });
+    expect(canUseSaveFilePicker()).toBe(true);
   });
 });

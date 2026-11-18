@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { isAndroidDevice } from "@/lib/platform/device";
+import { isNativePlatform } from "@/lib/platform/runtime";
 import {
   canUseSaveFilePicker,
   cleanCodingFileStem,
@@ -99,9 +101,13 @@ function EtacsSaveFileModalInner({
     try {
       const preferredMethod: SaveDialogMethod = supportsPicker
         ? "picker"
-        : request.canShareFiles
+        : isNativePlatform()
           ? "share"
-          : "download";
+          : isAndroidDevice()
+            ? "download"
+            : request.canShareFiles
+              ? "share"
+              : "download";
       await request.onConfirm(finalPreview, preferredMethod);
       onClose();
     } catch (err) {

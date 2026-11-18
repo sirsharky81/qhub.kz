@@ -104,6 +104,7 @@ export class WebBleLink implements BleLink {
   private notifyChar: BluetoothRemoteGATTCharacteristic | null = null;
   private writeChar: BluetoothRemoteGATTCharacteristic | null = null;
   private useWriteWithoutResponse = false;
+  private fallbackToWithResponse = false;
   private rx = new ElmRxBuffer();
   private onNotify: ((ev: Event) => void) | null = null;
 
@@ -227,7 +228,10 @@ export class WebBleLink implements BleLink {
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]!;
       const attempts: Array<{ withoutResp: boolean; fn: () => Promise<void> }> = [];
-      if (this.useWriteWithoutResponse && withoutResponse) {
+      const preferWithoutRespForChunk =
+        Boolean(withoutResponse) &&
+        (this.useWriteWithoutResponse || (chunks.length === 1 && !this.fallbackToWithResponse));
+      if (preferWithoutRespForChunk && withoutResponse) {
         attempts.push({ withoutResp: true, fn: () => withoutResponse(chunk) });
         attempts.push({ withoutResp: false, fn: () => withResponse(chunk) });
       } else {
@@ -241,7 +245,12 @@ export class WebBleLink implements BleLink {
       for (const attempt of attempts) {
         try {
           await attempt.fn();
-          this.useWriteWithoutResponse = attempt.withoutResp;
+          if (chunks.length > 1) {
+            this.useWriteWithoutResponse = attempt.withoutResp;
+          } else if (preferWithoutRespForChunk && !attempt.withoutResp) {
+            this.fallbackToWithResponse = true;
+            this.useWriteWithoutResponse = false;
+          }
           sent = true;
           break;
         } catch (error) {
@@ -250,7 +259,12 @@ export class WebBleLink implements BleLink {
           await new Promise((resolve) => setTimeout(resolve, 15));
           try {
             await attempt.fn();
-            this.useWriteWithoutResponse = attempt.withoutResp;
+            if (chunks.length > 1) {
+              this.useWriteWithoutResponse = attempt.withoutResp;
+            } else if (preferWithoutRespForChunk && !attempt.withoutResp) {
+              this.fallbackToWithResponse = true;
+              this.useWriteWithoutResponse = false;
+            }
             sent = true;
             break;
           } catch (retryError) {
@@ -285,6 +299,7 @@ export class WebBleLink implements BleLink {
     this.notifyChar = notify;
     this.writeChar = write;
     this.useWriteWithoutResponse = preferWriteWithoutResponse(write.properties, isBluefyBrowser());
+    this.fallbackToWithResponse = false;
 
     this.onNotify = (ev: Event) => {
       const chunk = notificationBytes(ev);

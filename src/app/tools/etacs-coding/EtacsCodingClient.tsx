@@ -400,8 +400,8 @@ export default function EtacsCodingClient() {
       const iso = ts.toISOString();
       const prefix = `${part}_${vin}_ecu`;
       const names = etacsDownloadNames(prefix, { partNumber: part, vin });
-      const chosenKonName = savedNames?.kon || names.kon;
-      const chosenCufName = savedNames?.cuf || names.cuf;
+      const chosenKonName = ensureCodingFileName(savedNames?.kon || names.kon, ".kon");
+      const chosenCufName = ensureCodingFileName(savedNames?.cuf || names.cuf, ".cuf");
 
       if (scenario === "etacs_cuf") {
         const cufBytes = formatMutCodingContainer({

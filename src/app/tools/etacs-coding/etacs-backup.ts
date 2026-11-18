@@ -4,6 +4,7 @@ import {
   type EtacsCodingDump,
 } from "@/lib/obd/mitsubishi-etacs";
 import { downloadBlobDirect, saveBlobToDevice } from "@/lib/platform/save-file";
+import { isAndroidDevice } from "@/lib/platform/device";
 import { bytesToHex } from "@/lib/obd/hex";
 
 function stamp(): string {
@@ -61,6 +62,9 @@ export function backupFileName(
 
 export function canUseSaveFilePicker(): boolean {
   if (typeof window === "undefined") return false;
+  // Android Chrome translates showSaveFilePicker + "application/octet-stream" into
+  // ACTION_CREATE_DOCUMENT, where DocumentsUI rewrites unknown .kon/.cuf extensions to .bin.
+  if (isAndroidDevice()) return false;
   const win = window as Window & { showSaveFilePicker?: unknown };
   return Boolean(window.isSecureContext && typeof win.showSaveFilePicker === "function");
 }
@@ -144,7 +148,9 @@ export async function saveCodingBytesAs(
   const ext = detectCodingExtension(fileName);
   const finalName = ensureCodingFileName(fileName, ext);
   const copy = new Uint8Array(bytes);
-  const blob = new Blob([copy.buffer as ArrayBuffer], { type: "application/octet-stream" });
+  const blobType =
+    method === "download" && isAndroidDevice() ? "" : "application/octet-stream";
+  const blob = new Blob([copy.buffer as ArrayBuffer], { type: blobType });
 
   if (method === "picker") {
     try {

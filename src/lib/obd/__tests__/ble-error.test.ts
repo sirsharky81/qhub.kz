@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   formatBleFailure,
   isNumericBleFailure,
@@ -14,7 +14,7 @@ import {
   VGATE_2AF0_NOTIFY,
   VGATE_2AF1_WRITE,
 } from "../vlinker-uuids";
-import { bindSerial } from "../web-ble-link";
+import { WebBleLink, bindSerial } from "../web-ble-link";
 
 describe("formatBleFailure", () => {
   it("explains Bluefy numeric status 2", () => {
@@ -157,5 +157,78 @@ describe("vLinker MC-IOS on Android Chrome Web Bluetooth", () => {
     const bound = await bindSerial(server);
     expect(bound.notify).toBe(notifyChar);
     expect(bound.write).toBe(writeChar);
+  });
+
+  describe("WebBleLink single-chunk writeWithoutResponse fast-path on Android Chrome", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("uses writeValueWithoutResponse for <=20-byte CAN frames on Android Chrome and keeps writeValueWithResponse for multi-chunk commands", async () => {
+      vi.stubGlobal("navigator", {
+        userAgent:
+          "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36",
+      });
+      const calls: string[] = [];
+      const notifyChar = {
+        uuid: VGATE_2AF0_NOTIFY,
+        properties: { notify: true },
+        startNotifications: async () => notifyChar,
+        stopNotifications: async () => notifyChar,
+        writeValue: async () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      };
+      const writeChar = {
+        uuid: VGATE_2AF1_WRITE,
+        properties: { write: true, writeWithoutResponse: true },
+        startNotifications: async () => writeChar,
+        stopNotifications: async () => writeChar,
+        writeValue: async () => {
+          calls.push("writeValue");
+        },
+        writeValueWithResponse: async () => {
+          calls.push("withResponse");
+        },
+        writeValueWithoutResponse: async () => {
+          calls.push("withoutResponse");
+        },
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      };
+      const svc = {
+        uuid: VGATE_18F0_SERVICE,
+        getCharacteristic: async (uuid: string) => {
+          if (uuid === VGATE_2AF0_NOTIFY || uuid === "2af0") return notifyChar;
+          if (uuid === VGATE_2AF1_WRITE || uuid === "2af1") return writeChar;
+          throw new Error(`Characteristic ${uuid} not found`);
+        },
+      };
+      const server = {
+        connected: true,
+        connect: async () => server,
+        disconnect: () => {},
+        getPrimaryService: async (uuid: string) => {
+          if (uuid === VGATE_18F0_SERVICE || uuid === "18f0") return svc;
+          throw new Error(`No service ${uuid}`);
+        },
+      };
+
+      const link = new WebBleLink(
+        { id: "vlinker-1", name: "vLinker MC-IOS", transport: "web-bluetooth" },
+        { id: "vlinker-1", name: "vLinker MC-IOS", gatt: server },
+      );
+      await link.connect();
+
+      // Single 17-byte CAN frame (<= 20 bytes) uses fast writeValueWithoutResponse
+      await link.writeLine("2100112233445566");
+      expect(calls).toEqual(["withoutResponse"]);
+
+      // Multi-chunk (> 20 bytes) keeps paced writeValueWithResponse on Android Chrome
+      calls.length = 0;
+      await link.writeLine("3BB0" + "22".repeat(20));
+      expect(calls.every((c) => c === "withResponse")).toBe(true);
+      expect(calls.length).toBeGreaterThan(1);
+    });
   });
 });
