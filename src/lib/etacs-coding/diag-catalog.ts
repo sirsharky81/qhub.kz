@@ -506,8 +506,8 @@ export function signalsForEcu(
   const vehicle = matchCatalogVehicle({ vkey }, db);
   const ecu = vehicle?.ecus?.find((item) => item.sysKey === sysKey);
   if (!vehicle || !ecu) return null;
-  const projected = projectEcus(vehicle).find((item) => item.sysKey === sysKey);
-  if (!projected) return null;
+  const projectedEcu = projectEcus(vehicle).find((item) => item.sysKey === sysKey);
+  if (!projectedEcu) return null;
 
   const wanted = new Set(preferredSkeys(ecu));
   const wantedVersion = normalizeDiagVersion(query?.diagVersion);
@@ -556,19 +556,45 @@ export function signalsForEcu(
         : wantedVersion
           ? `Профиль по каталогу (${best.skey}): версия ${wantedVersion} в базе не найдена`
           : "Профиль по каталогу, версия блока не прочитана";
+  const projected = best.items
+    .map((item, index) => ({ signal: projectSignal(item, best.skey), index }))
+    .filter((entry): entry is { signal: CatalogSignal; index: number } => entry.signal != null);
+  const seenPhysical = new Set<string>();
+  const seenIds = new Set<string>();
+  const signals: CatalogSignal[] = [];
+  for (const { signal, index } of projected) {
+    const physicalKey = [
+      signal.service,
+      signal.localId,
+      signal.bytePos,
+      signal.byteLen,
+      signal.byteOrder,
+      signal.bitPos,
+      signal.bitLen,
+      signal.bitMask ?? "",
+      signal.codeType ?? "",
+      signal.signed ? 1 : 0,
+      signal.factor,
+      signal.offset,
+      signal.nameEn,
+    ].join(":");
+    if (seenPhysical.has(physicalKey)) continue;
+    seenPhysical.add(physicalKey);
+    const uniqueId = seenIds.has(signal.id) ? `${signal.id}-${index}` : signal.id;
+    seenIds.add(uniqueId);
+    signals.push(uniqueId === signal.id ? signal : { ...signal, id: uniqueId });
+  }
   return {
     vkey: vehicle.vkey || vkey,
     sysKey,
-    nameRu: projected.nameRu,
-    nameEn: projected.nameEn,
+    nameRu: projectedEcu.nameRu,
+    nameEn: projectedEcu.nameEn,
     skey: best.skey,
-    txCanId: projected.txCanId,
-    rxCanId: projected.rxCanId,
+    txCanId: projectedEcu.txCanId,
+    rxCanId: projectedEcu.rxCanId,
     profileSource,
     profileNoteRu,
-    signals: best.items
-      .map((item) => projectSignal(item, best.skey))
-      .filter((item): item is CatalogSignal => item != null),
+    signals,
   };
 }
 

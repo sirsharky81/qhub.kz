@@ -159,6 +159,42 @@ const db = {
               offset: -40,
               decimals: 0,
             },
+            // Repeated identical signal from another MUT-III group (same physical definition)
+            {
+              itemNo: 1,
+              nameEn: "Engine speed",
+              nameRu: "Обороты",
+              udsServiceId: "0x21",
+              localId: "0x01",
+              unitRu: "r/min",
+              bytePos: 2,
+              byteLen: 2,
+              byteOrder: 2,
+              bitPos: -1,
+              bitLen: -1,
+              signed: false,
+              factor: 0.5,
+              offset: 0,
+              decimals: 0,
+            },
+            // Different signal from another MUT-III group that happens to reuse itemNo: 2
+            {
+              itemNo: 2,
+              nameEn: "Short term fuel trim 1",
+              nameRu: "Краткосрочная рег.топлива 1",
+              udsServiceId: "0x21",
+              localId: "0x07",
+              unitRu: "%",
+              bytePos: 3,
+              byteLen: 1,
+              byteOrder: 2,
+              bitPos: -1,
+              bitLen: -1,
+              signed: false,
+              factor: 0.39,
+              offset: -49.92,
+              decimals: 1,
+            },
           ],
         },
         "10019901": {
@@ -256,7 +292,13 @@ describe("catalog signals and DTC text", () => {
     expect(list?.skey).toBe("10022701");
     expect(list?.profileSource).toBe("catalog");
     expect(list?.profileNoteRu).toBe("Профиль по каталогу, версия блока не прочитана");
-    expect(list?.signals).toHaveLength(2);
+    expect(list?.signals).toHaveLength(3);
+    expect(new Set(list?.signals.map((s) => s.id)).size).toBe(3);
+    expect(list?.signals.map((s) => s.nameEn)).toEqual([
+      "Engine speed",
+      "Coolant",
+      "Short term fuel trim 1",
+    ]);
     expect(list?.signals[0]).not.toHaveProperty("reqMsg");
     expect(describeCatalogDtcs("05", ["b1000", "P0000"])).toEqual({
       B1000: { en: "Inside temp.sensor performance", ru: "Датчик температуры салона" },

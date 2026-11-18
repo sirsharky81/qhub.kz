@@ -53,7 +53,7 @@ export function mitsubishiFluidBand(
 }
 
 const MONITOR_NAME =
-  /ATF|A\/T fluid|CVT oil temp|темп\.?\s*масла CVT|темп\.?\s*жидк\.?\s*АКП|oil pan|oil TEMP|coolant|ОЖ|темп.*двиг|Engine speed|обороты|Vehicle speed|скор\.?\s*авт|Input shaft|Output shaft|Primary speed|педал|throttle|дроссел|нагруз|load|MAP|MAF|STFT|LTFT|Fuel trim|коррекц|Battery|напряж|voltage|пит\.|давлени|pressure|TPMS|шин|Fuel level|топлив|одометр|Odometer|Gear|передач|селектор|Shift position|Lock.?up|муфт|4WD|G[- ]?sensor|steer|рул|тормоз|Brake/i;
+  /ATF|A\/T fluid|CVT oil temp|темп\.?\s*масла CVT|темп\.?\s*жидк\.?\s*АКП|oil pan|oil TEMP|coolant|ОЖ|темп.*двиг|Engine speed|Engine revolution|Crank angle|коленч|обороты|Vehicle speed|скор\.?\s*авт|Input shaft|Output shaft|Primary speed|педал|throttle|дроссел|нагруз|load|MAP|MAF|STFT|LTFT|Fuel trim|коррекц|Battery|напряж|voltage|пит\.|давлени|pressure|TPMS|шин|Fuel level|топлив|одометр|Odometer|Gear|передач|селектор|Shift position|Lock.?up|муфт|4WD|G[- ]?sensor|steer|рул|тормоз|Brake/i;
 
 export function isPreferredMonitorSignal(signal: CatalogSignal): boolean {
   return MONITOR_NAME.test(`${signal.nameEn} ${signal.nameRu} ${signal.unit}`);

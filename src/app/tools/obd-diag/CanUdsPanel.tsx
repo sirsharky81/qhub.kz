@@ -1386,7 +1386,10 @@ export default function CanUdsPanel({
                   <div>
                     <div className="font-sans text-[10px] text-gray-500">Скольжение ГДТ (Slip)</div>
                     <div className="text-gray-800">
-                      {mitsuTcmData.torqueConverterSlipRpm != null ? `${mitsuTcmData.torqueConverterSlipRpm} об/мин` : "—"}
+                      {mitsuTcmData.torqueConverterSlipRpm != null
+                        ? `${mitsuTcmData.torqueConverterSlipRpm} об/мин`
+                        : "—"}
+                      {mitsuTcmData.lockUpDutyPct != null ? ` · блок. ${mitsuTcmData.lockUpDutyPct}%` : ""}
                     </div>
                   </div>
                   <div>

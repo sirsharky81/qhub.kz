@@ -148,10 +148,15 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   }, []);
 
   const selected = vehicle?.ecus.find((ecu) => ecu.sysKey === selectedKey) ?? null;
-  const pickedSignals = useMemo(
-    () => signals.filter((signal) => picked.includes(signal.id)),
-    [signals, picked],
-  );
+  const pickedSignals = useMemo(() => {
+    const wanted = new Set(picked);
+    const seen = new Set<string>();
+    return signals.filter((signal) => {
+      if (!wanted.has(signal.id) || seen.has(signal.id)) return false;
+      seen.add(signal.id);
+      return true;
+    });
+  }, [signals, picked]);
   const availableProcedures = useMemo(
     () =>
       selected && selectedSkey
@@ -816,13 +821,14 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
             items={pickedSignals.map((signal) => {
               void liveMinMaxTick;
               const stats = liveMinMaxRef.current.get(signal.id);
+              const digits = Math.min(Math.max(signal.decimals, 0), 6);
               return {
                 id: signal.id,
                 label: signal.nameRu || signal.nameEn,
                 value: liveNow[signal.id] ?? "—",
                 unit: signal.unit,
-                minText: stats ? String(stats.min) : null,
-                maxText: stats ? String(stats.max) : null,
+                minText: stats ? stats.min.toFixed(digits) : null,
+                maxText: stats ? stats.max.toFixed(digits) : null,
                 highlight: live,
               };
             })}
@@ -1115,6 +1121,8 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               </div>
               <div className="mt-1 text-[11px] text-gray-500">
                 {tcm.vehicleSpeedKmh != null ? `${tcm.vehicleSpeedKmh} км/ч` : "скорость —"}
+                {tcm.torqueConverterSlipRpm != null ? ` · скольж. ${tcm.torqueConverterSlipRpm} об/мин` : ""}
+                {tcm.lockUpDutyPct != null ? ` · блок. ${tcm.lockUpDutyPct}%` : ""}
                 {tcm.cvtDegradationCount != null ? ` · деградация CVT ${tcm.cvtDegradationCount}` : ""}
               </div>
             </div>

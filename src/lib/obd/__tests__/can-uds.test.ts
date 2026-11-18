@@ -1083,8 +1083,18 @@ describe("sendUds gate", () => {
           (link as unknown as { pending: string }).pending += "61 01 10 00 00\r>";
           return;
         }
+        if (currentHeader === "7E1") {
+          // 0x0A 0x00 = 2560 * 0.5 = 1280 rpm
+          (link as unknown as { pending: string }).pending += "61 01 0A 00\r>";
+          return;
+        }
         (link as unknown as { pending: string }).pending +=
           "00C\r0: 61 01 A0 4B A0 4C\r1: A2 4A A2 4B 9E 48 00\r>";
+        return;
+      }
+      if (line === "2103" && currentHeader === "7E1") {
+        (link as unknown as { pending: string }).pending +=
+          "61 03 00 00 80 00 00 00 00 00 00 00 00\r>";
         return;
       }
       if (line === "1092") {
@@ -1123,6 +1133,9 @@ describe("sendUds gate", () => {
     expect(tcm.atfTempPipeC).toBe(72);
     expect(tcm.gearNumber).toBe(4);
     expect(tcm.isGearDisengaged).toBe(false);
+    expect(tcm.engineRpm).toBe(1280);
+    expect(tcm.torqueConverterSlipRpm).toBe(0);
+    expect(tcm.lockUpDutyPct).toBe(50);
 
     const tpms = await readTpmsSensors(elm, "mitsubishi-773");
     expect(tpms.wheels).toHaveLength(5);

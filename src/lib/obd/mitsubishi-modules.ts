@@ -38,7 +38,11 @@ export interface MitsubishiTcmTelemetry {
   inputShaftRpm: number | null;
   /** Output shaft / secondary pulley speed in RPM (`D*128 + E*0.5`). */
   outputShaftRpm: number | null;
-  /** Torque converter damper slip in RPM (`I - 51`). */
+  /** Engine speed reported by TCM `21 01` (`bp=2..3`, `×0.5` RPM). */
+  engineRpm?: number | null;
+  /** Lock-up solenoid duty from 8AT `21 03` (`bp=4`, `0..100 %`). */
+  lockUpDutyPct?: number | null;
+  /** Torque converter slip in RPM (`Engine RPM - Input RPM` on 8AT, `I - 51` on 4AT/5AT). */
   torqueConverterSlipRpm: number | null;
   /** TCM supply voltage in V (`G * 33.15 / 255`). */
   controlVoltageV: number | null;
@@ -161,6 +165,8 @@ export function extractKwp21Data(raw: string, lid: number): number[] | null {
 export function decodeMitsubishiAt2102And2104(
   data2102: number[],
   data2104?: number[] | null,
+  data2101?: number[] | null,
+  data2103?: number[] | null,
 ): Omit<
   MitsubishiTcmTelemetry,
   "txHex" | "rxHex" | "partNumber" | "swVersion" | "cvtDegradationCount" | "raw2102" | "raw2104" | "raw2103"
@@ -178,6 +184,10 @@ export function decodeMitsubishiAt2102And2104(
 
   const inputShaftRpm = B != null && C != null ? Math.round(B * 128 + C * 0.5) : null;
   const outputShaftRpm = D != null && E != null ? Math.round(D * 128 + E * 0.5) : null;
+  const engineRpm =
+    data2101 && data2101.length >= 2
+      ? Math.round(data2101[0]! * 128 + data2101[1]! * 0.5)
+      : null;
   const is8at = data2102.length >= 11;
   const atfTempPipeC = F != null ? F - 50 : null;
   const atfTempPanC = is8at && G != null ? G - 50 : null;
@@ -185,7 +195,27 @@ export function decodeMitsubishiAt2102And2104(
   const controlVoltageV =
     !is8at && G != null ? Number(((G * 33.15) / 255).toFixed(2)) : null;
   const vehicleSpeedKmh = H != null ? Math.round((H * 714) / 255) : null;
-  const torqueConverterSlipRpm = I != null ? I - 51 : null;
+  const lockUpDutyPct =
+    is8at && data2103 && data2103.length >= 11
+      ? Math.round((data2103[2]! * 100) / 255)
+      : null;
+  const isIdleNeutralActive =
+    is8at && data2103 && data2103.length >= 11
+      ? (data2103[10]! & 0x04) !== 0
+      : false;
+  // On 8AT (8AT_18882400 / AT8_12882300), 21 02 byte I (bp=10) is unused (0xFF -> bogus 204 RPM);
+  // compute real slip from TCM 21 01 Engine RPM minus 21 02 Input Shaft RPM.
+  const torqueConverterSlipRpm = is8at
+    ? engineRpm != null && inputShaftRpm != null
+      ? engineRpm - inputShaftRpm
+      : I != null && I !== 0xff
+        ? I - 51
+        : null
+    : I != null && I !== 0xff
+      ? I - 51
+      : engineRpm != null && inputShaftRpm != null
+        ? engineRpm - inputShaftRpm
+        : null;
 
   // Decode selector lever from 21 04 byte C (`data2104[2]`) if available
   let selectorPosition = "—";
@@ -251,10 +281,10 @@ export function decodeMitsubishiAt2102And2104(
   const isAutoNeutralInD =
     !jBitPN &&
     !selectorIsNeutralOrPark &&
-    (vehicleSpeedKmh ?? 0) === 0 &&
-    (outputShaftRpm ?? 0) === 0 &&
-    (inputShaftRpm ?? 0) > 450 &&
-    (torqueConverterSlipRpm ?? 0) > 150;
+    (isIdleNeutralActive ||
+      ((vehicleSpeedKmh ?? 0) === 0 &&
+        (outputShaftRpm ?? 0) === 0 &&
+        (inputShaftRpm ?? 0) > 450));
 
   const isGearDisengaged = jBitPN || selectorIsNeutralOrPark || gearNumber === 0;
 
@@ -262,12 +292,20 @@ export function decodeMitsubishiAt2102And2104(
   if (jBitPN || selectorIsNeutralOrPark || gearNumber === 0) {
     disengagedStateText = "ПЕРЕДАЧА ВЫКЛЮЧЕНА (P / N — трансмиссия разомкнута)";
   } else if (isAutoNeutralInD) {
-    disengagedStateText = `Удержание на тормозе (${currentGearText}, ГДТ разомкнут, скольжение ${torqueConverterSlipRpm ?? 0} об/мин)`;
+    const slipSuffix =
+      torqueConverterSlipRpm != null ? `, скольжение ${torqueConverterSlipRpm} об/мин` : "";
+    disengagedStateText = `Удержание на тормозе (${currentGearText}, ГДТ разомкнут${slipSuffix})`;
   } else if (gearNumber != null && gearNumber > 0) {
     const lockState =
-      torqueConverterSlipRpm != null && Math.abs(torqueConverterSlipRpm) <= 15
-        ? "ГДТ заблокирован"
-        : `скольжение ГДТ ${torqueConverterSlipRpm ?? 0} об/мин`;
+      torqueConverterSlipRpm != null
+        ? Math.abs(torqueConverterSlipRpm) <= 15 && (lockUpDutyPct == null || lockUpDutyPct >= 10)
+          ? lockUpDutyPct != null
+            ? `ГДТ заблокирован (${lockUpDutyPct}%)`
+            : "ГДТ заблокирован"
+          : `скольжение ГДТ ${torqueConverterSlipRpm} об/мин${lockUpDutyPct != null ? `, блок. ${lockUpDutyPct}%` : ""}`
+        : lockUpDutyPct != null
+          ? `блокировка ГДТ ${lockUpDutyPct}%`
+          : "ГДТ разомкнут";
     disengagedStateText = `Передача включена (${currentGearText}, ${lockState})`;
   } else if (gearNumber === -1) {
     disengagedStateText = "Включен задний ход (R)";
@@ -288,6 +326,8 @@ export function decodeMitsubishiAt2102And2104(
     disengagedStateText,
     inputShaftRpm,
     outputShaftRpm,
+    engineRpm,
+    lockUpDutyPct,
     torqueConverterSlipRpm,
     controlVoltageV,
     vehicleSpeedKmh,
@@ -592,7 +632,23 @@ export async function readMitsubishiTransmission(elm: Elm327Client): Promise<Mit
     }
 
     if (data2102 && data2102.length >= 8) {
-      const decoded = decodeMitsubishiAt2102And2104(data2102, data2104);
+      let data2101: number[] | null = null;
+      let raw2103: string | null = null;
+      let data2103: number[] | null = null;
+      try {
+        data2101 = extractKwp21Data(await elm.sendPayload("2101", 1_800), 0x01);
+      } catch {
+        /* optional engine RPM from TCM */
+      }
+      if (data2102.length >= 11) {
+        try {
+          raw2103 = await elm.sendPayload("2103", 1_800);
+          data2103 = extractKwp21Data(raw2103, 0x03);
+        } catch {
+          /* optional 8AT lock-up solenoid duty / idle neutral */
+        }
+      }
+      const decoded = decodeMitsubishiAt2102And2104(data2102, data2104, data2101, data2103);
       return {
         ...decoded,
         txHex: "7E1",
@@ -602,7 +658,7 @@ export async function readMitsubishiTransmission(elm: Elm327Client): Promise<Mit
         cvtDegradationCount: null,
         raw2102: raw2102.replace(/>/g, "").replace(/\s+/g, " ").trim(),
         raw2104: raw2104 ? raw2104.replace(/>/g, "").replace(/\s+/g, " ").trim() : null,
-        raw2103: null,
+        raw2103: data2103 && raw2103 ? raw2103.replace(/>/g, "").replace(/\s+/g, " ").trim() : null,
       };
     }
 

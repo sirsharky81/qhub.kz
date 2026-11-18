@@ -49,8 +49,9 @@ describe("MUT-III Data List monitor picker", () => {
       signal({ id: "x-1", nameEn: "Unknown flag" }),
       signal({ id: "x-2", nameEn: "A/T fluid temp.sensor (Oil pan)", nameRu: "Датчик темп.жидк.АКП (картер)" }),
       signal({ id: "x-3", nameEn: "Engine speed", nameRu: "Обороты" }),
+      signal({ id: "x-4", nameEn: "Crank angle sensor", nameRu: "датч. угла повор. коленч. вала" }),
     ];
-    expect(pickPreferredMonitorSignals(signals, 2)).toEqual(["x-2", "x-3"]);
+    expect(pickPreferredMonitorSignals(signals, 3)).toEqual(["x-2", "x-3", "x-4"]);
     expect(isTransmissionEcu("AT/CVT/A-MT/TC-SST", "AT/CVT")).toBe(true);
   });
 });
@@ -125,12 +126,42 @@ describe("module identity and service sets", () => {
 });
 
 describe("MUT-III AT8 / CVT temperature scales", () => {
-  it("uses A−50 for 8AT pipe and pan sensors", () => {
+  it("uses A−50 for 8AT pipe and pan sensors and avoids bogus 204 RPM slip from 0xFF", () => {
     const decoded = decodeMitsubishiAt2102And2104([0x00, 10, 0, 8, 0, 122, 108, 25, 51, 0x20, 0x00]);
     expect(decoded.atfTempPipeC).toBe(72);
     expect(decoded.atfTempPanC).toBe(58);
     expect(decoded.atfTempC).toBe(58);
     expect(decoded.atfFormula).toBe("a-50");
+
+    // Real 8AT (V8AWG) returns 0xFF at byte I (data2102[8]) -> never report 204 RPM;
+    // when 21 01 Engine speed and 21 03 Lock-up solenoid are available, compute real slip = Engine - Input.
+    const real8atParkNo2101 = decodeMitsubishiAt2102And2104(
+      [0x00, 4, 196, 0, 0, 111, 111, 0, 0xff, 0x01, 0x00],
+      [0x00, 0x00, 0x01],
+    );
+    expect(real8atParkNo2101.inputShaftRpm).toBe(610);
+    expect(real8atParkNo2101.torqueConverterSlipRpm).toBeNull();
+
+    const real8atCoast = decodeMitsubishiAt2102And2104(
+      [0x00, 14, 0, 12, 0, 120, 120, 25, 0xff, 0x20, 0x00],
+      [0x00, 0x00, 0x08],
+      [0x0b, 0xb8], // 3000 * 0.5 = 1500 rpm
+      [0, 0, 0x00, 0, 0, 0, 0, 0, 0, 0, 0x00], // lock-up 0%
+    );
+    expect(real8atCoast.engineRpm).toBe(1500);
+    expect(real8atCoast.inputShaftRpm).toBe(1792);
+    expect(real8atCoast.torqueConverterSlipRpm).toBe(-292);
+    expect(real8atCoast.lockUpDutyPct).toBe(0);
+
+    const real8atLocked = decodeMitsubishiAt2102And2104(
+      [0x00, 14, 0, 12, 0, 120, 120, 25, 0xff, 0x20, 0x00],
+      [0x00, 0x00, 0x08],
+      [0x0e, 0x00], // 3584 * 0.5 = 1792 rpm
+      [0, 0, 0xff, 0, 0, 0, 0, 0, 0, 0, 0x00], // lock-up 100%
+    );
+    expect(real8atLocked.torqueConverterSlipRpm).toBe(0);
+    expect(real8atLocked.lockUpDutyPct).toBe(100);
+    expect(real8atLocked.disengagedStateText).toContain("ГДТ заблокирован");
   });
 
   it("uses A−55 for Outlander CVT oil temperature on 21 03 and decodes speeds, manual gear 0xFF, and 21 0D / 21 0E degradation", () => {
