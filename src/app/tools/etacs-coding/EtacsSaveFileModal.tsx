@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { isIOSDevice } from "@/lib/platform/device";
 import {
   canUseSaveFilePicker,
   cleanCodingFileStem,
@@ -55,12 +56,9 @@ function EtacsSaveFileModalInner({
   );
   const baseStem =
     rawBaseStem.replace(/_(?:orig|mod)(?:_\d{8}(?:_\d{4})?)?$/i, "") || rawBaseStem;
-  const alreadyHasDate = /_\d{8}(?:_\d+)?$/.test(baseStem);
   const [stem, setStem] = useState(() =>
     request.mode === "original"
-      ? alreadyHasDate
-        ? `${baseStem}_orig`
-        : `${baseStem}_orig_${makeTimestampTag()}`
+      ? `${baseStem}_orig`
       : `${baseStem}_mod_${makeTimestampTag()}`,
   );
   const [busy, setBusy] = useState(false);
@@ -93,15 +91,17 @@ function EtacsSaveFileModalInner({
     inputRef.current?.focus();
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (overrideMethod?: SaveDialogMethod) => {
     setBusy(true);
     setError(null);
     try {
-      const preferredMethod: SaveDialogMethod = supportsPicker
-        ? "picker"
-        : request.canShareFiles
-          ? "share"
-          : "download";
+      const preferredMethod: SaveDialogMethod =
+        overrideMethod ??
+        (supportsPicker
+          ? "picker"
+          : isIOSDevice() && request.canShareFiles
+            ? "share"
+            : "download");
       await request.onConfirm(finalPreview, preferredMethod);
       onClose();
     } catch (err) {
@@ -242,18 +242,34 @@ function EtacsSaveFileModalInner({
             </div>
           ) : null}
 
-          <div className="pt-1">
+          <div className="space-y-2 pt-1">
             <button
               type="button"
               disabled={busy}
               onClick={() => void handleConfirm()}
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-900 bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-800 active:scale-[0.99] disabled:opacity-50"
             >
-              <span>{busy ? "Сохранение…" : "Сохранить как…"}</span>
+              <span>
+                {busy
+                  ? "Сохранение…"
+                  : isIOSDevice() && request.canShareFiles
+                    ? "Сохранить в Файлы…"
+                    : "Сохранить как…"}
+              </span>
               <span className="rounded bg-white/15 px-2 py-0.5 font-mono text-xs">
                 {ext}
               </span>
             </button>
+            {!isIOSDevice() && request.canShareFiles ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void handleConfirm("share")}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-100 active:scale-[0.99] disabled:opacity-50"
+              >
+                Поделиться / Отправить файл ({ext})
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
