@@ -159,6 +159,33 @@ export async function saveBytesWithFilePicker(
  * - `download`: прямое скачивание в браузере с указанным именем (без перехвата Share Sheet)
  * - `share`: системное меню «Поделиться / Сохранить в Файлы» (удобно на iOS / Android для выбора папки)
  */
+function uint8ToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function downloadCodingViaHttpAttachment(bytes: Uint8Array, finalName: string): boolean {
+  if (typeof window === "undefined" || typeof document === "undefined") return false;
+  if (bytes.length === 0 || bytes.length > 8_192) return false;
+  try {
+    const b64 = uint8ToBase64Url(bytes);
+    const url = `/api/etacs-coding/save?name=${encodeURIComponent(finalName)}&b64=${encodeURIComponent(b64)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = finalName;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function saveCodingBytesAs(
   bytes: Uint8Array,
   fileName: string,
@@ -187,6 +214,14 @@ export async function saveCodingBytesAs(
 
   if (method === "share") {
     await saveBlobToDevice(blob, finalName);
+    return finalName;
+  }
+
+  // On Android (where DownloadManager often ignores <a download> on blob: URLs and renames .kon/.cuf -> .bin),
+  // prefer an HTTP GET attachment download with explicit Content-Disposition: attachment; filename="...kon"
+  const isAndroid =
+    typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent || "");
+  if (isAndroid && downloadCodingViaHttpAttachment(copy, finalName)) {
     return finalName;
   }
 

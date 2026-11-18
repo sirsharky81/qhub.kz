@@ -6,6 +6,36 @@ import {
 } from "@/lib/etacs-coding/licensing";
 import { saveEtacsPayload } from "@/lib/etacs-coding/service";
 
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const b64 = url.searchParams.get("b64") || "";
+  const rawName = url.searchParams.get("name") || "coding.kon";
+  if (!b64 || b64.length > 16_384) {
+    return new Response("Invalid download payload", { status: 400 });
+  }
+  const normalizedB64 = b64.replace(/-/g, "+").replace(/_/g, "/");
+  const bytes = Buffer.from(normalizedB64, "base64");
+  const isCuf = /\.cuf(?=$|[^a-zA-Z])/i.test(rawName);
+  const ext = isCuf ? ".cuf" : ".kon";
+  const stem = rawName
+    .split(/[/\\]/)
+    .pop()!
+    .replace(/\.(kon|cuf|bin|txt).*$/i, "")
+    .replace(/[^\w.\-()+]+/g, "_")
+    .replace(/[\s._-]+$/g, "");
+  const safeName = `${stem || "coding"}${ext}`;
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${safeName}"`,
+      "Content-Length": String(bytes.byteLength),
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 export async function POST(request: Request) {
   const blocked = await etacsGuard(request);
   if (blocked) return blocked;

@@ -1,4 +1,4 @@
-const CACHE_NAME = "qhub-v17";
+const CACHE_NAME = "qhub-v18";
 const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
@@ -39,23 +39,18 @@ self.addEventListener("fetch", (event) => {
 
   const { pathname } = url;
 
-  if (pathname.startsWith("/api/")) {
-    event.respondWith(fetch(request));
-    return;
-  }
-
-  if (request.headers.get("RSC") === "1" || url.searchParams.has("_rsc")) {
-    event.respondWith(fetch(request));
-    return;
-  }
-
+  // Never intercept API routes, RSC payloads, Next.js static chunks, or tool pages in Service Worker:
+  // returning without event.respondWith() lets the browser handle navigation and downloads natively,
+  // avoiding Android Chrome ERR_FAILED when fetch(request) rejects on redirected or streaming routes.
   if (
+    pathname.startsWith("/api/") ||
+    request.headers.get("RSC") === "1" ||
+    url.searchParams.has("_rsc") ||
     pathname.startsWith("/apps/") ||
     pathname.startsWith("/tools/") ||
     pathname.startsWith("/qhub-ctrl-7k2m") ||
     pathname.startsWith("/_next/")
   ) {
-    event.respondWith(fetch(request));
     return;
   }
 
