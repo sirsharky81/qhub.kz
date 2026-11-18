@@ -13,22 +13,44 @@ function stamp(): string {
 }
 
 /**
- * Определяет тип файла кодировки (.kon или .cuf), даже если браузер или мессенджер
- * добавил суффикс после расширения (например, `file.kon (1)` или `file.kon_copy`).
+ * Определяет тип файла кодировки (.kon или .cuf) по имени файла или содержимому буфера
+ * (65 байт = 130 hex символов -> .cuf, 90 байт = 180 hex символов -> .kon),
+ * даже если Android WebView / In-App браузер переименовал скачанный файл в `.bin` или `.txt`.
  */
-export function detectCodingExtension(fileName: string): ".kon" | ".cuf" {
+export function detectCodingKindFromBytes(bytes?: Uint8Array | null): ".kon" | ".cuf" | null {
+  if (!bytes || bytes.length < 400) return null;
+  try {
+    const hasBom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+    const body = hasBom ? bytes.subarray(3) : bytes;
+    if (body.length < 400) return null;
+    const ascii = new TextDecoder().decode(body.subarray(200, Math.min(body.length, 420))).trim();
+    if (/^[0-9A-Fa-f]+$/.test(ascii) && ascii.length % 2 === 0) {
+      const byteLen = ascii.length / 2;
+      if (byteLen === 65) return ".cuf";
+      if (byteLen > 0) return ".kon";
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function detectCodingExtension(fileName: string, bytes?: Uint8Array | null): ".kon" | ".cuf" {
   if (/\.cuf(?=$|[^a-zA-Z])/i.test(fileName)) return ".cuf";
+  if (/\.kon(?=$|[^a-zA-Z])/i.test(fileName)) return ".kon";
+  const fromBytes = detectCodingKindFromBytes(bytes);
+  if (fromBytes) return fromBytes;
   return ".kon";
 }
 
 /**
- * Очищает базовое имя файла от расширения (.kon / .cuf) и любых хвостов,
- * которые могли оказаться после расширения (`8637C671.kon_copy` -> `8637C671`).
+ * Очищает базовое имя файла от расширения (.kon / .cuf / .bin / .txt) и любых хвостов,
+ * которые могли оказаться после расширения (`8637C671.kon_copy` или `8637C671_orig.bin` -> `8637C671`).
  */
 export function cleanCodingFileStem(fileName: string, fallback = "coding"): string {
   const baseName = (fileName.split(/[/\\]/).pop() ?? fileName).trim();
   const withoutExtAndTail = baseName
-    .replace(/\.(kon|cuf).*$/i, "")
+    .replace(/\.(kon|cuf|bin|txt).*$/i, "")
     .replace(/[._-](original|before-write|edited|mod|orig|copy)(?:[._-]*\d+)*$/i, "")
     .replace(/[\s._-]+$/g, "")
     .trim();
@@ -38,12 +60,13 @@ export function cleanCodingFileStem(fileName: string, fallback = "coding"): stri
 
 /**
  * Гарантирует, что имя файла заканчивается строго на `.kon` или `.cuf`
- * (никогда не ставит суффикс после расширения, но сохраняет пользовательские метки до расширения).
+ * (никогда не ставит суффикс после расширения, убирает ошибочное `.bin`/`.txt` от Android-загрузчика,
+ * но сохраняет пользовательские метки до расширения).
  */
 export function ensureCodingFileName(inputName: string, ext: ".kon" | ".cuf"): string {
   const baseName = (inputName.split(/[/\\]/).pop() ?? inputName).trim();
   const withoutExtAndTail = baseName
-    .replace(/\.(kon|cuf).*$/i, "")
+    .replace(/\.(kon|cuf|bin|txt).*$/i, "")
     .replace(/[\s._-]+$/g, "")
     .trim();
   const safe = withoutExtAndTail.replace(/[^\w.\-()+\u0400-\u04FF ]+/g, "_") || "coding";
@@ -89,7 +112,7 @@ export async function requestSaveFileHandle(
               ? "Файл Custom Coding Mitsubishi (.cuf)"
               : "Файл Variant Coding Mitsubishi (.kon)",
           accept: {
-            "application/octet-stream": [ext],
+            "text/plain": [ext],
           },
         },
       ],
@@ -141,10 +164,12 @@ export async function saveCodingBytesAs(
   fileName: string,
   method: "picker" | "download" | "share" = "download",
 ): Promise<string> {
-  const ext = detectCodingExtension(fileName);
+  const ext = detectCodingExtension(fileName, bytes);
   const finalName = ensureCodingFileName(fileName, ext);
   const copy = new Uint8Array(bytes);
-  const blob = new Blob([copy.buffer as ArrayBuffer], { type: "application/octet-stream" });
+  // IMPORTANT: Use text/plain instead of application/octet-stream so Android Chrome / WebView
+  // DownloadManager never replaces unknown extensions (.kon / .cuf) with .bin!
+  const blob = new Blob([copy.buffer as ArrayBuffer], { type: "text/plain;charset=utf-8" });
 
   if (method === "picker") {
     try {
@@ -200,7 +225,10 @@ export async function saveEtacsDumpBackup(dump: EtacsCodingDump): Promise<{
     vin,
     timestamp: now,
   });
-  await saveBlobToDevice(new Blob([Uint8Array.from(konBytes)]), names.kon);
+  await saveBlobToDevice(
+    new Blob([Uint8Array.from(konBytes)], { type: "text/plain;charset=utf-8" }),
+    names.kon,
+  );
 
   let cufName: string | null = null;
   if (dump.custom.length > 0) {
@@ -210,7 +238,10 @@ export async function saveEtacsDumpBackup(dump: EtacsCodingDump): Promise<{
       vin,
       timestamp: now,
     });
-    await saveBlobToDevice(new Blob([Uint8Array.from(cufBytes)]), names.cuf);
+    await saveBlobToDevice(
+      new Blob([Uint8Array.from(cufBytes)], { type: "text/plain;charset=utf-8" }),
+      names.cuf,
+    );
     cufName = names.cuf;
   }
 

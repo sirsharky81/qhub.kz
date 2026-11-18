@@ -14,6 +14,7 @@ import {
 } from "./api-client";
 import {
   detectCodingExtension,
+  detectCodingKindFromBytes,
   ensureCodingFileName,
   requestSaveFileHandle,
   saveCodingBytesAs,
@@ -122,7 +123,7 @@ export default function EtacsCodingClient() {
     try {
       if (typeof navigator === "undefined" || !navigator.canShare) return false;
       const probe = new File([new Uint8Array(4)], "probe.kon", {
-        type: "application/octet-stream",
+        type: "text/plain",
       });
       return navigator.canShare({ files: [probe] });
     } catch {
@@ -286,25 +287,30 @@ export default function EtacsCodingClient() {
       fileHandle: FileSystemFileHandle | null,
       opts?: { loadSource?: "disk" | "obd"; backupSavedAt?: string | null },
     ) => {
-      const detectedKind = extKind(file.name);
-      if (!detectedKind) {
-        setBanner("Нужен файл с расширением .kon или .cuf");
-        return;
-      }
-      if (side === "b" && slotA.view) {
-        const kA = extKind(slotA.displayName);
-        const kB = detectedKind;
-        if (kA && kB && kA !== kB) {
-          setBanner(
-            `Для сравнения нужен файл того же типа, что и A (.${kA} ↔ .${kA}), а не .kon и .cuf.`,
-          );
-          return;
-        }
-      }
       try {
         const originalBytes = new Uint8Array(await file.arrayBuffer());
-        // Если имя файла было испорчено суффиксом после расширения (например, file.kon_copy),
-        // нормализуем его, чтобы расширение стояло строго в конце.
+        let detectedKind = extKind(file.name);
+        if (!detectedKind) {
+          const fromBytes = detectCodingKindFromBytes(originalBytes);
+          if (fromBytes === ".cuf") detectedKind = "cuf";
+          else if (fromBytes === ".kon") detectedKind = "kon";
+        }
+        if (!detectedKind) {
+          setBanner("Нужен файл кодировки Mitsubishi (.kon или .cuf)");
+          return;
+        }
+        if (side === "b" && slotA.view) {
+          const kA = extKind(slotA.displayName) || (slotA.view.codingBytes === 65 ? "cuf" : "kon");
+          const kB = detectedKind;
+          if (kA && kB && kA !== kB) {
+            setBanner(
+              `Для сравнения нужен файл того же типа, что и A (.${kA} ↔ .${kA}), а не .kon и .cuf.`,
+            );
+            return;
+          }
+        }
+        // Если имя файла было испорчено суффиксом после расширения (например, file.kon_copy)
+        // или переименовано Android-браузером в .bin/.txt, нормализуем его, чтобы расширение .kon/.cuf стояло строго в конце.
         const cleanDisplayName = ensureCodingFileName(
           file.name,
           detectedKind === "cuf" ? ".cuf" : ".kon",
@@ -312,7 +318,7 @@ export default function EtacsCodingClient() {
         const normalizedFile =
           cleanDisplayName === file.name
             ? file
-            : new File([originalBytes], cleanDisplayName, { type: "application/octet-stream" });
+            : new File([originalBytes], cleanDisplayName, { type: "text/plain;charset=utf-8" });
         const view = await parseEtacsFile(normalizedFile);
         const labels = new Map<number, string>();
         for (const row of view.rows) {
@@ -363,7 +369,10 @@ export default function EtacsCodingClient() {
         types: [
           {
             description: "Файлы кодировки Mitsubishi (.kon / .cuf)",
-            accept: { "application/octet-stream": [".kon", ".cuf"] },
+            accept: {
+              "text/plain": [".kon", ".cuf", ".bin", ".txt"],
+              "application/octet-stream": [".kon", ".cuf", ".bin"],
+            },
           },
         ],
         multiple: false,
@@ -1061,7 +1070,7 @@ export default function EtacsCodingClient() {
                     ref={inputARef}
                     type="file"
                     hidden
-                    accept=".kon,.cuf"
+                    accept=".kon,.cuf,.bin,.txt,text/plain,application/octet-stream"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) void loadFile("a", file, null);
@@ -1072,7 +1081,7 @@ export default function EtacsCodingClient() {
                     ref={inputBRef}
                     type="file"
                     hidden
-                    accept=".kon,.cuf"
+                    accept=".kon,.cuf,.bin,.txt,text/plain,application/octet-stream"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) void loadFile("b", file, null);

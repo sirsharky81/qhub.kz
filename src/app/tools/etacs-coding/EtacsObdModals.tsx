@@ -87,7 +87,7 @@ export function EtacsObdReadModal({
     try {
       if (typeof navigator === "undefined" || !navigator.canShare) return false;
       const probe = new File([new Uint8Array(4)], "probe.kon", {
-        type: "application/octet-stream",
+        type: "text/plain",
       });
       return navigator.canShare({ files: [probe] });
     } catch {
@@ -136,10 +136,23 @@ export function EtacsObdReadModal({
       cleanTargetName,
       effectiveMethod,
     );
+    const nextKon = ext === ".kon" ? saved : konSavedName;
+    const nextCuf = ext === ".cuf" ? saved : cufSavedName;
     if (ext === ".kon") {
       setKonSavedName(saved);
     } else {
       setCufSavedName(saved);
+    }
+    // Автоматически загружаем считанные данные в слот A сразу после сохранения требуемых исходников,
+    // чтобы данные блока гарантированно отобразились в таблице редактора даже без лишнего нажатия.
+    const allRequiredSaved =
+      (!requiresKonBackup || Boolean(nextKon)) &&
+      (!requiresCufBackup || Boolean(nextCuf));
+    if (allRequiredSaved) {
+      await onCompleteToEditor(dump, scenario, {
+        kon: nextKon ?? undefined,
+        cuf: nextCuf ?? undefined,
+      });
     }
   };
 
@@ -252,14 +265,12 @@ export function EtacsObdReadModal({
                 2. Сохраните выгруженные исходники (режим «Сохранить как…»)
               </p>
               <p className="mt-1 leading-relaxed">
-                {scenario === "etacs_cuf"
-                  ? "Нажмите кнопку ниже — откроется окно «Сохранить как…» для задания имени и сохранения исходного файла .cuf. После этого файл сразу откроется в слоте A."
-                  : scenario === "engine_kon"
-                    ? "Нажмите кнопку ниже — откроется окно «Сохранить как…» для сохранения исходника .kon ЭБУ двигателя."
-                    : hasCufInDump
-                      ? "Сохраните оба исходных файла (.kon и .cuf) через окно «Сохранить как…»."
-                      : "Сохраните считанный исходник .kon через окно «Сохранить как…»."}
-              </p>
+                  { requiresKonBackup && requiresCufBackup && hasCufInDump
+                    ? "После сохранения обоих исходников (.kon и .cuf) файл .kon автоматически откроется в слоте A и отобразит все параметры блока."
+                    : scenario === "etacs_cuf"
+                      ? "После сохранения исходника .cuf он автоматически откроется в слоте A и отобразит все кастомные параметры."
+                      : "После сохранения исходника .kon он автоматически откроется в слоте A и отобразит все параметры блока."}
+                </p>
 
               <div className="mt-2.5 flex flex-col gap-2">
                 {requiresKonBackup ? (
@@ -319,8 +330,8 @@ export function EtacsObdReadModal({
                   }}
                 >
                   {scenario === "etacs_cuf"
-                    ? "Открыть .cuf в слоте A для редактирования"
-                    : "Открыть .kon в слоте A для редактирования"}
+                    ? "Открыть .cuf в слоте A и показать данные"
+                    : "Открыть .kon в слоте A и показать данные"}
                 </PickerButton>
               </div>
             </div>

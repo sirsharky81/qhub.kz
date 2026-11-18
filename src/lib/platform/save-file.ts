@@ -18,24 +18,59 @@ function sanitizeFilename(filename: string): string {
   return base.replace(/[^\w.\-()+\u0400-\u04FF ]+/g, "_") || "file";
 }
 
+function mimeTypeForFilename(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".kon") || lower.endsWith(".cuf") || lower.endsWith(".txt") || lower.endsWith(".log")) {
+    return "text/plain;charset=utf-8";
+  }
+  if (lower.endsWith(".json")) {
+    return "application/json;charset=utf-8";
+  }
+  if (lower.endsWith(".csv")) {
+    return "text/csv;charset=utf-8";
+  }
+  if (lower.endsWith(".pdf")) {
+    return "application/pdf";
+  }
+  if (lower.endsWith(".zip")) {
+    return "application/zip";
+  }
+  return "application/octet-stream";
+}
+
+function normalizeBlobForDownload(blob: Blob, filename: string): Blob {
+  const currentType = (blob.type || "").toLowerCase();
+  if (currentType && currentType !== "application/octet-stream") {
+    return blob;
+  }
+  const inferred = mimeTypeForFilename(filename);
+  if (inferred === "application/octet-stream") {
+    return blob;
+  }
+  return new Blob([blob], { type: inferred });
+}
+
 function downloadViaAnchor(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
+  const safeName = sanitizeFilename(filename);
+  const normalizedBlob = normalizeBlobForDownload(blob, safeName);
+  const url = URL.createObjectURL(normalizedBlob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = sanitizeFilename(filename);
+  a.download = safeName;
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
   a.remove();
   // iOS Safari shows "Load Failed" if the blob URL is revoked too quickly.
-  window.setTimeout(() => URL.revokeObjectURL(url), isIOSDevice() ? 60_000 : 2_000);
+  window.setTimeout(() => URL.revokeObjectURL(url), isIOSDevice() ? 60_000 : 10_000);
 }
 
 async function shareFile(blob: Blob, filename: string): Promise<boolean> {
   if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
   const safeName = sanitizeFilename(filename);
-  const type = blob.type || "application/octet-stream";
-  const file = new File([blob], safeName, { type });
+  const normalizedBlob = normalizeBlobForDownload(blob, safeName);
+  const type = normalizedBlob.type || "application/octet-stream";
+  const file = new File([normalizedBlob], safeName, { type });
 
   const canShareFiles =
     typeof navigator.canShare === "function" ? navigator.canShare({ files: [file] }) : isIOSDevice();

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  detectCodingKindFromBytes,
+} from "@/app/tools/etacs-coding/etacs-backup";
+import {
+  formatMutCodingContainer,
+} from "@/lib/obd/mitsubishi-etacs";
+import {
   backupFileName,
   cleanCodingFileStem,
   detectCodingExtension,
@@ -30,6 +36,34 @@ describe("etacs-backup filename helpers", () => {
     expect(ensureCodingFileName("8637C671_mod_drl_off.kon", ".kon")).toBe(
       "8637C671_mod_drl_off.kon",
     );
+    // Strips Android DownloadManager .bin / .txt replacement and restores .kon / .cuf
+    expect(ensureCodingFileName("8637C671_MMEMCY1X2MH002100_20261117_1_orig.bin", ".kon")).toBe(
+      "8637C671_MMEMCY1X2MH002100_20261117_1_orig.kon",
+    );
+    expect(ensureCodingFileName("8637C671_MMEMCY1X2MH002100_20261117_1_orig_1.bin", ".cuf")).toBe(
+      "8637C671_MMEMCY1X2MH002100_20261117_1_orig_1.cuf",
+    );
+  });
+
+  it("detects .kon vs .cuf from file bytes even when Android renamed the file to .bin", () => {
+    const konContainer = formatMutCodingContainer({
+      payload: new Uint8Array(90).fill(0x28),
+      partNumber: "8637C671",
+      vin: "MMEMCY1X2MH002100",
+    });
+    const cufContainer = formatMutCodingContainer({
+      payload: new Uint8Array(65).fill(0xff),
+      partNumber: "8637C671",
+      vin: "MMEMCY1X2MH002100",
+    });
+    expect(detectCodingKindFromBytes(konContainer)).toBe(".kon");
+    expect(detectCodingKindFromBytes(cufContainer)).toBe(".cuf");
+    expect(
+      detectCodingExtension("8637C671_MMEMCY1X2MH002100_20261117_1_orig.bin", konContainer),
+    ).toBe(".kon");
+    expect(
+      detectCodingExtension("8637C671_MMEMCY1X2MH002100_20261117_1_orig_1.bin", cufContainer),
+    ).toBe(".cuf");
   });
 
   it("detects .kon and .cuf even when OS/browser added a suffix after the extension", () => {
