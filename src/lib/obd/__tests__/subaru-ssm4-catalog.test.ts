@@ -50,13 +50,16 @@ describe("subaru-ssm4-catalog", () => {
     expect(groups.has("Chassis")).toBe(true);
     expect(groups.has("Body")).toBe(true);
 
-    // Safety-critical modules (ABS 7B0, EPS 746, EyeSight 787, SRS 780) must disallow clearing DTCs
+    // Safety-critical modules stay flagged, but DTC clear is allowed (UDS 14 does not wipe calibrations)
     for (const tx of ["7B0", "746", "787", "780"]) {
       const ecu = SSM4_ECUS.find((e) => e.txHex === tx);
       expect(ecu).toBeDefined();
       expect(ecu?.safetyCritical).toBe(true);
-      expect(ecu?.canSafeClear).toBe(false);
+      expect(ecu?.canSafeClear).toBe(true);
     }
+    const ccu = SSM4_FULL_SYSTEMS.find((s) => s.id === "sys-ccu");
+    expect(ccu?.txHex).toBe("7D5");
+    expect(ccu?.rxHex).toBe("7DD");
   });
 
   it("matches Subaru vehicles by VIN prefix and chassis code", () => {

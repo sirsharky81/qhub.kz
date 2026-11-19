@@ -187,7 +187,7 @@ export function SubaruAllFaultsView({
                 onClick={() => setConfirmClearAll(true)}
                 className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-900 hover:bg-red-100 disabled:opacity-40"
               >
-                Очистить безопасные ({counts.safeClearableFaulted})
+                Очистить DTC ({counts.safeClearableFaulted})
               </button>
             )}
             {counts.scanned > 0 && (
@@ -303,10 +303,10 @@ export function SubaruAllFaultsView({
       {confirmClearAll && (
         <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs text-red-950 space-y-2">
           <div className="font-bold">
-            Очистить ошибки во всех безопасных блоках ({counts.safeClearableFaulted})?
+            Очистить ошибки во всех блоках с DTC ({counts.safeClearableFaulted})?
           </div>
           <p className="text-[11px] text-red-800">
-            Блоки EPS и EyeSight пропущены автоматически для защиты калибровок. После очистки будет выполнено повторное чтение.
+            Будут очищены DTC во всех ответивших блоках, включая EyeSight / EPS / SAS. После очистки будет выполнено повторное чтение.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -318,7 +318,7 @@ export function SubaruAllFaultsView({
               }}
               className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
             >
-              Да, очистить все безопасные
+              Да, очистить все
             </button>
             <button
               type="button"

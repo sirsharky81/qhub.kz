@@ -159,7 +159,7 @@ interface RawDb {
 }
 
 const UNSAFE_NAME = /SAS|STEERING ANGLE|EPS|POWER STEERING|EPB/i;
-const FORBIDDEN_CLEAR_TX = new Set(["746", "787", "622", "796", "7E2", "7E5", "610"]);
+const FORBIDDEN_CLEAR_TX = new Set(["622", "796", "610"]);
 
 let cached: RawDb | null = null;
 
