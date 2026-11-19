@@ -262,7 +262,7 @@ export const apps: App[] = [
     href: "/tools/obd-diag",
     tags: ["tools"],
     icon: "/tools/obd-diag/icon-192.png",
-    color: "from-emerald-500/10 to-slate-600/5",
+    color: "from-blue-700/10 to-slate-600/5",
     author: "QHub",
     authorType: "qhub",
     sortOrder: 3,

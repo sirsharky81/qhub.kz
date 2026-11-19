@@ -865,7 +865,7 @@ export default function SubaruCodingClient() {
             Subaru Coding & Immobilizer
           </h1>
           <p className="text-sm text-gray-600 leading-relaxed">
-            Перевод показаний Subaru с °F на °C и иммобилайзер (чтение ключей, прописка ключей и регистрация автозапуска RES) доступны после входа по номеру телефона.
+            Мастер входит по номеру телефона. Клиент с кодом комнаты подключает свой vLinker и видит только статус работы.
           </p>
           <button
             type="button"
@@ -874,6 +874,12 @@ export default function SubaruCodingClient() {
           >
             Войти по номеру телефона
           </button>
+          <Link
+            href="/tools/subaru-coding/room"
+            className="flex w-full items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-900 transition hover:bg-gray-50"
+          >
+            Войти в комнату
+          </Link>
           <div className="pt-1 flex justify-center gap-3 text-xs text-gray-500">
             <Link href="/tools/obd-diag" className="underline hover:text-gray-800">
               ← В Subaru Diagnostics

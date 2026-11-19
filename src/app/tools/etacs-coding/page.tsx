@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   },
 };
 
-const ICON = "/tools/obd-diag/icon-192.png";
+const ICON = "/tools/etacs-coding/icon-192.png";
 
 export default function EtacsCodingPage() {
   return (
