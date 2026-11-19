@@ -44,6 +44,13 @@ export function AppCard({
         ? "Остановлено"
         : "На паузе";
 
+  const fullBleedToolIcon =
+    app.id === "document-scanner" ||
+    app.id === "obd-diag" ||
+    app.id === "subaru-coding" ||
+    app.id === "mitsubishi-diag" ||
+    app.id === "etacs-coding";
+
   const cardClass = `app-card group relative rounded-2xl border border-gray-200 p-4 sm:p-5 flex flex-col gap-2 overflow-hidden shadow-sm ${APP_CARD_HEIGHT} ${
     app.comingSoon
       ? "opacity-50 cursor-default app-card-standard"
@@ -128,23 +135,33 @@ export function AppCard({
       ) : (
         <div className="relative z-10 flex flex-col flex-1 min-h-0 gap-2">
           <div className="flex items-center gap-2.5 shrink-0">
-            <div className={`${iconBox} rounded-[22%] shadow-[0_1px_3px_rgba(0,0,0,0.08)] relative`} aria-hidden>
+            <div
+              className={
+                fullBleedToolIcon
+                  ? "relative h-10 w-10 shrink-0 overflow-hidden rounded-[22%] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                  : `${iconBox} relative rounded-[22%] shadow-[0_1px_3px_rgba(0,0,0,0.08)]`
+              }
+              aria-hidden
+            >
               {app.icon.startsWith("/") ? (
-                <Image
-                  src={app.icon}
-                  alt=""
-                  width={40}
-                  height={40}
-                  className={
-                    app.id === "document-scanner" ||
-                    app.id === "obd-diag" ||
-                    app.id === "subaru-coding" ||
-                    app.id === "mitsubishi-diag" ||
-                    app.id === "etacs-coding"
-                      ? "w-full h-full object-cover"
-                      : "w-7 h-7 object-contain"
-                  }
-                />
+                fullBleedToolIcon ? (
+                  <img
+                    src={app.icon}
+                    alt=""
+                    width={40}
+                    height={40}
+                    className="h-full w-full object-cover"
+                    decoding="async"
+                  />
+                ) : (
+                  <Image
+                    src={app.icon}
+                    alt=""
+                    width={40}
+                    height={40}
+                    className="h-7 w-7 object-contain"
+                  />
+                )
               ) : (
                 <span className="text-2xl leading-none">{app.icon}</span>
               )}
