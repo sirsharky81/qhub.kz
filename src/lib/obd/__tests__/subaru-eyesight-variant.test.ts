@@ -147,6 +147,36 @@ describe("subaru-eyesight-variant (ADA-031 / ADA-032)", () => {
     expect(elm.sent.filter((s) => s.startsWith("2E"))).toEqual(["2E350230"]);
   });
 
+  it("blocks EyeSight writes when live schema conflicts with the Applied Model catalog schema", async () => {
+    const elmRegionOnly = scriptedElm({});
+    const regionOnly = await writeSubaruEyesightVariantByApplied(
+      elmRegionOnly,
+      "BTAEYR8",
+      "C0QF",
+      undefined,
+      {
+        writeMode: "region-only",
+        detectedSchema: "309x",
+      },
+    );
+
+    expect(regionOnly.success).toBe(false);
+    expect(regionOnly.targetCount).toBe(0);
+    expect(elmRegionOnly.sent).toHaveLength(0);
+    expect(regionOnly.steps.at(-1)).toContain("считанный блок использует схему 309x");
+
+    const elmFull = scriptedElm({});
+    const full = await writeSubaruEyesightVariantByApplied(elmFull, "BTACYR8", "C0QF", undefined, {
+      writeMode: "full-yyw",
+      detectedSchema: "35xx",
+    });
+
+    expect(full.success).toBe(false);
+    expect(full.targetCount).toBe(0);
+    expect(elmFull.sent).toHaveLength(0);
+    expect(full.steps.at(-1)).toContain("Applied Model BTACYR8");
+  });
+
   it("builds, serializes, diffs, and restores 1:1 original EyeSight backup (even for U45L)", async () => {
     const usBytes = getSsm4YywWriteDids("BTAEYR8", "U45D")!;
     const backup = buildSubaruEyesightBackup(
