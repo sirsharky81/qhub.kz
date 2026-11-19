@@ -25,6 +25,11 @@ import {
   type TpmsModuleReport,
 } from "./mitsubishi-modules";
 import type { MitsubishiServiceExecutionResult } from "./mitsubishi-service-procedures";
+import {
+  executeCatalogMutStep,
+  type MitsubishiCatalogMutExecutionResult,
+} from "./mitsubishi-mut-catalog-executor";
+import type { CatalogMutStep } from "@/lib/etacs-coding/diag-catalog";
 import { parseMitsubishiModuleIdentity } from "./mitsubishi-mut-monitor";
 import {
   readMitsubishiTpmsDidIds,
@@ -229,6 +234,8 @@ export interface ModuleDtcReport {
   diagVersion?: string | null;
   dtcs: ModuleDtcItem[];
   rawStatus: string;
+  /** MUT DiagSystem `sysKey` when the scan target came from the vehicle catalog. */
+  catalogSysKey?: number;
 }
 
 export interface ModuleDtcTarget {
@@ -239,6 +246,7 @@ export interface ModuleDtcTarget {
   canSafeClear: boolean;
   mode03Fallback?: boolean;
   mitsubishiKwp?: boolean;
+  catalogSysKey?: number;
 }
 
 const FREEZE_PIDS = ["010C", "010D", "0104", "0105", "0111", "0106"];
@@ -1527,6 +1535,20 @@ export class ObdBleSession {
     return executeMitsubishiServiceProcedure(this.elm!, options);
   }
 
+  /** Executes one Actuator / Special function step from the MUT `mut-diag-db.json` profile. */
+  async runMitsubishiCatalogMutStep(options: {
+    txCanId: string;
+    rxCanId: string;
+    step: CatalogMutStep;
+    uploadHex?: string;
+  }): Promise<MitsubishiCatalogMutExecutionResult> {
+    this.requireAdapter();
+    await this.waitLeave();
+    if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед выполнением функции MUT");
+    await this.ensureUdsProfile("6");
+    return executeCatalogMutStep(this.elm!, options);
+  }
+
   /**
    * Reads DTCs across all major vehicle ECUs (OBD Mode 03 on 7E0/7E1 + UDS Service 19 02 FF on SGP/Mitsubishi modules).
    * Always returns every module to default session `10 01` afterwards so warning lamps extinguish.
@@ -1697,13 +1719,37 @@ export class ObdBleSession {
         safetyCritical: false,
         canSafeClear: true,
       },
+      {
+        tx: 0x790,
+        rx: 0x532,
+        title: "Mitsubishi Круговой обзор (790 → 532)",
+        safetyCritical: true,
+        canSafeClear: true,
+        mitsubishiKwp: true,
+      },
+      {
+        tx: 0x610,
+        rx: 0x611,
+        title: "Mitsubishi Электростояночный тормоз EPB (610 → 611)",
+        safetyCritical: true,
+        canSafeClear: false,
+        mitsubishiKwp: true,
+      },
+      {
+        tx: 0x7b6,
+        rx: 0x7b7,
+        title: "Mitsubishi AWC / 4WD (7B6 → 7B7)",
+        safetyCritical: false,
+        canSafeClear: true,
+        mitsubishiKwp: true,
+      },
     ].filter((target) => {
       if (!onlyBrand) return true;
       const subaruTx = new Set([
         0x7e0, 0x7e1, 0x7a3, 0x7a2, 0x783, 0x752, 0x7c4, 0x786, 0x746, 0x787, 0x7b0, 0x780,
       ]);
       const mitsubishiTx = new Set([
-        0x7e0, 0x7e1, 0x620, 0x6a0, 0x773, 0x600, 0x622, 0x784, 0x6e0, 0x688,
+        0x7e0, 0x7e1, 0x620, 0x6a0, 0x773, 0x600, 0x622, 0x784, 0x6e0, 0x688, 0x790, 0x610, 0x7b6,
       ]);
       return (onlyBrand === "subaru" ? subaruTx : mitsubishiTx).has(target.tx);
     });
@@ -2017,6 +2063,7 @@ export class ObdBleSession {
           diagVersion,
           dtcs,
           rawStatus,
+          ...(target.catalogSysKey != null ? { catalogSysKey: target.catalogSysKey } : {}),
         });
         onProgress?.(`Проверен ${visibleTitle}`, [...out]);
       }

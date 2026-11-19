@@ -3,6 +3,7 @@ import {
   describeCatalogDtcs,
   listCatalogVehicleMatches,
   matchCatalogVehicle,
+  mutFunctionsForEcu,
   projectEcus,
   resolveCatalogVehicle,
   signalsForEcu,
@@ -115,8 +116,32 @@ const db = {
               reqMsg: "SHOULD_NOT_LEAK",
             },
           ],
-          actuatorTests: [{ reqMsg: "SECRET" }],
-          specialFunctions: [{ reqMsg: "SECRET" }],
+          functions: [{ fid: 48, nameEn: "Actuator test", nameRu: "Тест исполнителей" }],
+          actuatorTests: [
+            {
+              itemNo: 1,
+              nameEn: "Fan",
+              nameRu: "Вентилятор",
+              udsServiceId: "0x30",
+              localId: "0x07",
+              reqMsg: "01",
+            },
+          ],
+          specialFunctions: [
+            {
+              fid: 52008,
+              items: [
+                {
+                  itemNo: 1,
+                  nameEn: "Calibration",
+                  nameRu: "Калибровка",
+                  udsServiceId: "0x31",
+                  localId: "0x01",
+                  reqMsg: "00",
+                },
+              ],
+            },
+          ],
         },
       },
     },
@@ -282,6 +307,17 @@ describe("catalog resolve", () => {
     useDiagDb(db);
     expect(matchCatalogVehicle({ vin: "MMEMCY1XXNH009999" })?.vkey).toBe("1108740010");
     expect(listCatalogVehicleMatches({ vin: "MMEMCY1XXNH009999" })[0]?.vkey).toBe("1108740010");
+  });
+});
+
+describe("catalog mut functions", () => {
+  it("exposes actuator and special steps with req payloads", () => {
+    useDiagDb(db);
+    const list = mutFunctionsForEcu("1108740010", 1);
+    expect(list?.skey).toBe("220015009");
+    expect(list?.actuatorTests[0]?.reqMsg).toBe("01");
+    expect(list?.specialFunctions[0]?.fid).toBe(52008);
+    expect(list?.specialFunctions[0]?.steps[0]?.udsServiceId).toBe(0x31);
   });
 });
 

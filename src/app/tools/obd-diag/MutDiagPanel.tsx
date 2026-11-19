@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LiveMetricCards } from "./LiveMetricCards";
-import type { CatalogEcu, CatalogSignal, CatalogVehicle, CatalogVehicleSummary } from "@/lib/etacs-coding/diag-catalog";
+import type {
+  CatalogEcu,
+  CatalogMutFunctionGroup,
+  CatalogMutStep,
+  CatalogSignal,
+  CatalogVehicle,
+  CatalogVehicleSummary,
+} from "@/lib/etacs-coding/diag-catalog";
 import { asciiFromKwpPayload, decodeCatalogSignal, extractMitsubishiVin } from "@/lib/obd/mut-live";
 import {
   buildMitsubishiVisitReport,
@@ -22,6 +29,7 @@ import {
   type ModuleDtcTarget,
   type ObdConnectionPhase,
 } from "@/lib/obd/obd-session";
+import type { MitsubishiCatalogMutExecutionResult } from "@/lib/obd/mitsubishi-mut-catalog-executor";
 import type { MitsubishiMeterReport, MitsubishiTcmTelemetry } from "@/lib/obd/mitsubishi-modules";
 import {
   getMitsubishiProceduresForCatalogEcu,
@@ -73,6 +81,14 @@ function csvCell(value: string): string {
 
 function addressKey(tx: string, rx: string): string {
   return `${tx.toUpperCase()}-${rx.toUpperCase()}`;
+}
+
+function ecuReportKey(ecu: CatalogEcu): string {
+  return String(ecu.sysKey);
+}
+
+function reportStorageKey(report: ModuleDtcReport): string {
+  return report.catalogSysKey != null ? String(report.catalogSysKey) : addressKey(report.txHex, report.rxHex);
 }
 
 async function readDiagVin(session: ObdBleSession, hint?: string | null): Promise<string | null> {
@@ -134,6 +150,10 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   const [tcmLive, setTcmLive] = useState(false);
   const [selectedSkey, setSelectedSkey] = useState<string | null>(null);
   const [serviceResult, setServiceResult] = useState<MitsubishiServiceExecutionResult | null>(null);
+  const [mutActuators, setMutActuators] = useState<CatalogMutStep[]>([]);
+  const [mutSpecial, setMutSpecial] = useState<CatalogMutFunctionGroup[]>([]);
+  const [mutWorkspace, setMutWorkspace] = useState<"live" | "actuator" | "special">("live");
+  const [mutResult, setMutResult] = useState<MitsubishiCatalogMutExecutionResult | null>(null);
 
   const catalogStarted = useRef(false);
   const vinAutoTried = useRef(false);
@@ -269,12 +289,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     stopScan.current = false;
     setBusy(true);
     setError(null);
-    const unique = new Map<string, CatalogEcu>();
-    for (const ecu of vehicle.ecus) {
-      const key = addressKey(ecu.txCanId, ecu.rxCanId);
-      if (!unique.has(key)) unique.set(key, ecu);
-    }
-    const targets: ModuleDtcTarget[] = [...unique.values()].map((ecu) => ({
+    const targets: ModuleDtcTarget[] = vehicle.ecus.map((ecu) => ({
       tx: Number.parseInt(ecu.txCanId, 16),
       rx: Number.parseInt(ecu.rxCanId, 16),
       title: ecu.nameRu || ecu.nameEn,
@@ -282,6 +297,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       canSafeClear: ecu.canSafeClear,
       mode03Fallback: ecu.txCanId === "7E0" || ecu.txCanId === "7E1",
       mitsubishiKwp: true,
+      catalogSysKey: ecu.sysKey,
     }));
     try {
       const found = await session.scanCatalogModules(
@@ -291,14 +307,14 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
           setStatus(line);
           setReports((prev) => {
             const next = { ...prev };
-            for (const report of partial) next[addressKey(report.txHex, report.rxHex)] = report;
+            for (const report of partial) next[reportStorageKey(report)] = report;
             return next;
           });
         },
         () => stopScan.current,
       );
       const nextReports: Record<string, ModuleDtcReport> = {};
-      for (const report of found) nextReports[addressKey(report.txHex, report.rxHex)] = report;
+      for (const report of found) nextReports[reportStorageKey(report)] = report;
       setReports(nextReports);
       await describe(vehicle.ecus, nextReports);
       setStatus(`Опрошено блоков: ${found.length}`);
@@ -312,7 +328,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
   const describe = async (ecus: CatalogEcu[], nextReports: Record<string, ModuleDtcReport>) => {
     const byMaster = new Map<string, Set<string>>();
     for (const ecu of ecus) {
-      const report = nextReports[addressKey(ecu.txCanId, ecu.rxCanId)];
+      const report = nextReports[ecuReportKey(ecu)];
       if (!report || report.dtcs.length === 0) continue;
       const bucket = byMaster.get(ecu.dtcMasterId) ?? new Set<string>();
       for (const dtc of report.dtcs) bucket.add(dtc.code);
@@ -347,13 +363,14 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       canSafeClear: ecu.canSafeClear,
       mode03Fallback: ecu.txCanId === "7E0" || ecu.txCanId === "7E1",
       mitsubishiKwp: true,
+      catalogSysKey: ecu.sysKey,
     };
     try {
       setStatus(`Опрос «${ecu.nameRu}»…`);
       const found = await session.scanCatalogModules("6", [target]);
       const report = found[0];
       if (report) {
-        const key = addressKey(report.txHex, report.rxHex);
+        const key = ecuReportKey(ecu);
         const merged = { ...reports, [key]: report };
         setReports(merged);
         if (vehicle) await describe(vehicle.ecus, merged);
@@ -378,7 +395,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     setError(null);
     try {
       const message = await session.clearModuleDtcsSafe("6", ecu.txCanId, ecu.rxCanId);
-      const key = addressKey(ecu.txCanId, ecu.rxCanId);
+      const key = ecuReportKey(ecu);
       setReports((prev) => {
         const existing = prev[key];
         if (!existing) return prev;
@@ -399,8 +416,9 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     }
   };
 
-  const readModuleIdentity = async (tx: string, rx: string) => {
-    const cachedReport = reports[addressKey(tx, rx)];
+  const readModuleIdentity = async (ecu: CatalogEcu) => {
+    const { txCanId: tx, rxCanId: rx } = ecu;
+    const cachedReport = reports[ecuReportKey(ecu)];
     if (cachedReport?.partNumber && cachedReport?.diagVersion) {
       return { partNumber: cachedReport.partNumber, diagVersion: cachedReport.diagVersion };
     }
@@ -448,13 +466,17 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     setSamples([]);
     setLiveNow({});
     setSignals([]);
+    setMutActuators([]);
+    setMutSpecial([]);
+    setMutWorkspace("live");
+    setMutResult(null);
     if (!vehicle) return;
     try {
       let diagVersion: string | null = null;
       let partNumber: string | null = null;
       if (phase === "vehicle") {
         setStatus("Читаю парт-номер и версию блока…");
-        const identity = await readModuleIdentity(ecu.txCanId, ecu.rxCanId);
+        const identity = await readModuleIdentity(ecu);
         diagVersion = identity.diagVersion;
         partNumber = identity.partNumber;
       }
@@ -464,17 +486,31 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       });
       if (diagVersion) query.set("diagVersion", diagVersion);
       if (partNumber) query.set("partNumber", partNumber);
-      const response = await fetch(`/api/etacs-coding/diag/signals?${query.toString()}`);
-      const body = (await response.json()) as {
+      const [signalsResponse, mutResponse] = await Promise.all([
+        fetch(`/api/etacs-coding/diag/signals?${query.toString()}`),
+        fetch(`/api/etacs-coding/diag/mut-functions?${query.toString()}`),
+      ]);
+      const body = (await signalsResponse.json()) as {
         error?: string;
         skey?: string;
         signals?: CatalogSignal[];
         profileNoteRu?: string;
       };
-      if (!response.ok) throw new Error(body.error || "Список параметров недоступен");
+      if (!signalsResponse.ok) throw new Error(body.error || "Список параметров недоступен");
       const list = body.signals ?? [];
       setSelectedSkey(body.skey ?? null);
       setSignals(list);
+      if (mutResponse.ok) {
+        const mutBody = (await mutResponse.json()) as {
+          actuatorTests?: CatalogMutStep[];
+          specialFunctions?: CatalogMutFunctionGroup[];
+        };
+        setMutActuators(mutBody.actuatorTests ?? []);
+        setMutSpecial(mutBody.specialFunctions ?? []);
+      } else {
+        setMutActuators([]);
+        setMutSpecial([]);
+      }
       const serviceIds = serviceSet ? pickServiceSetSignals(list, serviceSet, MAX_LIVE) : [];
       setPicked(serviceIds.length > 0 ? serviceIds : pickPreferredMonitorSignals(list, MAX_LIVE));
       setStatus(null);
@@ -493,7 +529,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     let partNumber: string | null = null;
     if (phase === "vehicle") {
       setStatus("Читаю парт-номер и версию блока…");
-      const identity = await readModuleIdentity(ecu.txCanId, ecu.rxCanId);
+      const identity = await readModuleIdentity(ecu);
       diagVersion = identity.diagVersion;
       partNumber = identity.partNumber;
     }
@@ -508,6 +544,49 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
     if (!response.ok) throw new Error(body.error || "Не удалось определить блок");
     if (!body.skey) throw new Error("Каталог MMC не нашёл этот блок.");
     return body.skey;
+  };
+
+  const runCatalogMutStep = async (step: CatalogMutStep, ecu: CatalogEcu, uploadHex?: string) => {
+    if (phase !== "vehicle" || busy) return;
+    if (liveRunning.current) {
+      stopLive.current = true;
+      setLive(false);
+    }
+    let binaryHex = uploadHex;
+    if (step.expectsBinaryUpload && !binaryHex) {
+      const file = await new Promise<File | null>((resolve) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".dat,.bin,.snapshot,.hex";
+        input.onchange = () => resolve(input.files?.[0] ?? null);
+        input.click();
+      });
+      if (!file) return;
+      const buffer = await file.arrayBuffer();
+      binaryHex = [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    const confirmed = window.confirm(
+      `${step.nameRu}\n\nБлок: ${ecu.nameRu}\nАдрес: ${ecu.txCanId}→${ecu.rxCanId}\n\nВыполнить шаг MUT (Actuator / Special)?`,
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    setMutResult(null);
+    try {
+      setStatus(`MUT: ${step.nameRu}…`);
+      const res = await session.runMitsubishiCatalogMutStep({
+        txCanId: ecu.txCanId,
+        rxCanId: ecu.rxCanId,
+        step,
+        uploadHex: binaryHex,
+      });
+      setMutResult(res);
+      setStatus(res.success ? `Выполнено: ${step.nameRu}` : `Отказ: ${step.nameRu}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Функция MUT не выполнена");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const runServiceProcedure = async (proc: MitsubishiServiceProcedure, ecu: CatalogEcu) => {
@@ -708,7 +787,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       vin,
       vehicleName: vehicle ? vehicle.nameRu : null,
       modules: (vehicle?.ecus ?? []).map((ecu) => {
-        const report = reports[addressKey(ecu.txCanId, ecu.rxCanId)];
+        const report = reports[ecuReportKey(ecu)];
         const master = texts[ecu.dtcMasterId] ?? {};
         return {
           nameRu: ecu.nameRu,
@@ -814,9 +893,37 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               Сброс
             </button>
           </div>
+          {mutActuators.length > 0 || mutSpecial.length > 0 ? (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {(
+                [
+                  ["live", `Data List (${signals.length})`],
+                  ...(mutActuators.length > 0
+                    ? ([["actuator", `Actuator (${mutActuators.length})`]] as const)
+                    : []),
+                  ...(mutSpecial.length > 0
+                    ? ([["special", `Special (${mutSpecial.reduce((n, g) => n + g.steps.length, 0)})`]] as const)
+                    : []),
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setMutWorkspace(id)}
+                  className={`rounded-lg px-2.5 py-1 text-[10px] font-medium ${
+                    mutWorkspace === id
+                      ? "border border-gray-900 bg-gray-900 text-white"
+                      : "border border-gray-300 text-gray-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
-        {pickedSignals.length > 0 ? (
+        {mutWorkspace === "live" && pickedSignals.length > 0 ? (
           <LiveMetricCards
             items={pickedSignals.map((signal) => {
               void liveMinMaxTick;
@@ -833,10 +940,11 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
               };
             })}
           />
-        ) : (
+        ) : mutWorkspace === "live" ? (
           <p className="text-xs text-gray-500">Отметьте параметры в «Настройка» ниже.</p>
-        )}
+        ) : null}
 
+        {mutWorkspace === "live" ? (
         <details className="rounded-lg border border-gray-200 bg-gray-50 p-2">
           <summary className="cursor-pointer text-xs font-semibold text-gray-700">
             Настройка параметров ({picked.length}/{MAX_LIVE})
@@ -869,8 +977,80 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
             CSV ({samples.length})
           </button>
         </details>
+        ) : null}
 
-        {availableProcedures.length > 0 ? (
+        {mutWorkspace === "actuator" ? (
+          <div className="space-y-2">
+            <p className="text-[11px] text-gray-600">
+              Actuator test из профиля MUT (SKEY {selectedSkey ?? "—"}). Для исполнителей удерживается ~2,5 с.
+            </p>
+            <ul className="max-h-80 space-y-2 overflow-y-auto">
+              {mutActuators.map((step) => (
+                <li key={step.id} className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 text-xs font-medium text-gray-900">{step.nameRu || step.nameEn}</div>
+                    <button
+                      type="button"
+                      disabled={phase !== "vehicle" || busy}
+                      onClick={() => void runCatalogMutStep(step, selected)}
+                      className="shrink-0 rounded-lg border border-gray-900 bg-gray-900 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
+                    >
+                      Пуск
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {mutWorkspace === "special" ? (
+          <div className="max-h-96 space-y-3 overflow-y-auto">
+            {mutSpecial.map((group) => (
+              <div key={group.fid} className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+                <h4 className="text-xs font-semibold text-gray-900">
+                  {group.nameRu} <span className="font-normal text-gray-500">(fid {group.fid})</span>
+                </h4>
+                <ul className="mt-2 space-y-2">
+                  {group.steps.map((step) => (
+                    <li key={step.id} className="rounded border border-white bg-white p-2">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="min-w-0 text-[11px] text-gray-800">
+                          {step.nameRu || step.nameEn}
+                          {step.expectsBinaryUpload ? (
+                            <span className="ml-1 text-amber-800">· файл .dat / snapshot</span>
+                          ) : null}
+                        </p>
+                        <button
+                          type="button"
+                          disabled={phase !== "vehicle" || busy}
+                          onClick={() => void runCatalogMutStep(step, selected)}
+                          className="shrink-0 rounded border border-gray-900 px-2 py-1 text-[10px] font-semibold text-gray-900 disabled:opacity-40"
+                        >
+                          {step.expectsBinaryUpload ? "Загрузить…" : "Выполнить"}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {mutResult ? (
+          <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-950">
+            <div className="font-semibold">MUT: {mutResult.nameRu}</div>
+            <div className="mt-1 text-[11px]">{mutResult.success ? "Успех" : "Отказ или неполный ответ"}</div>
+            <ul className="mt-1 max-h-28 list-disc overflow-y-auto pl-4 text-[10px]">
+              {mutResult.steps.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {mutWorkspace === "live" && availableProcedures.length > 0 ? (
           <details open className="rounded-lg border border-amber-300/80 bg-amber-50/40 p-2.5">
             <summary className="cursor-pointer text-xs font-semibold text-gray-900">
               Калибровки, сбросы адаптаций и тесты MMC ({availableProcedures.length})
@@ -906,9 +1086,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
             </div>
             {serviceResult ? (
               <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs text-emerald-950">
-                <div className="font-semibold">
-                  Результат: {serviceResult.nameRu}
-                </div>
+                <div className="font-semibold">Результат: {serviceResult.nameRu}</div>
                 {serviceResult.decodedSummary ? (
                   <div className="mt-1 font-mono text-[11px] font-bold text-emerald-900">
                     {serviceResult.decodedSummary}
@@ -919,7 +1097,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
           </details>
         ) : null}
 
-        <LiveChart signals={pickedSignals} samples={samples} />
+        {mutWorkspace === "live" ? <LiveChart signals={pickedSignals} samples={samples} /> : null}
       </div>
     ) : null;
 
@@ -1206,8 +1384,8 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
       <div className="mt-3 flex flex-col gap-2">
         {[...vehicle.ecus]
           .sort((a, b) => {
-            const ra = reports[addressKey(a.txCanId, a.rxCanId)];
-            const rb = reports[addressKey(b.txCanId, b.rxCanId)];
+            const ra = reports[ecuReportKey(a)];
+            const rb = reports[ecuReportKey(b)];
             const score = (r: ModuleDtcReport | undefined) => {
               if (!r) return 1;
               if (r.responded && r.dtcs.length > 0) return 0;
@@ -1217,7 +1395,7 @@ export default function MutDiagPanel({ session, phase, section = "live", onShowL
             return score(ra) - score(rb);
           })
           .map((ecu) => {
-          const report = reports[addressKey(ecu.txCanId, ecu.rxCanId)];
+          const report = reports[ecuReportKey(ecu)];
           const master = texts[ecu.dtcMasterId] ?? {};
           const active = selectedKey === ecu.sysKey;
           return (

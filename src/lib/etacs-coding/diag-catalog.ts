@@ -85,6 +85,21 @@ export interface CatalogSignalQuery {
   partNumber?: string | null;
 }
 
+interface RawMutItem {
+  itemNo: number;
+  nameEn?: string;
+  nameRu?: string;
+  udsServiceId?: string | null;
+  localId?: string | null;
+  reqMsg?: string;
+  groupId?: string;
+}
+
+interface RawSpecialFunction {
+  fid: number;
+  items?: RawMutItem[];
+}
+
 interface RawSignal {
   itemNo: number;
   nameEn?: string;
@@ -118,9 +133,45 @@ interface RawSignal {
 
 interface RawProfile {
   skey: string;
+  functions?: Array<{ fid: number; nameEn?: string; nameRu?: string }>;
   dataList?: RawSignal[];
-  actuatorTests?: unknown;
-  specialFunctions?: unknown;
+  actuatorTests?: RawMutItem[];
+  specialFunctions?: RawSpecialFunction[];
+}
+
+export interface CatalogMutStep {
+  id: string;
+  itemNo: number;
+  nameEn: string;
+  nameRu: string;
+  udsServiceId: number | null;
+  localId: number | null;
+  reqMsg: string;
+  groupId?: string;
+  /** Large 3B uploads from MUT (calibration / snapshot). */
+  expectsBinaryUpload?: boolean;
+}
+
+export interface CatalogMutFunctionGroup {
+  kind: "special";
+  fid: number;
+  nameEn: string;
+  nameRu: string;
+  steps: CatalogMutStep[];
+}
+
+export interface CatalogMutFunctionList {
+  vkey: string;
+  sysKey: number;
+  nameRu: string;
+  nameEn: string;
+  skey: string;
+  txCanId: string;
+  rxCanId: string;
+  profileSource: CatalogSignalList["profileSource"];
+  profileNoteRu: string;
+  actuatorTests: CatalogMutStep[];
+  specialFunctions: CatalogMutFunctionGroup[];
 }
 
 interface RawDefinition {
@@ -180,8 +231,6 @@ export function loadDiagDb(): RawDb {
   const db = JSON.parse(fs.readFileSync(file, "utf8")) as RawDb;
   for (const def of Object.values(db.ecuDefinitions ?? {})) {
     for (const profile of Object.values(def.profiles ?? {})) {
-      delete profile.actuatorTests;
-      delete profile.specialFunctions;
       for (const item of profile.dataList ?? []) delete item.reqMsg;
     }
   }
@@ -340,6 +389,15 @@ function formatCatalogEcuNameRu(nameEn: string, rawNameRu?: string): string {
   if (en === "STEERING ANGLE SENSOR") {
     return "Датчик угла руля (SAS)";
   }
+  if (en.includes("MULTI AROUND") || en.includes("AROUND MONITOR") || en === "CAMERA") {
+    return /кругов|обзор|камер/i.test(ru) ? ru : "Круговой обзор (Multi Around Monitor)";
+  }
+  if (en.includes("ELECTRIC PARKING") || en === "EPB") {
+    return /стояноч|EPB/i.test(ru) ? ru : "Электростояночный тормоз (EPB)";
+  }
+  if (en.includes("AWC") || en.includes("SS4") || en.includes("4WD/AWC")) {
+    return /полн|4wd|awd/i.test(ru) ? ru : `Привод 4WD / AWC (${nameEn})`;
+  }
   return ru || nameEn;
 }
 
@@ -491,18 +549,28 @@ function normalizeDiagVersion(value: string | null | undefined): string | null {
 
 interface ProfileCandidate {
   skey: string;
-  items: RawSignal[];
+  profile: RawProfile;
+  itemCount: number;
   versionHit: boolean;
   partHit: boolean;
   listed: boolean;
 }
 
-export function signalsForEcu(
+interface ResolvedEcuProfile {
+  vehicle: RawVehicle;
+  ecu: RawEcu;
+  projectedEcu: CatalogEcu;
+  best: RawProfile;
+  profileSource: CatalogSignalList["profileSource"];
+  profileNoteRu: string;
+}
+
+function resolveEcuProfile(
   vkey: string,
   sysKey: number,
-  db = loadDiagDb(),
+  db: RawDb,
   query?: CatalogSignalQuery,
-): CatalogSignalList | null {
+): ResolvedEcuProfile | null {
   const vehicle = matchCatalogVehicle({ vkey }, db);
   const ecu = vehicle?.ecus?.find((item) => item.sysKey === sysKey);
   if (!vehicle || !ecu) return null;
@@ -528,11 +596,16 @@ export function signalsForEcu(
     );
     const partHit = part.length >= 6 && file.toUpperCase().includes(part);
     for (const profile of Object.values(db.ecuDefinitions?.[file]?.profiles ?? {})) {
-      const items = profile.dataList ?? [];
-      if (items.length === 0) continue;
+      const itemCount = Math.max(
+        profile.dataList?.length ?? 0,
+        profile.actuatorTests?.length ?? 0,
+        profile.specialFunctions?.reduce((n, fn) => n + (fn.items?.length ?? 0), 0) ?? 0,
+      );
+      if (itemCount === 0) continue;
       candidates.push({
         skey: profile.skey,
-        items,
+        profile,
+        itemCount,
         versionHit: versionSkeys.has(profile.skey),
         partHit,
         listed: wanted.has(profile.skey),
@@ -540,23 +613,68 @@ export function signalsForEcu(
     }
   }
   const richest = (pool: ProfileCandidate[]) =>
-    [...pool].sort((left, right) => right.items.length - left.items.length)[0] ?? null;
+    [...pool].sort((left, right) => right.itemCount - left.itemCount)[0] ?? null;
   const byVersion = richest(candidates.filter((item) => item.versionHit));
   const byPart = byVersion ? null : richest(candidates.filter((item) => item.partHit));
   const listed = candidates.filter((item) => item.listed);
   const byCatalog = byVersion || byPart ? null : richest(listed.length > 0 ? listed : candidates);
-  const best = byVersion ?? byPart ?? byCatalog;
-  if (!best) return null;
+  const picked = byVersion ?? byPart ?? byCatalog;
+  if (!picked) return null;
   const profileSource: CatalogSignalList["profileSource"] = byVersion ? "version" : byPart ? "part" : "catalog";
   const profileNoteRu =
     profileSource === "version"
-      ? `Профиль ${best.skey} по версии блока ${wantedVersion}`
+      ? `Профиль ${picked.skey} по версии блока ${wantedVersion}`
       : profileSource === "part"
-        ? `Профиль ${best.skey} по парт-номеру ${part}`
+        ? `Профиль ${picked.skey} по парт-номеру ${part}`
         : wantedVersion
-          ? `Профиль по каталогу (${best.skey}): версия ${wantedVersion} в базе не найдена`
+          ? `Профиль по каталогу (${picked.skey}): версия ${wantedVersion} в базе не найдена`
           : "Профиль по каталогу, версия блока не прочитана";
-  const projected = best.items
+  return {
+    vehicle,
+    ecu,
+    projectedEcu,
+    best: picked.profile,
+    profileSource,
+    profileNoteRu,
+  };
+}
+
+function fidName(profile: RawProfile, fid: number): { en: string; ru: string } {
+  const hit = profile.functions?.find((fn) => fn.fid === fid);
+  if (hit) return { en: hit.nameEn || `Function ${fid}`, ru: hit.nameRu || hit.nameEn || `Функция ${fid}` };
+  return { en: `Function ${fid}`, ru: `Функция ${fid}` };
+}
+
+function projectMutStep(item: RawMutItem, skey: string, prefix: string): CatalogMutStep | null {
+  const service = parseHexByte(item.udsServiceId) ?? 0x30;
+  const localId = parseHexByte(item.localId);
+  const reqMsg = (item.reqMsg ?? "").replace(/\s+/g, "");
+  const hexLen = reqMsg.replace(/[^0-9a-f]/gi, "").length;
+  return {
+    id: `${skey}-${prefix}-${item.itemNo}`,
+    itemNo: item.itemNo,
+    nameEn: item.nameEn || "",
+    nameRu: item.nameRu || item.nameEn || "",
+    udsServiceId: service,
+    localId,
+    reqMsg,
+    ...(item.groupId ? { groupId: item.groupId } : {}),
+    ...(service === 0x3b && hexLen > 128 ? { expectsBinaryUpload: true } : {}),
+  };
+}
+
+export function signalsForEcu(
+  vkey: string,
+  sysKey: number,
+  db = loadDiagDb(),
+  query?: CatalogSignalQuery,
+): CatalogSignalList | null {
+  const resolved = resolveEcuProfile(vkey, sysKey, db, query);
+  if (!resolved) return null;
+  const { vehicle, projectedEcu, best, profileSource, profileNoteRu } = resolved;
+  const items = best.dataList ?? [];
+  if (items.length === 0) return null;
+  const projected = items
     .map((item, index) => ({ signal: projectSignal(item, best.skey), index }))
     .filter((entry): entry is { signal: CatalogSignal; index: number } => entry.signal != null);
   const seenPhysical = new Set<string>();
@@ -595,6 +713,49 @@ export function signalsForEcu(
     profileSource,
     profileNoteRu,
     signals,
+  };
+}
+
+export function mutFunctionsForEcu(
+  vkey: string,
+  sysKey: number,
+  db = loadDiagDb(),
+  query?: CatalogSignalQuery,
+): CatalogMutFunctionList | null {
+  const resolved = resolveEcuProfile(vkey, sysKey, db, query);
+  if (!resolved) return null;
+  const { vehicle, projectedEcu, best, profileSource, profileNoteRu } = resolved;
+  const actuatorTests = (best.actuatorTests ?? [])
+    .map((item) => projectMutStep(item, best.skey, "act"))
+    .filter((step): step is CatalogMutStep => step != null);
+  const specialFunctions: CatalogMutFunctionGroup[] = (best.specialFunctions ?? []).map((group) => {
+    const names = fidName(best, group.fid);
+    const steps = (group.items ?? [])
+      .map((item) => projectMutStep(item, best.skey, `sf${group.fid}`))
+      .filter((step): step is CatalogMutStep => step != null);
+    return {
+      kind: "special" as const,
+      fid: group.fid,
+      nameEn: names.en,
+      nameRu: names.ru,
+      steps,
+    };
+  });
+  if (actuatorTests.length === 0 && specialFunctions.every((group) => group.steps.length === 0)) {
+    return null;
+  }
+  return {
+    vkey: vehicle.vkey || vkey,
+    sysKey,
+    nameRu: projectedEcu.nameRu,
+    nameEn: projectedEcu.nameEn,
+    skey: best.skey,
+    txCanId: projectedEcu.txCanId,
+    rxCanId: projectedEcu.rxCanId,
+    profileSource,
+    profileNoteRu,
+    actuatorTests,
+    specialFunctions: specialFunctions.filter((group) => group.steps.length > 0),
   };
 }
 
