@@ -920,10 +920,18 @@ describe("sendUds gate", () => {
     expect(dtcs[0]?.statusByte).toBe(0x2f);
     expect(dtcs[0]?.active).toBe(true);
 
-    // Calibration-sensitive steering/EPB/camera modules (EPS 746, EyeSight 787, SAS 622, EPB 610) must refuse DTC clearing
+    // Mitsubishi SAS/EPB stay blocked; Subaru EPS/EyeSight may clear DTCs
     const session = new ObdBleSession();
-    for (const blockedTx of ["746", "787", "622", "610"]) {
+    for (const blockedTx of ["622", "610"]) {
       await expect(session.clearModuleDtcsSafe("6", blockedTx, "788")).rejects.toThrow(/заблокирован/i);
+    }
+    for (const allowedTx of ["746", "787"]) {
+      const err = await session.clearModuleDtcsSafe("6", allowedTx, "74E").then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeTruthy();
+      expect(String(err)).not.toMatch(/заблокирован/i);
     }
   });
 

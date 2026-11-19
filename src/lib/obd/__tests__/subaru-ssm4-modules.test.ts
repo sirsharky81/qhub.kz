@@ -86,14 +86,21 @@ describe("subaru-ssm4-modules", () => {
     expect(getSubaruBlockScanStatus(sorted[4]!.report)).toBe("not_detected");
   });
 
-  it("defines unique physical CAN targets and protects EPS/EyeSight from clearing", () => {
+  it("defines unique physical CAN targets and allows DTC clear on EPS/EyeSight/Head Unit", () => {
     const txSet = new Set(SUBARU_ALL_DTC_TARGETS.map((t) => t.tx));
     expect(txSet.size).toBe(SUBARU_ALL_DTC_TARGETS.length);
-    expect(isSubaruTxSafeToClear("746")).toBe(false);
-    expect(isSubaruTxSafeToClear("787")).toBe(false);
+    expect(SUBARU_ALL_DTC_TARGETS.length).toBeGreaterThanOrEqual(27);
+    expect(SUBARU_ALL_DTC_TARGETS.some((t) => t.tx === 0x7d5)).toBe(true);
+    expect(SUBARU_ALL_DTC_TARGETS.some((t) => t.tx === 0x757)).toBe(true);
+    expect(isSubaruTxSafeToClear("746")).toBe(true);
+    expect(isSubaruTxSafeToClear("787")).toBe(true);
+    expect(isSubaruTxSafeToClear("7D5")).toBe(true);
     expect(isSubaruTxSafeToClear("7E0")).toBe(true);
     expect(isSubaruTxSafeToClear("7B0")).toBe(true);
     expect(isSubaruTxSafeToClear("780")).toBe(true);
+    for (const target of SUBARU_ALL_DTC_TARGETS) {
+      expect(target.canSafeClear).toBe(true);
+    }
   });
 
   it("strictly excludes Meter, EyeSight, and Immo functions already built in /tools/subaru-coding", () => {

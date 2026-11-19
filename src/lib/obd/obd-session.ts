@@ -1602,14 +1602,14 @@ export class ObdBleSession {
         rx: 0x74e,
         title: "Электроусилитель руля EPS (746 → 74E)",
         safetyCritical: true,
-        canSafeClear: false,
+        canSafeClear: true,
       },
       {
         tx: 0x787,
         rx: 0x78f,
         title: "Камера и ассистенты EyeSight (787 → 78F)",
         safetyCritical: true,
-        canSafeClear: false,
+        canSafeClear: true,
       },
       {
         tx: 0x7b0,
@@ -2016,8 +2016,8 @@ export class ObdBleSession {
   }
 
   /**
-   * Safely clears DTCs on modules (ECM, TCM, SRS, ABS/ASC, Meter, BIU/ETACS, Climate, Sonar).
-   * Explicitly refuses EPS (746/796), SAS (622), EPB (610), and EyeSight (787) to protect steering/brake-pad/camera calibrations.
+   * Clears DTCs on modules (ECM, TCM, SRS, ABS/ASC, Meter, BIU/ETACS, Climate, Sonar, EyeSight, EPS).
+   * Still refuses Mitsubishi SAS (622), EPS (796), and EPB (610) where clear is unsafe on MUT-III.
    */
   async clearModuleDtcsSafe(
     protocol: CanProtocol,
@@ -2026,10 +2026,10 @@ export class ObdBleSession {
   ): Promise<string> {
     const cleanTx = txHex.trim().toUpperCase();
     const cleanRx = rxHex.trim().toUpperCase();
-    const FORBIDDEN_CLEAR_TX = new Set(["746", "787", "622", "796", "7E2", "7E5", "610"]);
+    const FORBIDDEN_CLEAR_TX = new Set(["622", "796", "610"]);
     if (FORBIDDEN_CLEAR_TX.has(cleanTx)) {
       throw new Error(
-        `Сброс ошибок в блоке (${cleanTx}) заблокирован для защиты калибровок SAS / EPS / EPB / EyeSight. Доступно только чтение.`,
+        `Сброс ошибок в блоке (${cleanTx}) заблокирован для защиты калибровок SAS / EPS / EPB. Доступно только чтение.`,
       );
     }
     this.requireAdapter();
