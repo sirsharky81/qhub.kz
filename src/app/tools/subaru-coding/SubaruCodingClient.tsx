@@ -53,8 +53,9 @@ import type { SubaruMeterWriteMode } from "@/lib/obd/subaru-meter-variant";
 import { formatObdEnvironmentLines, probeObdEnvironment } from "@/lib/obd/obd-environment";
 import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transport";
 import { SubaruImmoSection } from "./SubaruImmoSection";
+import { SubaruRemoteDesk } from "./SubaruRemoteDesk";
 
-type MainTab = "meter" | "immo";
+type MainTab = "meter" | "immo" | "remote";
 
 const phaseLabels: Record<ObdConnectionPhase, string> = {
   idle: "Не подключено",
@@ -913,7 +914,7 @@ export default function SubaruCodingClient() {
       </header>
 
       {/* Connection Bar */}
-      {ready ? (
+      {tab !== "remote" && (ready ? (
         <section className="flex items-center justify-between gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-xs">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 font-semibold text-emerald-800">
@@ -961,7 +962,7 @@ export default function SubaruCodingClient() {
             </div>
           )}
         </section>
-      )}
+      ))}
 
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-medium text-red-800">
@@ -989,9 +990,20 @@ export default function SubaruCodingClient() {
         >
           Иммобилайзер Subaru (Ключи / RES)
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("remote")}
+          className={`flex-1 rounded-lg px-2 py-2.5 text-xs font-bold transition sm:text-sm ${
+            tab === "remote" ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
+          }`}
+        >
+          Удалённое подключение
+        </button>
       </div>
 
-      {tab === "meter" ? (
+      {tab === "remote" ? (
+        <SubaruRemoteDesk />
+      ) : tab === "meter" ? (
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>

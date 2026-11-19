@@ -321,8 +321,12 @@ export class RoomCoreEngine {
   }
 }
 
-import { SHARE_ROOM_CONFIG } from "./config";
+import { SHARE_ROOM_CONFIG, SUBARU_ASSIST_ROOM_CONFIG } from "./config";
 
 export function createShareRoomEngine(): RoomCoreEngine {
   return new RoomCoreEngine(SHARE_ROOM_CONFIG);
+}
+
+export function createSubaruAssistRoomEngine(): RoomCoreEngine {
+  return new RoomCoreEngine(SUBARU_ASSIST_ROOM_CONFIG);
 }

@@ -1,4 +1,4 @@
-export type RoomCoreServiceId = "share";
+export type RoomCoreServiceId = "share" | "subaru-assist";
 
 export type RoomCoreInviteChannel = "link" | "qr" | "code";
 

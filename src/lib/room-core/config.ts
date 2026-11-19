@@ -8,3 +8,12 @@ export const SHARE_ROOM_CONFIG: RoomCoreServiceConfig = {
   ownerRole: "host",
   memberRole: "guest",
 };
+
+export const SUBARU_ASSIST_ROOM_CONFIG: RoomCoreServiceConfig = {
+  serviceId: "subaru-assist",
+  redisPrefix: "room-core:subaru-assist:",
+  maxMembers: 2,
+  ttlSec: 60 * 60,
+  ownerRole: "master",
+  memberRole: "client",
+};

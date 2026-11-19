@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   ObdBleSession,
@@ -20,6 +20,8 @@ interface Props {
   busy: boolean;
   setBusy: (busy: boolean) => void;
   setError: (error: string | null) => void;
+  initialSubTab?: ImmoSubTab;
+  onProgress?: (event: "start" | "ok" | "fail" | "present-key") => void;
 }
 
 export function SubaruImmoSection({
@@ -28,13 +30,21 @@ export function SubaruImmoSection({
   busy,
   setBusy,
   setError,
+  initialSubTab,
+  onProgress,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [immoLogCopied, setImmoLogCopied] = useState(false);
   useEffect(() => {
     setMounted(true);
   }, []);
-  const [subTab, setSubTab] = useState<ImmoSubTab>("read-keys");
+  const progressRef = useRef(onProgress);
+  progressRef.current = onProgress;
+  const note = (event: "start" | "ok" | "fail" | "present-key") => progressRef.current?.(event);
+  const [subTab, setSubTab] = useState<ImmoSubTab>(initialSubTab ?? "read-keys");
+  useEffect(() => {
+    if (initialSubTab) setSubTab(initialSubTab);
+  }, [initialSubTab]);
   const [resSystemType, setResSystemType] = useState<SubaruResSystemType>("auto");
   const [immoKeyCountRead, setImmoKeyCountRead] = useState<{
     ecuTx: string;
@@ -59,6 +69,7 @@ export function SubaruImmoSection({
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
+    note("start");
     const logs: string[] = [];
     try {
       const elm = session.getElm();
@@ -137,7 +148,9 @@ export function SubaruImmoSection({
         logs.push("Блок иммобилайзера не вернул DID 1378 / 1158. Проверьте IG ON и тип системы.");
       }
       setImmoLogLines((prev) => [...prev, ...logs]);
+      note(found ? "ok" : "fail");
     } catch (e) {
+      note("fail");
       setError(e instanceof Error ? e.message : "Ошибка чтения количества ключей");
     } finally {
       setBusy(false);
@@ -151,6 +164,7 @@ export function SubaruImmoSection({
     setImmoDeleteConfirmTyped("");
     setBusy(true);
     setError(null);
+    note("start");
     const logs: string[] = [
       "=== Удаление всех ключей кроме присутствующего в салоне (IMM-070.srp / IMM-016.srp) ===",
     ];
@@ -180,6 +194,7 @@ export function SubaruImmoSection({
         const pDel = parseUdsResponse(rDel, 0x2e);
         logs.push(`${target.hex}: 2E 11 C1 02 → ${rDel.replace(/>/g, "").trim()}`);
         if (pDel.kind === "positive") {
+          note("present-key");
           logs.push("→ Поднесите ОДИН сохраняемый смарт-ключ к кнопке ENGINE START/STOP…");
           for (let i = 1; i <= 8; i++) {
             const r69 = await elm.sendPayload("221369", 2000);
@@ -200,7 +215,9 @@ export function SubaruImmoSection({
         await elm.sendPayload("1001", 800);
       }
       setImmoLogLines((prev) => [...prev, ...logs]);
+      note("ok");
     } catch (e) {
+      note("fail");
       setError(e instanceof Error ? e.message : "Ошибка удаления ключей");
     } finally {
       setBusy(false);
@@ -212,6 +229,7 @@ export function SubaruImmoSection({
       if (!ready || busy) return;
       setBusy(true);
       setError(null);
+      note("start");
       const logs: string[] = [];
       try {
         const elm = session.getElm();
@@ -243,6 +261,7 @@ export function SubaruImmoSection({
           }
           setImmoWizardStep(2);
         } else if (step === 2) {
+          note("present-key");
           logs.push(`=== Шаг 2/4: Верификация РАБОЧЕГО ключа у кнопки START/STOP (${target.hex}) ===`);
           const rawStart = await elm.sendPayload("2E11C101", 3000);
           logs.push(`${target.hex}: 2E 11 C1 01 → ${rawStart.replace(/>/g, "").trim()}`);
@@ -257,6 +276,7 @@ export function SubaruImmoSection({
           }
           setImmoWizardStep(3);
         } else if (step === 3) {
+          note("present-key");
           logs.push(`=== Шаг 3/4: Приложите НОВЫЙ смарт-ключ к кнопке START/STOP (${target.hex}) ===`);
           await elm.sendPayload("22136A", 2000);
           for (let poll = 1; poll <= 5; poll++) {
@@ -278,7 +298,9 @@ export function SubaruImmoSection({
           await elm.sendPayload("1001", 800);
         }
         setImmoLogLines((prev) => [...prev, ...logs]);
+        note("ok");
       } catch (e) {
+        note("fail");
         setError(e instanceof Error ? e.message : "Ошибка шага мастера прописки ключа");
       } finally {
         setBusy(false);
@@ -291,6 +313,7 @@ export function SubaruImmoSection({
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
+    note("start");
     const logs: string[] = [];
     try {
       const elm = session.getElm();
@@ -318,7 +341,9 @@ export function SubaruImmoSection({
         }
       }
       setImmoLogLines((prev) => [...prev, ...logs]);
+      note("ok");
     } catch (e) {
+      note("fail");
       setError(e instanceof Error ? e.message : "Ошибка запроса Seed");
     } finally {
       setBusy(false);
@@ -334,6 +359,7 @@ export function SubaruImmoSection({
     }
     setBusy(true);
     setError(null);
+    note("start");
     const logs: string[] = [];
     try {
       const elm = session.getElm();
@@ -350,7 +376,9 @@ export function SubaruImmoSection({
       const raw27 = await elm.sendPayload(`${target.keySub}${cleanKey}`, 3000);
       logs.push(`${target.hex}: Отправка Key (${target.keySub}) → ${raw27.replace(/>/g, "").trim()}`);
       setImmoLogLines((prev) => [...prev, ...logs]);
+      note("ok");
     } catch (e) {
+      note("fail");
       setError(e instanceof Error ? e.message : "Ошибка отправки Key");
     } finally {
       setBusy(false);
@@ -361,11 +389,14 @@ export function SubaruImmoSection({
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
+    note("start");
     try {
       const result = await session.probeSubaruResCm("6");
       setResProbe(result);
       setImmoLogLines((prev) => [...prev, ...result.steps]);
+      note("ok");
     } catch (e) {
+      note("fail");
       setError(e instanceof Error ? e.message : "Ошибка опроса RES CM");
     } finally {
       setBusy(false);
@@ -379,14 +410,19 @@ export function SubaruImmoSection({
     setResConfirmTyped("");
     setBusy(true);
     setError(null);
+    note("start");
     try {
       const result = await session.registerSubaruResCm("6", { systemType: resSystemType });
       setResRegisterResult(result);
       setImmoLogLines((prev) => [...prev, ...result.steps]);
       if (!result.success) {
+        note("fail");
         setError(result.steps.at(-1) ?? "Блок не подтвердил прописку RES.");
+      } else {
+        note("ok");
       }
     } catch (e) {
+      note("fail");
       setError(e instanceof Error ? e.message : "Ошибка привязки RES");
     } finally {
       setBusy(false);

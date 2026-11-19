@@ -286,6 +286,22 @@ export class ObdBleSession {
     return this.elm;
   }
 
+  /** Use an ELM that talks to a vLinker on another phone. Local BLE is not opened. */
+  attachRemoteElm(elm: Elm327Client): void {
+    this.link = null;
+    this.elm = elm;
+    this.phase = "vehicle";
+    this.lineMode = "obd";
+    this.canProtocol = null;
+  }
+
+  detachRemoteElm(): void {
+    this.elm = null;
+    this.phase = "idle";
+    this.lineMode = "obd";
+    this.canProtocol = null;
+  }
+
   setLinkLostHandler(handler: (() => void) | null): void {
     this.linkLost = handler;
     this.link?.setDisconnectListener(() => this.handleLinkLost());
@@ -2088,6 +2104,43 @@ export class ObdBleSession {
         /* ignore */
       }
     }
+  }
+
+  /**
+   * After a remote °F→°C write: read history on the meter and EyeSight, clear both, read again.
+   * DTC codes stay with the caller. The client UI only receives a status phrase.
+   */
+  async clearSubaruRegionHistory(protocol: CanProtocol = "6"): Promise<{
+    meterBefore: string[];
+    eyesightBefore: string[];
+    meterClear: string;
+    eyesightClear: string;
+    meterAfter: string[];
+    eyesightAfter: string[];
+  }> {
+    this.requireAdapter();
+    await this.waitLeave();
+    await this.elm!.useUdsProfile(protocol);
+    const readCodes = async (tx: number, rx: number): Promise<string[]> => {
+      try {
+        const raw = await this.udsExchange(tx, rx, "1902FF", 2_000);
+        const parsed = parseUdsResponse(raw, 0x19);
+        if (parsed.kind !== "positive") return [];
+        return parseUdsDtcs1902(parsed.payload)
+          .filter((d) => (d.statusByte & 0x09) !== 0)
+          .map((d) => d.code);
+      } catch {
+        return [];
+      }
+    };
+
+    const meterBefore = await readCodes(0x783, 0x78b);
+    const eyesightBefore = await readCodes(0x787, 0x78f);
+    const meterClear = await this.clearModuleDtcsSafe(protocol, "783", "78B");
+    const eyesightClear = await this.clearModuleDtcsSafe(protocol, "787", "78F");
+    const meterAfter = await readCodes(0x783, 0x78b);
+    const eyesightAfter = await readCodes(0x787, 0x78f);
+    return { meterBefore, eyesightBefore, meterClear, eyesightClear, meterAfter, eyesightAfter };
   }
 
   async connectAdapter(): Promise<{ name: string; elm: ElmIdentity }> {

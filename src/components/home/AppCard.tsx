@@ -154,6 +154,14 @@ export function AppCard({
               <h3 className="font-semibold text-base text-gray-900 leading-tight tracking-tight">
                 {app.title}
               </h3>
+              {app.id === "subaru-coding" && (
+                <Link
+                  href="/tools/subaru-coding/room"
+                  className="relative z-20 shrink-0 text-[11px] font-semibold text-blue-800 underline"
+                >
+                  В комнату
+                </Link>
+              )}
               {isMessengerApp && messengerUnread > 0 && (
                 <span className="inline-flex items-center rounded-full bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] font-semibold text-sky-700 motion-safe:animate-pulse">
                   {messengerUnread > 99 ? "99+" : messengerUnread}
@@ -182,6 +190,19 @@ export function AppCard({
 
   if (app.comingSoon) {
     return <div className={cardClass}>{inner}</div>;
+  }
+
+  if (app.id === "subaru-coding" && !app.comingSoon) {
+    return (
+      <div className={cardClass}>
+        <Link
+          href={app.href}
+          className="absolute inset-0 z-[5] rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400/50"
+          aria-label={`Открыть ${app.title}`}
+        />
+        {inner}
+      </div>
+    );
   }
 
   if (isMusicActive) {

@@ -262,6 +262,12 @@ export async function checkSharePollRateLimit(
   return checkRateLimit("qhub:share-poll", identifier);
 }
 
+export async function checkSubaruAssistRateLimit(
+  identifier: string,
+): Promise<{ allowed: boolean; retryAfterSec?: number }> {
+  return checkRateLimit("qhub:subaru-assist", identifier);
+}
+
 export async function checkFamilyLocationRequestRateLimit(
   parentMemberId: string,
   targetMemberId: string,
