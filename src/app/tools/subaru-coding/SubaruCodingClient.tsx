@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAccessCheck } from "@/lib/messenger/client";
 import { maskPhone } from "@/lib/messenger/phone-format";
@@ -61,6 +62,34 @@ const phaseLabels: Record<ObdConnectionPhase, string> = {
   vehicle: "Связь с ЭБУ",
 };
 
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fallback below for iOS Safari / restricted contexts */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.left = "-1000px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export default function SubaruCodingClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -77,8 +106,14 @@ export default function SubaruCodingClient() {
   const [elmVersion, setElmVersion] = useState<string | null>(null);
   const [supplyVolts, setSupplyVolts] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyActionLabel, setBusyActionLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [envLines, setEnvLines] = useState<string[] | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Meter 12-column state
   const [appliedModelInput, setAppliedModelInput] = useState("BTAEYR8");
@@ -108,6 +143,11 @@ export default function SubaruCodingClient() {
   const [eyesightBackupNotice, setEyesightBackupNotice] = useState<string | null>(null);
   const eyesightBackupFileInputRef = useRef<HTMLInputElement | null>(null);
   const [eyesightLogCopied, setEyesightLogCopied] = useState(false);
+  const [eyesightWriteLogCopied, setEyesightWriteLogCopied] = useState(false);
+  const [meterWriteLogCopied, setMeterWriteLogCopied] = useState(false);
+  const [meterReadCopied, setMeterReadCopied] = useState(false);
+  const meterWriteResultRef = useRef<HTMLDivElement | null>(null);
+  const eyesightWriteResultRef = useRef<HTMLDivElement | null>(null);
   const [eyesightWriteResult, setEyesightWriteResult] =
     useState<SubaruEyesightVariantWriteResult | null>(null);
   const [eyesightWritePending, setEyesightWritePending] = useState<{
@@ -391,6 +431,7 @@ export default function SubaruCodingClient() {
   const handleReadMeter12Column = useCallback(async () => {
     if (!ready || busy) return;
     setBusy(true);
+    setBusyActionLabel("Чтение приборки (783)…");
     setError(null);
     try {
       const result = await sessionRef.current.readSubaruMeter12ColumnCode("6");
@@ -411,13 +452,15 @@ export default function SubaruCodingClient() {
       setError(e instanceof Error ? e.message : "Ошибка чтения приборки");
     } finally {
       setBusy(false);
+      setBusyActionLabel(null);
       setPhase(sessionRef.current.phase);
     }
-  }, [ready, busy]);
+  }, [ready, busy, stickerOptionInput]);
 
   const handleReadEyesightOnly = useCallback(async () => {
     if (!ready || busy) return;
     setBusy(true);
+    setBusyActionLabel("Чтение EyeSight (787)…");
     setError(null);
     try {
       const hintApp = meter12Read?.match.actualAppliedModel || appliedModelInput;
@@ -476,6 +519,7 @@ export default function SubaruCodingClient() {
       setError(e instanceof Error ? e.message : "Ошибка чтения EyeSight");
     } finally {
       setBusy(false);
+      setBusyActionLabel(null);
       setPhase(sessionRef.current.phase);
     }
   }, [ready, busy, meter12Read, appliedModelInput, meter12SecurityKeyInput, stickerOptionInput]);
@@ -483,6 +527,7 @@ export default function SubaruCodingClient() {
   const handleCompareMeterEyesight = useCallback(async () => {
     if (!ready || busy) return;
     setBusy(true);
+    setBusyActionLabel("Сравнение 783 ↔ 787…");
     setError(null);
     try {
       const result = await sessionRef.current.readSubaruMeterEyesightVariantCompare(
@@ -517,6 +562,7 @@ export default function SubaruCodingClient() {
       setError(e instanceof Error ? e.message : "Ошибка сравнения приборка / EyeSight");
     } finally {
       setBusy(false);
+      setBusyActionLabel(null);
       setPhase(sessionRef.current.phase);
     }
   }, [ready, busy, meter12SecurityKeyInput, stickerOptionInput]);
@@ -706,6 +752,7 @@ export default function SubaruCodingClient() {
     const pending = eyesightWritePending;
     setEyesightWritePending(null);
     setBusy(true);
+    setBusyActionLabel(`Запись EyeSight (${pending.appliedModel}+${pending.optionCode})…`);
     setError(null);
     try {
       const result = await sessionRef.current.writeSubaruEyesightVariantCode(
@@ -722,6 +769,9 @@ export default function SubaruCodingClient() {
         },
       );
       setEyesightWriteResult(result);
+      requestAnimationFrame(() => {
+        eyesightWriteResultRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
       if (!result.success) {
         setError(
           result.securityAccessRequired
@@ -741,6 +791,7 @@ export default function SubaruCodingClient() {
       setError(e instanceof Error ? e.message : "Ошибка записи EyeSight");
     } finally {
       setBusy(false);
+      setBusyActionLabel(null);
       setPhase(sessionRef.current.phase);
     }
   }, [ready, busy, eyesightWritePending, meter12SecurityKeyInput, eyesightRead]);
@@ -751,6 +802,7 @@ export default function SubaruCodingClient() {
     if (pending.appliedModel.trim().length !== 7 || pending.optionCode.trim().length !== 4) return;
     setMeter12WritePending(null);
     setBusy(true);
+    setBusyActionLabel(`Запись приборки (${pending.appliedModel}+${pending.optionCode})…`);
     setError(null);
     try {
       const result = await sessionRef.current.writeSubaruMeter12ColumnCode(
@@ -766,6 +818,9 @@ export default function SubaruCodingClient() {
       setMeter12WriteResult(result);
       if (result.after) setMeter12Read(result.after);
       else if (result.before) setMeter12Read(result.before);
+      requestAnimationFrame(() => {
+        meterWriteResultRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
       if (!result.success) {
         setError(result.steps.at(-1) ?? "Запись не подтверждена приборкой.");
       }
@@ -773,9 +828,22 @@ export default function SubaruCodingClient() {
       setError(e instanceof Error ? e.message : "Ошибка записи приборки");
     } finally {
       setBusy(false);
+      setBusyActionLabel(null);
       setPhase(sessionRef.current.phase);
     }
   }, [ready, busy, meter12WritePending, meter12SecurityKeyInput]);
+
+  useEffect(() => {
+    if (!eyesightWritePending && !meter12WritePending) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setEyesightWritePending(null);
+        setMeter12WritePending(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [eyesightWritePending, meter12WritePending]);
 
   if (authChecking) {
     return (
@@ -1107,13 +1175,35 @@ export default function SubaruCodingClient() {
                   Полное чтение SSM4 (mHZ + cgdw) против справочника для{" "}
                   {meter12Read.match.actualAppliedModel}
                 </div>
-                {meterReadStats && (
-                  <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-[10px] text-gray-700">
-                    Активных A0xx: {meterReadStats.presentA0xx} · Отсутствуют (--):{" "}
-                    {meterReadStats.absentA0xx} · Карты:{" "}
-                    {meterReadStats.bitmaps.join(", ") || "—"}
-                  </span>
-                )}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {meterReadStats && (
+                    <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-[10px] text-gray-700">
+                      Активных A0xx: {meterReadStats.presentA0xx} · Отсутствуют (--):{" "}
+                      {meterReadStats.absentA0xx} · Карты:{" "}
+                      {meterReadStats.bitmaps.join(", ") || "—"}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lines = [
+                        `Meter ${meter12Read.txHex}→${meter12Read.rxHex}`,
+                        `VIN: ${meter12Read.vin ?? "—"}`,
+                        `Applied+Option: ${meter12Read.match.actualAppliedModel}+${meter12Read.match.actualOptionCode} (${meter12Read.match.actualRegion})`,
+                        ...meter12Read.dids.map((d) => `${d.did}=${d.hex}`),
+                      ];
+                      void copyTextToClipboard(lines.join("\n")).then((ok) => {
+                        if (ok) {
+                          setMeterReadCopied(true);
+                          setTimeout(() => setMeterReadCopied(false), 2000);
+                        }
+                      });
+                    }}
+                    className="rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-800"
+                  >
+                    {meterReadCopied ? "Скопировано ✓" : "Копировать дамп"}
+                  </button>
+                </div>
               </div>
               <p className="text-[11px] text-gray-600">
                 Считано ровно по таблице SSM4 <code className="font-mono">cGZGBPHB-WmTWLZ.mHZ</code>{" "}
@@ -1487,12 +1577,20 @@ export default function SubaruCodingClient() {
                     <button
                       type="button"
                       onClick={() => {
-                        const txt = (eyesightRead.steps ?? []).join("\n");
-                        void navigator.clipboard?.writeText(txt);
-                        setEyesightLogCopied(true);
-                        setTimeout(() => setEyesightLogCopied(false), 2000);
+                        const txt = [
+                          `EyeSight ${eyesightRead.txHex}→${eyesightRead.rxHex}`,
+                          `VIN: ${eyesightRead.vin ?? "—"}`,
+                          `Match: ${eyesightRead.match.appliedModel ?? "—"}+${eyesightRead.match.optionCode ?? "—"}`,
+                          ...(eyesightRead.steps ?? []),
+                        ].join("\n");
+                        void copyTextToClipboard(txt).then((ok) => {
+                          if (ok) {
+                            setEyesightLogCopied(true);
+                            setTimeout(() => setEyesightLogCopied(false), 2000);
+                          }
+                        });
                       }}
-                      className="rounded border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-900 hover:bg-violet-50"
+                      className="rounded border border-violet-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-violet-900 hover:bg-violet-50"
                     >
                       {eyesightLogCopied ? "Скопировано ✓" : "Копировать журнал"}
                     </button>
@@ -1891,16 +1989,43 @@ export default function SubaruCodingClient() {
 
           {eyesightWriteResult && (
             <div
+              ref={eyesightWriteResultRef}
               className={`rounded-xl border p-3 text-xs space-y-1.5 font-mono ${
                 eyesightWriteResult.success
                   ? "border-violet-300 bg-violet-50 text-violet-950"
                   : "border-rose-300 bg-rose-50 text-rose-950"
               }`}
             >
-              <div className="font-bold font-sans">
-                {eyesightWriteResult.success
-                  ? `✓ EyeSight ADA-031 (${eyesightWriteResult.writeMode}): подтверждено ${eyesightWriteResult.verifiedCount}/${eyesightWriteResult.targetCount} DID (${eyesightWriteResult.appliedModel}+${eyesightWriteResult.optionCode})`
-                  : `Запись EyeSight не подтверждена (записано ${eyesightWriteResult.writtenCount}/${eyesightWriteResult.targetCount}, сверено ${eyesightWriteResult.verifiedCount}/${eyesightWriteResult.targetCount})`}
+              <div className="flex flex-wrap items-center justify-between gap-2 font-sans">
+                <div className="font-bold">
+                  {eyesightWriteResult.success
+                    ? `✓ EyeSight ADA-031 (${eyesightWriteResult.writeMode}): подтверждено ${eyesightWriteResult.verifiedCount}/${eyesightWriteResult.targetCount} DID (${eyesightWriteResult.appliedModel}+${eyesightWriteResult.optionCode})`
+                    : `Запись EyeSight не подтверждена (записано ${eyesightWriteResult.writtenCount}/${eyesightWriteResult.targetCount}, сверено ${eyesightWriteResult.verifiedCount}/${eyesightWriteResult.targetCount})`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const header = eyesightWriteResult.success
+                      ? `EyeSight OK (${eyesightWriteResult.writeMode}): ${eyesightWriteResult.verifiedCount}/${eyesightWriteResult.targetCount} DID (${eyesightWriteResult.appliedModel}+${eyesightWriteResult.optionCode})`
+                      : `EyeSight FAIL (${eyesightWriteResult.writeMode}): written=${eyesightWriteResult.writtenCount}/${eyesightWriteResult.targetCount}, verified=${eyesightWriteResult.verifiedCount}/${eyesightWriteResult.targetCount} (${eyesightWriteResult.appliedModel}+${eyesightWriteResult.optionCode})`;
+                    const lines = [
+                      header,
+                      ...(eyesightWriteResult.mismatchedDids.length > 0
+                        ? [`Mismatches: ${eyesightWriteResult.mismatchedDids.join("; ")}`]
+                        : []),
+                      ...eyesightWriteResult.steps,
+                    ];
+                    void copyTextToClipboard(lines.join("\n")).then((ok) => {
+                      if (ok) {
+                        setEyesightWriteLogCopied(true);
+                        setTimeout(() => setEyesightWriteLogCopied(false), 2000);
+                      }
+                    });
+                  }}
+                  className="shrink-0 rounded-lg border border-black/15 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-800 hover:bg-gray-50"
+                >
+                  {eyesightWriteLogCopied ? "Скопировано ✓" : "Копировать логи"}
+                </button>
               </div>
               {eyesightWriteResult.cgwFilterRemoved && (
                 <div className="font-sans text-[11px]">CGW FilterRemove: да</div>
@@ -1910,7 +2035,7 @@ export default function SubaruCodingClient() {
                   Расхождения при повторном чтении: {eyesightWriteResult.mismatchedDids.join("; ")}
                 </div>
               )}
-              <ul className="max-h-40 overflow-y-auto list-disc pl-4 space-y-0.5 text-[10px]">
+              <ul className="max-h-56 overflow-y-auto list-disc pl-4 space-y-0.5 text-[10px]">
                 {eyesightWriteResult.steps.map((s, i) => (
                   <li key={i}>{s}</li>
                 ))}
@@ -1920,16 +2045,44 @@ export default function SubaruCodingClient() {
 
           {meter12WriteResult && (
             <div
+              ref={meterWriteResultRef}
               className={`rounded-xl border p-3 text-xs space-y-1.5 ${
                 meter12WriteResult.success
                   ? "border-emerald-300 bg-emerald-50"
                   : "border-rose-300 bg-rose-50"
               }`}
             >
-              <div className="font-bold">
-                {meter12WriteResult.success
-                  ? `✓ Записано DID ${meter12WriteResult.writtenDid}: ${meter12WriteResult.plan.appliedModel} + ${meter12WriteResult.plan.optionCode}`
-                  : "Запись остановлена"}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-bold">
+                  {meter12WriteResult.success
+                    ? `✓ Записано DID ${meter12WriteResult.writtenDid}: ${meter12WriteResult.plan.appliedModel} + ${meter12WriteResult.plan.optionCode}`
+                    : "Запись остановлена"}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const header = meter12WriteResult.success
+                      ? `Meter OK (${meter12WriteResult.writtenDid}): ${meter12WriteResult.plan.appliedModel} + ${meter12WriteResult.plan.optionCode}`
+                      : `Meter STOP: ${meter12WriteResult.plan.appliedModel} + ${meter12WriteResult.plan.optionCode}`;
+                    const afterLine = meter12WriteResult.after
+                      ? `После записи считано: ${meter12WriteResult.after.match.inferredAppliedModel} + ${meter12WriteResult.after.match.inferredOptionCode} (${meter12WriteResult.after.match.inferredRegion})`
+                      : null;
+                    const lines = [
+                      header,
+                      ...(afterLine ? [afterLine] : []),
+                      ...meter12WriteResult.steps,
+                    ];
+                    void copyTextToClipboard(lines.join("\n")).then((ok) => {
+                      if (ok) {
+                        setMeterWriteLogCopied(true);
+                        setTimeout(() => setMeterWriteLogCopied(false), 2000);
+                      }
+                    });
+                  }}
+                  className="shrink-0 rounded-lg border border-black/15 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-800 hover:bg-gray-50"
+                >
+                  {meterWriteLogCopied ? "Скопировано ✓" : "Копировать логи"}
+                </button>
               </div>
               {meter12WriteResult.after && (
                 <div>
@@ -1941,7 +2094,7 @@ export default function SubaruCodingClient() {
                   ({meter12WriteResult.after.match.inferredRegion})
                 </div>
               )}
-              <ul className="max-h-40 overflow-y-auto space-y-0.5 font-mono text-[10px] text-gray-700">
+              <ul className="max-h-56 overflow-y-auto space-y-0.5 font-mono text-[10px] text-gray-700">
                 {meter12WriteResult.steps.map((step, idx) => (
                   <li key={idx}>• {step}</li>
                 ))}
@@ -2134,242 +2287,280 @@ export default function SubaruCodingClient() {
         />
       )}
 
-      {/* Clean Confirm Modal without 0205 */}
-      {eyesightWritePending && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setEyesightWritePending(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border border-violet-900 bg-white p-5 shadow-xl space-y-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="rounded-lg bg-violet-900 px-3 py-1.5 text-xs font-bold text-white">
-              {eyesightWritePending.writeMode === "custom-35xx"
-                ? "Восстановление оригинала EyeSight из бэкапа"
-                : eyesightWritePending.writeMode === "region-only"
-                  ? `EyeSight — запись только региона (DID ${modalEyesightInputGuide?.destinationDid ?? "3502"})`
-                  : `EyeSight — Selection of Parameter (SSM4 ${modalEyesightInputGuide?.didRange ?? "3501..3510"} · ${modalEyesightInputGuide?.didCount ?? 16} DID)`}
+      {/* Live busy status pill rendered in viewport portal */}
+      {mounted &&
+        busy &&
+        busyActionLabel &&
+        createPortal(
+          <div className="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex justify-center px-4">
+            <div className="flex items-center gap-2 rounded-full border border-gray-800 bg-gray-900/95 px-4 py-2 text-xs font-semibold text-white shadow-lg">
+              <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              <span>{busyActionLabel}</span>
             </div>
-            <p className="text-[11px] text-gray-700 leading-relaxed">
-              Запись Vehicle Model Registration в блок EyeSight ({eyesightRead?.txHex ?? "787"}).
-              Перед записью снимается CGW FilterRemove, затем выполняется 10 03 → SecurityAccess (27 03/04) → 2E → повторная сверка (B09).
-            </p>
-            {modalEyesightInputGuide && eyesightWritePending.writeMode !== "custom-35xx" && (
-              <div className="rounded-lg border border-violet-200 bg-violet-50/70 px-2.5 py-1.5 text-[10px] text-violet-950 leading-relaxed">
-                {modalEyesightInputGuide.hintRu}
-              </div>
-            )}
-            {modalEyesightSupport &&
-              eyesightWritePending.writeMode !== "custom-35xx" &&
-              !modalEyesightSupport.allowObdWrite && (
-                <div className="rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-[10px] text-rose-900 leading-relaxed">
-                  ⛔ {modalEyesightSupport.ruleTitleRu}: {modalEyesightSupport.reasonRu}
-                </div>
-              )}
-            <div className="grid grid-cols-2 gap-2">
-              <label className="block">
-                <span className="text-[11px] font-semibold text-gray-700">Applied Model:</span>
-                <input
-                  type="text"
-                  maxLength={7}
-                  disabled={eyesightWritePending.writeMode === "custom-35xx"}
-                  value={eyesightWritePending.appliedModel}
-                  onChange={(e) =>
-                    setEyesightWritePending({
-                      ...eyesightWritePending,
-                      appliedModel: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7),
-                    })
-                  }
-                  className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[11px] font-semibold text-gray-700">Option Code:</span>
-                <input
-                  type="text"
-                  maxLength={4}
-                  disabled={eyesightWritePending.writeMode === "custom-35xx"}
-                  value={eyesightWritePending.optionCode}
-                  onChange={(e) =>
-                    setEyesightWritePending({
-                      ...eyesightWritePending,
-                      optionCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4),
-                    })
-                  }
-                  className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
-                />
-              </label>
-            </div>
-            <div className="rounded-lg bg-violet-50 p-2.5 font-mono text-xs text-violet-950 border border-violet-200 space-y-1">
-              <div>Applied Model : <strong>{eyesightWritePending.appliedModel}</strong></div>
-              <div>
-                Option Code   : <strong>{eyesightWritePending.optionCode}</strong>
-                {modalEyesightInputGuide?.resolvedCatalogOption &&
-                  modalEyesightInputGuide.resolvedCatalogOption !== eyesightWritePending.optionCode && (
-                    <span className="ml-1.5 text-[10px] font-sans text-violet-800">
-                      (маска Y-Yw: <strong>{modalEyesightInputGuide.resolvedCatalogOption}</strong>)
-                    </span>
-                  )}
-              </div>
-              {modalPlannedEyesightPreview.length > 0 ? (
-                <div className="max-h-24 overflow-y-auto text-[10px] text-violet-900 pt-1 border-t border-violet-200">
-                  Будет записано ({modalPlannedEyesightPreview.length} DID):{" "}
-                  {modalPlannedEyesightPreview.join(", ")}
-                </div>
-              ) : (
-                <div className="text-[11px] text-rose-700 font-sans">
-                  Внимание: для {eyesightWritePending.appliedModel}+{eyesightWritePending.optionCode} нет строки в Y-Yw — выберите режим «Только регион ({modalEyesightInputGuide?.destinationDid ?? "3502"})» или код из Y-Yw.
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setEyesightWritePending(null)}
-                className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                disabled={
-                  eyesightWritePending.appliedModel.trim().length !== 7 ||
-                  eyesightWritePending.optionCode.trim().length <
-                    (modalEyesightInputGuide?.expectedOptionLength ?? 4) ||
-                  modalPlannedEyesightPreview.length === 0 ||
-                  (eyesightWritePending.writeMode !== "custom-35xx" &&
-                    modalEyesightSupport != null &&
-                    !modalEyesightSupport.allowObdWrite)
-                }
-                onClick={() => void executeEyesightVariantWrite()}
-                className="rounded-xl bg-violet-900 hover:bg-violet-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                {eyesightWritePending.writeMode === "custom-35xx"
-                  ? "OK — восстановить EyeSight"
-                  : "OK — загрузить в EyeSight"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
 
-      {meter12WritePending && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setMeter12WritePending(null)}
-        >
+      {/* Clean Confirm Modal without 0205 (portaled outside ObdScrollShell transform so fixed inset-0 stays centered on current viewport) */}
+      {mounted &&
+        eyesightWritePending &&
+        createPortal(
           <div
-            className="w-full max-w-md rounded-2xl border border-blue-900 bg-white p-5 shadow-xl space-y-3"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overscroll-contain"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setEyesightWritePending(null)}
           >
-            <div className="rounded-lg bg-blue-900 px-3 py-1.5 text-xs font-bold text-white flex items-center justify-between">
-              <span>
-                {meter12WritePending.writeMode === "custom-a0xx"
-                  ? "Восстановление оригинала из бэкапа"
-                  : meter12WritePending.writeMode === "full-cgdw"
-                    ? "Полная запись всех DID (как SSM4)"
-                    : "Перевод на °C (2 DID: A002 + A011)"}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="block">
-                <span className="text-[11px] font-semibold text-gray-700">Applied Model (7 симв.):</span>
-                <input
-                  type="text"
-                  maxLength={7}
-                  disabled={meter12WritePending.writeMode === "custom-a0xx"}
-                  value={meter12WritePending.appliedModel}
-                  onChange={(e) =>
-                    setMeter12WritePending({
-                      ...meter12WritePending,
-                      appliedModel: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7),
-                    })
-                  }
-                  className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[11px] font-semibold text-gray-700">Option Code (4 симв.):</span>
-                <input
-                  type="text"
-                  maxLength={4}
-                  disabled={meter12WritePending.writeMode === "custom-a0xx"}
-                  value={meter12WritePending.optionCode}
-                  onChange={(e) =>
-                    setMeter12WritePending({
-                      ...meter12WritePending,
-                      optionCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4),
-                    })
-                  }
-                  className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
-                />
-              </label>
-            </div>
-            <div className="rounded-lg bg-blue-50 p-2.5 font-mono text-xs text-blue-950 border border-blue-200 space-y-1">
-              <div>Applied Model : <strong>{meter12WritePending.appliedModel}</strong></div>
-              <div>Option Code   : <strong>{meter12WritePending.optionCode}</strong></div>
-              <div>
-                Режим записи  :{" "}
-                <strong>
-                  {meter12WritePending.writeMode === "custom-a0xx"
-                    ? "Бэкап оригинала (custom-a0xx)"
-                    : meter12WritePending.writeMode === "full-cgdw"
-                      ? "Полная маска SSM4 cgdw"
-                      : "Безопасный минимум (2 DID: A002+A011)"}
-                </strong>
+            <div
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-violet-900 bg-white p-5 shadow-xl space-y-3"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="rounded-lg bg-violet-900 px-3 py-1.5 text-xs font-bold text-white flex items-center justify-between gap-2">
+                <span>
+                  {eyesightWritePending.writeMode === "custom-35xx"
+                    ? "Восстановление оригинала EyeSight из бэкапа"
+                    : eyesightWritePending.writeMode === "region-only"
+                      ? `EyeSight — запись только региона (DID ${modalEyesightInputGuide?.destinationDid ?? "3502"})`
+                      : `EyeSight — Selection of Parameter (SSM4 ${modalEyesightInputGuide?.didRange ?? "3501..3510"} · ${modalEyesightInputGuide?.didCount ?? 16} DID)`}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Закрыть"
+                  onClick={() => setEyesightWritePending(null)}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-white/80 hover:bg-white/15 hover:text-white"
+                >
+                  ✕
+                </button>
               </div>
-              {modalPlannedA0xxPreview.length > 0 ? (
-                <div className="max-h-24 overflow-y-auto text-[10px] text-blue-900 pt-1 border-t border-blue-200">
-                  Будет записано ({modalPlannedA0xxPreview.length} DID):{" "}
-                  {modalPlannedA0xxPreview.join(", ")}
-                </div>
-              ) : (
-                <div className="text-[11px] text-rose-700 font-sans">
-                  Внимание: для {meter12WritePending.appliedModel}+{meter12WritePending.optionCode} нет строки в справочнике cgdw — выберите режим «Только 2 DID» или код из таблицы.
+              <p className="text-[11px] text-gray-700 leading-relaxed">
+                Запись Vehicle Model Registration в блок EyeSight ({eyesightRead?.txHex ?? "787"}).
+                Перед записью снимается CGW FilterRemove, затем выполняется 10 03 → SecurityAccess (27 03/04) → 2E → повторная сверка (B09).
+              </p>
+              {modalEyesightInputGuide && eyesightWritePending.writeMode !== "custom-35xx" && (
+                <div className="rounded-lg border border-violet-200 bg-violet-50/70 px-2.5 py-1.5 text-[10px] text-violet-950 leading-relaxed">
+                  {modalEyesightInputGuide.hintRu}
                 </div>
               )}
-              {meter12WritePending.writeMode !== "custom-a0xx" &&
-                modalMeterSupport &&
-                !modalMeterSupport.allowObdWrite && (
-                  <div className="text-[11px] text-rose-700 font-sans pt-1 border-t border-rose-200">
-                    ⛔ {modalMeterSupport.ruleTitleRu}: {modalMeterSupport.reasonRu}
+              {modalEyesightSupport &&
+                eyesightWritePending.writeMode !== "custom-35xx" &&
+                !modalEyesightSupport.allowObdWrite && (
+                  <div className="rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-[10px] text-rose-900 leading-relaxed">
+                    ⛔ {modalEyesightSupport.ruleTitleRu}: {modalEyesightSupport.reasonRu}
                   </div>
                 )}
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-gray-700">Applied Model:</span>
+                  <input
+                    type="text"
+                    maxLength={7}
+                    disabled={eyesightWritePending.writeMode === "custom-35xx"}
+                    value={eyesightWritePending.appliedModel}
+                    onChange={(e) =>
+                      setEyesightWritePending({
+                        ...eyesightWritePending,
+                        appliedModel: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7),
+                      })
+                    }
+                    className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-gray-700">Option Code:</span>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    disabled={eyesightWritePending.writeMode === "custom-35xx"}
+                    value={eyesightWritePending.optionCode}
+                    onChange={(e) =>
+                      setEyesightWritePending({
+                        ...eyesightWritePending,
+                        optionCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4),
+                      })
+                    }
+                    className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
+                  />
+                </label>
+              </div>
+              <div className="rounded-lg bg-violet-50 p-2.5 font-mono text-xs text-violet-950 border border-violet-200 space-y-1">
+                <div>Applied Model : <strong>{eyesightWritePending.appliedModel}</strong></div>
+                <div>
+                  Option Code   : <strong>{eyesightWritePending.optionCode}</strong>
+                  {modalEyesightInputGuide?.resolvedCatalogOption &&
+                    modalEyesightInputGuide.resolvedCatalogOption !== eyesightWritePending.optionCode && (
+                      <span className="ml-1.5 text-[10px] font-sans text-violet-800">
+                        (маска Y-Yw: <strong>{modalEyesightInputGuide.resolvedCatalogOption}</strong>)
+                      </span>
+                    )}
+                </div>
+                {modalPlannedEyesightPreview.length > 0 ? (
+                  <div className="max-h-24 overflow-y-auto text-[10px] text-violet-900 pt-1 border-t border-violet-200">
+                    Будет записано ({modalPlannedEyesightPreview.length} DID):{" "}
+                    {modalPlannedEyesightPreview.join(", ")}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-rose-700 font-sans">
+                    Внимание: для {eyesightWritePending.appliedModel}+{eyesightWritePending.optionCode} нет строки в Y-Yw — выберите режим «Только регион ({modalEyesightInputGuide?.destinationDid ?? "3502"})» или код из Y-Yw.
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setEyesightWritePending(null)}
+                  className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    eyesightWritePending.appliedModel.trim().length !== 7 ||
+                    eyesightWritePending.optionCode.trim().length <
+                      (modalEyesightInputGuide?.expectedOptionLength ?? 4) ||
+                    modalPlannedEyesightPreview.length === 0 ||
+                    (eyesightWritePending.writeMode !== "custom-35xx" &&
+                      modalEyesightSupport != null &&
+                      !modalEyesightSupport.allowObdWrite)
+                  }
+                  onClick={() => void executeEyesightVariantWrite()}
+                  className="rounded-xl bg-violet-900 hover:bg-violet-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  {eyesightWritePending.writeMode === "custom-35xx"
+                    ? "OK — восстановить EyeSight"
+                    : "OK — загрузить в EyeSight"}
+                </button>
+              </div>
             </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setMeter12WritePending(null)}
-                className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                disabled={
-                  meter12WritePending.appliedModel.trim().length !== 7 ||
-                  meter12WritePending.optionCode.trim().length !== 4 ||
-                  modalPlannedA0xxPreview.length === 0 ||
-                  (meter12WritePending.writeMode !== "custom-a0xx" &&
-                    modalMeterSupport != null &&
-                    !modalMeterSupport.allowObdWrite)
-                }
-                onClick={() => void executeMeter12Write()}
-                className="rounded-xl bg-blue-900 hover:bg-blue-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                {meter12WritePending.writeMode === "custom-a0xx"
-                  ? "OK — восстановить оригинал"
-                  : "OK — записать в приборку"}
-              </button>
+          </div>,
+          document.body,
+        )}
+
+      {mounted &&
+        meter12WritePending &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overscroll-contain"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setMeter12WritePending(null)}
+          >
+            <div
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-blue-900 bg-white p-5 shadow-xl space-y-3"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="rounded-lg bg-blue-900 px-3 py-1.5 text-xs font-bold text-white flex items-center justify-between gap-2">
+                <span>
+                  {meter12WritePending.writeMode === "custom-a0xx"
+                    ? "Восстановление оригинала из бэкапа"
+                    : meter12WritePending.writeMode === "full-cgdw"
+                      ? "Полная запись всех DID (как SSM4)"
+                      : "Перевод на °C (2 DID: A002 + A011)"}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Закрыть"
+                  onClick={() => setMeter12WritePending(null)}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-white/80 hover:bg-white/15 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-gray-700">Applied Model (7 симв.):</span>
+                  <input
+                    type="text"
+                    maxLength={7}
+                    disabled={meter12WritePending.writeMode === "custom-a0xx"}
+                    value={meter12WritePending.appliedModel}
+                    onChange={(e) =>
+                      setMeter12WritePending({
+                        ...meter12WritePending,
+                        appliedModel: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7),
+                      })
+                    }
+                    className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-gray-700">Option Code (4 симв.):</span>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    disabled={meter12WritePending.writeMode === "custom-a0xx"}
+                    value={meter12WritePending.optionCode}
+                    onChange={(e) =>
+                      setMeter12WritePending({
+                        ...meter12WritePending,
+                        optionCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4),
+                      })
+                    }
+                    className="mt-0.5 w-full rounded border border-gray-400 bg-white px-2.5 py-1.5 font-mono text-sm font-bold uppercase disabled:bg-gray-100"
+                  />
+                </label>
+              </div>
+              <div className="rounded-lg bg-blue-50 p-2.5 font-mono text-xs text-blue-950 border border-blue-200 space-y-1">
+                <div>Applied Model : <strong>{meter12WritePending.appliedModel}</strong></div>
+                <div>Option Code   : <strong>{meter12WritePending.optionCode}</strong></div>
+                <div>
+                  Режим записи  :{" "}
+                  <strong>
+                    {meter12WritePending.writeMode === "custom-a0xx"
+                      ? "Бэкап оригинала (custom-a0xx)"
+                      : meter12WritePending.writeMode === "full-cgdw"
+                        ? "Полная маска SSM4 cgdw"
+                        : "Безопасный минимум (2 DID: A002+A011)"}
+                  </strong>
+                </div>
+                {modalPlannedA0xxPreview.length > 0 ? (
+                  <div className="max-h-24 overflow-y-auto text-[10px] text-blue-900 pt-1 border-t border-blue-200">
+                    Будет записано ({modalPlannedA0xxPreview.length} DID):{" "}
+                    {modalPlannedA0xxPreview.join(", ")}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-rose-700 font-sans">
+                    Внимание: для {meter12WritePending.appliedModel}+{meter12WritePending.optionCode} нет строки в справочнике cgdw — выберите режим «Только 2 DID» или код из таблицы.
+                  </div>
+                )}
+                {meter12WritePending.writeMode !== "custom-a0xx" &&
+                  modalMeterSupport &&
+                  !modalMeterSupport.allowObdWrite && (
+                    <div className="text-[11px] text-rose-700 font-sans pt-1 border-t border-rose-200">
+                      ⛔ {modalMeterSupport.ruleTitleRu}: {modalMeterSupport.reasonRu}
+                    </div>
+                  )}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setMeter12WritePending(null)}
+                  className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    meter12WritePending.appliedModel.trim().length !== 7 ||
+                    meter12WritePending.optionCode.trim().length !== 4 ||
+                    modalPlannedA0xxPreview.length === 0 ||
+                    (meter12WritePending.writeMode !== "custom-a0xx" &&
+                      modalMeterSupport != null &&
+                      !modalMeterSupport.allowObdWrite)
+                  }
+                  onClick={() => void executeMeter12Write()}
+                  className="rounded-xl bg-blue-900 hover:bg-blue-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  {meter12WritePending.writeMode === "custom-a0xx"
+                    ? "OK — восстановить оригинал"
+                    : "OK — записать в приборку"}
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

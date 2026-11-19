@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   ObdBleSession,
 } from "@/lib/obd/obd-session";
@@ -28,6 +29,11 @@ export function SubaruImmoSection({
   setBusy,
   setError,
 }: Props) {
+  const [mounted, setMounted] = useState(false);
+  const [immoLogCopied, setImmoLogCopied] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const [subTab, setSubTab] = useState<ImmoSubTab>("read-keys");
   const [resSystemType, setResSystemType] = useState<SubaruResSystemType>("auto");
   const [immoKeyCountRead, setImmoKeyCountRead] = useState<{
@@ -716,15 +722,42 @@ export function SubaruImmoSection({
       {/* Immobilizer Log */}
       {immoLogLines.length > 0 && (
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-1.5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold text-gray-700">Журнал иммобилайзера</span>
-            <button
-              type="button"
-              onClick={() => setImmoLogLines([])}
-              className="text-[11px] text-gray-500 hover:text-gray-800"
-            >
-              Очистить
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const text = immoLogLines.join("\n");
+                  const done = () => {
+                    setImmoLogCopied(true);
+                    setTimeout(() => setImmoLogCopied(false), 2000);
+                  };
+                  if (navigator.clipboard?.writeText) {
+                    void navigator.clipboard.writeText(text).then(done).catch(() => undefined);
+                  } else {
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    ta.style.position = "fixed";
+                    ta.style.top = "-1000px";
+                    document.body.appendChild(ta);
+                    ta.select();
+                    if (document.execCommand("copy")) done();
+                    ta.remove();
+                  }
+                }}
+                className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-800 hover:bg-gray-100"
+              >
+                {immoLogCopied ? "Скопировано ✓" : "Копировать логи"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setImmoLogLines([])}
+                className="text-[11px] text-gray-500 hover:text-gray-800"
+              >
+                Очистить
+              </button>
+            </div>
           </div>
           <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] text-gray-800">
             {immoLogLines.join("\n")}
@@ -732,101 +765,107 @@ export function SubaruImmoSection({
         </div>
       )}
 
-      {/* Delete Confirm Modal */}
-      {immoDeleteConfirmOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setImmoDeleteConfirmOpen(false)}
-        >
+      {/* Delete Confirm Modal (portaled outside ObdScrollShell transform) */}
+      {mounted &&
+        immoDeleteConfirmOpen &&
+        createPortal(
           <div
-            className="w-full max-w-md rounded-2xl border border-rose-300 bg-white p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overscroll-contain"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setImmoDeleteConfirmOpen(false)}
           >
-            <h2 className="text-base font-bold text-gray-900">Удалить остальные ключи?</h2>
-            <p className="mt-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-950">
-              Все ключи, кроме одного ключа, который вы поднесёте к кнопке ENGINE START/STOP, будут удалены.
-            </p>
-            <label className="mt-3 block space-y-1">
-              <span className="text-xs font-medium text-gray-900">
-                Введите <code className="font-mono font-bold">DELETE</code>:
-              </span>
-              <input
-                type="text"
-                value={immoDeleteConfirmTyped}
-                onChange={(e) => setImmoDeleteConfirmTyped(e.target.value.toUpperCase())}
-                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
-              />
-            </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setImmoDeleteConfirmOpen(false)}
-                className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                disabled={immoDeleteConfirmTyped.trim().toUpperCase() !== "DELETE"}
-                onClick={() => void handleExecuteDeleteOtherKeys()}
-                className="rounded-xl bg-rose-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                Удалить
-              </button>
+            <div
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-rose-300 bg-white p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-base font-bold text-gray-900">Удалить остальные ключи?</h2>
+              <p className="mt-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-950">
+                Все ключи, кроме одного ключа, который вы поднесёте к кнопке ENGINE START/STOP, будут удалены.
+              </p>
+              <label className="mt-3 block space-y-1">
+                <span className="text-xs font-medium text-gray-900">
+                  Введите <code className="font-mono font-bold">DELETE</code>:
+                </span>
+                <input
+                  type="text"
+                  value={immoDeleteConfirmTyped}
+                  onChange={(e) => setImmoDeleteConfirmTyped(e.target.value.toUpperCase())}
+                  className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
+                />
+              </label>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setImmoDeleteConfirmOpen(false)}
+                  className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  disabled={immoDeleteConfirmTyped.trim().toUpperCase() !== "DELETE"}
+                  onClick={() => void handleExecuteDeleteOtherKeys()}
+                  className="rounded-xl bg-rose-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Удалить
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
 
-      {/* RES Confirm Modal */}
-      {resConfirmOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setResConfirmOpen(false)}
-        >
+      {/* RES Confirm Modal (portaled outside ObdScrollShell transform) */}
+      {mounted &&
+        resConfirmOpen &&
+        createPortal(
           <div
-            className="w-full max-w-md rounded-2xl border border-blue-300 bg-white p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overscroll-contain"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setResConfirmOpen(false)}
           >
-            <h2 className="text-base font-bold text-gray-900">Прописать блок RES?</h2>
-            <p className="mt-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950">
-              IG ON, рабочий ключ в салоне. Отправляет `2E 11 B0 01` (`7B4`/`751`) или `31 01 40 05` (`752`).
-            </p>
-            <label className="mt-3 block space-y-1">
-              <span className="text-xs font-medium text-gray-900">
-                Введите <code className="font-mono font-bold">YES</code>:
-              </span>
-              <input
-                type="text"
-                value={resConfirmTyped}
-                onChange={(e) => setResConfirmTyped(e.target.value.toUpperCase())}
-                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
-              />
-            </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setResConfirmOpen(false)}
-                className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                disabled={resConfirmTyped.trim().toUpperCase() !== "YES"}
-                onClick={() => void handleRegisterResCm()}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                Прописать RES
-              </button>
+            <div
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-blue-300 bg-white p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-base font-bold text-gray-900">Прописать блок RES?</h2>
+              <p className="mt-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950">
+                IG ON, рабочий ключ в салоне. Отправляет `2E 11 B0 01` (`7B4`/`751`) или `31 01 40 05` (`752`).
+              </p>
+              <label className="mt-3 block space-y-1">
+                <span className="text-xs font-medium text-gray-900">
+                  Введите <code className="font-mono font-bold">YES</code>:
+                </span>
+                <input
+                  type="text"
+                  value={resConfirmTyped}
+                  onChange={(e) => setResConfirmTyped(e.target.value.toUpperCase())}
+                  className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm font-bold uppercase"
+                />
+              </label>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setResConfirmOpen(false)}
+                  className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-900"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  disabled={resConfirmTyped.trim().toUpperCase() !== "YES"}
+                  onClick={() => void handleRegisterResCm()}
+                  className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Прописать RES
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

@@ -615,4 +615,135 @@ describe("subaru-meter-variant", () => {
     expect(elm.sent).toHaveLength(0);
     expect(res.steps.some((s) => s.includes("без разбора"))).toBe(true);
   });
+
+  it("keeps 763 open without 10 01 after 31 01 02 00 on pre-facelift BTACYR8 (10C2=00, 103B=FF on 020C) and unlocks 783 with IDX35 on attempt 2", async () => {
+    const btacyr8Dids = getSsm4CgdwWriteDids("BTACYR8", "C0QF");
+    expect(btacyr8Dids).not.toBeNull();
+    expect(btacyr8Dids).toHaveLength(22);
+
+    const cgwSeed = [
+      0x08, 0x06, 0x8a, 0xec, 0x70, 0x30, 0x90, 0x22,
+      0x14, 0x39, 0x39, 0x78, 0xec, 0x9c, 0x96, 0x83,
+    ];
+    const key01 = SUBARU_SGP_AES128_KEYS.find((k) => k.id === "12265_0251_3")!;
+    const expectedCgwKey = computeSubaruSecurityKey16ByteAesEcb(
+      cgwSeed,
+      key01.keyHex.match(/../g)!.map((h) => Number.parseInt(h, 16)),
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    const meterSeed = [0x1a, 0x2b, 0x3c, 0x4d];
+    const expectedMeterKeyIdx35 = computeSubaruSecurityKey4Byte(
+      meterSeed,
+      SUBARU_METER_SECURITY_KEY_TABLES.find((t) => t.id === "CTRL_IDX35_LE")!.words,
+      "ctrl-mode1",
+    )
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join("");
+
+    let currentTx = 0;
+    let cgwSaOpen = false;
+    let cgwFilterOpenBy0200 = false;
+    let meterSaOpen = false;
+    let meterWrongKeys = 0;
+    let gateOpen = false;
+    const txLog: string[] = [];
+
+    const elm: SubaruMeterWriteLink = {
+      async sendCommand() {
+        return "OK";
+      },
+      async setCanHeader(tx) {
+        currentTx = tx;
+      },
+      async sendPayload(hex) {
+        const k = hex.replace(/\s+/g, "").toUpperCase();
+        txLog.push(`${currentTx.toString(16)}:${k}`);
+        if (currentTx === 0x763) {
+          if (k === "1003") return "50 03";
+          if (k === "1001") {
+            // Returning CGW to default session re-enables the SID 27 filter (as observed on live BTACYR8)!
+            cgwSaOpen = false;
+            cgwFilterOpenBy0200 = false;
+            return "50 01 00 32 01 F4";
+          }
+          if (k === "3101020C") return "7F 31 78 71 01 02 0C";
+          if (k === "220250") return "62 02 50 00";
+          if (k === "220251") return "62 02 51 03";
+          if (k === "2707") {
+            return "67 07 " + cgwSeed.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+          }
+          if (k === `2708${expectedCgwKey}`) {
+            cgwSaOpen = true;
+            return "67 08";
+          }
+          if (k === "31010200") {
+            if (!cgwSaOpen) return "7F 31 33";
+            cgwFilterOpenBy0200 = true;
+            return "71 01 02 00";
+          }
+          if (k === "22103B") return cgwFilterOpenBy0200 ? "62 10 3B 00" : "62 10 3B FF";
+          return "NO DATA";
+        }
+        if (currentTx === 0x783) {
+          if (k === "1003") return "50 03";
+          if (k === "1001") return "50 01";
+          if (k === "3E00") return "7E 00";
+          if (k === "2210C2") return gateOpen ? "62 10 C2 FF" : "62 10 C2 00";
+          if (k === "2703") {
+            return cgwFilterOpenBy0200
+              ? "67 03 " + meterSeed.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")
+              : "NO DATA";
+          }
+          if (k.startsWith("2704")) {
+            if (!cgwFilterOpenBy0200) return "NO DATA";
+            if (k === `2704${expectedMeterKeyIdx35}`) {
+              meterSaOpen = true;
+              return "67 04";
+            }
+            meterWrongKeys++;
+            // Simulate strict ECU locking out on 3rd wrong key so CTRL_IDX35_LE MUST be tried before 3rd attempt
+            return meterWrongKeys >= 3 ? "7F 27 36" : "7F 27 35";
+          }
+          if (k === "2E10C2FF") {
+            if (!meterSaOpen && !gateOpen) return "7F 2E 33";
+            gateOpen = true;
+            return "6E 10 C2";
+          }
+          if (k === "2E10C200") {
+            gateOpen = false;
+            return "6E 10 C2";
+          }
+          const m = k.match(/^2E(A0[0-9A-F]{2})([0-9A-F]{2})$/);
+          if (m) {
+            if (!gateOpen) return "7F 2E 33";
+            return `6E ${m[1]!.slice(0, 2)} ${m[1]!.slice(2)}`;
+          }
+        }
+        return "NO DATA";
+      },
+    };
+
+    const res = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTACYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "full-cgdw",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.writtenDid).toBe("CGDW A0xx (22/22)");
+    expect(res.securityAccessRequired).toBe(false);
+    expect(txLog).toContain(`763:31010200`);
+    expect(txLog).toContain(`783:2704${expectedMeterKeyIdx35}`);
+    expect(txLog.indexOf("763:31010200")).toBeLessThan(txLog.indexOf(`783:2704${expectedMeterKeyIdx35}`));
+    expect(txLog.lastIndexOf("763:1001")).toBeGreaterThan(txLog.indexOf("783:2E10C200"));
+    expect(res.steps.some((s) => s.includes("фильтр 27 xx ещё активен"))).toBe(true);
+  });
 });

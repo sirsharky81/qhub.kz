@@ -815,10 +815,15 @@ export async function unlockSubaruCgwFilterRemove(
           const pR = parseUdsResponse(rawR, 0x31);
           const clean = rawR.replace(/>/g, "").trim();
           if (pR.kind === "positive") {
-            steps.push(
-              `${label}: ✓ фильтр SID снят (${routineHex.slice(0, 2)} ${routineHex.slice(2, 4)} ${routineHex.slice(4, 6)} ${routineHex.slice(6)} → ${clean})`,
-            );
-            await tryLogCgwFilterState103B(elm, label, steps, "после 31 01");
+            const state103b = await tryLogCgwFilterState103B(elm, label, steps, "после 31 01");
+            const routineFormatted = `${routineHex.slice(0, 2)} ${routineHex.slice(2, 4)} ${routineHex.slice(4, 6)} ${routineHex.slice(6)}`;
+            if (state103b != null && state103b !== 0x00) {
+              steps.push(
+                `${label}: ${routineFormatted} → ${clean}, но 22 103B = ${state103b.toString(16).padStart(2, "0").toUpperCase()} (фильтр 27 xx ещё активен)`,
+              );
+            } else {
+              steps.push(`${label}: ✓ фильтр SID снят (${routineFormatted} → ${clean})`);
+            }
             if (options.keepGatewayOpen) {
               steps.push(`${label}: сессия CGW оставлена открытой (без 10 01)`);
               await sleep(250);
@@ -1165,8 +1170,10 @@ export async function unlockSubaruMeterSecurityAccess(
         pair.level === 5
           ? ["ctrl-mode1", "standard-l5", "standard-l3", "ocpt"]
           : ["ctrl-mode1", "standard-l3", "ocpt"];
-      for (const tbl of SUBARU_METER_SECURITY_KEY_TABLES) {
-        for (const mode of modeOrder) {
+      // Try official MET-002/009/010 GetSecurityAccessSelKey ("ctrl-mode1", idx=11 then idx=35) FIRST across all tables
+      // before probing non-ctrl modes so ECUs with low NRC 36 attempt limits don't lock out prematurely.
+      for (const mode of modeOrder) {
+        for (const tbl of SUBARU_METER_SECURITY_KEY_TABLES) {
           const kBytes = computeSubaruSecurityKey4Byte(seedBytes, tbl.words, mode);
           const kHex = compactHex(kBytes);
           if (kHex.length === 8 && !candidates.some((c) => c.keyHex === kHex)) {
@@ -1314,6 +1321,111 @@ async function sendWriteWithRetry(
 }
 
 export type SubaruMeterWriteMode = "two-did" | "full-cgdw" | "custom-a0xx";
+
+async function closeKeptOpenMeterGateways(
+  elm: SubaruMeterWriteLink,
+  keptGateways: readonly { tx: number; rx: number }[],
+): Promise<void> {
+  for (const gw of keptGateways) {
+    try {
+      await elm.setCanHeader(gw.tx, gw.rx);
+      await elm.sendPayload("1001", 800);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function escalateCgwKeepOpenAndUnlockMeter(
+  elm: SubaruMeterWriteLink,
+  tx: number,
+  rx: number,
+  steps: string[],
+  options: {
+    userKeyHex?: string;
+    keyVersionByte: number | null;
+    keptGateways: { tx: number; rx: number }[];
+    triedAltGateways: { done: boolean };
+  },
+): Promise<{ unlocked: boolean; seedHex: string | null; lockedOut?: boolean }> {
+  const txHex = tx.toString(16).toUpperCase();
+  const rxHex = rx.toString(16).toUpperCase();
+
+  const trackKept = (gw: {
+    keptOpen: boolean;
+    gatewayTx: number | null;
+    gatewayRx: number | null;
+  }) => {
+    if (
+      gw.keptOpen &&
+      gw.gatewayTx != null &&
+      gw.gatewayRx != null &&
+      !options.keptGateways.some((k) => k.tx === gw.gatewayTx)
+    ) {
+      options.keptGateways.push({ tx: gw.gatewayTx, rx: gw.gatewayRx });
+    }
+  };
+
+  steps.push(
+    `${txHex}→${rxHex}: 27 03 → NO DATA — полная AES-разблокировка шлюза CGW 763 (27 07/08 + 31 01 02 00 без 10 01)…`,
+  );
+  const cgwSa763 = await unlockSubaruCgwFilterRemove(elm, steps, {
+    requireSecurityAccess: true,
+    targetTxs: [0x763],
+    keepGatewayOpen: true,
+  });
+  trackKept(cgwSa763);
+
+  await openMeterSession(elm, tx, rx);
+  let u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+    userKeyHex: options.userKeyHex,
+    keyVersionByte: options.keyVersionByte,
+    preferEcuKinds: [0x12, 0x10, 0x11],
+  });
+  if (u.unlocked || u.seedHex || u.lockedOut) {
+    return u;
+  }
+
+  if (cgwSa763.filterRemoved) {
+    const cgwExtra = await unlockSubaruCgwFilterRemove(elm, steps, {
+      requireSecurityAccess: true,
+      targetTxs: [0x763],
+      keepGatewayOpen: true,
+      routines: ["31011201", "3101020C"],
+    });
+    trackKept(cgwExtra);
+    if (cgwExtra.filterRemoved) {
+      await openMeterSession(elm, tx, rx);
+      u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+        userKeyHex: options.userKeyHex,
+        keyVersionByte: options.keyVersionByte,
+        preferEcuKinds: [0x12, 0x10, 0x11],
+      });
+      if (u.unlocked || u.seedHex || u.lockedOut) {
+        return u;
+      }
+    }
+  }
+
+  if (!options.triedAltGateways.done) {
+    options.triedAltGateways.done = true;
+    const cgwAlt = await unlockSubaruCgwFilterRemove(elm, steps, {
+      targetTxs: [0x750, 0x765],
+      keepGatewayOpen: true,
+    });
+    trackKept(cgwAlt);
+    if (cgwAlt.filterRemoved) {
+      await openMeterSession(elm, tx, rx);
+      u = await unlockSubaruMeterSecurityAccess(elm, tx, rx, steps, {
+        userKeyHex: options.userKeyHex,
+        keyVersionByte: options.keyVersionByte,
+        preferEcuKinds: [0x12, 0x10, 0x11],
+      });
+    }
+  }
+
+  return u;
+}
 
 /**
  * Writes Applied Model + Option Code to Combination Meter via UDS 2E DID 0250/0251 or MET-002.srp A0xx.
@@ -1498,265 +1610,280 @@ export async function writeSubaruMeter12ColumnCode(
   let lastSeedHex: string | null = null;
   const skip0250Candidates = forceA0xxPath || hasA002Snapshot;
 
-  for (const target of targets) {
-    const txHex = target.tx.toString(16).toUpperCase();
-    const rxHex = target.rx.toString(16).toUpperCase();
-    try {
-      await openMeterSession(elm, target.tx, target.rx);
-      steps.push(`${txHex}→${rxHex}: открыта сессия приборки (10 03)`);
-    } catch (error) {
-      steps.push(
-        `${txHex}→${rxHex}: не удалось открыть 10 03 (${error instanceof Error ? error.message : String(error)})`,
-      );
-      continue;
-    }
+  const keptGateways: { tx: number; rx: number }[] = [];
+  const triedAltGateways = { done: false };
 
-    try {
-      let did0250OutOfRange = false;
-      if (!skip0250Candidates) {
-        for (const item of plan.candidates) {
-          assertWriteCandidate(item);
-          const parsed = await sendWriteWithRetry(
-            elm,
-            item.requestHex,
-            steps,
-            `${txHex}→${rxHex} 2E ${item.did} (${item.noteRu})`,
-          );
-          if (parsed.kind === "positive") {
-            writtenDid = item.did;
-            writtenHex = item.dataHex;
-            steps.push(`${txHex}→${rxHex}: DID ${item.did} записан (6E)`);
-            break;
-          }
-          if (parsed.kind === "negative" && parsed.nrc === 0x31) {
-            did0250OutOfRange = true;
-          }
-          if (parsed.kind === "negative" && parsed.nrc === 0x33) {
-            securityAccessRequired = true;
-            steps.push(
-              `${txHex}→${rxHex}: NRC 33 SecurityAccess. Ключ приборки в QHub не подставляется — нужна дилерская SSM4.`,
-            );
-            break;
-          }
-        }
-      } else {
-        did0250OutOfRange = true;
+  try {
+    for (const target of targets) {
+      const txHex = target.tx.toString(16).toUpperCase();
+      const rxHex = target.rx.toString(16).toUpperCase();
+      try {
+        await openMeterSession(elm, target.tx, target.rx);
+        steps.push(`${txHex}→${rxHex}: открыта сессия приборки (10 03)`);
+      } catch (error) {
         steps.push(
-          `${txHex}→${rxHex}: SGP / A0xx — пропускаем 2E 0250/0251 и сразу идём через CGW-001 + MET-002/009`,
+          `${txHex}→${rxHex}: не удалось открыть 10 03 (${error instanceof Error ? error.message : String(error)})`,
         );
+        continue;
       }
 
-      // Execute SSM4 CGW-001 + MET-002.srp / MET-009.srp Procedure B:
-      // 1) CGW 763→76B: 10 03 → 31 01 02 0C → 10 01 (and escalate to 27 07/08 + 31 01 02 00 → 10 01 if 27 03 is dropped)
-      // 2) Meter 783→78B: 10 03 → 22 10C2 → (27 03/04 if 10C2=00) → 2E 10C2 FF → 2E A0xx... → 2E 10C2 00
-      if (!writtenDid && !securityAccessRequired && (hasA002Snapshot || did0250OutOfRange || forceA0xxPath)) {
-        const previewWrites =
-          a0xxWritePlan.length <= 4
-            ? a0xxWritePlan.map((w) => `2E ${w.did} ${w.byteHex}`).join(" → ")
-            : `${a0xxWritePlan.length} DID (${a0xxWritePlan[0]!.did}..${a0xxWritePlan[a0xxWritePlan.length - 1]!.did})`;
-        steps.push(
-          `${txHex}→${rxHex}: запуск CGW-001 + MET-002/009 (${previewWrites})`,
-        );
-
-        let cgwOk = false;
-        try {
-          const cgw = await unlockSubaruCgwFilterRemove(elm, steps);
-          cgwOk = cgw.filterRemoved;
-          if (cgwOk && cgw.gatewayLabel) {
-            steps.push(`${cgw.gatewayLabel}: фильтр снят → переключаемся на приборку ${txHex}→${rxHex}`);
+      try {
+        let did0250OutOfRange = false;
+        if (!skip0250Candidates) {
+          for (const item of plan.candidates) {
+            assertWriteCandidate(item);
+            const parsed = await sendWriteWithRetry(
+              elm,
+              item.requestHex,
+              steps,
+              `${txHex}→${rxHex} 2E ${item.did} (${item.noteRu})`,
+            );
+            if (parsed.kind === "positive") {
+              writtenDid = item.did;
+              writtenHex = item.dataHex;
+              steps.push(`${txHex}→${rxHex}: DID ${item.did} записан (6E)`);
+              break;
+            }
+            if (parsed.kind === "negative" && parsed.nrc === 0x31) {
+              did0250OutOfRange = true;
+            }
+            if (parsed.kind === "negative" && parsed.nrc === 0x33) {
+              securityAccessRequired = true;
+              steps.push(
+                `${txHex}→${rxHex}: NRC 33 SecurityAccess. Ключ приборки в QHub не подставляется — нужна дилерская SSM4.`,
+              );
+              break;
+            }
           }
-        } catch (err) {
+        } else {
+          did0250OutOfRange = true;
           steps.push(
-            `CGW FilterRemove ошибка: ${err instanceof Error ? err.message : String(err)}`,
+            `${txHex}→${rxHex}: SGP / A0xx — пропускаем 2E 0250/0251 и сразу идём через CGW-001 + MET-002/009`,
           );
         }
 
-        // Switch CAN headers back from CGW to Combination Meter and open 10 03
-        await openMeterSession(elm, target.tx, target.rx);
-
-        if (!cgwOk) {
+        // Execute SSM4 CGW-001 + MET-002.srp / MET-009.srp Procedure B:
+        // 1) CGW 763→76B: 10 03 → 31 01 02 0C → 10 01 (and escalate to 27 07/08 + 31 01 02 00 WITHOUT 10 01 if 27 03 is dropped)
+        // 2) Meter 783→78B: 10 03 → 22 10C2 → (27 03/04 if 10C2=00) → 2E 10C2 FF → 2E A0xx... → 2E 10C2 00
+        if (!writtenDid && !securityAccessRequired && (hasA002Snapshot || did0250OutOfRange || forceA0xxPath)) {
+          const previewWrites =
+            a0xxWritePlan.length <= 4
+              ? a0xxWritePlan.map((w) => `2E ${w.did} ${w.byteHex}`).join(" → ")
+              : `${a0xxWritePlan.length} DID (${a0xxWritePlan[0]!.did}..${a0xxWritePlan[a0xxWritePlan.length - 1]!.did})`;
           steps.push(
-            `${txHex}→${rxHex}: SID-фильтр CGW НЕ снят. Если 2E 10C2 FF вернёт NRC 33 / 27→NO DATA — проверьте IG ON и адаптер.`,
+            `${txHex}→${rxHex}: запуск CGW-001 + MET-002/009 (${previewWrites})`,
           );
-        }
 
-        // Read Meter KeyVersion from 22 0251 if not already in snapshot
-        let activeKeyVersionByte = keyVersionByte;
-        if (activeKeyVersionByte == null) {
+          let cgwOk = false;
           try {
-            const rawM0251 = await elm.sendPayload("220251", 1_200);
-            const pM0251 = parseUdsResponse(rawM0251, 0x22);
-            if (pM0251.kind === "positive" && pM0251.payload.length >= 3) {
-              activeKeyVersionByte = pM0251.payload[2] ?? pM0251.payload[pM0251.payload.length - 1] ?? null;
+            const cgw = await unlockSubaruCgwFilterRemove(elm, steps);
+            cgwOk = cgw.filterRemoved;
+            if (cgwOk && cgw.gatewayLabel) {
+              steps.push(`${cgw.gatewayLabel}: переход на приборку ${txHex}→${rxHex}`);
+            }
+          } catch (err) {
+            steps.push(
+              `CGW FilterRemove ошибка: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+
+          // Switch CAN headers back from CGW to Combination Meter and open 10 03
+          await openMeterSession(elm, target.tx, target.rx);
+
+          if (!cgwOk) {
+            steps.push(
+              `${txHex}→${rxHex}: SID-фильтр CGW НЕ снят. Если 2E 10C2 FF вернёт NRC 33 / 27→NO DATA — проверьте IG ON и адаптер.`,
+            );
+          }
+
+          // Read Meter KeyVersion from 22 0251 if not already in snapshot
+          let activeKeyVersionByte = keyVersionByte;
+          if (activeKeyVersionByte == null) {
+            try {
+              const rawM0251 = await elm.sendPayload("220251", 1_200);
+              const pM0251 = parseUdsResponse(rawM0251, 0x22);
+              if (pM0251.kind === "positive" && pM0251.payload.length >= 3) {
+                activeKeyVersionByte = pM0251.payload[2] ?? pM0251.payload[pM0251.payload.length - 1] ?? null;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+
+          // Step B01: Check 22 10C2 FIRST; only if 10C2=00 (Used Mode) do we need 27 03 → 27 04!
+          let gateAlreadyOpen = false;
+          let gateReturned00 = false;
+          try {
+            const raw10c2 = await elm.sendPayload("2210C2", 1_500);
+            const p10c2 = parseUdsResponse(raw10c2, 0x22);
+            steps.push(
+              `${txHex}→${rxHex}: проверка ворот 22 10C2 (MET-009 B01) → ${raw10c2.replace(/>/g, "").trim() || "нет ответа"}`,
+            );
+            if (p10c2.kind === "positive") {
+              const val = p10c2.payload[p10c2.payload.length - 1];
+              if (val === 0xff) gateAlreadyOpen = true;
+              if (val === 0x00) gateReturned00 = true;
             }
           } catch {
             /* ignore */
           }
-        }
 
-        // Step B01: Check 22 10C2 FIRST; only if 10C2=00 (Used Mode) do we need 27 03 → 27 04!
-        let gateAlreadyOpen = false;
-        let gateReturned00 = false;
-        try {
-          const raw10c2 = await elm.sendPayload("2210C2", 1_500);
-          const p10c2 = parseUdsResponse(raw10c2, 0x22);
-          steps.push(
-            `${txHex}→${rxHex}: проверка ворот 22 10C2 (MET-009 B01) → ${raw10c2.replace(/>/g, "").trim() || "нет ответа"}`,
-          );
-          if (p10c2.kind === "positive") {
-            const val = p10c2.payload[p10c2.payload.length - 1];
-            if (val === 0xff) gateAlreadyOpen = true;
-            if (val === 0x00) gateReturned00 = true;
-          }
-        } catch {
-          /* ignore */
-        }
+          let triedKeepOpenEscalation = false;
+          let lockedOutOnMeter = false;
 
-        if (gateAlreadyOpen) {
-          steps.push(`${txHex}→${rxHex}: ворота уже открыты (10C2=FF) — зонд 27 03 не нужен`);
-        } else if (gateReturned00) {
-          steps.push(
-            `${txHex}→${rxHex}: приборка в Used Mode (10C2=00) — выполняем 10 03 → 27 03 → 27 04 ПЕРЕД 2E 10C2 FF…`,
-          );
-          await elm.sendPayload("1003", 1_500);
-          let preUnlock = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
-            userKeyHex: input.securityKeyHex,
-            keyVersionByte: activeKeyVersionByte,
-            preferEcuKinds: [0x12, 0x10, 0x11],
-          });
-          if (preUnlock.seedHex) lastSeedHex = preUnlock.seedHex;
-          // If 27 03 was dropped by CGW (NO DATA), escalate to full AES cgwSidFilterRemove (27 07→27 08 + 31 01 02 00 → 10 01)
-          if (!preUnlock.unlocked && !preUnlock.seedHex) {
+          if (gateAlreadyOpen) {
+            steps.push(`${txHex}→${rxHex}: ворота уже открыты (10C2=FF) — зонд 27 03 не нужен`);
+          } else if (gateReturned00) {
             steps.push(
-              `${txHex}→${rxHex}: 27 03 → NO DATA — пробуем полную AES-разблокировку шлюза CGW (27 07/08 + 31 01 02 00 → 10 01)…`,
+              `${txHex}→${rxHex}: приборка в Used Mode (10C2=00) — выполняем 10 03 → 27 03 → 27 04 ПЕРЕД 2E 10C2 FF…`,
             );
-            await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
-            await openMeterSession(elm, target.tx, target.rx);
-            preUnlock = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+            await elm.sendPayload("1003", 1_500);
+            let preUnlock = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
               userKeyHex: input.securityKeyHex,
               keyVersionByte: activeKeyVersionByte,
               preferEcuKinds: [0x12, 0x10, 0x11],
+              seedPairs: [{ seedSub: "2703", keySub: "2704", level: 3 }],
+              stopOnSeedNoData: true,
             });
             if (preUnlock.seedHex) lastSeedHex = preUnlock.seedHex;
+            if (preUnlock.lockedOut) lockedOutOnMeter = true;
+            // If 27 03 was dropped by CGW (NO DATA), escalate to full AES cgwSidFilterRemove (27 07→27 08 + 31 01 02 00 WITHOUT 10 01)
+            if (!preUnlock.unlocked && !preUnlock.seedHex && !preUnlock.lockedOut) {
+              triedKeepOpenEscalation = true;
+              preUnlock = await escalateCgwKeepOpenAndUnlockMeter(elm, target.tx, target.rx, steps, {
+                userKeyHex: input.securityKeyHex,
+                keyVersionByte: activeKeyVersionByte,
+                keptGateways,
+                triedAltGateways,
+              });
+              if (preUnlock.seedHex) lastSeedHex = preUnlock.seedHex;
+              if (preUnlock.lockedOut) lockedOutOnMeter = true;
+            }
           }
-        }
 
-        let pGateOpen = await sendWriteWithRetry(
-          elm,
-          "2E10C2FF",
-          steps,
-          `${txHex}→${rxHex} 2E 10C2 FF (открытие вариантной записи MET-002/009 B06 C04)`,
-        );
-        if (pGateOpen.kind === "negative" && pGateOpen.nrc === 0x33) {
-          steps.push(
-            `${txHex}→${rxHex}: 2E 10C2 FF запросил SecurityAccess (NRC 33) — выполняем 27 03 / 27 04…`,
-          );
-          await elm.sendPayload("1003", 1_500);
-          let unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
-            userKeyHex: input.securityKeyHex,
-            keyVersionByte: activeKeyVersionByte,
-            preferEcuKinds: [0x12, 0x10, 0x11],
-          });
-          if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
-          if (!unlockRes.unlocked && !unlockRes.seedHex) {
-            await unlockSubaruCgwFilterRemove(elm, steps, { requireSecurityAccess: true });
-            await openMeterSession(elm, target.tx, target.rx);
-            unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+          let pGateOpen = lockedOutOnMeter
+            ? parseUdsResponse("7F2E33", 0x2e)
+            : await sendWriteWithRetry(
+                elm,
+                "2E10C2FF",
+                steps,
+                `${txHex}→${rxHex} 2E 10C2 FF (открытие вариантной записи MET-002/009 B06 C04)`,
+              );
+          if (pGateOpen.kind === "negative" && pGateOpen.nrc === 0x33 && !lockedOutOnMeter && !triedKeepOpenEscalation) {
+            steps.push(
+              `${txHex}→${rxHex}: 2E 10C2 FF запросил SecurityAccess (NRC 33) — выполняем 27 03 / 27 04…`,
+            );
+            await elm.sendPayload("1003", 1_500);
+            let unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
               userKeyHex: input.securityKeyHex,
               keyVersionByte: activeKeyVersionByte,
               preferEcuKinds: [0x12, 0x10, 0x11],
+              seedPairs: [{ seedSub: "2703", keySub: "2704", level: 3 }],
+              stopOnSeedNoData: true,
             });
             if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
-          }
-          if (unlockRes.unlocked) {
-            pGateOpen = await sendWriteWithRetry(
-              elm,
-              "2E10C2FF",
-              steps,
-              `${txHex}→${rxHex} 2E 10C2 FF (повтор после SecurityAccess 67 04)`,
-            );
-          }
-        }
-
-        if (pGateOpen.kind === "negative" && pGateOpen.nrc === 0x33) {
-          securityAccessRequired = true;
-          steps.push(
-            `${txHex}→${rxHex}: 2E 10C2 FF остался закрыт (NRC 33 SecurityAccess)${lastSeedHex ? ` · Seed: ${lastSeedHex}` : " · Seed не получен (27 xx → NO DATA — CGW всё ещё режет SecurityAccess)"}.`,
-          );
-        } else {
-          const okA0xx: { did: string; byteHex: string }[] = [];
-          const nrc31A0xx: string[] = [];
-          let sawNrc33OnA0xx = false;
-          let triedUnlockDuringA0xx = false;
-
-          for (const item of a0xxWritePlan) {
-            let pW = await sendWriteWithRetry(
-              elm,
-              `2E${item.did}${item.byteHex}`,
-              steps,
-              `${txHex}→${rxHex} 2E ${item.did} ${item.byteHex} (${item.noteRu})`,
-            );
-            if (pW.kind === "negative" && pW.nrc === 0x33 && !triedUnlockDuringA0xx) {
-              triedUnlockDuringA0xx = true;
-              const unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+            if (!unlockRes.unlocked && !unlockRes.seedHex && !unlockRes.lockedOut) {
+              triedKeepOpenEscalation = true;
+              unlockRes = await escalateCgwKeepOpenAndUnlockMeter(elm, target.tx, target.rx, steps, {
                 userKeyHex: input.securityKeyHex,
                 keyVersionByte: activeKeyVersionByte,
+                keptGateways,
+                triedAltGateways,
               });
               if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
-              if (unlockRes.unlocked) {
-                await sendWriteWithRetry(
-                  elm,
-                  "2E10C2FF",
-                  steps,
-                  `${txHex}→${rxHex} 2E 10C2 FF (повтор открытия после SecurityAccess)`,
-                );
-                pW = await sendWriteWithRetry(
-                  elm,
-                  `2E${item.did}${item.byteHex}`,
-                  steps,
-                  `${txHex}→${rxHex} 2E ${item.did} ${item.byteHex} (повтор ${item.noteRu})`,
-                );
-              }
             }
-            if (pW.kind === "positive") {
-              okA0xx.push({ did: item.did, byteHex: item.byteHex });
-            } else if (pW.kind === "negative" && pW.nrc === 0x31) {
-              nrc31A0xx.push(item.did);
-            } else if (pW.kind === "negative" && pW.nrc === 0x33) {
-              sawNrc33OnA0xx = true;
-            }
-          }
-
-          await sendWriteWithRetry(
-            elm,
-            "2E10C200",
-            steps,
-            `${txHex}→${rxHex} 2E 10C2 00 (закрытие вариантной записи MET-002 B26 C01)`,
-          );
-
-          if (okA0xx.length > 0) {
-            if (writeMode === "two-did") {
-              writtenDid = "A002/A011";
-              writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
-              steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
-            } else {
-              writtenDid = `${writeMode === "custom-a0xx" ? "BACKUP" : "CGDW"} A0xx (${okA0xx.length}/${a0xxWritePlan.length})`;
-              writtenHex = okA0xx.map((x) => `${x.did}=${x.byteHex}`).join(" ");
-              steps.push(
-                `${txHex}→${rxHex}: записано ${okA0xx.length} из ${a0xxWritePlan.length} вариантных A0xx DID${nrc31A0xx.length ? ` (NRC 31 на: ${nrc31A0xx.join(", ")})` : ""}.`,
+            if (unlockRes.unlocked) {
+              pGateOpen = await sendWriteWithRetry(
+                elm,
+                "2E10C2FF",
+                steps,
+                `${txHex}→${rxHex} 2E 10C2 FF (повтор после SecurityAccess 67 04)`,
               );
             }
-          } else if (sawNrc33OnA0xx) {
+          }
+
+          if (pGateOpen.kind === "negative" && pGateOpen.nrc === 0x33) {
             securityAccessRequired = true;
+            steps.push(
+              `${txHex}→${rxHex}: 2E 10C2 FF остался закрыт (NRC 33 SecurityAccess)${lastSeedHex ? ` · Seed: ${lastSeedHex}` : " · Seed не получен (27 xx → NO DATA — CGW всё ещё режет SecurityAccess)"}.`,
+            );
+          } else {
+            const okA0xx: { did: string; byteHex: string }[] = [];
+            const nrc31A0xx: string[] = [];
+            let sawNrc33OnA0xx = false;
+            let triedUnlockDuringA0xx = false;
+
+            for (const item of a0xxWritePlan) {
+              let pW = await sendWriteWithRetry(
+                elm,
+                `2E${item.did}${item.byteHex}`,
+                steps,
+                `${txHex}→${rxHex} 2E ${item.did} ${item.byteHex} (${item.noteRu})`,
+              );
+              if (pW.kind === "negative" && pW.nrc === 0x33 && !triedUnlockDuringA0xx) {
+                triedUnlockDuringA0xx = true;
+                const unlockRes = await unlockSubaruMeterSecurityAccess(elm, target.tx, target.rx, steps, {
+                  userKeyHex: input.securityKeyHex,
+                  keyVersionByte: activeKeyVersionByte,
+                });
+                if (unlockRes.seedHex) lastSeedHex = unlockRes.seedHex;
+                if (unlockRes.unlocked) {
+                  await sendWriteWithRetry(
+                    elm,
+                    "2E10C2FF",
+                    steps,
+                    `${txHex}→${rxHex} 2E 10C2 FF (повтор открытия после SecurityAccess)`,
+                  );
+                  pW = await sendWriteWithRetry(
+                    elm,
+                    `2E${item.did}${item.byteHex}`,
+                    steps,
+                    `${txHex}→${rxHex} 2E ${item.did} ${item.byteHex} (повтор ${item.noteRu})`,
+                  );
+                }
+              }
+              if (pW.kind === "positive") {
+                okA0xx.push({ did: item.did, byteHex: item.byteHex });
+              } else if (pW.kind === "negative" && pW.nrc === 0x31) {
+                nrc31A0xx.push(item.did);
+              } else if (pW.kind === "negative" && pW.nrc === 0x33) {
+                sawNrc33OnA0xx = true;
+              }
+            }
+
+            await sendWriteWithRetry(
+              elm,
+              "2E10C200",
+              steps,
+              `${txHex}→${rxHex} 2E 10C2 00 (закрытие вариантной записи MET-002 B26 C01)`,
+            );
+
+            if (okA0xx.length > 0) {
+              if (writeMode === "two-did") {
+                writtenDid = "A002/A011";
+                writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
+                steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
+              } else {
+                writtenDid = `${writeMode === "custom-a0xx" ? "BACKUP" : "CGDW"} A0xx (${okA0xx.length}/${a0xxWritePlan.length})`;
+                writtenHex = okA0xx.map((x) => `${x.did}=${x.byteHex}`).join(" ");
+                steps.push(
+                  `${txHex}→${rxHex}: записано ${okA0xx.length} из ${a0xxWritePlan.length} вариантных A0xx DID${nrc31A0xx.length ? ` (NRC 31 на: ${nrc31A0xx.join(", ")})` : ""}.`,
+                );
+              }
+            } else if (sawNrc33OnA0xx) {
+              securityAccessRequired = true;
+            }
           }
         }
+      } finally {
+        await closeMeterSession(elm);
+        steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
       }
-    } finally {
-      await closeMeterSession(elm);
-      steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
-    }
 
-    if (writtenDid || securityAccessRequired) break;
+      if (writtenDid || securityAccessRequired) break;
+    }
+  } finally {
+    await closeKeptOpenMeterGateways(elm, keptGateways);
   }
 
   if (!writtenDid && !securityAccessRequired) {
