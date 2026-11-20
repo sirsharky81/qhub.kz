@@ -14,6 +14,10 @@ import {
   parseSubaru12ColumnFromAscii,
 } from "./subaru-ssm4-catalog";
 import { isWritableMeterA0xxDid, type SubaruMeterA0xxWriteEntry } from "./subaru-meter-backup";
+import {
+  detectSubaruMeterPanelKind,
+  SUBARU_METER_PANEL_PROFILES,
+} from "./subaru-meter-did-dictionary";
 
 /**
  * 32-nibble S-box (`KeyPartsTable`) from SSM4 `CMD_FhiCan.dll` (`0x1000824b` / `0x10008985`)
@@ -1490,10 +1494,29 @@ export async function writeSubaruMeter12ColumnCode(
       : METER_TARGETS;
 
   const destPrefix = input.optionCode.trim().toUpperCase().slice(0, 2);
-  // Per MET-002.srp / cgdwPHBWHoZ.mLW: A002 = Act place / Destination (02=U4, 03=C0 °C/km/h, 05=U5, 06=C5), A011 = TPMS presence (FF=Function effective, 00=No function)
-  const a002TargetByte =
-    destPrefix === "C0" ? "03" : destPrefix === "C5" ? "06" : destPrefix === "U5" ? "05" : "02";
-  const a011TargetByte = destPrefix === "C0" || destPrefix === "C5" ? "00" : "FF";
+  // Destination register depends on the meter family: SGP Gen2 (Outback BT / Legacy BW / Ascent WM /
+  // Crosstrek GU / WRX VB / BRZ ZD) use A002 (02=U4, 03=C0, 05=U5, 06=C5); SGP Gen1 (Forester SK,
+  // Impreza/Crosstrek GK/GT) use A001 (02=US, 03=Canada). Writing A002 to a Gen1 cluster is rejected
+  // with NRC 31, so never hard-code A002 for the two-did / default path.
+  const destinationDid =
+    SUBARU_METER_PANEL_PROFILES[
+      detectSubaruMeterPanelKind({ appliedModel: input.appliedModel }).panelKind
+    ].destinationDid;
+  const isMetric = destPrefix === "C0" || destPrefix === "C5";
+  // Per MET-002.srp / cgdwPHBWHoZ.mLW. A011 = TPMS presence (FF=Function effective, 00=No function).
+  const destinationTargetByte =
+    destinationDid === "A001"
+      ? isMetric
+        ? "03"
+        : "02"
+      : destPrefix === "C0"
+        ? "03"
+        : destPrefix === "C5"
+          ? "06"
+          : destPrefix === "U5"
+            ? "05"
+            : "02";
+  const a011TargetByte = isMetric ? "00" : "FF";
 
   const currentDidMap: Record<string, string> = {};
   for (const d of input.currentDids ?? []) {
@@ -1613,7 +1636,11 @@ export async function writeSubaruMeter12ColumnCode(
     );
   } else {
     a0xxWritePlan = [
-      { did: "A002", byteHex: a002TargetByte, noteRu: `Destination ${destPrefix}` },
+      {
+        did: destinationDid,
+        byteHex: destinationTargetByte,
+        noteRu: `Destination ${destPrefix} (${destinationDid})`,
+      },
       {
         did: "A011",
         byteHex: a011TargetByte,
@@ -1622,9 +1649,11 @@ export async function writeSubaruMeter12ColumnCode(
     ];
   }
 
-  const hasA002Snapshot = (input.currentDids ?? []).some(
-    (d) => d.did.toUpperCase() === "A002" || d.did.toUpperCase() === "A011",
-  );
+  // A destination/units snapshot from a live read: A002 (Gen2) or A001 (Gen1) or A011 (units) present.
+  const hasA002Snapshot = (input.currentDids ?? []).some((d) => {
+    const did = d.did.toUpperCase();
+    return did === "A002" || did === "A001" || did === "A011";
+  });
   const forceA0xxPath =
     writeMode === "full-cgdw" ||
     writeMode === "custom-a0xx" ||
@@ -1934,9 +1963,11 @@ export async function writeSubaruMeter12ColumnCode(
 
             if (okA0xx.length > 0) {
               if (writeMode === "two-did") {
-                writtenDid = "A002/A011";
-                writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
-                steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
+                writtenDid = `${destinationDid}/A011`;
+                writtenHex = `${destinationDid}=${destinationTargetByte} A011=${a011TargetByte}`;
+                steps.push(
+                  `${txHex}→${rxHex}: вариантные регистры ${destinationDid}/A011 записаны (6E ${destinationDid.slice(0, 2)} ${destinationDid.slice(2)} / 6E A0 11).`,
+                );
               } else {
                 const modeLabel =
                   writeMode === "custom-a0xx"

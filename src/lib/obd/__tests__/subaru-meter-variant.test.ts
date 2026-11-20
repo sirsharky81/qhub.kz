@@ -192,6 +192,35 @@ describe("subaru-meter-variant", () => {
     ]);
   });
 
+  it("two-did writes the A001 destination (not A002) on SGP Gen1 Forester SK / Impreza GK/GT clusters", async () => {
+    // Forester SK (SGP Gen1) uses A001 for destination. Writing A002 here would be rejected (NRC 31).
+    const elm = scriptedElm({
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
+      "2E10C2FF": "6E 10 C2",
+      "2EA00103": "6E A0 01",
+      "2EA01100": "6E A0 11",
+      "2E10C200": "6E 10 C2",
+    });
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "SK9EY4L",
+      optionCode: "C5YX",
+      currentDids: [
+        { did: "A001", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "two-did",
+    });
+    expect(result.success).toBe(true);
+    expect(result.writtenDid).toBe("A001/A011");
+    expect(result.writtenHex).toBe("A001=03 A011=00");
+    expect(elm.sent.filter((s) => s.startsWith("2EA0"))).toEqual(["2EA00103", "2EA01100"]);
+    // Never touches A002 on a Gen1 cluster
+    expect(elm.sent.some((s) => s.startsWith("2EA002"))).toBe(false);
+  });
+
   it("unlocks 27 03 -> 27 04 using FHIUtilityCtrlNK GetSecurityAccessSelKey(idx=11 LE, ctrl-mode1) after passcode 0205 when 2E 0250 returns NRC 31 or 2E 10C2 FF returns NRC 33", async () => {
     const seed = [0x12, 0x34, 0x56, 0x78];
     const expectedKey = computeSubaruSecurityKey4Byte(

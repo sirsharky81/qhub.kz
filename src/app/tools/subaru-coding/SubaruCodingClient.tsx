@@ -339,9 +339,25 @@ export default function SubaruCodingClient() {
       return (list ?? []).map((w) => `${w.did}=${w.byteHex}`);
     }
     const dest = meter12WritePending.optionCode.slice(0, 2);
-    const a002 = dest === "C0" ? "03" : dest === "C5" ? "06" : dest === "U5" ? "05" : "02";
-    const a011 = dest === "C0" || dest === "C5" ? "00" : "FF";
-    return [`A002=${a002}`, `A011=${a011}`];
+    const isMetric = dest === "C0" || dest === "C5";
+    const destinationDid = SUBARU_METER_PANEL_PROFILES[activePanelKind].destinationDid;
+    const destByte =
+      destinationDid === "A001"
+        ? isMetric
+          ? "03"
+          : "02"
+        : dest === "C0"
+          ? "03"
+          : dest === "C5"
+            ? "06"
+            : dest === "U5"
+              ? "05"
+              : "02";
+    const a011 = isMetric ? "00" : "FF";
+    return [
+      `${destinationDid}=${destByte} (${decodeSubaruMeterA0xxByte(destinationDid, destByte, activePanelKind)})`,
+      `A011=${a011} (${decodeSubaruMeterA0xxByte("A011", a011, activePanelKind)})`,
+    ];
   }, [meter12WritePending, activePanelKind]);
 
   const eyesightCatalogDiff = useMemo(() => {
@@ -543,6 +559,15 @@ export default function SubaruCodingClient() {
     () => decodeSubaruAppliedModel12Columns(appliedModelInput, optionCodeInput),
     [appliedModelInput, optionCodeInput],
   );
+
+  // The "Write Canada" shortcut uses full-cgdw, which needs the (model + option) pair to exist in
+  // the SSM4 cgdw catalog. For US-only models (or models absent from cgdw) the resolver falls back
+  // to a fabricated C0xx code that the meter would reject, so gate the button on a real cgdw pair.
+  const canadaOptionAvailable = useMemo(() => {
+    const opts = appliedModelAnalysis.cgdwOptionCodes;
+    if (opts.length === 0) return false;
+    return opts.includes(appliedModelAnalysis.canadianOptionCodeC0);
+  }, [appliedModelAnalysis]);
 
   const eyesightInputGuide = useMemo(
     () =>
@@ -2154,7 +2179,12 @@ export default function SubaruCodingClient() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
+                disabled={
+                  !ready ||
+                  busy ||
+                  !appliedModelAnalysis.obdConversionSupport.allowObdWrite ||
+                  !canadaOptionAvailable
+                }
                 onClick={() =>
                   openMeterWriteModal(
                     appliedModelAnalysis.appliedModel || "BTAEYR8",
@@ -2163,7 +2193,9 @@ export default function SubaruCodingClient() {
                 }
                 className="rounded-xl bg-emerald-700 hover:bg-emerald-800 px-3 py-2.5 text-xs font-bold text-white disabled:opacity-40"
               >
-                Записать Канада {appliedModelAnalysis.canadianOptionCodeC0} (°C, км/ч)
+                {canadaOptionAvailable
+                  ? `Записать Канада ${appliedModelAnalysis.canadianOptionCodeC0} (°C, км/ч)`
+                  : "Канада: нет кода в cgdw"}
               </button>
               <button
                 type="button"
