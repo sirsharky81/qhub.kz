@@ -8,6 +8,10 @@ import {
   formatSubaruTempText,
   formatSubaruTpmsText,
 } from "./subaru-decode";
+import {
+  SUBARU_METER_A0XX_META_MAP,
+  decodeSubaruMeterA0xxByte,
+} from "./subaru-meter-did-dictionary";
 
 export interface UdsTemplate {
   id: string;
@@ -221,52 +225,52 @@ export const MODULE_DID_LABELS: Record<string, Record<string, string>> = {
     "0240": "Битовая карта поддержки DID 0241–0260 приборки",
     "0200": "Битовая карта поддержки DID 0201–0220 приборки",
     A000: "Карта поддерживаемых вариантных DID A001–A020 приборки",
-    A001: "Вариантный регистр модели / рынка приборки (A001)",
-    A002: "Код региона / Destination приборки (A002: 02=U4 США, 03=C0 Канада °C/км/ч, 05=U5 США PZEV, 06=C5 Канада PZEV)",
-    A003: "Объём топливного бака (A003)",
-    A004: "Вариантный регистр приборки (A004)",
-    A005: "Вариантный регистр приборки (A005)",
-    A006: "Задний / боковой радар BSD/SRVD (A006)",
-    A007: "Конфигурация X-Mode / SI-Drive в приборке (A007)",
-    A008: "Система Auto Stop-Start / ISS (A008)",
-    A009: "Автокорректор фар (A009)",
-    A00A: "Вариантный регистр приборки (A00A)",
-    A00B: "Наличие AVN / головного устройства (A00B)",
-    A00C: "Конфигурация AVN / мультимедиа (A00C)",
-    A00D: "Вариантный регистр приборки (A00D)",
-    A00E: "Вариантный регистр приборки (A00E)",
-    A00F: "LED-фары головного света (A00F)",
-    A010: "Индикатор переключения передач GSI (A010)",
-    A011: "Единицы измерения приборки (A011: FF=США °F/мили, 00=Канада °C/км/ч)",
-    A012: "Вариантный регистр приборки (A012)",
-    A013: "Вариантный регистр приборки (A013)",
-    A014: "Вариантный регистр приборки (A014)",
-    A015: "Вариантный регистр приборки (A015)",
-    A016: "Вариантный регистр оснащения приборки (A016)",
-    A017: "Вариантный регистр приборки (A017)",
-    A018: "Вариантный регистр приборки (A018)",
-    A019: "Вариантный регистр приборки (A019)",
+    A001: "Act place information — регион / Destination (SK, GT, GK · A001)",
+    A002: "Act place information — регион / Destination и единицы шкал (BT/BW/GU/VB/ZD · A002)",
+    A003: "Региональный индекс шкалы GU (A003)",
+    A004: "Резервный DID mHZ (A004)",
+    A005: "Eyesight presence information — наличие EyeSight (A005)",
+    A006: "RADAR ASSY B&S presence information — радар BSD / RCTA (A006)",
+    A007: "SI-X / SI-Drive presence information — X-Mode и SI-Drive (A007)",
+    A008: "Auto start & stop presence information — старт-стоп ISS (A008)",
+    A009: "Autoleveler presence information — автокорректор фар (A009)",
+    A00A: "Вариантный флаг GK/GT ранний (A00A)",
+    A00B: "AVN (HU) Equipment — штатное ГУ (SK, GT, GK, BRZ · A00B)",
+    A00C: "LED headlamp presence information — светодиодные фары LED (A00C)",
+    A00D: "Rear DIFF temperature — температура заднего дифференциала (A00D)",
+    A00E: "Резервный DID cgdw (A00E)",
+    A00F: "Gear shift up indicator presence information — подсказка переключения вверх (A00F)",
+    A010: "Warning-BOX presence information — окно предупреждений (A010)",
+    A011: "TPMS presence information — контроль давления в шинах TPMS (A011: FF=вкл, 00=выкл)",
+    A012: "Pedestrian Airbag — подушка безопасности пешехода (SK/GT/GK · A012)",
+    A013: "Вариантный регистр кузова/рынка GK/GT ранний (A013)",
+    A014: "SRH presence information — поворотные фары SRH (A014)",
+    A015: "MFD — верхний дисплей MFD (SK/GT/GK · A015)",
+    A016: "Vehicle Type information — тип кузова (00=4D, 01=5D, 03=XV/OBK · A016)",
+    A017: "Резервный DID mHZ (A017)",
+    A018: "Оснащение GK ранний (A018)",
+    A019: "Driver Monitoring System Presence Information — DMS / DriverFocus (A019)",
     A020: "Карта поддерживаемых вариантных DID A021–A040 приборки",
-    A021: "Вариантный регистр приборки (A021)",
-    A022: "Вариантный регистр приборки (A022)",
-    A023: "Вариантный регистр приборки (A023)",
-    A024: "Вариантный регистр систем помощи / EyeSight в приборке (A024)",
-    A025: "Вариантный регистр приборки (A025)",
-    A026: "Вариантный регистр приборки (A026)",
-    A027: "Вариантный регистр индикации приборки (A027)",
-    A028: "Вариантный регистр комплектации приборки (A028)",
-    A02A: "Вариантный регистр приборки (A02A)",
-    A02B: "Вариантный регистр приборки (A02B)",
-    A02D: "Вариантный регистр приборки (A02D)",
-    A02E: "Вариантный регистр поколения / модельного года (A02E)",
-    A02F: "Вариантный регистр приборки (A02F)",
-    A034: "Вариантный регистр приборки (A034)",
-    A035: "Вариантный регистр приборки (A035)",
-    A036: "Вариантный регистр опций пакета приборки (A036)",
-    A037: "Вариантный регистр приборки (A037)",
-    A039: "Вариантный регистр приборки (A039)",
+    A021: "Passenger / Rear Seat Belt Warning — ремни пассажира и заднего ряда (A021)",
+    A022: "EAM presence information — модуль EAM (A022)",
+    A023: "Electric door mirror information — электроскладывание зеркал (A023)",
+    A024: "Speaker and AMP Information — аудиосистема / усилитель Harman Kardon (A024)",
+    A025: "SXM Antenna Presence Information — антенна SiriusXM (A025)",
+    A026: "DAB Antenna Presence Information — антенна DAB (A026)",
+    A027: "Camera System Information — камеры обзора (01=Rear, 02=Rear+Front · A027)",
+    A028: "DCM Function Presence Information — телематика DCM / Starlink (A028)",
+    A02A: "Спецификация комплектации WRX VB / Levorg VN (A02A)",
+    A02B: "Платформа WRX VB / Levorg VN (A02B)",
+    A02D: "Vehicle Grade Presence Information — версия WILDERNESS (A02D: 01=WILDERNESS)",
+    A02E: "Ревизия поколения MY23 / WM (A02E)",
+    A02F: "Пакет Touring / Premier (A02F)",
+    A034: "Региональный флаг LHD/RHD (A034)",
+    A035: "Региональный индекс GU (A035)",
+    A036: "Пакет опций MY23+ (A036)",
+    A037: "Резервный DID mHZ (A037)",
+    A039: "Пакет оснащения Base vs Upper MY23+ (A039)",
     A040: "Карта поддерживаемых вариантных DID A041–A060 приборки",
-    A041: "Вариантный регистр приборки (A041)",
+    A041: "Маркер поколения MY23+ (A041)",
     "10C2": "Флаг сессии записи варианта приборки (10C2: FF=открыто, 00=штатно)",
     "1007": "Температура наружная / приборки (1007)",
     "1041": "Датчик уровня топлива 1 — левый полубак (1041)",
@@ -881,29 +885,14 @@ export function formatUdsPayload(payload: number[], requestSid?: number, txHex?:
       const pct = Math.round((a * 100) / 255);
       return `${label ? `${label}: ` : ""}${pct}%  [${dataHex}=${a}]`;
     }
-    if ((cleanTx === "783" || cleanTx === "7C0") && didHex === "A002" && dataBytes.length >= 1) {
-      const b0 = dataBytes[0]!;
-      const destDesc =
-        b0 === 0x02
-          ? "U4 — США Federal (°F, MPH, мили)"
-          : b0 === 0x03
-            ? "C0 — Канада Standard (°C, км/ч, л/100км)"
-            : b0 === 0x05
-              ? "U5 — США PZEV (°F, MPH, мили)"
-              : b0 === 0x06
-                ? "C5 — Канада PZEV (°C, км/ч, л/100км)"
-                : `код 0x${b0.toString(16).padStart(2, "0").toUpperCase()}`;
-      return `${label ? `${label}: ` : ""}${dataHex}  [${destDesc}]`;
-    }
-    if ((cleanTx === "783" || cleanTx === "7C0") && didHex === "A011" && dataBytes.length >= 1) {
-      const b0 = dataBytes[0]!;
-      const unitDesc =
-        b0 === 0xff
-          ? "США (°F, MPH, мили)"
-          : b0 === 0x00
-            ? "Канада / Метрика (°C, км/ч, л/100км)"
-            : `код 0x${b0.toString(16).padStart(2, "0").toUpperCase()}`;
-      return `${label ? `${label}: ` : ""}${dataHex}  [${unitDesc}]`;
+    if (
+      (cleanTx === "783" || cleanTx === "7C0") &&
+      SUBARU_METER_A0XX_META_MAP[didHex] &&
+      dataBytes.length >= 1
+    ) {
+      const byteHex = dataBytes[0]!.toString(16).padStart(2, "0").toUpperCase();
+      const desc = decodeSubaruMeterA0xxByte(didHex, byteHex);
+      return `${label ? `${label}: ` : ""}${dataHex}  [${desc}]`;
     }
     const text = dataBytes
       .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : " "))

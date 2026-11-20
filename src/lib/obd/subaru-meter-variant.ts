@@ -1320,7 +1320,7 @@ async function sendWriteWithRetry(
   return last;
 }
 
-export type SubaruMeterWriteMode = "two-did" | "full-cgdw" | "custom-a0xx";
+export type SubaruMeterWriteMode = "two-did" | "full-cgdw" | "custom-a0xx" | "individual-dids";
 
 async function closeKeptOpenMeterGateways(
   elm: SubaruMeterWriteLink,
@@ -1428,11 +1428,12 @@ async function escalateCgwKeepOpenAndUnlockMeter(
 }
 
 /**
- * Writes Applied Model + Option Code to Combination Meter via UDS 2E DID 0250/0251 or MET-002.srp A0xx.
+ * Writes Applied Model + Option Code (or individual A0xx DIDs) to Combination Meter via UDS 2E DID 0250/0251 or MET-002.srp A0xx.
  * Supports:
- * - `two-did` (default): writes only A002 (Destination) + A011 (Units) on SGP meters (safe minimal region switch).
+ * - `two-did` (default): writes only A002 (Destination) + A011 (TPMS presence) on SGP meters.
  * - `full-cgdw`: writes all A0xx variant DIDs from the matching SSM4 cgdw catalog row (`sendMetVariByApplied`).
  * - `custom-a0xx`: writes exact saved 1-byte A0xx DIDs (for 1:1 original backup restoration, e.g. U45L).
+ * - `individual-dids`: writes selected individual 1-byte A0xx DIDs from the dictionary editor.
  * Never calls writeCommonArea, never writes odometer DIDs.
  */
 export async function writeSubaruMeter12ColumnCode(
@@ -1454,9 +1455,16 @@ export async function writeSubaruMeter12ColumnCode(
     input.optionCode,
     input.currentDids ?? [],
   );
-  const steps: string[] = [plan.reasonRu];
+  const steps: string[] = [
+    writeMode === "individual-dids"
+      ? "Режим точечного кодирования отдельных DID приборной панели (783)"
+      : plan.reasonRu,
+  ];
 
-  if (writeMode !== "custom-a0xx") {
+  if (
+    writeMode !== "custom-a0xx" &&
+    (writeMode !== "individual-dids" || input.appliedModel.trim().length > 0)
+  ) {
     const support = checkSubaruObdConversionSupport(input.appliedModel);
     if (!support.allowObdWrite) {
       steps.push(`${support.ruleTitleRu}: ${support.reasonRu}`);
@@ -1482,7 +1490,7 @@ export async function writeSubaruMeter12ColumnCode(
       : METER_TARGETS;
 
   const destPrefix = input.optionCode.trim().toUpperCase().slice(0, 2);
-  // Per MET-002.srp / cgdwPHBWHoZ.mLW: A002 = Destination (02=U4, 03=C0, 05=U5, 06=C5), A011 = Unit region (FF=US °F/MPH, 00=CA °C/km/h)
+  // Per MET-002.srp / cgdwPHBWHoZ.mLW: A002 = Act place / Destination (02=U4, 03=C0 °C/km/h, 05=U5, 06=C5), A011 = TPMS presence (FF=Function effective, 00=No function)
   const a002TargetByte =
     destPrefix === "C0" ? "03" : destPrefix === "C5" ? "06" : destPrefix === "U5" ? "05" : "02";
   const a011TargetByte = destPrefix === "C0" || destPrefix === "C5" ? "00" : "FF";
@@ -1532,10 +1540,14 @@ export async function writeSubaruMeter12ColumnCode(
     steps.push(
       `Режим SSM4 sendMetVariByApplied: подготовлено ${a0xxWritePlan.length} вариантных DID для ${cleanApp}+${cleanOpt}.`,
     );
-  } else if (writeMode === "custom-a0xx") {
+  } else if (writeMode === "custom-a0xx" || writeMode === "individual-dids") {
     const rawList = input.customA0xxWrites ?? [];
     if (rawList.length === 0) {
-      steps.push("Список DID для восстановления оригинала пуст.");
+      steps.push(
+        writeMode === "individual-dids"
+          ? "Не выбрано ни одного изменённого DID для записи."
+          : "Список DID для восстановления оригинала пуст.",
+      );
       return {
         success: false,
         steps,
@@ -1546,11 +1558,14 @@ export async function writeSubaruMeter12ColumnCode(
         seedHex: null,
       };
     }
+    const dedupMap = new Map<string, string>();
     for (const item of rawList) {
       const did = item.did.trim().toUpperCase();
       const byteHex = item.byteHex.trim().toUpperCase();
       if (!isWritableMeterA0xxDid(did) || !/^[0-9A-F]{2}$/.test(byteHex)) {
-        steps.push(`Запрещённый или некорректный DID в бэкапе: ${did}=${byteHex}. Запись остановлена.`);
+        steps.push(
+          `Запрещённый или некорректный DID в запросе: ${did}=${byteHex}. Запись остановлена.`,
+        );
         return {
           success: false,
           steps,
@@ -1561,10 +1576,40 @@ export async function writeSubaruMeter12ColumnCode(
           seedHex: null,
         };
       }
-      a0xxWritePlan.push({ did, byteHex, noteRu: "восстановление оригинала" });
+      dedupMap.set(did, byteHex);
+    }
+    const skippedAbsent: string[] = [];
+    for (const [did, byteHex] of dedupMap.entries()) {
+      if (writeMode === "individual-dids" && currentDidMap[did] === "--") {
+        skippedAbsent.push(did);
+        continue;
+      }
+      a0xxWritePlan.push({
+        did,
+        byteHex,
+        noteRu:
+          writeMode === "individual-dids" ? "точечное кодирование DID" : "восстановление оригинала",
+      });
+    }
+    if (skippedAbsent.length > 0) {
+      steps.push(`Пропущены DID, отсутствующие в приборке (--): ${skippedAbsent.join(", ")}`);
+    }
+    if (a0xxWritePlan.length === 0) {
+      steps.push("Нет доступных для записи DID (выбранные регистры отсутствуют в этой приборке).");
+      return {
+        success: false,
+        steps,
+        plan,
+        writtenDid: null,
+        writtenHex: null,
+        securityAccessRequired: false,
+        seedHex: null,
+      };
     }
     steps.push(
-      `Режим восстановления из бэкапа: подготовлено ${a0xxWritePlan.length} оригинальных A0xx DID.`,
+      writeMode === "individual-dids"
+        ? `Точечная запись DID приборки: подготовлено ${a0xxWritePlan.length} регистр(ов).`
+        : `Режим восстановления из бэкапа: подготовлено ${a0xxWritePlan.length} оригинальных A0xx DID.`,
     );
   } else {
     a0xxWritePlan = [
@@ -1572,7 +1617,7 @@ export async function writeSubaruMeter12ColumnCode(
       {
         did: "A011",
         byteHex: a011TargetByte,
-        noteRu: a011TargetByte === "00" ? "°C / км/ч" : "°F / MPH",
+        noteRu: a011TargetByte === "00" ? "TPMS выкл (C0/C5)" : "TPMS вкл (U4/U5)",
       },
     ];
   }
@@ -1580,7 +1625,10 @@ export async function writeSubaruMeter12ColumnCode(
   const hasA002Snapshot = (input.currentDids ?? []).some(
     (d) => d.did.toUpperCase() === "A002" || d.did.toUpperCase() === "A011",
   );
-  const forceA0xxPath = writeMode === "full-cgdw" || writeMode === "custom-a0xx";
+  const forceA0xxPath =
+    writeMode === "full-cgdw" ||
+    writeMode === "custom-a0xx" ||
+    writeMode === "individual-dids";
   const snap0251 = (input.currentDids ?? []).find((d) => d.did.toUpperCase() === "0251");
   const keyVersionByte = snap0251 ? (didBytes(snap0251.hex)[0] ?? null) : null;
 
@@ -1851,6 +1899,32 @@ export async function writeSubaruMeter12ColumnCode(
               }
             }
 
+            if (writeMode === "individual-dids" && okA0xx.length > 0) {
+              for (const written of okA0xx) {
+                try {
+                  const rawCheck = await elm.sendPayload(`22${written.did}`, 1_500);
+                  const pCheck = parseUdsResponse(rawCheck, 0x22);
+                  if (pCheck.kind === "positive" && pCheck.payload.length >= 3) {
+                    const actualByte = pCheck.payload[pCheck.payload.length - 1]!
+                      .toString(16)
+                      .padStart(2, "0")
+                      .toUpperCase();
+                    if (actualByte === written.byteHex) {
+                      steps.push(
+                        `${txHex}→${rxHex}: проверка 22 ${written.did} → ${actualByte} ✓ (подтверждено)`,
+                      );
+                    } else {
+                      steps.push(
+                        `${txHex}→${rxHex}: проверка 22 ${written.did} → получено ${actualByte}, ожидалось ${written.byteHex}`,
+                      );
+                    }
+                  }
+                } catch {
+                  /* ignore readback probe error */
+                }
+              }
+            }
+
             await sendWriteWithRetry(
               elm,
               "2E10C200",
@@ -1864,7 +1938,13 @@ export async function writeSubaruMeter12ColumnCode(
                 writtenHex = `A002=${a002TargetByte} A011=${a011TargetByte}`;
                 steps.push(`${txHex}→${rxHex}: вариантные регистры A002/A011 записаны (6E A0 02 / 6E A0 11).`);
               } else {
-                writtenDid = `${writeMode === "custom-a0xx" ? "BACKUP" : "CGDW"} A0xx (${okA0xx.length}/${a0xxWritePlan.length})`;
+                const modeLabel =
+                  writeMode === "custom-a0xx"
+                    ? "BACKUP"
+                    : writeMode === "individual-dids"
+                      ? "INDIVIDUAL"
+                      : "CGDW";
+                writtenDid = `${modeLabel} A0xx (${okA0xx.length}/${a0xxWritePlan.length})`;
                 writtenHex = okA0xx.map((x) => `${x.did}=${x.byteHex}`).join(" ");
                 steps.push(
                   `${txHex}→${rxHex}: записано ${okA0xx.length} из ${a0xxWritePlan.length} вариантных A0xx DID${nrc31A0xx.length ? ` (NRC 31 на: ${nrc31A0xx.join(", ")})` : ""}.`,
