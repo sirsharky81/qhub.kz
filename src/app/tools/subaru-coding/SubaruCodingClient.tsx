@@ -126,9 +126,10 @@ export default function SubaruCodingClient() {
   }, []);
 
   // Meter 12-column state
-  const [appliedModelInput, setAppliedModelInput] = useState("BTAEYR8");
-  const [optionCodeInput, setOptionCodeInput] = useState("U45D");
-  const [stickerOptionInput, setStickerOptionInput] = useState("U45L");
+  const [appliedModelInput, setAppliedModelInput] = useState("");
+  const [optionCodeInput, setOptionCodeInput] = useState("");
+  const [stickerOptionInput, setStickerOptionInput] = useState("");
+  const [manualCodingOpen, setManualCodingOpen] = useState(false);
   const [presetDualOnly, setPresetDualOnly] = useState(false);
   const [selectedPanelKind, setSelectedPanelKind] = useState<SubaruMeterPanelKind | "auto">("auto");
   const [showAllDictionaryDids, setShowAllDictionaryDids] = useState(false);
@@ -521,7 +522,10 @@ export default function SubaruCodingClient() {
   const eyesightInputGuide = useMemo(
     () =>
       explainEyesightOptionInput(
-        appliedModelInput || meter12Read?.match.actualAppliedModel || "BTAEYR8",
+        appliedModelInput ||
+          meter12Read?.match.actualAppliedModel ||
+          eyesightRead?.match.appliedModel ||
+          "",
         optionCodeInput,
         appliedModelAnalysis.cgdwOptionCodes,
         eyesightRead?.match.schema ?? null,
@@ -529,6 +533,7 @@ export default function SubaruCodingClient() {
     [
       appliedModelInput,
       meter12Read,
+      eyesightRead?.match.appliedModel,
       optionCodeInput,
       appliedModelAnalysis.cgdwOptionCodes,
       eyesightRead?.match.schema,
@@ -689,9 +694,9 @@ export default function SubaruCodingClient() {
     ) => {
       if (!ready || busy) return;
       const cleanModel =
-        rawModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7) || "BTAEYR8";
+        rawModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
       const cleanOpt =
-        rawOption.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "C0QF";
+        rawOption.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
       setMeter12WritePending({
         appliedModel: cleanModel,
         optionCode: cleanOpt,
@@ -780,9 +785,9 @@ export default function SubaruCodingClient() {
     ) => {
       if (!ready || busy) return;
       const cleanModel =
-        rawModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7) || "BTAEYR8";
+        rawModel.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
       const cleanOpt =
-        rawOption.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "C0QF";
+        rawOption.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
       setEyesightWritePending({
         appliedModel: cleanModel,
         optionCode: cleanOpt,
@@ -1176,6 +1181,60 @@ export default function SubaruCodingClient() {
             </div>
           </div>
 
+          <input
+            ref={backupFileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null;
+              void handleLoadMeterBackupFile(f);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={eyesightBackupFileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null;
+              void handleLoadEyesightBackupFile(f);
+              e.target.value = "";
+            }}
+          />
+
+          {!meter12Read && !eyesightRead && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-700">
+              <span>
+                Считайте <strong>приборку (783)</strong> или <strong>EyeSight (787)</strong>, чтобы определить модель, сохранить бэкап оригинала и открыть кодирование.
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => backupFileInputRef.current?.click()}
+                  className="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 px-2.5 py-1 font-medium text-gray-800"
+                >
+                  Загрузить бэкап приборки…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => eyesightBackupFileInputRef.current?.click()}
+                  className="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 px-2.5 py-1 font-medium text-gray-800"
+                >
+                  Бэкап EyeSight…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManualCodingOpen((v) => !v)}
+                  className="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 px-2.5 py-1 font-medium text-gray-700"
+                >
+                  {manualCodingOpen ? "Скрыть ручной ввод" : "Ввести модель вручную"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {(meter12Read || eyesightRead) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {meter12Read && (
@@ -1424,7 +1483,8 @@ export default function SubaruCodingClient() {
             </div>
           )}
 
-          {/* Original Backup Save-As & Restore Panel */}
+          {/* Original Backup Save-As & Restore Panel — shown after reading meter (or when a backup is loaded) */}
+          {(meter12Read || loadedBackup) && (
           <div className="rounded-xl border border-slate-300 bg-slate-50 p-3 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -1476,17 +1536,6 @@ export default function SubaruCodingClient() {
               >
                 Из памяти браузера
               </button>
-              <input
-                ref={backupFileInputRef}
-                type="file"
-                accept="application/json,.json"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  void handleLoadMeterBackupFile(f);
-                  e.target.value = "";
-                }}
-              />
             </div>
 
             {backupNotice && (
@@ -1535,6 +1584,7 @@ export default function SubaruCodingClient() {
               </div>
             )}
           </div>
+          )}
 
           {meterEyesightCompare && (
             <div
@@ -1767,7 +1817,8 @@ export default function SubaruCodingClient() {
             </div>
           )}
 
-          {/* EyeSight Backup Save-As & Restore + ADA-031 Sync */}
+          {/* EyeSight Backup Save-As & Restore + ADA-031 Sync — shown after reading EyeSight (or backup / manual) */}
+          {(eyesightRead || loadedEyesightBackup || manualCodingOpen) && (
           <div className="rounded-xl border border-violet-300 bg-violet-50/50 p-3.5 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -1862,11 +1913,17 @@ export default function SubaruCodingClient() {
               </button>
               <button
                 type="button"
-                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
+                disabled={
+                  !ready ||
+                  busy ||
+                  !appliedModelAnalysis.obdConversionSupport.allowObdWrite ||
+                  appliedModelInput.trim().length < 7 ||
+                  optionCodeInput.trim().length < 4
+                }
                 onClick={() => openEyesightWriteModal(appliedModelInput, optionCodeInput)}
                 className="rounded-xl bg-gray-900 hover:bg-gray-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
               >
-                Загрузить из полей ({appliedModelInput || "BTAEYR8"}+{optionCodeInput || "U45D"})
+                Загрузить из полей ({appliedModelInput || "—"}+{optionCodeInput || "—"})
               </button>
             </div>
 
@@ -1893,17 +1950,6 @@ export default function SubaruCodingClient() {
               >
                 Из памяти браузера
               </button>
-              <input
-                ref={eyesightBackupFileInputRef}
-                type="file"
-                accept="application/json,.json"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  void handleLoadEyesightBackupFile(f);
-                  e.target.value = "";
-                }}
-              />
             </div>
 
             {eyesightBackupNotice && (
@@ -1955,8 +2001,11 @@ export default function SubaruCodingClient() {
               </div>
             )}
           </div>
+          )}
 
-          {/* Input Fields */}
+          {/* Input Fields + Full Meter Write (shown after reading Meter/EyeSight or manual open) */}
+          {(meter12Read || eyesightRead || manualCodingOpen) && (
+          <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block space-y-1">
               <span className="text-xs font-semibold text-gray-800">
@@ -1966,6 +2015,7 @@ export default function SubaruCodingClient() {
                 type="text"
                 maxLength={7}
                 value={appliedModelInput}
+                placeholder="Напр. BTACYR8"
                 onChange={(e) =>
                   setAppliedModelInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7))
                 }
@@ -1980,6 +2030,7 @@ export default function SubaruCodingClient() {
                 type="text"
                 maxLength={4}
                 value={optionCodeInput}
+                placeholder="Напр. U45D"
                 onChange={(e) =>
                   setOptionCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4))
                 }
@@ -2107,11 +2158,17 @@ export default function SubaruCodingClient() {
               </button>
               <button
                 type="button"
-                disabled={!ready || busy || !appliedModelAnalysis.obdConversionSupport.allowObdWrite}
+                disabled={
+                  !ready ||
+                  busy ||
+                  !appliedModelAnalysis.obdConversionSupport.allowObdWrite ||
+                  appliedModelInput.trim().length < 7 ||
+                  optionCodeInput.trim().length < 4
+                }
                 onClick={() => openMeterWriteModal(appliedModelInput, optionCodeInput)}
                 className="rounded-xl bg-gray-900 hover:bg-gray-800 px-3 py-2.5 text-xs font-bold text-white disabled:opacity-40"
               >
-                Записать из полей ({appliedModelInput || "BTAEYR8"}+{optionCodeInput || "U45D"})
+                Записать из полей ({appliedModelInput || "—"}+{optionCodeInput || "—"})
               </button>
             </div>
             <div className="pt-1">
@@ -2124,18 +2181,35 @@ export default function SubaruCodingClient() {
               />
             </div>
           </div>
+          </>
+          )}
 
           {/* Individual DID Dictionary & Coding Editor (Cardiag / SSM4 Meter Setting Information Status) */}
-          <div className="rounded-xl border border-cyan-300 bg-cyan-50/40 p-3 sm:p-4 space-y-3 overflow-hidden">
-            <div className="space-y-2">
-              <div className="space-y-0.5">
-                <div className="text-xs font-bold text-cyan-950">
-                  2.5. Выборочное кодирование отдельных DID приборной панели (783)
-                </div>
+          <details
+            open={meter12Read != null}
+            className="rounded-xl border border-cyan-300 bg-cyan-50/40 p-3 sm:p-4 overflow-hidden group"
+          >
+            <summary className="cursor-pointer list-none flex items-center justify-between gap-2 text-xs font-bold text-cyan-950">
+              <span>
+                2.5. Выборочное кодирование отдельных DID приборной панели (783)
+                {!meter12Read && (
+                  <span className="ml-1.5 font-normal text-[11px] text-cyan-800">
+                    (справочник — нажмите, чтобы посмотреть до считывания)
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-[10px] font-semibold text-cyan-800 group-open:hidden">
+                Открыть ▾
+              </span>
+              <span className="shrink-0 text-[10px] font-semibold text-cyan-800 hidden group-open:inline">
+                Свернуть ▴
+              </span>
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div className="space-y-2">
                 <p className="text-[11px] text-cyan-900 leading-relaxed">
                   После чтения приборки в каждом списке по умолчанию подставляется фактическое значение из авто — меняйте только нужные DID и записывайте выборочно.
                 </p>
-              </div>
               <label className="block space-y-1 min-w-0">
                 <span className="block text-[11px] font-semibold text-cyan-950">
                   Вид приборной панели:
@@ -2511,7 +2585,8 @@ export default function SubaruCodingClient() {
                 Записать выбранные DID ({pendingIndividualChanges.length})
               </button>
             </div>
-          </div>
+            </div>
+          </details>
 
           {eyesightWriteResult && (
             <div
@@ -2729,6 +2804,7 @@ export default function SubaruCodingClient() {
                         onClick={() => {
                           setAppliedModelInput(preset.appliedModel);
                           setOptionCodeInput(preset.canadianOptionCodeC0);
+                          setManualCodingOpen(true);
                         }}
                         className="cursor-pointer hover:bg-emerald-50"
                       >
@@ -2780,6 +2856,7 @@ export default function SubaruCodingClient() {
                                 e.stopPropagation();
                                 setAppliedModelInput(dx.appliedModel);
                                 setOptionCodeInput(dx.canadianOptionCode);
+                                setManualCodingOpen(true);
                               }}
                               className="rounded border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-900"
                             >
