@@ -19,6 +19,7 @@ import {
 import {
   SUBARU_CANADIAN_OPTION_PRESETS,
   SUBARU_OBD_SUPPORTED_MODELS_SUMMARY,
+  asciiFromSubaruDidHex,
   checkSubaruObdConversionSupport,
   decodeSubaruAppliedModel12Columns,
   diffEyesightAgainstAppliedCatalog,
@@ -231,6 +232,20 @@ export default function SubaruCodingClient() {
   }, [meter12Read, appliedModelInput, liveMeterDidMap]);
 
   const detectedMeterPanelKind = detectedMeterPanelInfo.panelKind;
+
+  const meterEcuPartInfo = useMemo(() => {
+    if (!meter12Read) return null;
+    const readAscii = (did: string): string | null => {
+      const entry = meter12Read.dids.find((d) => d.did.toUpperCase() === did);
+      if (!entry || !entry.hex || entry.hex === "--") return null;
+      const ascii = asciiFromSubaruDidHex(entry.hex).replace(/[^A-Za-z0-9._-]/g, "").trim();
+      return ascii.length >= 4 ? ascii : null;
+    };
+    const partNumber = readAscii("F18E") ?? readAscii("F187");
+    const hwNumber = readAscii("F191");
+    if (!partNumber && !hwNumber) return null;
+    return { partNumber, hwNumber };
+  }, [meter12Read]);
 
   const activePanelKind: SubaruMeterPanelKind =
     selectedPanelKind === "auto" ? detectedMeterPanelKind : selectedPanelKind;
@@ -1172,6 +1187,23 @@ export default function SubaruCodingClient() {
                     {meter12Read.match.actualAppliedModel} + {meter12Read.match.actualOptionCode}
                   </div>
                   <div className="text-[11px] text-amber-900">{meter12Read.match.actualRegion}</div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-amber-200/80 pt-1 text-[10px] text-amber-950">
+                    {meterEcuPartInfo?.partNumber && (
+                      <span>
+                        Номер блока (F18E/F187):{" "}
+                        <strong className="font-mono">{meterEcuPartInfo.partNumber}</strong>
+                      </span>
+                    )}
+                    {meterEcuPartInfo?.hwNumber &&
+                      meterEcuPartInfo.hwNumber !== meterEcuPartInfo.partNumber && (
+                        <span>
+                          HW (F191): <strong className="font-mono">{meterEcuPartInfo.hwNumber}</strong>
+                        </span>
+                      )}
+                    <span>
+                      Вид панели: <strong>{SUBARU_METER_PANEL_PROFILES[detectedMeterPanelKind].titleRu}</strong>
+                    </span>
+                  </div>
                 </div>
               )}
               {eyesightRead && (
