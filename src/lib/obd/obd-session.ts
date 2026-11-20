@@ -1484,12 +1484,31 @@ export class ObdBleSession {
     await this.waitLeave();
     if (this.elm!.isMonitoring) throw new Error("Остановите CAN-монитор перед записью EyeSight");
     await this.ensureUdsProfile(protocol);
+    const writeMode = options?.writeMode ?? "full-yyw";
+    let writeOptions = options;
+    if (writeMode !== "custom-35xx") {
+      const steps: string[] = [];
+      const probe = await readSubaruEyesight35xxDids(this.elm!, {
+        steps,
+        withCgw: true,
+        didHexList: SUBARU_EYESIGHT_VARIANT_READ_DIDS,
+        securityKeyHex,
+        unlockIfNrc33: true,
+        hintAppliedModel: appliedModel,
+      });
+      writeOptions = {
+        ...options,
+        txHex: probe.tx.toString(16).toUpperCase(),
+        rxHex: probe.rx.toString(16).toUpperCase(),
+        detectedSchema: probe.detectedSchema,
+      };
+    }
     return writeSubaruEyesightVariantByApplied(
       this.elm!,
       appliedModel,
       optionCode,
       securityKeyHex,
-      options,
+      writeOptions,
     );
   }
 

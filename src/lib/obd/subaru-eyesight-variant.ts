@@ -1038,11 +1038,33 @@ export async function writeSubaruEyesightVariantByApplied(
   const app = appliedModel.trim().toUpperCase();
   const opt = optionCode.trim().toUpperCase();
   const writeMode: SubaruEyesightWriteMode = options?.writeMode ?? "full-yyw";
-  const modelSchema = getSsm4YywSchemaForModel(app) ?? options?.detectedSchema ?? "35xx";
+  const catalogSchema = getSsm4YywSchemaForModel(app);
+  const liveSchema = options?.detectedSchema;
+  const modelSchema = catalogSchema ?? liveSchema ?? "35xx";
 
   const steps: string[] = [
     `SSM4 Selection of Parameter (${writeMode}, ${modelSchema}): ${app}+${opt} (Y-YwPHBWHoZ.mLW)`,
   ];
+
+  if (writeMode !== "custom-35xx" && catalogSchema && liveSchema && catalogSchema !== liveSchema) {
+    return {
+      success: false,
+      writeMode,
+      steps: [
+        ...steps,
+        `Запись EyeSight остановлена: считанный блок использует схему ${liveSchema}, а Applied Model ${app} в справочнике Y-Yw использует ${catalogSchema}. Выберите Applied Model той же схемы или перечитайте EyeSight перед записью.`,
+      ],
+      appliedModel: app,
+      optionCode: opt,
+      writtenCount: 0,
+      targetCount: 0,
+      verifiedCount: 0,
+      mismatchedDids: [],
+      afterDidMap: {},
+      securityAccessRequired: false,
+      cgwFilterRemoved: false,
+    };
+  }
 
   if (writeMode !== "custom-35xx") {
     const support = checkSubaruObdConversionSupport(app);

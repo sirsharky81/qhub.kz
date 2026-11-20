@@ -3,6 +3,7 @@ import {
   readSubaruEyesight35xxDids,
   writeSubaruEyesightVariantByApplied,
 } from "../subaru-eyesight-variant";
+import { ObdBleSession } from "../obd-session";
 import {
   buildSubaruEyesightBackup,
   diffBackupVsLiveEyesight,
@@ -49,6 +50,25 @@ function scriptedElm(replies: Record<string, string | string[]>): SubaruMeterWri
       return "NO DATA";
     },
   };
+}
+
+function scriptedSession(replies: Record<string, string | string[]>): {
+  session: ObdBleSession;
+  elm: ReturnType<typeof scriptedElm>;
+} {
+  const elm = scriptedElm(replies) as ReturnType<typeof scriptedElm> & {
+    isMonitoring: boolean;
+    stopMonitor: () => Promise<void>;
+    useUdsProfile: () => Promise<void>;
+    clearRxFilter: () => Promise<void>;
+  };
+  elm.isMonitoring = false;
+  elm.stopMonitor = async () => undefined;
+  elm.useUdsProfile = async () => undefined;
+  elm.clearRxFilter = async () => undefined;
+  const session = new ObdBleSession();
+  session.attachRemoteElm(elm as unknown as Parameters<ObdBleSession["attachRemoteElm"]>[0]);
+  return { session, elm };
 }
 
 describe("subaru-eyesight-variant (ADA-031 / ADA-032)", () => {
@@ -145,6 +165,58 @@ describe("subaru-eyesight-variant (ADA-031 / ADA-032)", () => {
     expect(res.targetCount).toBe(1);
     expect(res.verifiedCount).toBe(1);
     expect(elm.sent.filter((s) => s.startsWith("2E"))).toEqual(["2E350230"]);
+  });
+
+  it("blocks EyeSight writes when live schema conflicts with the Applied Model catalog schema", async () => {
+    const elmRegionOnly = scriptedElm({});
+    const regionOnly = await writeSubaruEyesightVariantByApplied(
+      elmRegionOnly,
+      "BTAEYR8",
+      "C0QF",
+      undefined,
+      {
+        writeMode: "region-only",
+        detectedSchema: "309x",
+      },
+    );
+
+    expect(regionOnly.success).toBe(false);
+    expect(regionOnly.targetCount).toBe(0);
+    expect(elmRegionOnly.sent).toHaveLength(0);
+    expect(regionOnly.steps.at(-1)).toContain("считанный блок использует схему 309x");
+
+    const elmFull = scriptedElm({});
+    const full = await writeSubaruEyesightVariantByApplied(elmFull, "BTACYR8", "C0QF", undefined, {
+      writeMode: "full-yyw",
+      detectedSchema: "35xx",
+    });
+
+    expect(full.success).toBe(false);
+    expect(full.targetCount).toBe(0);
+    expect(elmFull.sent).toHaveLength(0);
+    expect(full.steps.at(-1)).toContain("Applied Model BTACYR8");
+  });
+
+  it("re-probes the live EyeSight schema before session writes and refuses mismatches before 2E", async () => {
+    const legacyBytes = getSsm4YywWriteDids("BTACYR8", "C0QF")!;
+    const replies: Record<string, string> = {
+      "1003": "50 03",
+      "3E00": "7E 00",
+    };
+    for (const item of legacyBytes) {
+      replies[`22${item.did}`] = `62 ${item.did.slice(0, 2)} ${item.did.slice(2)} ${item.byteHex}`;
+    }
+
+    const { session, elm } = scriptedSession(replies);
+    const res = await session.writeSubaruEyesightVariantCode("BTAEYR8", "C0QF", "6", undefined, {
+      writeMode: "region-only",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.targetCount).toBe(0);
+    expect(res.steps.at(-1)).toContain("считанный блок использует схему 309x");
+    expect(elm.sent.some((s) => s.startsWith("223091"))).toBe(true);
+    expect(elm.sent.filter((s) => s.startsWith("2E"))).toEqual([]);
   });
 
   it("builds, serializes, diffs, and restores 1:1 original EyeSight backup (even for U45L)", async () => {
