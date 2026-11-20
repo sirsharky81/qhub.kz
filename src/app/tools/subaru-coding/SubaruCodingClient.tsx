@@ -57,6 +57,7 @@ import {
   decodeSubaruMeterA0xxByte,
   detectSubaruMeterPanelKind,
   getMeterPanelDidSpecList,
+  getSubaruMeterCgdwModelBinding,
   type SubaruMeterPanelKind,
 } from "@/lib/obd/subaru-meter-did-dictionary";
 import { formatObdEnvironmentLines, probeObdEnvironment } from "@/lib/obd/obd-environment";
@@ -132,6 +133,7 @@ export default function SubaruCodingClient() {
   const [manualCodingOpen, setManualCodingOpen] = useState(false);
   const [presetDualOnly, setPresetDualOnly] = useState(false);
   const [selectedPanelKind, setSelectedPanelKind] = useState<SubaruMeterPanelKind | "auto">("auto");
+  const [allowPanelWideValues, setAllowPanelWideValues] = useState(false);
   const [showAllDictionaryDids, setShowAllDictionaryDids] = useState(false);
   const [onlyModifiedDids, setOnlyModifiedDids] = useState(false);
   const [didDictSearch, setDidDictSearch] = useState("");
@@ -253,15 +255,38 @@ export default function SubaruCodingClient() {
 
   const activePanelProfile = SUBARU_METER_PANEL_PROFILES[activePanelKind];
 
+  const activeModelForSpecs = useMemo(() => {
+    const readApp = meter12Read?.match.actualAppliedModel?.trim().toUpperCase();
+    if (readApp && readApp !== "UNKNOWN") return readApp;
+    return appliedModelInput.trim().toUpperCase();
+  }, [meter12Read, appliedModelInput]);
+
+  const activeModelCgdwBinding = useMemo(
+    () => getSubaruMeterCgdwModelBinding(activeModelForSpecs),
+    [activeModelForSpecs],
+  );
+
+  const hasExactModelBinding =
+    activeModelCgdwBinding != null && activeModelCgdwBinding.panelKind === activePanelKind;
+  const isStrictModelDidMode = hasExactModelBinding && !allowPanelWideValues;
+  const hasAutoPanelSource = Boolean(meter12Read || activeModelForSpecs.length >= 2);
+
   const meterDidSpecs = useMemo(() => {
-    const app = meter12Read?.match.actualAppliedModel || appliedModelInput;
     return getMeterPanelDidSpecList({
       panelKind: activePanelKind,
-      appliedModel: app,
+      appliedModel: activeModelForSpecs,
       liveDidMap: meter12Read ? liveMeterDidMap : undefined,
       includeAllCatalogDids: showAllDictionaryDids,
+      strictToModelCode: !allowPanelWideValues,
     });
-  }, [activePanelKind, meter12Read, appliedModelInput, liveMeterDidMap, showAllDictionaryDids]);
+  }, [
+    activePanelKind,
+    activeModelForSpecs,
+    meter12Read,
+    liveMeterDidMap,
+    showAllDictionaryDids,
+    allowPanelWideValues,
+  ]);
 
   const pendingIndividualChanges = useMemo(() => {
     if (!meter12Read) return [];
@@ -550,6 +575,8 @@ export default function SubaruCodingClient() {
     try {
       const result = await sessionRef.current.readSubaruMeter12ColumnCode("6");
       setMeter12Read(result);
+      setSelectedPanelKind("auto");
+      setAllowPanelWideValues(false);
       setIndividualDidDraft({});
       setCustomHexEditingDid({});
       if (result.match.actualAppliedModel && result.match.actualAppliedModel.length === 7) {
@@ -652,6 +679,8 @@ export default function SubaruCodingClient() {
       );
       setMeterEyesightCompare(result);
       setMeter12Read(result.meter);
+      setSelectedPanelKind("auto");
+      setAllowPanelWideValues(false);
       setIndividualDidDraft({});
       setCustomHexEditingDid({});
       setEyesightRead(result.eyesight);
@@ -2211,22 +2240,43 @@ export default function SubaruCodingClient() {
                   После чтения приборки в каждом списке по умолчанию подставляется фактическое значение из авто — меняйте только нужные DID и записывайте выборочно.
                 </p>
               <label className="block space-y-1 min-w-0">
-                <span className="block text-[11px] font-semibold text-cyan-950">
-                  Вид приборной панели:
-                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="block text-[11px] font-semibold text-cyan-950">
+                    Вид приборной панели:
+                  </span>
+                  {hasAutoPanelSource && selectedPanelKind !== "auto" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPanelKind("auto");
+                        setIndividualDidDraft({});
+                        setCustomHexEditingDid({});
+                      }}
+                      className="text-[11px] font-semibold text-cyan-800 underline hover:text-cyan-950"
+                    >
+                      Вернуть авто
+                    </button>
+                  )}
+                </div>
                 <select
-                  value={selectedPanelKind}
-                  onChange={(e) =>
-                    setSelectedPanelKind(e.target.value as SubaruMeterPanelKind | "auto")
-                  }
+                  value={hasAutoPanelSource ? activePanelKind : selectedPanelKind}
+                  onChange={(e) => {
+                    const val = e.target.value as SubaruMeterPanelKind | "auto";
+                    setSelectedPanelKind(
+                      hasAutoPanelSource && val === detectedMeterPanelKind ? "auto" : val,
+                    );
+                    setIndividualDidDraft({});
+                    setCustomHexEditingDid({});
+                  }}
                   className="block w-full min-w-0 max-w-full rounded-lg border border-cyan-300 bg-white px-2.5 py-2 text-xs font-semibold text-gray-900"
                 >
-                  <option value="auto">
-                    Авто: {SUBARU_METER_PANEL_PROFILES[detectedMeterPanelKind].titleRu}
-                  </option>
+                  {!hasAutoPanelSource && (
+                    <option value="auto">Авто (определится после считывания)</option>
+                  )}
                   {SUBARU_METER_PANEL_PROFILE_LIST.map((p) => (
                     <option key={p.kind} value={p.kind}>
                       {p.titleRu}
+                      {hasAutoPanelSource && p.kind === detectedMeterPanelKind ? " (авто)" : ""}
                     </option>
                   ))}
                 </select>
@@ -2245,9 +2295,27 @@ export default function SubaruCodingClient() {
                   Act place: {activePanelProfile.destinationDid}
                 </span>
               </div>
-              <div className="text-[10px] text-gray-600">
-                Определено: {detectedMeterPanelInfo.detectedBy} · Активных DID панели:{" "}
-                <span className="font-mono">{activePanelProfile.activeDids.length}</span>
+              <div className="text-[10px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span>Определено: {detectedMeterPanelInfo.detectedBy}</span>
+                <span>
+                  · Активных DID:{" "}
+                  <span className="font-mono">
+                    {meterDidSpecs.filter((s) => s.supportedOnPanel).length}
+                  </span>
+                </span>
+                {hasExactModelBinding && activeModelCgdwBinding && (
+                  <span
+                    className={`rounded px-1.5 py-0.5 font-semibold ${
+                      isStrictModelDidMode
+                        ? "bg-emerald-100 text-emerald-900"
+                        : "bg-amber-100 text-amber-900"
+                    }`}
+                  >
+                    {isStrictModelDidMode
+                      ? `Строго по ${activeModelCgdwBinding.appliedModel} (${activeModelCgdwBinding.optionCodes.join(", ")})`
+                      : `Расширенный выбор (${activeModelCgdwBinding.appliedModel})`}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -2261,6 +2329,23 @@ export default function SubaruCodingClient() {
                   className="w-full sm:flex-1 min-w-0 rounded-lg border border-cyan-300 bg-white px-2.5 py-1.5 text-xs text-gray-900"
                 />
                 <div className="flex flex-wrap items-center gap-2">
+                  {hasExactModelBinding && (
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={allowPanelWideValues}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setAllowPanelWideValues(checked);
+                          if (!checked) {
+                            setCustomHexEditingDid({});
+                          }
+                        }}
+                        className="rounded border-gray-300"
+                      />
+                      <span>Расширить выбор на всю панель</span>
+                    </label>
+                  )}
                   <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-700 cursor-pointer">
                     <input
                       type="checkbox"
@@ -2474,6 +2559,16 @@ export default function SubaruCodingClient() {
                             Список
                           </button>
                         </div>
+                      ) : isStrictModelDidMode && spec.options.length === 1 && !isModified ? (
+                        <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-2.5 py-1.5 text-xs text-gray-800">
+                          <span className="min-w-0 truncate font-medium">
+                            <span className="font-mono font-bold">{spec.options[0].hex}</span> —{" "}
+                            {spec.options[0].labelRu}
+                          </span>
+                          <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900">
+                            Фикс. в cgdw
+                          </span>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-1.5 min-w-0">
                           <select
@@ -2527,7 +2622,7 @@ export default function SubaruCodingClient() {
                               ↩
                             </button>
                           )}
-                          {meter12Read && hasLiveByte && (
+                          {meter12Read && hasLiveByte && !isStrictModelDidMode && (
                             <button
                               type="button"
                               title="Ввести произвольный HEX-байт"
