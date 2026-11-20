@@ -6685,16 +6685,18 @@ export const SUBARU_METER_VARIANT_SAFE_PATH = {
  */
 export const SUBARU_METER_VARIANT_READ_FACTS = {
   destinationDid: "A002",
+  /** Legacy property name kept for compatibility; SSM4 confirms A011 is `TPMS presence information` (`FF`=Function effective, `00`=No function). */
   unitsDid: "A011",
+  tpmsDid: "A011",
   a002Map: { "02": "U4", "03": "C0", "05": "U5", "06": "C5" } as const,
-  a011Map: { FF: "USA °F/MPH", "00": "Canada °C/km/h" } as const,
+  a011Map: { FF: "TPMS Function effective (вкл)", "00": "TPMS No function (выкл)" } as const,
   ascii12ColumnDids: ["0250", "0251", "F1A0", "F1A1"] as const,
   fingerprintDidKeys: SSM4_CGDW_FP_DID_KEYS,
   eyesightLib: "Y-YwPHBWHoZ.mLW",
   meterLib: "cgdwPHBWHoZ.mLW",
   eyesightDidKeys: SSM4_YYW_FP_DID_KEYS,
   noteRu:
-    "SSM4: (Applied,Option)→строка cgdw→полный набор A0xx (не только A002/A011). Обратно: считав все DID строки (в т.ч. отсутствие A02E), получаем model+option. Урезанный отпечаток давал ложные коллизии.",
+    "SSM4: (Applied,Option)→строка cgdw→полный набор A0xx (A002 = Act place/шкалы, A011 = TPMS presence). Обратно: считав все DID строки (в т.ч. отсутствие A02E), получаем model+option.",
 } as const;
 
 /** EyeSight stereo variant DIDs from Y-YwPHBW-WmPGBu.mHZ (`3501..3510`, 16 DIDs) + legacy `Y-YwPHBW-WmPGBN.mHZ` (`3091..309D`). */

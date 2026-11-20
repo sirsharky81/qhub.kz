@@ -746,4 +746,77 @@ describe("subaru-meter-variant", () => {
     expect(txLog.lastIndexOf("763:1001")).toBeGreaterThan(txLog.indexOf("783:2E10C200"));
     expect(res.steps.some((s) => s.includes("фильтр 27 xx ещё активен"))).toBe(true);
   });
+
+  it("writes only selected individual DIDs (e.g. A002=03 Canada °C while preserving A011=FF TPMS) with readback verification", async () => {
+    const liveBytes: Record<string, string> = {
+      A002: "02",
+      A011: "FF",
+      A024: "02",
+    };
+    const elm = {
+      sent: [] as string[],
+      async sendCommand() {
+        return "OK";
+      },
+      async setCanHeader() {},
+      async sendPayload(hexPayload: string) {
+        const k = hexPayload.toUpperCase();
+        elm.sent.push(k);
+        if (k === "1003") return "50 03";
+        if (k === "1001") return "50 01";
+        if (k === "3E00") return "7E 00";
+        if (k === "3101020C") return "71 01 02 0C";
+        if (k === "2210C2") return "62 10 C2 FF";
+        if (k === "220251") return "62 02 51 01";
+        if (k === "2E10C2FF" || k === "2E10C200") return "6E 10 C2";
+        const mWrite = k.match(/^2E(A0[0-9A-F]{2})([0-9A-F]{2})$/);
+        if (mWrite) {
+          liveBytes[mWrite[1]!] = mWrite[2]!;
+          return `6E ${mWrite[1]!.slice(0, 2)} ${mWrite[1]!.slice(2)}`;
+        }
+        const mRead = k.match(/^22(A0[0-9A-F]{2})$/);
+        if (mRead && liveBytes[mRead[1]!]) {
+          return `62 ${mRead[1]!.slice(0, 2)} ${mRead[1]!.slice(2)} ${liveBytes[mRead[1]!]}`;
+        }
+        return "NO DATA";
+      },
+    };
+
+    const res = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTACYR8",
+      optionCode: "U45D",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+        { did: "A02E", hex: "--" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "individual-dids",
+      customA0xxWrites: [
+        { did: "A002", byteHex: "03" },
+        { did: "A02E", byteHex: "00" },
+      ],
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.writtenDid).toBe("INDIVIDUAL A0xx (1/1)");
+    expect(res.writtenHex).toBe("A002=03");
+    expect(elm.sent).toContain("2EA00203");
+    expect(elm.sent).toContain("22A002");
+    expect(elm.sent.some((s) => s.startsWith("2EA011"))).toBe(false);
+    expect(elm.sent.some((s) => s.startsWith("2EA02E"))).toBe(false);
+    expect(res.steps.some((s) => s.includes("22 A002 → 03 ✓"))).toBe(true);
+
+    // Rejects non-writable/reserved DIDs like A000 or A004
+    const elmBlocked = scriptedElm({});
+    const blockedRes = await writeSubaruMeter12ColumnCode(elmBlocked, {
+      appliedModel: "BTACYR8",
+      optionCode: "U45D",
+      writeMode: "individual-dids",
+      customA0xxWrites: [{ did: "A000", byteHex: "FF" }],
+    });
+    expect(blockedRes.success).toBe(false);
+    expect(elmBlocked.sent).toHaveLength(0);
+  });
 });
