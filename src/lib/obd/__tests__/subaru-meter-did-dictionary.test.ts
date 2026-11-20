@@ -4,6 +4,7 @@ import {
   decodeSubaruMeterA0xxByte,
   detectSubaruMeterPanelKind,
   getMeterPanelDidSpecList,
+  getSubaruMeterCgdwModelBinding,
 } from "../subaru-meter-did-dictionary";
 
 describe("subaru-meter-did-dictionary", () => {
@@ -99,5 +100,45 @@ describe("subaru-meter-did-dictionary", () => {
     expect(decodeSubaruMeterA0xxByte("A011", "00", "bt-bw-early")).toContain("No function");
     expect(decodeSubaruMeterA0xxByte("A02D", "01", "bt-bw-early")).toContain("WILDERNESS");
     expect(decodeSubaruMeterA0xxByte("A024", "02", "bt-bw-early")).toContain("6SP");
+  });
+
+  it("enforces strict cgdw Model Code bindings for panel detection, DIDs, and allowed byte values", () => {
+    // Models like BT9CKCL (EU/AU 2022) and GT7BKDL must resolve via cgdw, not prefix heuristics
+    const btEu2022 = detectSubaruMeterPanelKind({ appliedModel: "BT9CKCL" });
+    expect(btEu2022.panelKind).toBe("bt-bw-wm-facelift");
+    expect(btEu2022.strictModelBinding).toBe(true);
+
+    const gtLate = detectSubaruMeterPanelKind({ appliedModel: "GT7BKDL" });
+    expect(gtLate.panelKind).toBe("gk-gt-late");
+    expect(gtLate.strictModelBinding).toBe(true);
+
+    // BTAEYR8 (MY24) must NOT expose A02E (MY23-only) and must lock A016 strictly to 03
+    const btaeyBinding = getSubaruMeterCgdwModelBinding("BTAEYR8");
+    expect(btaeyBinding).not.toBeNull();
+    expect(btaeyBinding?.activeDids).not.toContain("A02E");
+
+    const strictSpecs = getMeterPanelDidSpecList({
+      panelKind: "bt-bw-wm-facelift",
+      appliedModel: "BTAEYR8",
+    });
+    expect(strictSpecs.some((s) => s.meta.did === "A02E")).toBe(false);
+    expect(strictSpecs.find((s) => s.meta.did === "A002")?.options.map((o) => o.hex)).toEqual([
+      "02",
+      "03",
+    ]);
+    expect(strictSpecs.find((s) => s.meta.did === "A016")?.options.map((o) => o.hex)).toEqual([
+      "03",
+    ]);
+
+    // Non-strict mode allows browsing all panel-wide values when explicitly requested
+    const wideSpecs = getMeterPanelDidSpecList({
+      panelKind: "bt-bw-wm-facelift",
+      appliedModel: "BTAEYR8",
+      strictToModelCode: false,
+    });
+    expect(wideSpecs.some((s) => s.meta.did === "A02E")).toBe(true);
+    expect(
+      (wideSpecs.find((s) => s.meta.did === "A002")?.options.length ?? 0) > 2,
+    ).toBe(true);
   });
 });

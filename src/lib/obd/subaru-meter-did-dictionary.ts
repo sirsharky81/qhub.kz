@@ -77,7 +77,7 @@ export const SUBARU_METER_PANEL_PROFILES: Record<
     activeDids: [
       "A002", "A005", "A006", "A007", "A008", "A009", "A00C", "A00F", "A010",
       "A011", "A014", "A016", "A019", "A021", "A022", "A023", "A024", "A025",
-      "A026", "A027", "A028", "A02D",
+      "A026", "A027", "A028", "A02D", "A034",
     ],
   },
   "bt-bw-wm-facelift": {
@@ -751,8 +751,94 @@ export function classifyCgdwRowPanelKind(appliedModel: string, fp: string): Suba
   return "bt-bw-early";
 }
 
+export interface SubaruMeterCgdwModelBinding {
+  appliedModel: string;
+  panelKind: SubaruMeterPanelKind;
+  rowCount: number;
+  optionCodes: string[];
+  activeDids: string[];
+  activeDidSet: ReadonlySet<string>;
+  byDidValues: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+let modelBindingCache: Map<string, SubaruMeterCgdwModelBinding> | null = null;
+
+function getModelBindingMap(): Map<string, SubaruMeterCgdwModelBinding> {
+  if (modelBindingCache) return modelBindingCache;
+
+  const grouped = new Map<
+    string,
+    {
+      panelKind: SubaruMeterPanelKind;
+      rowCount: number;
+      optionCodes: string[];
+      activeDidSet: Set<string>;
+      byDidValues: Map<string, Set<string>>;
+    }
+  >();
+
+  for (const row of SSM4_CGDW_FINGERPRINTS) {
+    const app = row.appliedModel.trim().toUpperCase();
+    let entry = grouped.get(app);
+    if (!entry) {
+      entry = {
+        panelKind: classifyCgdwRowPanelKind(app, row.fp),
+        rowCount: 0,
+        optionCodes: [],
+        activeDidSet: new Set<string>(),
+        byDidValues: new Map<string, Set<string>>(),
+      };
+      grouped.set(app, entry);
+    }
+    entry.rowCount += 1;
+    if (!entry.optionCodes.includes(row.optionCode)) {
+      entry.optionCodes.push(row.optionCode);
+    }
+    for (const did of SSM4_CGDW_FP_DID_KEYS) {
+      const b = getFpByte(row.fp, did);
+      if (b === "--") continue;
+      entry.activeDidSet.add(did);
+      let vals = entry.byDidValues.get(did);
+      if (!vals) {
+        vals = new Set<string>();
+        entry.byDidValues.set(did, vals);
+      }
+      vals.add(b);
+    }
+  }
+
+  const out = new Map<string, SubaruMeterCgdwModelBinding>();
+  for (const [appliedModel, g] of grouped.entries()) {
+    const activeDids = SSM4_CGDW_FP_DID_KEYS.filter((d) => g.activeDidSet.has(d));
+    out.set(appliedModel, {
+      appliedModel,
+      panelKind: g.panelKind,
+      rowCount: g.rowCount,
+      optionCodes: g.optionCodes,
+      activeDids,
+      activeDidSet: g.activeDidSet,
+      byDidValues: g.byDidValues,
+    });
+  }
+  modelBindingCache = out;
+  return out;
+}
+
+/**
+ * Returns the exact cgdw catalog binding (panel family, active DIDs, and allowed byte values)
+ * for a specific 7-character Applied Model code, or `null` if that code is not in cgdw.
+ */
+export function getSubaruMeterCgdwModelBinding(
+  appliedModel: string | null | undefined,
+): SubaruMeterCgdwModelBinding | null {
+  const clean = (appliedModel ?? "").trim().toUpperCase();
+  if (!clean) return null;
+  return getModelBindingMap().get(clean) ?? null;
+}
+
 /**
  * Determines the meter panel kind from the live ECU readback (`Applied Model` + active A0xx DIDs).
+ * Prefers exact `cgdw` Model Code bindings when consistent with live ECU DIDs.
  */
 export function detectSubaruMeterPanelKind(input: {
   appliedModel?: string | null;
@@ -761,18 +847,40 @@ export function detectSubaruMeterPanelKind(input: {
   panelKind: SubaruMeterPanelKind;
   profile: SubaruMeterPanelProfile;
   detectedBy: string;
+  strictModelBinding: boolean;
 } {
   const activeSet = new Set(
     (input.activeDids ?? []).map((d) => d.trim().toUpperCase()),
   );
   const app = (input.appliedModel ?? "").trim().toUpperCase();
+  const modelBinding = getSubaruMeterCgdwModelBinding(app);
 
-  // Check explicit hardware signals from active DIDs first when available
+  if (modelBinding) {
+    const destDid = SUBARU_METER_PANEL_PROFILES[modelBinding.panelKind].destinationDid;
+    const liveMatchesDest =
+      activeSet.size === 0 ||
+      activeSet.has(destDid) ||
+      (!activeSet.has("A001") && !activeSet.has("A002"));
+    if (liveMatchesDest) {
+      return {
+        panelKind: modelBinding.panelKind,
+        profile: SUBARU_METER_PANEL_PROFILES[modelBinding.panelKind],
+        detectedBy:
+          activeSet.size > 0
+            ? `справочник cgdw (${modelBinding.appliedModel}) + считывание 783`
+            : `справочник cgdw (${modelBinding.appliedModel})`,
+        strictModelBinding: true,
+      };
+    }
+  }
+
+  // Check explicit hardware signals from active DIDs when exact cgdw binding is absent or conflicts
   if (activeSet.has("A003") || activeSet.has("A035")) {
     return {
       panelKind: "gu-crosstrek",
       profile: SUBARU_METER_PANEL_PROFILES["gu-crosstrek"],
       detectedBy: "активный DID A003/A035 (GU)",
+      strictModelBinding: false,
     };
   }
   if (activeSet.has("A02A") || activeSet.has("A02B")) {
@@ -780,6 +888,7 @@ export function detectSubaruMeterPanelKind(input: {
       panelKind: "vb-vn-wrx",
       profile: SUBARU_METER_PANEL_PROFILES["vb-vn-wrx"],
       detectedBy: "активный DID A02A/A02B (WRX/Levorg)",
+      strictModelBinding: false,
     };
   }
   if (activeSet.has("A001")) {
@@ -788,6 +897,7 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "gk-gt-early",
         profile: SUBARU_METER_PANEL_PROFILES["gk-gt-early"],
         detectedBy: "A001 + A013/A018 (ранний GK/GT)",
+        strictModelBinding: false,
       };
     }
     if (activeSet.has("A019") || activeSet.has("A022") || activeSet.has("A00D")) {
@@ -795,6 +905,7 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "sk-forester",
         profile: SUBARU_METER_PANEL_PROFILES["sk-forester"],
         detectedBy: "A001 + A019/A022 (Forester SK)",
+        strictModelBinding: false,
       };
     }
     if (app.startsWith("SK")) {
@@ -802,12 +913,14 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "sk-forester",
         profile: SUBARU_METER_PANEL_PROFILES["sk-forester"],
         detectedBy: `Applied Model ${app}`,
+        strictModelBinding: false,
       };
     }
     return {
       panelKind: "gk-gt-late",
       profile: SUBARU_METER_PANEL_PROFILES["gk-gt-late"],
       detectedBy: "A001 + A021 (GK/GT 2019–2023)",
+      strictModelBinding: false,
     };
   }
   if (activeSet.has("A002")) {
@@ -821,6 +934,7 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "bt-bw-wm-facelift",
         profile: SUBARU_METER_PANEL_PROFILES["bt-bw-wm-facelift"],
         detectedBy: "A002 + A02F/A036/A041 (BT/BW/WM рестайл)",
+        strictModelBinding: false,
       };
     }
     if (activeSet.has("A00B") && !activeSet.has("A019") && !activeSet.has("A023")) {
@@ -828,6 +942,7 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "zd8-zn8-brz",
         profile: SUBARU_METER_PANEL_PROFILES["zd8-zn8-brz"],
         detectedBy: "A002 + A00B без A023 (BRZ/GR86)",
+        strictModelBinding: false,
       };
     }
     if (app.startsWith("GU")) {
@@ -835,6 +950,7 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "gu-crosstrek",
         profile: SUBARU_METER_PANEL_PROFILES["gu-crosstrek"],
         detectedBy: `Applied Model ${app}`,
+        strictModelBinding: false,
       };
     }
     if (app.startsWith("VB") || app.startsWith("VN")) {
@@ -842,6 +958,7 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "vb-vn-wrx",
         profile: SUBARU_METER_PANEL_PROFILES["vb-vn-wrx"],
         detectedBy: `Applied Model ${app}`,
+        strictModelBinding: false,
       };
     }
     if (app.startsWith("ZD") || app.startsWith("ZN")) {
@@ -849,21 +966,24 @@ export function detectSubaruMeterPanelKind(input: {
         panelKind: "zd8-zn8-brz",
         profile: SUBARU_METER_PANEL_PROFILES["zd8-zn8-brz"],
         detectedBy: `Applied Model ${app}`,
+        strictModelBinding: false,
       };
     }
     return {
       panelKind: "bt-bw-early",
       profile: SUBARU_METER_PANEL_PROFILES["bt-bw-early"],
       detectedBy: "A002 без A036 (BT/BW 2020–2022)",
+      strictModelBinding: false,
     };
   }
 
-  // Fallback purely by Applied Model
+  // Fallback purely by Applied Model prefix
   if (app.startsWith("GU")) {
     return {
       panelKind: "gu-crosstrek",
       profile: SUBARU_METER_PANEL_PROFILES["gu-crosstrek"],
       detectedBy: `Applied Model ${app}`,
+      strictModelBinding: false,
     };
   }
   if (app.startsWith("VB") || app.startsWith("VN")) {
@@ -871,6 +991,7 @@ export function detectSubaruMeterPanelKind(input: {
       panelKind: "vb-vn-wrx",
       profile: SUBARU_METER_PANEL_PROFILES["vb-vn-wrx"],
       detectedBy: `Applied Model ${app}`,
+      strictModelBinding: false,
     };
   }
   if (app.startsWith("ZD") || app.startsWith("ZN")) {
@@ -878,6 +999,7 @@ export function detectSubaruMeterPanelKind(input: {
       panelKind: "zd8-zn8-brz",
       profile: SUBARU_METER_PANEL_PROFILES["zd8-zn8-brz"],
       detectedBy: `Applied Model ${app}`,
+      strictModelBinding: false,
     };
   }
   if (app.startsWith("SK")) {
@@ -885,6 +1007,7 @@ export function detectSubaruMeterPanelKind(input: {
       panelKind: "sk-forester",
       profile: SUBARU_METER_PANEL_PROFILES["sk-forester"],
       detectedBy: `Applied Model ${app}`,
+      strictModelBinding: false,
     };
   }
   if (app.startsWith("GK") || app.startsWith("GT")) {
@@ -895,6 +1018,7 @@ export function detectSubaruMeterPanelKind(input: {
       panelKind: kind,
       profile: SUBARU_METER_PANEL_PROFILES[kind],
       detectedBy: `Applied Model ${app}`,
+      strictModelBinding: false,
     };
   }
   if (app.startsWith("WM") || (app.startsWith("BT") || app.startsWith("BW")) && (app[3] === "D" || app[3] === "E" || app[3] === "F")) {
@@ -902,12 +1026,14 @@ export function detectSubaruMeterPanelKind(input: {
       panelKind: "bt-bw-wm-facelift",
       profile: SUBARU_METER_PANEL_PROFILES["bt-bw-wm-facelift"],
       detectedBy: `Applied Model ${app}`,
+      strictModelBinding: false,
     };
   }
   return {
     panelKind: "bt-bw-early",
     profile: SUBARU_METER_PANEL_PROFILES["bt-bw-early"],
-    detectedBy: app ? `Applied Model ${app}` : "по умолчанию BT/BW",
+    detectedBy: app ? `Applied Model ${app}` : "не выбрано (считайте приборку или выберите вручную)",
+    strictModelBinding: false,
   };
 }
 
@@ -1043,30 +1169,24 @@ export function getMeterPanelDidSpecList(options: {
   appliedModel?: string | null;
   liveDidMap?: Record<string, string>;
   includeAllCatalogDids?: boolean;
+  /**
+   * When true (default), if `appliedModel` has an exact `cgdw` catalog entry matching `panelKind`,
+   * restrict DIDs and allowed byte values strictly to that Model Code (plus any live ECU byte).
+   */
+  strictToModelCode?: boolean;
 }): SubaruMeterPanelDidSpec[] {
   const profile = SUBARU_METER_PANEL_PROFILES[options.panelKind];
   const profileSet = new Set(profile.activeDids);
   const cleanApp = (options.appliedModel ?? "").trim().toUpperCase();
+  const hasLiveMap = options.liveDidMap != null;
   const liveMap = options.liveDidMap ?? {};
   const panelStats = getPanelCgdwStats(options.panelKind);
 
-  // Collect values seen specifically for this Applied Model
-  const appValuesByDid = new Map<string, Set<string>>();
-  if (cleanApp) {
-    for (const row of SSM4_CGDW_FINGERPRINTS) {
-      if (row.appliedModel !== cleanApp) continue;
-      for (const did of SSM4_CGDW_FP_DID_KEYS) {
-        const b = getFpByte(row.fp, did);
-        if (b === "--") continue;
-        let s = appValuesByDid.get(did);
-        if (!s) {
-          s = new Set<string>();
-          appValuesByDid.set(did, s);
-        }
-        s.add(b);
-      }
-    }
-  }
+  const modelBinding = getSubaruMeterCgdwModelBinding(cleanApp);
+  const isStrictModelActive =
+    options.strictToModelCode !== false &&
+    modelBinding != null &&
+    modelBinding.panelKind === options.panelKind;
 
   const out: SubaruMeterPanelDidSpec[] = [];
   for (const meta of SUBARU_METER_A0XX_META_LIST) {
@@ -1078,27 +1198,38 @@ export function getMeterPanelDidSpecList(options: {
           ? "--"
           : null;
     const isLiveActive = liveByte != null && liveByte !== "--";
-    const supportedOnPanel = profileSet.has(meta.did) || isLiveActive;
+    const supportedOnPanel = isStrictModelActive
+      ? hasLiveMap
+        ? isLiveActive
+        : modelBinding.activeDidSet.has(meta.did)
+      : hasLiveMap
+        ? isLiveActive
+        : profileSet.has(meta.did);
 
     if (!options.includeAllCatalogDids && !supportedOnPanel) continue;
 
     const panelValMap = panelStats.byDid.get(meta.did);
-    const appValSet = appValuesByDid.get(meta.did) ?? new Set<string>();
+    const appValSet = modelBinding?.byDidValues.get(meta.did) ?? new Set<string>();
 
     const allBytes = new Set<string>();
-    if (panelValMap) {
-      for (const b of panelValMap.keys()) allBytes.add(b);
-    }
-    for (const b of appValSet) allBytes.add(b);
-    if (isLiveActive && liveByte) allBytes.add(liveByte);
+    if (isStrictModelActive && appValSet.size > 0) {
+      for (const b of appValSet) allBytes.add(b);
+      if (isLiveActive && liveByte) allBytes.add(liveByte);
+    } else {
+      if (panelValMap) {
+        for (const b of panelValMap.keys()) allBytes.add(b);
+      }
+      for (const b of appValSet) allBytes.add(b);
+      if (isLiveActive && liveByte) allBytes.add(liveByte);
 
-    // For boolean presence DIDs active on this panel, always ensure both states are selectable
-    if (supportedOnPanel && meta.valueKind === "presence-ff-00") {
-      allBytes.add("FF");
-      allBytes.add("00");
-    } else if (supportedOnPanel && meta.valueKind === "presence-01-00") {
-      allBytes.add("01");
-      allBytes.add("00");
+      // For boolean presence DIDs in non-strict mode, ensure both states are selectable
+      if (supportedOnPanel && meta.valueKind === "presence-ff-00") {
+        allBytes.add("FF");
+        allBytes.add("00");
+      } else if (supportedOnPanel && meta.valueKind === "presence-01-00") {
+        allBytes.add("01");
+        allBytes.add("00");
+      }
     }
 
     const optList: SubaruMeterDidValueOption[] = [...allBytes]
