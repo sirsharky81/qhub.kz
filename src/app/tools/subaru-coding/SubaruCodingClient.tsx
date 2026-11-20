@@ -129,10 +129,10 @@ export default function SubaruCodingClient() {
   const [appliedModelInput, setAppliedModelInput] = useState("BTAEYR8");
   const [optionCodeInput, setOptionCodeInput] = useState("U45D");
   const [stickerOptionInput, setStickerOptionInput] = useState("U45L");
-  const [meterWriteMode, setMeterWriteMode] = useState<"two-did" | "full-cgdw">("two-did");
   const [presetDualOnly, setPresetDualOnly] = useState(false);
   const [selectedPanelKind, setSelectedPanelKind] = useState<SubaruMeterPanelKind | "auto">("auto");
   const [showAllDictionaryDids, setShowAllDictionaryDids] = useState(false);
+  const [onlyModifiedDids, setOnlyModifiedDids] = useState(false);
   const [didDictSearch, setDidDictSearch] = useState("");
   const [individualDidDraft, setIndividualDidDraft] = useState<Record<string, string>>({});
   const [customHexEditingDid, setCustomHexEditingDid] = useState<Record<string, boolean>>({});
@@ -684,7 +684,7 @@ export default function SubaruCodingClient() {
     (
       rawModel: string,
       rawOption: string,
-      mode: SubaruMeterWriteMode = meterWriteMode,
+      mode: SubaruMeterWriteMode = "full-cgdw",
       customA0xxWrites?: SubaruMeterA0xxWriteEntry[],
     ) => {
       if (!ready || busy) return;
@@ -699,7 +699,7 @@ export default function SubaruCodingClient() {
         customA0xxWrites,
       });
     },
-    [ready, busy, meterWriteMode],
+    [ready, busy],
   );
 
   const handleSaveMeterBackup = useCallback(() => {
@@ -1318,11 +1318,10 @@ export default function SubaruCodingClient() {
                           onClick={() => {
                             setAppliedModelInput(dx.appliedModel);
                             setOptionCodeInput(dx.canadianOptionCode);
-                            setMeterWriteMode("full-cgdw");
                           }}
                           className="mt-2 rounded-lg bg-cyan-800 hover:bg-cyan-900 px-3 py-1.5 text-[11px] font-bold text-white"
                         >
-                          Подставить {dx.appliedModel} + {dx.canadianOptionCode} (Dual X-Mode · Все DID)
+                          Подставить {dx.appliedModel} + {dx.canadianOptionCode} (Dual X-Mode)
                         </button>
                       )}
                     </div>
@@ -2047,7 +2046,6 @@ export default function SubaruCodingClient() {
                         const dx = appliedModelAnalysis.dualXModeRecommendation;
                         setAppliedModelInput(dx.appliedModel);
                         setOptionCodeInput(dx.canadianOptionCode);
-                        setMeterWriteMode("full-cgdw");
                       }}
                       className="rounded-lg bg-cyan-800 hover:bg-cyan-900 px-2.5 py-1 text-[10px] font-bold text-white"
                     >
@@ -2062,40 +2060,17 @@ export default function SubaruCodingClient() {
 
           {/* Always-active Write Buttons when connected */}
           <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-3.5 space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="space-y-1">
               <div className="text-xs font-bold text-emerald-950">
-                2. Перевести на °C (выберите объём записи DID):
+                2. Записать все DID приборки по Applied Model + Option Code (SSM4 cgdw)
               </div>
-              <div className="inline-flex rounded-lg border border-emerald-300 bg-white p-0.5 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => setMeterWriteMode("two-did")}
-                  className={`rounded-md px-2.5 py-1 font-semibold ${
-                    meterWriteMode === "two-did"
-                      ? "bg-emerald-700 text-white"
-                      : "text-gray-700 hover:bg-emerald-50"
-                  }`}
-                >
-                  Только 2 DID (A002+A011)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMeterWriteMode("full-cgdw")}
-                  className={`rounded-md px-2.5 py-1 font-semibold ${
-                    meterWriteMode === "full-cgdw"
-                      ? "bg-emerald-700 text-white"
-                      : "text-gray-700 hover:bg-emerald-50"
-                  }`}
-                >
-                  Все DID как SSM4 (cgdw)
-                </button>
-              </div>
+              <p className="text-[11px] text-emerald-900 leading-relaxed">
+                Перезаписывает весь профиль <code className="font-mono">A0xx</code> для выбранной пары из справочника{" "}
+                <code className="font-mono">cgdw</code>. Если нужно поменять только отдельные параметры (например только{" "}
+                <code className="font-mono">A002=03</code> без отключения TPMS), используйте выборочное кодирование в блоке{" "}
+                <strong>2.5</strong> ниже.
+              </p>
             </div>
-            <p className="text-[11px] text-emerald-900">
-              {meterWriteMode === "two-did"
-                ? "Безопасный минимум (2 DID): пишет A002 (рынок/шкалы °C или °F) и A011 (TPMS: для C0/C5 = 00 выкл, для U4/U5 = FF вкл). Чтобы перевести в °C и при этом СОХРАНИТЬ TPMS (A002=03, A011=FF) — используйте точечное кодирование отдельных DID ниже."
-                : "Полный режим SSM4 sendMetVariByApplied: перезаписывает все ~28 A0xx DID выбранной строки справочника cgdw (в т.ч. A024/A036). Перед записью сохраните бэкап оригинала! Для кодов вне cgdw (U45L) используйте «Только 2 DID» или бэкап."}
-            </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 type="button"
@@ -2151,179 +2126,192 @@ export default function SubaruCodingClient() {
           </div>
 
           {/* Individual DID Dictionary & Coding Editor (Cardiag / SSM4 Meter Setting Information Status) */}
-          <div className="rounded-xl border border-cyan-300 bg-cyan-50/40 p-3.5 space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="rounded-xl border border-cyan-300 bg-cyan-50/40 p-3 sm:p-4 space-y-3 overflow-hidden">
+            <div className="space-y-2">
               <div className="space-y-0.5">
                 <div className="text-xs font-bold text-cyan-950">
-                  2.5. Справочник и кодирование отдельных DID приборной панели (783)
+                  2.5. Выборочное кодирование отдельных DID приборной панели (783)
                 </div>
                 <p className="text-[11px] text-cyan-900 leading-relaxed">
-                  Точечная правка отдельных параметров приборки (как в SSM4 Meter Setting Information Status / Cardiag):
-                  значения подбираются из каталога <code className="font-mono">cgdw</code> под конкретный вид приборной панели.
+                  После чтения приборки в каждом списке по умолчанию подставляется фактическое значение из авто — меняйте только нужные DID и записывайте выборочно.
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-cyan-950">
-                  <span>Вид приборки:</span>
-                  <select
-                    value={selectedPanelKind}
-                    onChange={(e) =>
-                      setSelectedPanelKind(e.target.value as SubaruMeterPanelKind | "auto")
-                    }
-                    className="rounded-lg border border-cyan-300 bg-white px-2 py-1 text-[11px] font-semibold text-gray-900"
-                  >
-                    <option value="auto">
-                      Авто ({SUBARU_METER_PANEL_PROFILES[detectedMeterPanelKind].titleRu})
+              <label className="block space-y-1 min-w-0">
+                <span className="block text-[11px] font-semibold text-cyan-950">
+                  Вид приборной панели:
+                </span>
+                <select
+                  value={selectedPanelKind}
+                  onChange={(e) =>
+                    setSelectedPanelKind(e.target.value as SubaruMeterPanelKind | "auto")
+                  }
+                  className="block w-full min-w-0 max-w-full rounded-lg border border-cyan-300 bg-white px-2.5 py-2 text-xs font-semibold text-gray-900"
+                >
+                  <option value="auto">
+                    Авто: {SUBARU_METER_PANEL_PROFILES[detectedMeterPanelKind].titleRu}
+                  </option>
+                  {SUBARU_METER_PANEL_PROFILE_LIST.map((p) => (
+                    <option key={p.kind} value={p.kind}>
+                      {p.titleRu}
                     </option>
-                    {SUBARU_METER_PANEL_PROFILE_LIST.map((p) => (
-                      <option key={p.kind} value={p.kind}>
-                        {p.titleRu}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+                  ))}
+                </select>
+              </label>
             </div>
 
             <div className="rounded-lg border border-cyan-200 bg-white px-3 py-2 text-[11px] text-gray-800 space-y-1">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <div className="min-w-0 break-words">
                   <strong className="text-cyan-950">{activePanelProfile.titleRu}</strong>{" "}
                   <span className="font-mono text-[10px] text-gray-500">
                     ({activePanelProfile.modelsRu})
                   </span>
                 </div>
-                <span className="rounded bg-cyan-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-cyan-900">
-                  Act place DID: {activePanelProfile.destinationDid}
+                <span className="shrink-0 rounded bg-cyan-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-cyan-900">
+                  Act place: {activePanelProfile.destinationDid}
                 </span>
               </div>
-              <div className="text-gray-600">
+              <div className="text-[10px] text-gray-600">
                 Определено: {detectedMeterPanelInfo.detectedBy} · Активных DID панели:{" "}
                 <span className="font-mono">{activePanelProfile.activeDids.length}</span>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <input
                   type="text"
                   value={didDictSearch}
                   onChange={(e) => setDidDictSearch(e.target.value)}
-                  placeholder="Фильтр: DID (A011), TPMS, SI-X, Mirror…"
-                  className="w-56 rounded-lg border border-cyan-300 bg-white px-2.5 py-1 text-xs text-gray-900"
+                  placeholder="Поиск по DID (A011), TPMS, SI-X, Mirror…"
+                  className="w-full sm:flex-1 min-w-0 rounded-lg border border-cyan-300 bg-white px-2.5 py-1.5 text-xs text-gray-900"
                 />
-                <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showAllDictionaryDids}
-                    onChange={(e) => setShowAllDictionaryDids(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  <span>Показать все 44 DID каталога (включая неактивные / резерв)</span>
-                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showAllDictionaryDids}
+                      onChange={(e) => setShowAllDictionaryDids(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    <span>Все 44 DID каталога</span>
+                  </label>
+                  {meter12Read && pendingIndividualChanges.length > 0 && (
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={onlyModifiedDids}
+                        onChange={(e) => setOnlyModifiedDids(e.target.checked)}
+                        className="rounded border-amber-400"
+                      />
+                      <span>Только изменённые ({pendingIndividualChanges.length})</span>
+                    </label>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {meter12Read &&
-                  liveMeterDidMap["A002"] &&
-                  liveMeterDidMap["A002"] !== "--" &&
-                  liveMeterDidMap["A011"] &&
-                  liveMeterDidMap["A011"] !== "--" && (
+
+              {(meter12Read || Object.keys(individualDidDraft).length > 0) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {meter12Read &&
+                    liveMeterDidMap["A002"] &&
+                    liveMeterDidMap["A002"] !== "--" &&
+                    liveMeterDidMap["A011"] &&
+                    liveMeterDidMap["A011"] !== "--" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setIndividualDidDraft((prev) => ({
+                            ...prev,
+                            A002: "03",
+                            A011: "FF",
+                          }))
+                        }
+                        className="rounded-lg border border-emerald-400 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-950"
+                      >
+                        Пресет: Канада °C + оставить TPMS (A002=03, A011=FF)
+                      </button>
+                    )}
+                  {Object.keys(individualDidDraft).length > 0 && (
                     <button
                       type="button"
-                      onClick={() =>
-                        setIndividualDidDraft((prev) => ({
-                          ...prev,
-                          A002: "03",
-                          A011: "FF",
-                        }))
-                      }
-                      className="rounded-lg border border-emerald-400 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-950"
+                      onClick={() => {
+                        setIndividualDidDraft({});
+                        setCustomHexEditingDid({});
+                        setOnlyModifiedDids(false);
+                      }}
+                      className="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-700"
                     >
-                      Пресет: Канада °C + оставить TPMS (A002=03, A011=FF)
+                      Сбросить изменения
                     </button>
                   )}
-                {Object.keys(individualDidDraft).length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIndividualDidDraft({});
-                      setCustomHexEditingDid({});
-                    }}
-                    className="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-700"
-                  >
-                    Сбросить черновик
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
-            <div className="overflow-x-auto rounded-lg border border-cyan-200 bg-white max-h-[460px] overflow-y-auto">
-              <table className="w-full text-left text-[11px]">
-                <thead className="sticky top-0 z-10 bg-cyan-900 text-white">
-                  <tr>
-                    <th className="px-2.5 py-1.5 font-semibold">DID</th>
-                    <th className="px-2.5 py-1.5 font-semibold">Параметр SSM4 / Описание</th>
-                    <th className="px-2.5 py-1.5 font-semibold">Текущее в авто</th>
-                    <th className="px-2.5 py-1.5 font-semibold">Значение справочника ({activePanelProfile.kind})</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {meterDidSpecs
-                    .filter((spec) => {
-                      const q = didDictSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      return (
-                        spec.meta.did.toLowerCase().includes(q) ||
-                        spec.meta.ssm4NameEn.toLowerCase().includes(q) ||
-                        (spec.meta.cardiagNameEn ?? "").toLowerCase().includes(q) ||
-                        spec.meta.titleRu.toLowerCase().includes(q) ||
-                        spec.meta.descriptionRu.toLowerCase().includes(q)
-                      );
-                    })
-                    .map((spec) => {
-                      const did = spec.meta.did;
-                      const liveHex = liveMeterDidMap[did];
-                      const isLiveAbsent = liveHex === "--";
-                      const hasLiveByte = Boolean(liveHex && /^[0-9A-F]{2}$/.test(liveHex));
-                      const draftHex = individualDidDraft[did];
-                      const effectiveHex = draftHex ?? (hasLiveByte ? liveHex : "");
-                      const isModified =
-                        Boolean(
-                          hasLiveByte &&
-                            draftHex &&
-                            /^[0-9A-F]{2}$/.test(draftHex) &&
-                            draftHex !== liveHex,
-                        );
-                      const isCustomMode = Boolean(customHexEditingDid[did]);
-                      const knownValues = spec.options.map((v) => v.hex);
-                      const valueNotInList = Boolean(effectiveHex && !knownValues.includes(effectiveHex));
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 max-h-[540px] overflow-y-auto pr-0.5">
+              {meterDidSpecs
+                .filter((spec) => {
+                  const did = spec.meta.did;
+                  if (onlyModifiedDids && meter12Read) {
+                    const liveHex = liveMeterDidMap[did];
+                    const draftHex = individualDidDraft[did];
+                    if (
+                      !liveHex ||
+                      liveHex === "--" ||
+                      !draftHex ||
+                      !/^[0-9A-F]{2}$/.test(draftHex) ||
+                      draftHex === liveHex
+                    ) {
+                      return false;
+                    }
+                  }
+                  const q = didDictSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    did.toLowerCase().includes(q) ||
+                    spec.meta.ssm4NameEn.toLowerCase().includes(q) ||
+                    (spec.meta.cardiagNameEn ?? "").toLowerCase().includes(q) ||
+                    spec.meta.titleRu.toLowerCase().includes(q) ||
+                    spec.meta.descriptionRu.toLowerCase().includes(q)
+                  );
+                })
+                .map((spec) => {
+                  const did = spec.meta.did;
+                  const liveHex = liveMeterDidMap[did];
+                  const isLiveAbsent = meter12Read != null && liveHex === "--";
+                  const hasLiveByte = Boolean(liveHex && /^[0-9A-F]{2}$/.test(liveHex));
+                  const draftHex = individualDidDraft[did];
+                  const fallbackPreviewHex = spec.options[0]?.hex ?? "";
+                  const effectiveHex =
+                    draftHex ?? (hasLiveByte ? liveHex! : !meter12Read ? fallbackPreviewHex : "");
+                  const isModified = Boolean(
+                    hasLiveByte &&
+                      draftHex &&
+                      /^[0-9A-F]{2}$/.test(draftHex) &&
+                      draftHex !== liveHex,
+                  );
+                  const isCustomMode = Boolean(customHexEditingDid[did]);
+                  const knownValues = spec.options.map((v) => v.hex);
+                  const valueNotInList = Boolean(effectiveHex && !knownValues.includes(effectiveHex));
 
-                      return (
-                        <tr
-                          key={did}
-                          className={`border-t border-gray-100 align-top ${
-                            isModified
-                              ? "bg-amber-50/90"
-                              : isLiveAbsent
-                                ? "bg-gray-50/60 text-gray-500"
-                                : ""
-                          }`}
-                        >
-                          <td className="px-2.5 py-2 font-mono font-bold whitespace-nowrap">
-                            <div>{did}</div>
-                            {!spec.meta.editableInUi && (
-                              <span className="inline-block mt-0.5 rounded bg-gray-200 px-1 py-0.5 font-sans text-[9px] font-semibold text-gray-700">
-                                read-only
-                              </span>
-                            )}
-                            {isModified && (
-                              <span className="inline-block mt-0.5 rounded bg-amber-300 px-1 py-0.5 font-sans text-[9px] font-bold text-amber-950">
-                                {liveHex}→{draftHex}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-2.5 py-2 min-w-[210px]">
-                            <div className="font-semibold text-gray-900">
+                  return (
+                    <div
+                      key={did}
+                      className={`rounded-xl border p-3 space-y-2 min-w-0 transition-colors ${
+                        isModified
+                          ? "border-amber-400 bg-amber-50/90"
+                          : isLiveAbsent
+                            ? "border-gray-200 bg-gray-50/70 text-gray-500"
+                            : "border-cyan-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 min-w-0">
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded bg-cyan-900 px-1.5 py-0.5 font-mono text-[11px] font-bold text-white">
+                              {did}
+                            </span>
+                            <span className="text-xs font-bold text-gray-900 break-words">
                               {spec.meta.ssm4NameEn}
                               {spec.meta.cardiagNameEn &&
                                 spec.meta.cardiagNameEn !== spec.meta.ssm4NameEn && (
@@ -2331,152 +2319,173 @@ export default function SubaruCodingClient() {
                                     ({spec.meta.cardiagNameEn})
                                   </span>
                                 )}
-                            </div>
-                            <div className="text-[10px] text-gray-700">{spec.meta.titleRu}</div>
-                            <div className="text-[10px] text-gray-500 leading-snug mt-0.5">
-                              {spec.meta.descriptionRu}
-                            </div>
-                          </td>
-                          <td className="px-2.5 py-2 font-mono min-w-[140px]">
-                            {!meter12Read ? (
-                              <span className="text-[10px] font-sans text-gray-400">
-                                не считано
-                              </span>
-                            ) : isLiveAbsent ? (
-                              <span className="text-[10px] font-sans text-gray-400">
-                                -- (не используется)
-                              </span>
-                            ) : hasLiveByte ? (
-                              <div>
-                                <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 font-bold text-slate-900">
-                                  {liveHex}
-                                </span>
-                                <div className="font-sans text-[10px] text-gray-700 mt-0.5">
-                                  {decodeSubaruMeterA0xxByte(did, liveHex!, activePanelKind)}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-[10px] font-sans text-gray-400">—</span>
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-medium text-gray-700">
+                            {spec.meta.titleRu}
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 flex flex-col items-end gap-1">
+                          {!spec.meta.editableInUi ? (
+                            <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700">
+                              read-only
+                            </span>
+                          ) : !meter12Read ? (
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
+                              {spec.options.length} вар.
+                            </span>
+                          ) : isLiveAbsent ? (
+                            <span className="rounded bg-gray-200 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
+                              -- нет
+                            </span>
+                          ) : isModified ? (
+                            <span className="rounded bg-amber-300 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-950">
+                              {liveHex} → {draftHex}
+                            </span>
+                          ) : hasLiveByte ? (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-900">
+                              Факт: {liveHex}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-gray-500 leading-snug">
+                        {spec.meta.descriptionRu}
+                      </p>
+
+                      {!spec.meta.editableInUi ? (
+                        <div className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] text-gray-600">
+                          {spec.options[0]?.labelRu ?? "Системный / резервный DID (не записывается)"}
+                        </div>
+                      ) : isLiveAbsent ? (
+                        <div className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] text-gray-500">
+                          Отсутствует в этой приборке (--)
+                        </div>
+                      ) : isCustomMode ? (
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <input
+                            type="text"
+                            maxLength={2}
+                            value={effectiveHex}
+                            onChange={(e) => {
+                              const val = e.target.value
+                                .toUpperCase()
+                                .replace(/[^0-9A-F]/g, "")
+                                .slice(0, 2);
+                              setIndividualDidDraft((prev) => ({
+                                ...prev,
+                                [did]: val,
+                              }));
+                            }}
+                            placeholder="FF"
+                            className="w-16 rounded-lg border border-cyan-400 bg-white px-2.5 py-1.5 font-mono text-xs font-bold uppercase text-gray-900"
+                          />
+                          <span className="flex-1 min-w-0 truncate text-[11px] text-gray-600">
+                            {effectiveHex.length === 2
+                              ? decodeSubaruMeterA0xxByte(did, effectiveHex, activePanelKind)
+                              : "Введите 2 HEX-символа"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCustomHexEditingDid((prev) => ({
+                                ...prev,
+                                [did]: false,
+                              }))
+                            }
+                            className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+                          >
+                            Список
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <select
+                            disabled={meter12Read != null && !hasLiveByte}
+                            value={effectiveHex}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setIndividualDidDraft((prev) => {
+                                const next = { ...prev };
+                                if (!val || (hasLiveByte && val === liveHex)) {
+                                  delete next[did];
+                                } else {
+                                  next[did] = val;
+                                }
+                                return next;
+                              });
+                            }}
+                            className="w-full min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                          >
+                            {!effectiveHex && <option value="">— нет вариантов —</option>}
+                            {valueNotInList && effectiveHex && (
+                              <option value={effectiveHex}>
+                                {effectiveHex} —{" "}
+                                {decodeSubaruMeterA0xxByte(did, effectiveHex, activePanelKind)}
+                                {hasLiveByte && effectiveHex === liveHex ? " (факт)" : " (своё)"}
+                              </option>
                             )}
-                          </td>
-                          <td className="px-2.5 py-2 min-w-[230px]">
-                            {!spec.meta.editableInUi ? (
-                              <span className="text-[10px] text-gray-500">
-                                {spec.options[0]?.labelRu ?? "Не изменяется по 2E"}
-                              </span>
-                            ) : isCustomMode ? (
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  maxLength={2}
-                                  value={effectiveHex}
-                                  disabled={!meter12Read || isLiveAbsent}
-                                  onChange={(e) => {
-                                    const val = e.target.value
-                                      .toUpperCase()
-                                      .replace(/[^0-9A-F]/g, "")
-                                      .slice(0, 2);
-                                    setIndividualDidDraft((prev) => ({
-                                      ...prev,
-                                      [did]: val,
-                                    }));
-                                  }}
-                                  placeholder="FF"
-                                  className="w-14 rounded border border-cyan-400 bg-white px-2 py-1 font-mono text-xs font-bold uppercase text-gray-900"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setCustomHexEditingDid((prev) => ({
-                                      ...prev,
-                                      [did]: false,
-                                    }))
-                                  }
-                                  className="rounded border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-700 hover:bg-gray-50"
-                                >
-                                  Список
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1.5">
-                                  <select
-                                    disabled={!meter12Read || isLiveAbsent || !hasLiveByte}
-                                    value={effectiveHex}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setIndividualDidDraft((prev) => {
-                                        const next = { ...prev };
-                                        if (!val || val === liveHex) {
-                                          delete next[did];
-                                        } else {
-                                          next[did] = val;
-                                        }
-                                        return next;
-                                      });
-                                    }}
-                                    className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
-                                  >
-                                    {!effectiveHex && <option value="">— выберите —</option>}
-                                    {valueNotInList && effectiveHex && (
-                                      <option value={effectiveHex}>
-                                        {effectiveHex} — {decodeSubaruMeterA0xxByte(did, effectiveHex, activePanelKind)} (текущее/своё)
-                                      </option>
-                                    )}
-                                    {spec.options.map((v) => (
-                                      <option key={v.hex} value={v.hex}>
-                                        {v.hex} — {v.labelRu}
-                                        {v.examplePairs.length > 0 && v.examplePairs.length <= 3
-                                          ? ` (${v.examplePairs.join(", ")})`
-                                          : ""}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  {meter12Read && hasLiveByte && (
-                                    <button
-                                      type="button"
-                                      title="Ввести произвольный HEX-байт"
-                                      onClick={() =>
-                                        setCustomHexEditingDid((prev) => ({
-                                          ...prev,
-                                          [did]: true,
-                                        }))
-                                      }
-                                      className="shrink-0 rounded border border-gray-300 bg-gray-50 hover:bg-gray-100 px-1.5 py-1 font-mono text-[10px] text-gray-700"
-                                    >
-                                      HEX
-                                    </button>
-                                  )}
-                                </div>
-                                {!meter12Read && spec.options.length > 0 && (
-                                  <div className="text-[10px] text-gray-600">
-                                    Варианты SSM4:{" "}
-                                    {spec.options
-                                      .slice(0, 6)
-                                      .map((v) => `${v.hex}=${v.labelRu}`)
-                                      .join(" · ")}
-                                    {spec.options.length > 6 ? ` (+${spec.options.length - 6})` : ""}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
+                            {spec.options.map((v) => (
+                              <option key={v.hex} value={v.hex}>
+                                {v.hex} — {v.labelRu}
+                                {hasLiveByte && v.hex === liveHex ? " (факт)" : ""}
+                                {!hasLiveByte && v.examplePairs.length > 0 && v.examplePairs.length <= 2
+                                  ? ` [${v.examplePairs.join(", ")}]`
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                          {isModified && (
+                            <button
+                              type="button"
+                              title="Вернуть фактическое значение"
+                              onClick={() =>
+                                setIndividualDidDraft((prev) => {
+                                  const next = { ...prev };
+                                  delete next[did];
+                                  return next;
+                                })
+                              }
+                              className="shrink-0 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 px-2 py-1.5 text-[11px] font-semibold text-amber-900"
+                            >
+                              ↩
+                            </button>
+                          )}
+                          {meter12Read && hasLiveByte && (
+                            <button
+                              type="button"
+                              title="Ввести произвольный HEX-байт"
+                              onClick={() =>
+                                setCustomHexEditingDid((prev) => ({
+                                  ...prev,
+                                  [did]: true,
+                                }))
+                              }
+                              className="shrink-0 rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 px-2 py-1.5 font-mono text-[11px] text-gray-700"
+                            >
+                              HEX
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-cyan-200/80">
               <div className="text-[11px] text-cyan-950">
                 {!meter12Read ? (
-                  <span>Нажмите «1. Считать приборку (783)» выше, чтобы редактировать и записывать отдельные DID авто.</span>
+                  <span>
+                    Сейчас открыт просмотр справочника. Нажмите «1. Считать приборку», чтобы подгрузить фактические значения из авто для записи.
+                  </span>
                 ) : pendingIndividualChanges.length === 0 ? (
-                  <span>Изменённых DID пока нет — выберите новые значения в таблице выше.</span>
+                  <span>В списке подставлены фактические значения из авто. Измените нужный DID для записи.</span>
                 ) : (
                   <span className="font-semibold">
-                    Готово к записи ({pendingIndividualChanges.length}):{" "}
+                    К записи ({pendingIndividualChanges.length}):{" "}
                     <span className="font-mono">
                       {pendingIndividualChanges.map((c) => `${c.did}: ${c.oldHex}→${c.newHex}`).join(", ")}
                     </span>
@@ -2497,7 +2506,7 @@ export default function SubaruCodingClient() {
                     })),
                   )
                 }
-                className="rounded-xl bg-cyan-800 hover:bg-cyan-900 px-4 py-2 text-xs font-bold text-white disabled:opacity-40"
+                className="w-full sm:w-auto shrink-0 rounded-xl bg-cyan-800 hover:bg-cyan-900 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-40"
               >
                 Записать выбранные DID ({pendingIndividualChanges.length})
               </button>
@@ -2663,7 +2672,7 @@ export default function SubaruCodingClient() {
                   Справочник замен из SSM4 cgdw (нажмите — подставить Applied + канадский Option):
                 </div>
                 <div className="text-[11px] text-gray-500">
-                  При выборе пресета с <strong>Dual X-Mode</strong> автоматически включается режим «Все DID как SSM4 (cgdw)» для записи байта X-Mode (A007).
+                  В блоке 2 записывается полный профиль <strong>cgdw</strong> выбранной строки (включая байт X-Mode <code className="font-mono">A007</code>).
                 </div>
               </div>
               <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 text-[11px]">
@@ -2720,7 +2729,6 @@ export default function SubaruCodingClient() {
                         onClick={() => {
                           setAppliedModelInput(preset.appliedModel);
                           setOptionCodeInput(preset.canadianOptionCodeC0);
-                          if (isDual) setMeterWriteMode("full-cgdw");
                         }}
                         className="cursor-pointer hover:bg-emerald-50"
                       >
@@ -2772,7 +2780,6 @@ export default function SubaruCodingClient() {
                                 e.stopPropagation();
                                 setAppliedModelInput(dx.appliedModel);
                                 setOptionCodeInput(dx.canadianOptionCode);
-                                setMeterWriteMode("full-cgdw");
                               }}
                               className="rounded border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-900"
                             >
@@ -3047,7 +3054,7 @@ export default function SubaruCodingClient() {
                   </div>
                 ) : (
                   <div className="text-[11px] text-rose-700 font-sans">
-                    Внимание: для {meter12WritePending.appliedModel}+{meter12WritePending.optionCode} нет строки в справочнике cgdw — выберите режим «Только 2 DID» или код из таблицы.
+                    Внимание: для {meter12WritePending.appliedModel}+{meter12WritePending.optionCode} нет строки в справочнике cgdw — выберите код из таблицы или используйте блок 2.5 для точечного кодирования DID.
                   </div>
                 )}
                 {meter12WritePending.writeMode !== "custom-a0xx" &&
