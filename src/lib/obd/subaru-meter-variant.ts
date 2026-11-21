@@ -1689,6 +1689,7 @@ export async function writeSubaruMeter12ColumnCode(
 
   const keptGateways: { tx: number; rx: number }[] = [];
   const triedAltGateways = { done: false };
+  let partialA0xxMutation = false;
 
   try {
     for (const target of targets) {
@@ -1962,7 +1963,16 @@ export async function writeSubaruMeter12ColumnCode(
             );
 
             if (okA0xx.length > 0) {
-              if (writeMode === "two-did") {
+              if (okA0xx.length !== a0xxWritePlan.length) {
+                partialA0xxMutation = true;
+                const okSet = new Set(okA0xx.map((x) => x.did));
+                const failed = a0xxWritePlan
+                  .filter((x) => !okSet.has(x.did))
+                  .map((x) => x.did);
+                steps.push(
+                  `${txHex}→${rxHex}: частичная запись A0xx (${okA0xx.length}/${a0xxWritePlan.length}) — подтверждены ${okA0xx.map((x) => x.did).join(", ")}, не подтверждены ${failed.join(", ")}. Успех не выставляется; другие CAN-адреса не пробуются, чтобы не усугубить частичную мутацию.`,
+                );
+              } else if (writeMode === "two-did") {
                 writtenDid = `${destinationDid}/A011`;
                 writtenHex = `${destinationDid}=${destinationTargetByte} A011=${a011TargetByte}`;
                 steps.push(
@@ -1991,13 +2001,13 @@ export async function writeSubaruMeter12ColumnCode(
         steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
       }
 
-      if (writtenDid || securityAccessRequired) break;
+      if (writtenDid || securityAccessRequired || partialA0xxMutation) break;
     }
   } finally {
     await closeKeptOpenMeterGateways(elm, keptGateways);
   }
 
-  if (!writtenDid && !securityAccessRequired) {
+  if (!writtenDid && !securityAccessRequired && !partialA0xxMutation) {
     steps.push(
       "Приборка не подтвердила 2E 0250/0251. Проверьте IG ON, адрес 783 и что DID — ASCII, а не битовая маска.",
     );

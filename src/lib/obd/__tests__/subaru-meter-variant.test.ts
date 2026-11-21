@@ -848,4 +848,54 @@ describe("subaru-meter-variant", () => {
     expect(blockedRes.success).toBe(false);
     expect(elmBlocked.sent).toHaveLength(0);
   });
+
+  it("does not report success or try another meter target after a partial individual A0xx write", async () => {
+    const headers: number[] = [];
+    const sent: string[] = [];
+    const elm: SubaruMeterWriteLink = {
+      async sendCommand(command) {
+        sent.push(command.replace(/\s+/g, "").toUpperCase());
+        return "OK";
+      },
+      async setCanHeader(tx) {
+        headers.push(tx);
+      },
+      async sendPayload(hex) {
+        const key = hex.replace(/\s+/g, "").toUpperCase();
+        sent.push(key);
+        if (key === "1003" || key === "1001" || key === "3E00") return "50 03";
+        if (key === "3101020C") return "71 01 02 0C";
+        if (key === "2210C2") return "62 10 C2 FF";
+        if (key === "2E10C2FF") return "6E 10 C2";
+        if (key === "2EA00203") return "6E A0 02";
+        if (key === "2EA01100") return "7F 2E 31";
+        if (key === "2E10C200") return "6E 10 C2";
+        return "NO DATA";
+      },
+    };
+
+    const res = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTACYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "individual-dids",
+      customA0xxWrites: [
+        { did: "A002", byteHex: "03" },
+        { did: "A011", byteHex: "00" },
+      ],
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.writtenDid).toBeNull();
+    expect(sent).toContain("2EA00203");
+    expect(sent).toContain("2EA01100");
+    expect(sent).toContain("2E10C200");
+    expect(headers).not.toContain(0x7c0);
+    expect(res.steps.join(" ")).toMatch(/частичная запись A0xx \(1\/2\)/);
+  });
 });
