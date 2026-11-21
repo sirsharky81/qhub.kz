@@ -138,6 +138,7 @@ export default function SubaruCodingClient() {
   const [onlyModifiedDids, setOnlyModifiedDids] = useState(false);
   const [didDictSearch, setDidDictSearch] = useState("");
   const [individualDidDraft, setIndividualDidDraft] = useState<Record<string, string>>({});
+  const [selectedSameValueDids, setSelectedSameValueDids] = useState<Record<string, boolean>>({});
   const [customHexEditingDid, setCustomHexEditingDid] = useState<Record<string, boolean>>({});
   const [meter12Read, setMeter12Read] = useState<SubaruMeter12ColumnRead | null>(null);
   const [loadedBackup, setLoadedBackup] = useState<SubaruMeterBackupFile | null>(null);
@@ -305,19 +306,29 @@ export default function SubaruCodingClient() {
       const liveHex = liveMeterDidMap[did];
       if (!liveHex || liveHex === "--") continue;
       const draftHex = individualDidDraft[did];
-      if (!draftHex || !/^[0-9A-F]{2}$/.test(draftHex) || draftHex === liveHex) continue;
+      const hasDraft = Boolean(draftHex && /^[0-9A-F]{2}$/.test(draftHex) && draftHex !== liveHex);
+      const isSameSelected = Boolean(selectedSameValueDids[did]) && !hasDraft;
+      if (!hasDraft && !isSameSelected) continue;
+      const targetHex = hasDraft ? draftHex! : liveHex;
       changes.push({
         did,
         ssm4Name: spec.meta.ssm4NameEn,
         titleRu: spec.meta.titleRu,
         oldHex: liveHex,
-        newHex: draftHex,
+        newHex: targetHex,
         oldDesc: decodeSubaruMeterA0xxByte(did, liveHex, activePanelKind),
-        newDesc: decodeSubaruMeterA0xxByte(did, draftHex, activePanelKind),
+        newDesc: decodeSubaruMeterA0xxByte(did, targetHex, activePanelKind),
       });
     }
     return changes;
-  }, [meter12Read, meterDidSpecs, liveMeterDidMap, individualDidDraft, activePanelKind]);
+  }, [
+    meter12Read,
+    meterDidSpecs,
+    liveMeterDidMap,
+    individualDidDraft,
+    selectedSameValueDids,
+    activePanelKind,
+  ]);
 
   const modalPlannedA0xxPreview = useMemo(() => {
     if (!meter12WritePending) return [];
@@ -603,6 +614,7 @@ export default function SubaruCodingClient() {
       setSelectedPanelKind("auto");
       setAllowPanelWideValues(false);
       setIndividualDidDraft({});
+      setSelectedSameValueDids({});
       setCustomHexEditingDid({});
       if (result.match.actualAppliedModel && result.match.actualAppliedModel.length === 7) {
         setAppliedModelInput(result.match.actualAppliedModel);
@@ -707,6 +719,7 @@ export default function SubaruCodingClient() {
       setSelectedPanelKind("auto");
       setAllowPanelWideValues(false);
       setIndividualDidDraft({});
+      setSelectedSameValueDids({});
       setCustomHexEditingDid({});
       setEyesightRead(result.eyesight);
       if (result.meter.match.actualAppliedModel.length === 7) {
@@ -1001,6 +1014,7 @@ export default function SubaruCodingClient() {
         setMeter12Read(result.after);
         if (result.success) {
           setIndividualDidDraft({});
+          setSelectedSameValueDids({});
           setCustomHexEditingDid({});
         }
       } else if (result.before) {
@@ -2282,6 +2296,7 @@ export default function SubaruCodingClient() {
                       onClick={() => {
                         setSelectedPanelKind("auto");
                         setIndividualDidDraft({});
+                        setSelectedSameValueDids({});
                         setCustomHexEditingDid({});
                       }}
                       className="text-[11px] font-semibold text-cyan-800 underline hover:text-cyan-950"
@@ -2298,6 +2313,7 @@ export default function SubaruCodingClient() {
                       hasAutoPanelSource && val === detectedMeterPanelKind ? "auto" : val,
                     );
                     setIndividualDidDraft({});
+                    setSelectedSameValueDids({});
                     setCustomHexEditingDid({});
                   }}
                   className="block w-full min-w-0 max-w-full rounded-lg border border-cyan-300 bg-white px-2.5 py-2 text-xs font-semibold text-gray-900"
@@ -2395,13 +2411,15 @@ export default function SubaruCodingClient() {
                         onChange={(e) => setOnlyModifiedDids(e.target.checked)}
                         className="rounded border-amber-400"
                       />
-                      <span>Только изменённые ({pendingIndividualChanges.length})</span>
+                      <span>Только выбранные ({pendingIndividualChanges.length})</span>
                     </label>
                   )}
                 </div>
               </div>
 
-              {(meter12Read || Object.keys(individualDidDraft).length > 0) && (
+              {(meter12Read ||
+                Object.keys(individualDidDraft).length > 0 ||
+                Object.keys(selectedSameValueDids).length > 0) && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   {meter12Read &&
                     liveMeterDidMap["A002"] &&
@@ -2422,11 +2440,13 @@ export default function SubaruCodingClient() {
                         Пресет: Канада °C + оставить TPMS (A002=03, A011=FF)
                       </button>
                     )}
-                  {Object.keys(individualDidDraft).length > 0 && (
+                  {(Object.keys(individualDidDraft).length > 0 ||
+                    Object.keys(selectedSameValueDids).length > 0) && (
                     <button
                       type="button"
                       onClick={() => {
                         setIndividualDidDraft({});
+                        setSelectedSameValueDids({});
                         setCustomHexEditingDid({});
                         setOnlyModifiedDids(false);
                       }}
@@ -2446,13 +2466,17 @@ export default function SubaruCodingClient() {
                   if (onlyModifiedDids && meter12Read) {
                     const liveHex = liveMeterDidMap[did];
                     const draftHex = individualDidDraft[did];
-                    if (
-                      !liveHex ||
-                      liveHex === "--" ||
-                      !draftHex ||
-                      !/^[0-9A-F]{2}$/.test(draftHex) ||
-                      draftHex === liveHex
-                    ) {
+                    const hasDraft = Boolean(
+                      liveHex &&
+                        liveHex !== "--" &&
+                        draftHex &&
+                        /^[0-9A-F]{2}$/.test(draftHex) &&
+                        draftHex !== liveHex,
+                    );
+                    const isSameSelected = Boolean(
+                      liveHex && liveHex !== "--" && selectedSameValueDids[did] && !hasDraft,
+                    );
+                    if (!hasDraft && !isSameSelected) {
                       return false;
                     }
                   }
@@ -2481,6 +2505,9 @@ export default function SubaruCodingClient() {
                       /^[0-9A-F]{2}$/.test(draftHex) &&
                       draftHex !== liveHex,
                   );
+                  const isSameSelected = Boolean(
+                    spec.meta.editableInUi && hasLiveByte && !isModified && selectedSameValueDids[did],
+                  );
                   const isCustomMode = Boolean(customHexEditingDid[did]);
                   const knownValues = spec.options.map((v) => v.hex);
                   const valueNotInList = Boolean(effectiveHex && !knownValues.includes(effectiveHex));
@@ -2491,9 +2518,11 @@ export default function SubaruCodingClient() {
                       className={`rounded-xl border p-3 space-y-2 min-w-0 transition-colors ${
                         isModified
                           ? "border-amber-400 bg-amber-50/90"
-                          : isLiveAbsent
-                            ? "border-gray-200 bg-gray-50/70 text-gray-500"
-                            : "border-cyan-200 bg-white"
+                          : isSameSelected
+                            ? "border-cyan-500 bg-cyan-50/70"
+                            : isLiveAbsent
+                              ? "border-gray-200 bg-gray-50/70 text-gray-500"
+                              : "border-cyan-200 bg-white"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2 min-w-0">
@@ -2535,9 +2564,26 @@ export default function SubaruCodingClient() {
                               {liveHex} → {draftHex}
                             </span>
                           ) : hasLiveByte ? (
-                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-900">
-                              Факт: {liveHex}
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedSameValueDids((prev) => {
+                                  const next = { ...prev };
+                                  if (next[did]) delete next[did];
+                                  else next[did] = true;
+                                  return next;
+                                })
+                              }
+                              title="Выбрать DID для тестовой заливки фактически считанного значения"
+                              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] font-bold transition-colors ${
+                                isSameSelected
+                                  ? "bg-cyan-700 text-white ring-1 ring-cyan-800"
+                                  : "bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
+                              }`}
+                            >
+                              <span>{isSameSelected ? "✓" : "○"}</span>
+                              <span>Факт: {liveHex}</span>
+                            </button>
                           ) : null}
                         </div>
                       </div>
@@ -2683,12 +2729,20 @@ export default function SubaruCodingClient() {
                     Сейчас открыт просмотр справочника. Нажмите «1. Считать приборку», чтобы подгрузить фактические значения из авто для записи.
                   </span>
                 ) : pendingIndividualChanges.length === 0 ? (
-                  <span>В списке подставлены фактические значения из авто. Измените нужный DID для записи.</span>
+                  <span>
+                    В списке подставлены фактические значения из авто. Измените нужный DID или нажмите «Факт: XX» для тестовой перезаписи.
+                  </span>
                 ) : (
                   <span className="font-semibold">
                     К записи ({pendingIndividualChanges.length}):{" "}
                     <span className="font-mono">
-                      {pendingIndividualChanges.map((c) => `${c.did}: ${c.oldHex}→${c.newHex}`).join(", ")}
+                      {pendingIndividualChanges
+                        .map((c) =>
+                          c.oldHex === c.newHex
+                            ? `${c.did}: ${c.newHex} (факт)`
+                            : `${c.did}: ${c.oldHex}→${c.newHex}`,
+                        )
+                        .join(", ")}
                     </span>
                   </span>
                 )}
