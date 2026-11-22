@@ -140,7 +140,7 @@ export function AdminDashboard() {
         </p>
       )}
 
-      <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1">
+      <div className="flex w-full max-w-full flex-wrap rounded-xl border border-gray-200 bg-white p-1">
         <button
           type="button"
           onClick={() => setActiveTab("apps")}
