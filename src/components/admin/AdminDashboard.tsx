@@ -12,6 +12,7 @@ import { MessengerStorageHygieneSection } from "@/components/admin/MessengerStor
 import { MessengerPushDiagnosticsSection } from "@/components/admin/MessengerPushDiagnosticsSection";
 import { KzMapsModerationSection } from "@/components/admin/KzMapsModerationSection";
 import { EtacsAdminSection } from "@/components/admin/EtacsAdminSection";
+import { SubaruCodingWhitelistSection } from "@/components/admin/SubaruCodingWhitelistSection";
 
 interface AdminAppRow {
   id: string;
@@ -31,7 +32,9 @@ export function AdminDashboard() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [pwdLoading, setPwdLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"apps" | "messenger" | "push" | "kzmaps" | "etacs">("apps");
+  const [activeTab, setActiveTab] = useState<
+    "apps" | "messenger" | "push" | "kzmaps" | "etacs" | "subaru"
+  >("apps");
 
   const loadApps = useCallback(async () => {
     setLoading(true);
@@ -111,6 +114,7 @@ export function AdminDashboard() {
             {activeTab === "push" && "Отдельная вкладка диагностики push-уведомлений Messenger."}
             {activeTab === "kzmaps" && "Модерация предложенных мест KZ Maps."}
             {activeTab === "etacs" && "Управление тарифами, промокодами, заявками и разблокированными VIN в ETACS Coding."}
+            {activeTab === "subaru" && "Whitelist номеров, которым разрешён вход в Subaru Coding."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -182,6 +186,15 @@ export function AdminDashboard() {
         >
           ETACS Coding
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("subaru")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "subaru" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          Subaru Coding
+        </button>
       </div>
 
       {activeTab === "apps" && (
@@ -237,6 +250,8 @@ export function AdminDashboard() {
       {activeTab === "kzmaps" && <KzMapsModerationSection />}
 
       {activeTab === "etacs" && <EtacsAdminSection />}
+
+      {activeTab === "subaru" && <SubaruCodingWhitelistSection />}
 
       {activeTab === "apps" && (
       <section className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">

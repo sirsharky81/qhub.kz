@@ -106,6 +106,7 @@ export default function SubaruCodingClient() {
   const searchParams = useSearchParams();
   const [authChecking, setAuthChecking] = useState(true);
   const [loggedInPhone, setLoggedInPhone] = useState<string | null>(null);
+  const [codingAllowed, setCodingAllowed] = useState(false);
 
   const [session] = useState(() => new ObdBleSession());
   const sessionRef = useRef(session);
@@ -492,18 +493,24 @@ export default function SubaruCodingClient() {
   useEffect(() => {
     let active = true;
     void fetchAccessCheck()
-      .then((res) => {
+      .then(async (res) => {
         if (!active) return;
-        if (res.messengerLoggedIn && res.phone) {
-          setLoggedInPhone(res.phone);
-        } else {
+        if (!res.messengerLoggedIn || !res.phone) {
           setLoggedInPhone(null);
+          setCodingAllowed(false);
+          setAuthChecking(false);
+          return;
         }
+        setLoggedInPhone(res.phone);
+        const access = await fetch("/api/subaru-coding/access", { cache: "no-store" });
+        if (!active) return;
+        setCodingAllowed(access.ok);
         setAuthChecking(false);
       })
       .catch(() => {
         if (!active) return;
         setLoggedInPhone(null);
+        setCodingAllowed(false);
         setAuthChecking(false);
       });
     return () => {
@@ -1051,6 +1058,29 @@ export default function SubaruCodingClient() {
     return (
       <div className="min-h-[60dvh] flex items-center justify-center text-sm text-gray-500">
         Проверка авторизации по номеру телефона…
+      </div>
+    );
+  }
+
+  if (loggedInPhone && !codingAllowed) {
+    return (
+      <div className="min-h-[70dvh] flex items-center justify-center p-4">
+        <div className="max-w-md w-full rounded-2xl border border-amber-200 bg-white p-6 space-y-4 text-center shadow-sm">
+          <div className="inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
+            Нет доступа
+          </div>
+          <h1 className="text-lg font-bold text-gray-900">Subaru Coding закрыт для этого номера</h1>
+          <p className="text-sm text-gray-600 leading-relaxed">
+            Вы вошли как <span className="font-mono font-semibold">{maskPhone(loggedInPhone)}</span>, но этого
+            номера нет в списке допуска. Администратор добавляет телефон в панели QHub.
+          </p>
+          <Link
+            href="/tools/subaru-coding/room"
+            className="flex w-full items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-900 transition hover:bg-gray-50"
+          >
+            Войти в комнату по коду
+          </Link>
+        </div>
       </div>
     );
   }
