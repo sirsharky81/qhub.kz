@@ -1685,6 +1685,7 @@ export async function writeSubaruMeter12ColumnCode(
   let writtenDid: string | null = null;
   let writtenHex: string | null = null;
   let lastSeedHex: string | null = null;
+  let partialA0xxMutation = false;
   const skip0250Candidates = forceA0xxPath || hasA002Snapshot;
 
   const keptGateways: { tx: number; rx: number }[] = [];
@@ -1962,7 +1963,13 @@ export async function writeSubaruMeter12ColumnCode(
             );
 
             if (okA0xx.length > 0) {
-              if (writeMode === "two-did") {
+              const allA0xxConfirmed = okA0xx.length === a0xxWritePlan.length;
+              if (!allA0xxConfirmed) {
+                partialA0xxMutation = true;
+                steps.push(
+                  `${txHex}→${rxHex}: частичная запись A0xx (${okA0xx.length}/${a0xxWritePlan.length}) — операция помечена как неуспешная, повтор по другим адресам остановлен.`,
+                );
+              } else if (writeMode === "two-did") {
                 writtenDid = `${destinationDid}/A011`;
                 writtenHex = `${destinationDid}=${destinationTargetByte} A011=${a011TargetByte}`;
                 steps.push(
@@ -1991,13 +1998,13 @@ export async function writeSubaruMeter12ColumnCode(
         steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
       }
 
-      if (writtenDid || securityAccessRequired) break;
+      if (writtenDid || securityAccessRequired || partialA0xxMutation) break;
     }
   } finally {
     await closeKeptOpenMeterGateways(elm, keptGateways);
   }
 
-  if (!writtenDid && !securityAccessRequired) {
+  if (!writtenDid && !securityAccessRequired && !partialA0xxMutation) {
     steps.push(
       "Приборка не подтвердила 2E 0250/0251. Проверьте IG ON, адрес 783 и что DID — ASCII, а не битовая маска.",
     );

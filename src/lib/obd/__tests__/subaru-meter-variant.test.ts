@@ -848,4 +848,39 @@ describe("subaru-meter-variant", () => {
     expect(blockedRes.success).toBe(false);
     expect(elmBlocked.sent).toHaveLength(0);
   });
+
+  it("does not report success when an individual A0xx write only partially applies", async () => {
+    const elm = scriptedElm({
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
+      "2E10C2FF": "6E 10 C2",
+      "2EA00202": "6E A0 02",
+      "2EA011FF": "7F 2E 31",
+      "22A002": "62 A0 02 02",
+      "2E10C200": "6E 10 C2",
+    });
+
+    const res = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTACYR8",
+      optionCode: "U45D",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "individual-dids",
+      customA0xxWrites: [
+        { did: "A002", byteHex: "02" },
+        { did: "A011", byteHex: "FF" },
+      ],
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.writtenDid).toBeNull();
+    expect(res.writtenHex).toBeNull();
+    expect(elm.sent).toContain("2EA00202");
+    expect(elm.sent).toContain("2EA011FF");
+    expect(res.steps.join(" ")).toMatch(/частичная запись A0xx \(1\/2\)/);
+  });
 });
