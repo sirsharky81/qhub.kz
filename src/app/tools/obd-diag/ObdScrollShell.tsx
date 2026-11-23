@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import ServicePageHeader from "@/components/ServicePageHeader";
 import { useIosSingleScrollPane } from "@/hooks/useIosSingleScrollPane";
 import ObdScrollContext from "./ObdScrollContext";
 import { ObdDeployGuard } from "./ObdDeployGuard";
@@ -10,9 +12,13 @@ const MAX_DEFERRED_UPDATES = 16;
 export function ObdScrollShell({
   children,
   pageBuildId,
+  title,
+  iconSrc,
 }: {
   children: ReactNode;
   pageBuildId: string;
+  title: string;
+  iconSrc: string;
 }) {
   const { scrollRef, scrollingRef, onScrollEndRef } = useIosSingleScrollPane({ scrollEndMs: 240 });
   const deferredRef = useRef<(() => void)[]>([]);
@@ -61,27 +67,45 @@ export function ObdScrollShell({
 
   return (
     <ObdScrollContext.Provider value={scrollContextValue}>
-      <div
-        ref={scrollRef}
-        className="bg-white text-gray-900"
-        style={{
-          position: "fixed",
-          inset: 0,
-          minHeight: "100dvh",
-          overflowX: "clip",
-          overflowY: "auto",
-          overscrollBehavior: "none",
-          WebkitOverflowScrolling: "touch",
-          touchAction: "pan-y",
-          transform: "translateZ(0)",
-        }}
-      >
+      <div className="fixed inset-0 flex min-h-[100dvh] flex-col bg-white text-gray-900">
+        <div className="shrink-0" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+          <ServicePageHeader
+            className="bg-white border-gray-200 dark:bg-white dark:border-gray-200"
+            trailing={
+              <Link
+                href="/"
+                className="hidden text-xs text-gray-400 transition-colors hover:text-gray-700 sm:block"
+              >
+                ← Все приложения
+              </Link>
+            }
+          >
+            <span className="shrink-0 select-none text-gray-300">/</span>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <div className="h-5 w-5 shrink-0 overflow-hidden rounded-[22%] shadow-sm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={iconSrc} alt="" className="h-full w-full object-cover" />
+              </div>
+              <span className="truncate text-xs font-medium text-gray-800 sm:text-sm">{title}</span>
+            </div>
+          </ServicePageHeader>
+        </div>
         <div
-          className="mx-auto max-w-lg min-w-0 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
-          style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
+          ref={scrollRef}
+          className="min-h-0 flex-1"
+          style={{
+            overflowX: "clip",
+            overflowY: "auto",
+            overscrollBehavior: "none",
+            WebkitOverflowScrolling: "touch",
+            touchAction: "pan-y",
+            transform: "translateZ(0)",
+          }}
         >
-          <ObdDeployGuard pageBuildId={pageBuildId} />
-          {children}
+          <div className="mx-auto min-w-0 max-w-lg px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-5">
+            <ObdDeployGuard pageBuildId={pageBuildId} />
+            {children}
+          </div>
         </div>
       </div>
     </ObdScrollContext.Provider>

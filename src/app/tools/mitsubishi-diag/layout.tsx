@@ -15,8 +15,8 @@ export const metadata: Metadata = {
     title: "Mitsubishi Diagnostics",
   },
   icons: {
-    icon: [{ url: `${ICON_BASE}/icon-192.png`, sizes: "192x192", type: "image/png" }],
-    apple: [{ url: `${ICON_BASE}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" }],
+    icon: [{ url: `${ICON_BASE}/icon-192.png?v=3`, sizes: "192x192", type: "image/png" }],
+    apple: [{ url: `${ICON_BASE}/apple-touch-icon.png?v=3`, sizes: "180x180", type: "image/png" }],
   },
 };
 
@@ -27,5 +27,13 @@ export const viewport: Viewport = {
 
 export default function MitsubishiDiagLayout({ children }: { children: ReactNode }) {
   const pageBuildId = readNextBuildId();
-  return <ObdScrollShell pageBuildId={pageBuildId}>{children}</ObdScrollShell>;
+  return (
+    <ObdScrollShell
+      pageBuildId={pageBuildId}
+      title="Mitsubishi Diagnostics"
+      iconSrc="/tools/mitsubishi-diag/icon-192.png?v=3"
+    >
+      {children}
+    </ObdScrollShell>
+  );
 }

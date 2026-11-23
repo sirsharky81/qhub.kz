@@ -11,8 +11,8 @@ export const metadata: Metadata = {
     title: "Mitsubishi ETACS",
   },
   icons: {
-    icon: [{ url: `${ICON_BASE}/icon-192.png`, sizes: "192x192", type: "image/png" }],
-    apple: [{ url: `${ICON_BASE}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" }],
+    icon: [{ url: `${ICON_BASE}/icon-192.png?v=3`, sizes: "192x192", type: "image/png" }],
+    apple: [{ url: `${ICON_BASE}/apple-touch-icon.png?v=3`, sizes: "180x180", type: "image/png" }],
   },
 };
 

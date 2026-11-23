@@ -106,6 +106,33 @@ const sharedConfig: NextConfig = {
           },
         ],
       },
+      {
+        source: "/tools/subaru-coding/manifest.json",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache, must-revalidate, max-age=0",
+          },
+        ],
+      },
+      {
+        source: "/tools/mitsubishi-diag/manifest.json",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache, must-revalidate, max-age=0",
+          },
+        ],
+      },
+      {
+        source: "/tools/etacs-coding/manifest.json",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache, must-revalidate, max-age=0",
+          },
+        ],
+      },
     ];
   },
 };

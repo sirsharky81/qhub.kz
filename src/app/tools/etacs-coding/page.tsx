@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   },
 };
 
-const ICON = "/tools/etacs-coding/icon-192.png";
+const ICON = "/tools/etacs-coding/icon-192.png?v=3";
 
 export default function EtacsCodingPage() {
   return (
