@@ -42,6 +42,17 @@ export interface MessengerOtpSendResult {
   expiresAt?: number;
   resendAfterSec?: number;
   channel?: "push" | "call";
+  callTo?: string | null;
+  error?: string;
+}
+
+export interface MessengerOtpPollResult {
+  ok: boolean;
+  pending?: boolean;
+  phone?: string;
+  callTo?: string | null;
+  otpToken?: string;
+  expiresAt?: number;
   error?: string;
 }
 
@@ -125,6 +136,15 @@ export async function sendMessengerOtp(
     body: JSON.stringify({ phone, purpose, captchaToken }),
   });
   return res.json() as Promise<MessengerOtpSendResult>;
+}
+
+export async function pollMessengerOtp(phone: string): Promise<MessengerOtpPollResult> {
+  const res = await platformFetch("/api/messenger/auth/otp/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone }),
+  });
+  return res.json() as Promise<MessengerOtpPollResult>;
 }
 
 export async function verifyMessengerOtp(

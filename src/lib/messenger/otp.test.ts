@@ -1,13 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OTP_DIGITS, REDIS_OTP_CHALLENGE_PREFIX, REDIS_OTP_VERIFIED_PREFIX } from "./constants";
+import { OTP_CHALLENGE_TTL_SEC, OTP_DIGITS, REDIS_OTP_CHALLENGE_PREFIX, REDIS_OTP_VERIFIED_PREFIX } from "./constants";
 import { redisDel } from "./redis";
 import type { MessengerPushSubscription } from "./types";
 
-const sendFlashCall = vi.hoisted(() =>
-  vi.fn(async (input: { number: string; digits?: number }) => ({
+const createIncomingCallOtp = vi.hoisted(() =>
+  vi.fn(async () => ({
     id: 42,
-    code: "7482",
-    number: input.number,
+    callTo: "+77470940670",
+    status: "pending",
+  })),
+);
+
+const getIncomingCallOtp = vi.hoisted(() =>
+  vi.fn(async () => ({
+    id: 42,
+    callTo: "+77470940670",
+    status: "pending",
   })),
 );
 
@@ -24,7 +32,8 @@ vi.mock("@/lib/autocall/client", () => ({
     status = 502;
     code = "unavailable";
   },
-  sendFlashCall,
+  createIncomingCallOtp,
+  getIncomingCallOtp,
 }));
 
 vi.mock("./push-notify", () => ({
@@ -54,6 +63,7 @@ import {
   assertPinSetupAllowed,
   consumeVerifiedOtp,
   hashOtpCode,
+  pollMessengerIncomingOtp,
   sendMessengerOtp,
   verifyMessengerOtp,
 } from "./otp";
@@ -77,21 +87,42 @@ afterEach(async () => {
   await redisDel(`${REDIS_OTP_CHALLENGE_PREFIX}${phone}`);
 });
 
-describe("messenger flash-call OTP", () => {
+async function confirmIncomingCall() {
+  getIncomingCallOtp.mockResolvedValueOnce({
+    id: 42,
+    callTo: "+77470940670",
+    status: "verified",
+  });
+  const verified = await pollMessengerIncomingOtp(phone);
+  if (!verified.token) throw new Error("expected otp token");
+  return verified;
+}
+
+describe("messenger incoming-call OTP", () => {
   it("hashes codes the same way for a phone", () => {
     expect(hashOtpCode(phone, "7482")).toBe(hashOtpCode(phone, "7482"));
     expect(hashOtpCode(phone, "7482")).not.toBe(hashOtpCode(phone, "7483"));
   });
 
-  it("stores a challenge and accepts the flash-call code", async () => {
+  it("stores a challenge and accepts the incoming call", async () => {
     const sent = await sendMessengerOtp(phone);
-    expect(sent.digits).toBe(OTP_DIGITS);
+    expect(sent.digits).toBe(0);
     expect(sent.channel).toBe("call");
-    expect(sendFlashCall).toHaveBeenCalledWith({ number: phone, digits: OTP_DIGITS });
+    expect(sent.callTo).toBe("+77470940670");
+    expect(createIncomingCallOtp).toHaveBeenCalledWith({
+      number: phone,
+      callbackUrl: expect.stringMatching(/\/api\/messenger\/auth\/otp\/hook$/),
+      ttlSec: OTP_CHALLENGE_TTL_SEC,
+    });
     expect(notifyPinRecovery).not.toHaveBeenCalled();
 
-    await expect(verifyMessengerOtp(phone, "0000")).rejects.toThrow("Неверный код");
-    const verified = await verifyMessengerOtp(phone, "7482");
+    getIncomingCallOtp.mockResolvedValueOnce({
+      id: 42,
+      callTo: "+77470940670",
+      status: "pending",
+    });
+    await expect(pollMessengerIncomingOtp(phone)).resolves.toMatchObject({ pending: true });
+    const verified = await confirmIncomingCall();
     expect(verified.token).toMatch(/^[a-f0-9]{64}$/);
 
     const consumed = await consumeVerifiedOtp(verified.token);
@@ -117,7 +148,7 @@ describe("messenger flash-call OTP", () => {
 
   it("allows PIN setup after OTP when the number has no PIN yet", async () => {
     await sendMessengerOtp(phone);
-    const verified = await verifyMessengerOtp(phone, "7482");
+    const verified = await confirmIncomingCall();
     await expect(
       assertPinSetupAllowed({ phone, otpToken: verified.token }),
     ).resolves.toEqual({ via: "otp", otpToken: verified.token });
@@ -126,7 +157,7 @@ describe("messenger flash-call OTP", () => {
 
   it("does not allow registration OTP to overwrite an existing PIN", async () => {
     await sendMessengerOtp(phone);
-    const verified = await verifyMessengerOtp(phone, "7482");
+    const verified = await confirmIncomingCall();
     vi.mocked(getPinStatus).mockResolvedValue({
       passwordSet: true,
       mustChangePin: false,
@@ -149,9 +180,9 @@ describe("messenger flash-call OTP", () => {
 
     const sent = await sendMessengerOtp(phone, "register");
     expect(sent.channel).toBe("call");
-    expect(sendFlashCall).toHaveBeenCalled();
+    expect(createIncomingCallOtp).toHaveBeenCalled();
 
-    const verified = await verifyMessengerOtp(phone, "7482");
+    const verified = await confirmIncomingCall();
     await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).resolves.toEqual({
       via: "otp",
       otpToken: verified.token,
@@ -176,7 +207,7 @@ describe("messenger PIN recovery OTP", () => {
 
     const sent = await sendMessengerOtp(phone, "pin_recovery");
     expect(sent.channel).toBe("push");
-    expect(sendFlashCall).not.toHaveBeenCalled();
+    expect(createIncomingCallOtp).not.toHaveBeenCalled();
     expect(notifyPinRecovery).toHaveBeenCalledWith(phone, expect.stringMatching(/^\d{4}$/));
     expect(pushCode).toMatch(/^\d{4}$/);
 
@@ -188,7 +219,7 @@ describe("messenger PIN recovery OTP", () => {
     await redisDel(`${REDIS_OTP_VERIFIED_PREFIX}${verified.token}`);
   });
 
-  it("falls back to flash-call recovery when there is no push subscription", async () => {
+  it("falls back to an incoming call when there is no push subscription", async () => {
     vi.mocked(getPinStatus).mockResolvedValue({
       passwordSet: true,
       mustChangePin: false,
@@ -198,10 +229,15 @@ describe("messenger PIN recovery OTP", () => {
 
     const sent = await sendMessengerOtp(phone, "pin_recovery");
     expect(sent.channel).toBe("call");
-    expect(sendFlashCall).toHaveBeenCalledWith({ number: phone, digits: OTP_DIGITS });
+    expect(sent.callTo).toBe("+77470940670");
+    expect(createIncomingCallOtp).toHaveBeenCalledWith({
+      number: phone,
+      callbackUrl: expect.stringMatching(/\/api\/messenger\/auth\/otp\/hook$/),
+      ttlSec: OTP_CHALLENGE_TTL_SEC,
+    });
     expect(notifyPinRecovery).not.toHaveBeenCalled();
 
-    const verified = await verifyMessengerOtp(phone, "7482");
+    const verified = await confirmIncomingCall();
     await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).resolves.toEqual({
       via: "otp",
       otpToken: verified.token,

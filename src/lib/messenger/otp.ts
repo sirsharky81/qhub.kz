@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { AutocallError, sendFlashCall } from "@/lib/autocall/client";
+import { AutocallError, createIncomingCallOtp, getIncomingCallOtp } from "@/lib/autocall/client";
+import { getPublicOrigin } from "@/lib/public-origin";
 import {
   MESSENGER_OTP_COOKIE,
   OTP_CHALLENGE_TTL_SEC,
@@ -23,6 +24,9 @@ export type OtpChannel = "push" | "call";
 interface OtpChallenge {
   codeHash: string;
   flashCallId: number | null;
+  callTo: string | null;
+  /** `incoming` — user dials callTo; `code` — push or legacy flash-call digits. */
+  mode: "code" | "incoming";
   attempts: number;
   createdAt: number;
   purpose: OtpPurpose;
@@ -113,6 +117,7 @@ export async function sendMessengerOtp(
   expiresAt: number;
   resendAfterSec: number;
   channel: OtpChannel;
+  callTo: string | null;
 }> {
   const pinStatus = await getPinStatus(phone);
   if (purpose === "register") {
@@ -134,8 +139,10 @@ export async function sendMessengerOtp(
   }
 
   const channel = await resolveOtpChannel(phone, purpose);
-  let code: string;
+  let code = "";
   let flashCallId: number | null = null;
+  let callTo: string | null = null;
+  let mode: OtpChallenge["mode"] = "code";
 
   if (channel === "push") {
     code = generatePushOtpCode();
@@ -144,25 +151,28 @@ export async function sendMessengerOtp(
       throw new MessengerAuthError("Не удалось отправить уведомление. Напишите администратору.", 502);
     }
   } else {
+    mode = "incoming";
     try {
-      const flash = await sendFlashCall({ number: phone, digits: OTP_DIGITS });
-      code = flash.code;
-      flashCallId = flash.id || null;
+      const incoming = await createIncomingCallOtp({
+        number: phone,
+        callbackUrl: `${getPublicOrigin()}/api/messenger/auth/otp/hook`,
+        ttlSec: OTP_CHALLENGE_TTL_SEC,
+      });
+      flashCallId = incoming.id || null;
+      callTo = incoming.callTo;
     } catch (err) {
       if (err instanceof AutocallError) {
-        const message =
-          purpose === "pin_recovery"
-            ? "Не удалось подтвердить номер звонком. Напишите администратору."
-            : err.message;
-        throw new MessengerAuthError(message, err.status >= 400 ? err.status : 502);
+        throw new MessengerAuthError(err.message, err.status >= 400 ? err.status : 502);
       }
       throw err;
     }
   }
 
   const challenge: OtpChallenge = {
-    codeHash: hashOtpCode(phone, code),
+    codeHash: code ? hashOtpCode(phone, code) : "",
     flashCallId,
+    callTo,
+    mode,
     attempts: 0,
     createdAt: Date.now(),
     purpose,
@@ -171,11 +181,63 @@ export async function sendMessengerOtp(
   await redisSet(challengeKey(phone), JSON.stringify(challenge), OTP_CHALLENGE_TTL_SEC);
 
   return {
-    digits: OTP_DIGITS,
+    digits: channel === "push" ? OTP_DIGITS : 0,
     expiresAt: Date.now() + OTP_CHALLENGE_TTL_SEC * 1000,
     resendAfterSec: OTP_RESEND_COOLDOWN_SEC,
     channel,
+    callTo,
   };
+}
+
+export async function pollMessengerIncomingOtp(phone: string): Promise<{
+  pending: boolean;
+  callTo: string | null;
+  token?: string;
+  expiresAt?: number;
+}> {
+  const challenge = await redisGetJson<OtpChallenge>(challengeKey(phone));
+  if (!challenge || challenge.mode !== "incoming" || !challenge.flashCallId) {
+    throw new MessengerAuthError("Запросите звонок ещё раз", 400);
+  }
+
+  let remote;
+  try {
+    remote = await getIncomingCallOtp(challenge.flashCallId);
+  } catch (err) {
+    if (err instanceof AutocallError) {
+      throw new MessengerAuthError(err.message, err.status >= 400 ? err.status : 502);
+    }
+    throw err;
+  }
+
+  const callTo = challenge.callTo || remote.callTo || null;
+  if (remote.status === "verified") {
+    await redisDel(challengeKey(phone));
+    const token = randomBytes(32).toString("hex");
+    const verified: VerifiedOtp = {
+      phone,
+      purpose: challenge.purpose ?? "register",
+    };
+    await redisSet(verifiedKey(token), JSON.stringify(verified), OTP_VERIFIED_TTL_SEC);
+    return {
+      pending: false,
+      callTo,
+      token,
+      expiresAt: Date.now() + OTP_VERIFIED_TTL_SEC * 1000,
+    };
+  }
+
+  if (remote.status === "expired" || remote.status === "failed") {
+    await redisDel(challengeKey(phone));
+    throw new MessengerAuthError(
+      remote.status === "expired"
+        ? "Время звонка истекло. Позвоните ещё раз."
+        : "Не удалось подтвердить звонок. Позвоните ещё раз.",
+      400,
+    );
+  }
+
+  return { pending: true, callTo };
 }
 
 export async function verifyMessengerOtp(
@@ -190,6 +252,10 @@ export async function verifyMessengerOtp(
   const challenge = await redisGetJson<OtpChallenge>(challengeKey(phone));
   if (!challenge) {
     throw new MessengerAuthError("Код устарел. Запросите новый звонок.", 400);
+  }
+
+  if (challenge.mode === "incoming") {
+    throw new MessengerAuthError("Позвоните на номер подтверждения", 400);
   }
 
   const hint = retryHint(challenge.channel);

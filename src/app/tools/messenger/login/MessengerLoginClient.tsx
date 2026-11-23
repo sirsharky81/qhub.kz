@@ -17,6 +17,7 @@ import {
   fetchAccessCheck,
   identifyMessenger,
   loginMessenger,
+  pollMessengerOtp,
   sendMessengerOtp,
   setMessengerPin,
   verifyMessengerOtp,
@@ -51,6 +52,14 @@ function getSafeNextPath(): string {
   return "/tools/messenger/home";
 }
 
+function formatDialPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("7")) {
+    return `+7 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 9)} ${digits.slice(9, 11)}`;
+  }
+  return phone;
+}
+
 function saveLastPhone(phone: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(LAST_PHONE_STORAGE, phone);
@@ -73,6 +82,8 @@ export function MessengerLoginClient() {
   const [otpToken, setOtpToken] = useState<string | undefined>(undefined);
   const [otpPurpose, setOtpPurpose] = useState<OtpPurpose>("register");
   const [otpChannel, setOtpChannel] = useState<OtpChannel>("call");
+  const [callTo, setCallTo] = useState("");
+  const [otpLive, setOtpLive] = useState(false);
   const [otpSending, setOtpSending] = useState(false);
   const [resendAfterSec, setResendAfterSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -190,8 +201,11 @@ export function MessengerLoginClient() {
         setError(res.error ?? "Не удалось отправить код");
         return false;
       }
+      const channel = res.channel ?? "call";
       setOtpPurpose(purpose);
-      setOtpChannel(res.channel ?? "call");
+      setOtpChannel(channel);
+      setCallTo(res.callTo ?? "");
+      setOtpLive(channel === "call");
       setResendAfterSec(res.resendAfterSec ?? OTP_RESEND_COOLDOWN_SEC);
       return true;
     } finally {
@@ -345,6 +359,8 @@ export function MessengerLoginClient() {
     setOtpToken(undefined);
     setOtpPurpose("register");
     setOtpChannel("call");
+    setCallTo("");
+    setOtpLive(false);
     setDisplayName("");
     setSelfRegistration(false);
     setMustChangePin(false);
@@ -357,6 +373,43 @@ export function MessengerLoginClient() {
     setLoginCaptchaReset((k) => k + 1);
     setOtpCaptchaReset((k) => k + 1);
   }
+
+  useEffect(() => {
+    if (step !== "otp" || otpChannel !== "call" || !otpLive || !phone) return;
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        const res = await pollMessengerOtp(phone);
+        if (cancelled) return;
+        if (res.callTo) setCallTo(res.callTo);
+        if (res.pending) setError(null);
+        if (res.otpToken) {
+          setError(null);
+          setOtpToken(res.otpToken);
+          if (otpPurpose === "pin_recovery") setMustChangePin(true);
+          setPin("");
+          setConfirmPin("");
+          setOtpLive(false);
+          setStep("setPin");
+          return;
+        }
+        if (!res.pending) {
+          setOtpLive(false);
+          setError(res.error ?? "Не удалось подтвердить звонок");
+        }
+      } catch {
+        if (!cancelled) setError("Нет связи с сервером. Проверяем звонок ещё раз.");
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => void tick(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [step, otpChannel, otpLive, phone, otpPurpose]);
 
   useEffect(() => {
     if (resendAfterSec <= 0) return;
@@ -490,21 +543,31 @@ export function MessengerLoginClient() {
               <p className="text-xs text-gray-500 text-center">
                 {otpChannel === "push"
                   ? `Мы отправили код в уведомление. Откройте его и введите ${OTP_DIGITS} цифры.`
-                  : `Сейчас поступит звонок. Отвечать не нужно — введите последние ${OTP_DIGITS} цифры входящего номера.`}
+                  : `Позвоните со своего номера ${maskedPhone || ""} на номер ниже. Трубку не берут: будут гудки «занято», для вас звонок бесплатный.`}
               </p>
-              {otpPurpose === "pin_recovery" && otpChannel === "call" && (
-                <p className="text-xs text-gray-500 text-center">
-                  Если звонка нет — напишите администратору.
+              {otpChannel === "call" && callTo && (
+                <a
+                  href={`tel:${callTo}`}
+                  className="block rounded-2xl bg-gray-900 text-white py-3 text-center text-base font-semibold tracking-wide"
+                >
+                  Позвонить {formatDialPhone(callTo)}
+                </a>
+              )}
+              {otpChannel === "call" && (
+                <p className="text-xs text-center text-gray-500">
+                  {otpLive ? "Ждём звонок…" : "Запросите номер ещё раз, если звонок не прошёл."}
                 </p>
               )}
+              {otpChannel === "push" && (
               <PinInput
                 value={otpCode}
                 onChange={setOtpCode}
                 length={OTP_DIGITS}
                 masked={false}
-                label={otpChannel === "push" ? "Код из уведомления" : "Код из звонка"}
+                label="Код из уведомления"
                 autoFocus
               />
+              )}
               {otpPurpose === "pin_recovery" && (
                 <TurnstileWidget
                   siteKey={turnstile.siteKey}
@@ -516,6 +579,7 @@ export function MessengerLoginClient() {
                   onError={() => setOtpCaptchaToken(null)}
                 />
               )}
+              {otpChannel === "push" && (
               <button
                 type="button"
                 disabled={loading || otpSending || otpCode.length < OTP_DIGITS}
@@ -524,6 +588,7 @@ export function MessengerLoginClient() {
               >
                 {loading ? "Проверка…" : "Подтвердить"}
               </button>
+              )}
               <button
                 type="button"
                 disabled={
@@ -543,14 +608,14 @@ export function MessengerLoginClient() {
                 {otpSending
                   ? otpChannel === "push"
                     ? "Отправляем…"
-                    : "Звоним…"
+                    : "Готовим номер…"
                   : resendAfterSec > 0
                     ? otpChannel === "push"
                       ? `Повторить отправку через ${resendAfterSec} с`
-                      : `Повторить звонок через ${resendAfterSec} с`
+                      : `Новый номер через ${resendAfterSec} с`
                     : otpChannel === "push"
                       ? "Отправить ещё раз"
-                      : "Позвонить ещё раз"}
+                      : "Получить новый номер"}
               </button>
             </>
           )}

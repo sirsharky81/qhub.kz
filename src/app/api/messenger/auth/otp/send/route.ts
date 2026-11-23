@@ -97,6 +97,7 @@ export async function POST(request: Request) {
       expiresAt: result.expiresAt,
       resendAfterSec: result.resendAfterSec,
       channel: result.channel,
+      callTo: result.callTo,
     });
   } catch (err) {
     if (err instanceof MessengerAuthError) {
