@@ -64,6 +64,9 @@ import { formatObdEnvironmentLines, probeObdEnvironment } from "@/lib/obd/obd-en
 import { obdTransportHint, useObdTransportKind } from "@/lib/obd/use-obd-transport";
 import { SubaruImmoSection } from "./SubaruImmoSection";
 import { SubaruRemoteDesk } from "./SubaruRemoteDesk";
+import { SubaruSsmPanel } from "@/app/tools/obd-diag/SubaruSsmPanel";
+import { pushAssistStatusApi, type AssistSession } from "@/lib/subaru-assist/client";
+import type { AssistService, AssistStatusCode } from "@/lib/subaru-assist/status";
 
 type MainTab = "meter" | "immo" | "remote";
 
@@ -110,6 +113,17 @@ export default function SubaruCodingClient() {
 
   const [session] = useState(() => new ObdBleSession());
   const sessionRef = useRef(session);
+  const [remoteAttached, setRemoteAttached] = useState(false);
+  const [remoteService, setRemoteService] = useState<AssistService | null>(null);
+  const remoteAssistRef = useRef<AssistSession | null>(null);
+  const remoteAttachedRef = useRef(false);
+  const noteRemoteRef = useRef<(code: AssistStatusCode) => void>(() => undefined);
+  remoteAttachedRef.current = remoteAttached;
+  noteRemoteRef.current = (code) => {
+    const current = remoteAssistRef.current;
+    if (!current || !remoteAttachedRef.current) return;
+    void pushAssistStatusApi(current, code).catch(() => undefined);
+  };
   const [tab, setTab] = useState<MainTab>(() =>
     searchParams.get("tab") === "immo" ? "immo" : "meter",
   );
@@ -608,13 +622,14 @@ export default function SubaruCodingClient() {
     ],
   );
 
-  const ready = phase !== "idle";
+  const ready = remoteAttached ? tab === "remote" : phase !== "idle";
 
   const handleReadMeter12Column = useCallback(async () => {
     if (!ready || busy) return;
     setBusy(true);
     setBusyActionLabel("Чтение приборки (783)…");
     setError(null);
+    noteRemoteRef.current("meter_read");
     try {
       const result = await sessionRef.current.readSubaruMeter12ColumnCode("6");
       setMeter12Read(result);
@@ -635,8 +650,10 @@ export default function SubaruCodingClient() {
       } catch {
         /* ignore */
       }
+      noteRemoteRef.current("meter_ok");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка чтения приборки");
+      noteRemoteRef.current("meter_fail");
     } finally {
       setBusy(false);
       setBusyActionLabel(null);
@@ -649,6 +666,7 @@ export default function SubaruCodingClient() {
     setBusy(true);
     setBusyActionLabel("Чтение EyeSight (787)…");
     setError(null);
+    noteRemoteRef.current("eyesight_read");
     try {
       const hintApp = meter12Read?.match.actualAppliedModel || appliedModelInput;
       const result = await sessionRef.current.readSubaruEyesightVariantCode(
@@ -702,8 +720,10 @@ export default function SubaruCodingClient() {
       } catch {
         /* ignore */
       }
+      noteRemoteRef.current("eyesight_ok");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка чтения EyeSight");
+      noteRemoteRef.current("eyesight_fail");
     } finally {
       setBusy(false);
       setBusyActionLabel(null);
@@ -946,6 +966,7 @@ export default function SubaruCodingClient() {
     setBusy(true);
     setBusyActionLabel(`Запись EyeSight (${pending.appliedModel}+${pending.optionCode})…`);
     setError(null);
+    noteRemoteRef.current("write_start");
     try {
       const result = await sessionRef.current.writeSubaruEyesightVariantCode(
         pending.appliedModel,
@@ -970,7 +991,9 @@ export default function SubaruCodingClient() {
             ? "EyeSight: нужен SecurityAccess (27 03/04) — укажите ключ или используйте SSM4 с авторизацией."
             : result.steps.at(-1) ?? "Запись EyeSight не подтверждена.",
         );
+        noteRemoteRef.current("write_fail");
       } else {
+        noteRemoteRef.current("write_ok");
         const cmp = await sessionRef.current.readSubaruMeterEyesightVariantCompare(
           "6",
           meter12SecurityKeyInput.trim() || undefined,
@@ -981,6 +1004,7 @@ export default function SubaruCodingClient() {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка записи EyeSight");
+      noteRemoteRef.current("write_fail");
     } finally {
       setBusy(false);
       setBusyActionLabel(null);
@@ -1005,6 +1029,7 @@ export default function SubaruCodingClient() {
         : `Запись приборки (${pending.appliedModel}+${pending.optionCode})…`,
     );
     setError(null);
+    noteRemoteRef.current("write_start");
     try {
       const result = await sessionRef.current.writeSubaruMeter12ColumnCode(
         pending.appliedModel,
@@ -1032,9 +1057,13 @@ export default function SubaruCodingClient() {
       });
       if (!result.success) {
         setError(result.steps.at(-1) ?? "Запись не подтверждена приборкой.");
+        noteRemoteRef.current("write_fail");
+      } else {
+        noteRemoteRef.current("write_ok");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка записи приборки");
+      noteRemoteRef.current("write_fail");
     } finally {
       setBusy(false);
       setBusyActionLabel(null);
@@ -1151,7 +1180,13 @@ export default function SubaruCodingClient() {
       </header>
 
       {/* Connection Bar */}
-      {tab !== "remote" && (ready ? (
+      {tab !== "remote" && remoteAttached && (
+        <section className="rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs text-blue-950">
+          Сейчас команды идут в vLinker клиента. Работайте на вкладке «Удалённое подключение».
+        </section>
+      )}
+
+      {tab !== "remote" && !remoteAttached && (ready ? (
         <section className="flex items-center justify-between gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-xs">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 font-semibold text-emerald-800">
@@ -1208,11 +1243,11 @@ export default function SubaruCodingClient() {
       )}
 
       {/* 2 Clean Main Tabs: 1) Приборка (°F → °C)  2) Иммобилайзер Subaru */}
-      <div className="flex rounded-xl border border-gray-200 bg-gray-50 p-1">
+      <div className="flex flex-wrap rounded-xl border border-gray-200 bg-gray-50 p-1">
         <button
           type="button"
           onClick={() => setTab("meter")}
-          className={`flex-1 rounded-lg px-2 py-2.5 text-xs font-bold transition sm:text-sm ${
+          className={`min-w-0 flex-1 rounded-lg px-2 py-2.5 text-center text-xs font-bold leading-tight transition sm:text-sm ${
             tab === "meter" ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
           }`}
         >
@@ -1221,7 +1256,7 @@ export default function SubaruCodingClient() {
         <button
           type="button"
           onClick={() => setTab("immo")}
-          className={`flex-1 rounded-lg px-2 py-2.5 text-xs font-bold transition sm:text-sm ${
+          className={`min-w-0 flex-1 rounded-lg px-2 py-2.5 text-center text-xs font-bold leading-tight transition sm:text-sm ${
             tab === "immo" ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
           }`}
         >
@@ -1230,7 +1265,7 @@ export default function SubaruCodingClient() {
         <button
           type="button"
           onClick={() => setTab("remote")}
-          className={`flex-1 rounded-lg px-2 py-2.5 text-xs font-bold transition sm:text-sm ${
+          className={`min-w-0 flex-1 rounded-lg px-2 py-2.5 text-center text-xs font-bold leading-tight transition sm:text-sm ${
             tab === "remote" ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
           }`}
         >
@@ -1238,9 +1273,18 @@ export default function SubaruCodingClient() {
         </button>
       </div>
 
-      {tab === "remote" ? (
-        <SubaruRemoteDesk />
-      ) : tab === "meter" ? (
+      <div className={tab === "remote" ? "block" : "hidden"}>
+        <SubaruRemoteDesk
+          obd={session}
+          onAssistSession={(next) => {
+            remoteAssistRef.current = next;
+          }}
+          onAttached={setRemoteAttached}
+          onService={setRemoteService}
+        />
+      </div>
+
+      {(tab === "meter" || (tab === "remote" && remoteService === "celsius")) && (
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -3089,13 +3133,66 @@ export default function SubaruCodingClient() {
             </div>
           </div>
         </div>
-      ) : (
+      )}
+
+      {(tab === "immo" || (tab === "remote" && (remoteService === "key" || remoteService === "res"))) && (
         <SubaruImmoSection
+          key={tab === "remote" ? remoteService ?? "immo" : "local-immo"}
           session={session}
           ready={ready}
           busy={busy}
           setBusy={setBusy}
           setError={setError}
+          initialSubTab={remoteService === "res" ? "register-res" : "register-key"}
+          onProgress={
+            tab === "remote"
+              ? (event) => {
+                  if (event === "present-key") {
+                    noteRemoteRef.current("key_present");
+                    return;
+                  }
+                  const keyMode = remoteService !== "res";
+                  const code =
+                    event === "start"
+                      ? keyMode
+                        ? "key_step"
+                        : "res_step"
+                      : event === "ok"
+                        ? keyMode
+                          ? "key_ok"
+                          : "res_ok"
+                        : keyMode
+                          ? "key_fail"
+                          : "res_fail";
+                  noteRemoteRef.current(code);
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {tab === "remote" && remoteService === "diag" && (
+        <SubaruSsmPanel
+          session={session}
+          ready={ready}
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          onActivity={(event) => {
+            const code =
+              event === "scan"
+                ? "dtc_scan"
+                : event === "scan-ok"
+                  ? "dtc_ok"
+                  : event === "scan-fail"
+                    ? "dtc_fail"
+                    : event === "clear"
+                      ? "clear_start"
+                      : event === "clear-ok"
+                        ? "clear_ok"
+                        : "clear_fail";
+            noteRemoteRef.current(code);
+          }}
         />
       )}
 

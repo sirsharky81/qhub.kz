@@ -229,6 +229,7 @@ export class RoomCoreEngine {
     const room = await this.getRoom(member.roomId);
     if (!room) return;
 
+    room.memberIds = room.memberIds.filter((id) => id !== memberId);
     const activeMembers: RoomCoreMember[] = [];
     for (const id of room.memberIds) {
       const m = await this.getMember(id);
@@ -242,12 +243,34 @@ export class RoomCoreEngine {
         inviteKey(this.config.redisPrefix, room.inviteTokenHash),
         codeKey(this.config.redisPrefix, room.roomCode),
       );
-      for (const id of room.memberIds) {
+      for (const id of [...room.memberIds, memberId]) {
         await this.redis.del(memberKey(this.config.redisPrefix, id));
       }
+    } else {
+      await this.saveRoom(room);
     }
 
     await this.publishRoomEvent(room.roomId, { type: "member_left", memberId });
+  }
+
+  /** Owner closes the room for everyone. The code stops working immediately. */
+  async closeRoom(memberId: string): Promise<boolean> {
+    const member = await this.getMember(memberId);
+    if (!member || member.left) return false;
+    const room = await this.getRoom(member.roomId);
+    if (!room || room.closed) return false;
+    if (room.ownerMemberId !== member.memberId) return false;
+
+    await this.publishRoomEvent(room.roomId, { type: "room_closed", memberId });
+    await this.redis.del(
+      roomKey(this.config.redisPrefix, room.roomId),
+      inviteKey(this.config.redisPrefix, room.inviteTokenHash),
+      codeKey(this.config.redisPrefix, room.roomCode),
+    );
+    for (const id of room.memberIds) {
+      await this.redis.del(memberKey(this.config.redisPrefix, id));
+    }
+    return true;
   }
 
   async buildRoomPublic(room: RoomCoreRoom): Promise<RoomCoreRoomPublic> {

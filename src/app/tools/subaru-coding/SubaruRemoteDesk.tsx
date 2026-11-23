@@ -1,28 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ObdBleSession } from "@/lib/obd/obd-session";
-import { formatBleFailure } from "@/lib/obd/ble-error";
-import { resolveCanadianOptionCodesForSubaru } from "@/lib/obd/subaru-ssm4-catalog";
-import type { SubaruEyesightWriteMode } from "@/lib/obd/subaru-eyesight-variant";
-import type { SubaruMeterWriteMode } from "@/lib/obd/subaru-meter-variant";
+import type { ObdBleSession } from "@/lib/obd/obd-session";
 import {
   createAssistRoom,
-  markAssistRegionReady,
+  leaveAssistRoom,
   pollAssistRoom,
   pushAssistStatusApi,
+  setAssistService,
   type AssistSession,
 } from "@/lib/subaru-assist/client";
 import { AssistElmChannel } from "@/lib/subaru-assist/elm-channel";
 import { AssistPeer, type AssistLinkState } from "@/lib/subaru-assist/peer";
+import { clearAssistRoom, loadAssistRoom, saveAssistRoom } from "@/lib/subaru-assist/persist";
 import { RemoteElm327 } from "@/lib/subaru-assist/remote-elm";
+import { ASSIST_ROOM_TTL_MS, assistRemainingMs } from "@/lib/subaru-assist/room-clock";
 import {
   assistServiceLabel,
   type AssistService,
   type AssistStatusCode,
 } from "@/lib/subaru-assist/status";
 import type { AssistRoomState } from "@/lib/subaru-assist/store";
-import { SubaruImmoSection } from "./SubaruImmoSection";
+import { AssistRoomClock } from "./AssistRoomClock";
+
+const SERVICES: AssistService[] = ["celsius", "key", "res", "diag"];
 
 async function copyCode(code: string): Promise<boolean> {
   try {
@@ -33,32 +34,38 @@ async function copyCode(code: string): Promise<boolean> {
   }
 }
 
-export function SubaruRemoteDesk() {
+interface Props {
+  obd: ObdBleSession;
+  onAssistSession: (session: AssistSession | null) => void;
+  onAttached: (attached: boolean) => void;
+  onService: (service: AssistService | null) => void;
+}
+
+export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }: Props) {
   const [session, setSession] = useState<AssistSession | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [roomState, setRoomState] = useState<AssistRoomState | null>(null);
   const [link, setLink] = useState<AssistLinkState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [meterLine, setMeterLine] = useState<string | null>(null);
-  const [eyesightLine, setEyesightLine] = useState<string | null>(null);
-  const [targetLine, setTargetLine] = useState<string | null>(null);
-  const [clearLine, setClearLine] = useState<string | null>(null);
-  const [meterMode, setMeterMode] = useState<SubaruMeterWriteMode>("two-did");
-  const [eyesightMode, setEyesightMode] = useState<SubaruEyesightWriteMode>("full-yyw");
   const [clientHere, setClientHere] = useState(false);
-  const [hasTarget, setHasTarget] = useState(false);
-  const [obdReady, setObdReady] = useState(false);
-  const [regionReady, setRegionReady] = useState(false);
-  const meterWrittenRef = useRef(false);
-  const eyesightWrittenRef = useRef(false);
-  const appliedRef = useRef("");
-  const optionRef = useRef("");
+  const [restored, setRestored] = useState(false);
   const peerRef = useRef<AssistPeer | null>(null);
   const channelRef = useRef<AssistElmChannel | null>(null);
-  const obdRef = useRef<ObdBleSession | null>(null);
   const sessionRef = useRef<AssistSession | null>(null);
+  const obdRef = useRef(obd);
+  const attachedRef = useRef(false);
+  const sawDropRef = useRef(false);
+  const linkRef = useRef<AssistLinkState>("idle");
+  const adapterOnlineRef = useRef(false);
+  const onAssistSessionRef = useRef(onAssistSession);
+  const onAttachedRef = useRef(onAttached);
+  const onServiceRef = useRef(onService);
+  obdRef.current = obd;
   sessionRef.current = session;
+  onAssistSessionRef.current = onAssistSession;
+  onAttachedRef.current = onAttached;
+  onServiceRef.current = onService;
 
   const emit = useCallback(async (code: AssistStatusCode) => {
     channelRef.current?.publishStatus(code);
@@ -71,24 +78,105 @@ export function SubaruRemoteDesk() {
     }
   }, []);
 
-  const ensureObd = useCallback(() => {
-    const channel = channelRef.current;
-    if (!channel) throw new Error("Канал к клиенту ещё не открыт");
-    if (!obdRef.current) {
-      const elm = new RemoteElm327((command, timeoutMs) => channel.request(command, timeoutMs));
-      const obd = new ObdBleSession();
-      obd.attachRemoteElm(elm);
-      obdRef.current = obd;
-    }
-    return obdRef.current;
+  const detachElm = useCallback(() => {
+    if (!attachedRef.current) return;
+    obdRef.current.detachRemoteElm();
+    attachedRef.current = false;
+    onAttachedRef.current(false);
   }, []);
 
+  const attachElm = useCallback(() => {
+    const channel = channelRef.current;
+    if (!channel || attachedRef.current) return;
+    const elm = new RemoteElm327((command, timeoutMs) => channel.request(command, timeoutMs));
+    obdRef.current.attachRemoteElm(elm);
+    attachedRef.current = true;
+    onAttachedRef.current(true);
+  }, []);
+
+  const dropRoom = useCallback(
+    (message: string | null) => {
+      peerRef.current?.close();
+      peerRef.current = null;
+      channelRef.current = null;
+      detachElm();
+      clearAssistRoom("master");
+      onAssistSessionRef.current(null);
+      onServiceRef.current(null);
+      setSession(null);
+      setExpiresAt(null);
+      setRoomState(null);
+      setClientHere(false);
+      setLink("idle");
+      setError(message);
+    },
+    [detachElm],
+  );
+
+  const bindSession = useCallback(
+    async (next: AssistSession, expiry: number, fromStorage = false) => {
+      peerRef.current?.close();
+      detachElm();
+      sawDropRef.current = false;
+      setSession(next);
+      setExpiresAt(expiry);
+      setError(null);
+      setRestored(fromStorage);
+      saveAssistRoom("master", { session: next, expiresAt: expiry });
+      onAssistSessionRef.current(next);
+      const peer = new AssistPeer(next, (state) => {
+        setLink(state);
+        linkRef.current = state;
+        if (state === "connected") {
+          attachElm();
+          onAttachedRef.current(adapterOnlineRef.current);
+          if (sawDropRef.current) {
+            sawDropRef.current = false;
+            void emit("link_back");
+          }
+        }
+        if (state === "reconnecting") {
+          onAttachedRef.current(false);
+          channelRef.current?.failAll("Канал между телефонами переподключается");
+          if (!sawDropRef.current) {
+            sawDropRef.current = true;
+            void emit("link_lost");
+          }
+        }
+      });
+      channelRef.current = new AssistElmChannel(peer, () => undefined);
+      peerRef.current = peer;
+      await peer.start();
+    },
+    [attachElm, detachElm, emit],
+  );
+
   useEffect(() => {
+    const stored = loadAssistRoom("master");
+    if (stored) {
+      setRestored(true);
+      void bindSession(stored.session, stored.expiresAt, true).catch((err: unknown) => {
+        dropRoom(err instanceof Error ? err.message : "Не удалось вернуться в комнату");
+      });
+    }
     return () => {
       peerRef.current?.close();
-      obdRef.current?.detachRemoteElm();
+      detachElm();
     };
-  }, []);
+  }, [bindSession, detachElm, dropRoom]);
+
+  useEffect(() => {
+    if (!session) return;
+    const onShow = () => {
+      if (document.visibilityState === "visible") peerRef.current?.ensureConnected();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onShow);
+      window.removeEventListener("pageshow", onShow);
+    };
+  }, [session]);
 
   useEffect(() => {
     if (!session) return;
@@ -96,12 +184,25 @@ export function SubaruRemoteDesk() {
     const tick = async () => {
       try {
         const snapshot = await pollAssistRoom(session, 0);
-        if (!stop) {
-          setRoomState(snapshot.state);
-          setClientHere(snapshot.members.some((member) => member.role === "client"));
+        if (stop) return;
+        setRoomState(snapshot.state);
+        setClientHere(snapshot.members.some((member) => member.role === "client"));
+        adapterOnlineRef.current = snapshot.state.adapter === "online";
+        if (linkRef.current === "connected") attachElm();
+        onAttachedRef.current(linkRef.current === "connected" && adapterOnlineRef.current);
+        onServiceRef.current(snapshot.state.service);
+        if (snapshot.expiresAt) {
+          setExpiresAt(snapshot.expiresAt);
+          saveAssistRoom("master", { session, expiresAt: snapshot.expiresAt });
+          if (assistRemainingMs(snapshot.expiresAt) <= 0 || snapshot.closed) {
+            dropRoom("Час комнаты истёк. Создайте новую и отправьте код ещё раз.");
+          }
         }
       } catch (err) {
-        if (!stop) setError(err instanceof Error ? err.message : "Комната недоступна");
+        if (stop) return;
+        const message = err instanceof Error ? err.message : "Комната недоступна";
+        if (/истекл|закрыт|не найден/i.test(message)) dropRoom(message);
+        else setError(message);
       }
     };
     void tick();
@@ -110,191 +211,68 @@ export function SubaruRemoteDesk() {
       stop = true;
       clearInterval(timer);
     };
-  }, [session]);
+  }, [dropRoom, session]);
 
   const createRoom = async () => {
     setError(null);
     try {
       const created = await createAssistRoom();
-      setSession(created);
-      const peer = new AssistPeer(created, (state) => {
-        setLink(state);
-        if (state === "failed") {
-          channelRef.current?.failAll("Связь с vLinker прервана");
-          void emit("link_lost");
-        }
-      });
-      channelRef.current = new AssistElmChannel(peer, () => undefined);
-      peerRef.current = peer;
-      await peer.start();
+      await bindSession(created, Date.now() + ASSIST_ROOM_TTL_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать комнату");
     }
   };
 
+  const chooseService = async (service: AssistService) => {
+    if (!session) return;
+    setError(null);
+    try {
+      const state = await setAssistService(session, service);
+      setRoomState(state);
+      onService(service);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось выбрать сервис");
+    }
+  };
+
+  const deleteRoom = async () => {
+    if (!session) return;
+    if (!window.confirm("Удалить комнату? Клиент будет отключён, этот код больше не сработает.")) return;
+    setError(null);
+    try {
+      await leaveAssistRoom(session);
+      dropRoom("Комната удалена.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось удалить комнату");
+    }
+  };
+
+  const shareCode = async () => {
+    if (!session) return;
+    const text = `Код комнаты Subaru: ${session.roomCode}`;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ text });
+        return;
+      } catch {
+        /* fall through to copy */
+      }
+    }
+    setCopied(await copyCode(session.roomCode));
+  };
+
   const service = roomState?.service ?? null;
-  const adapterOnline = roomState?.adapter === "online" && link === "connected";
-
-  useEffect(() => {
-    if (!adapterOnline || obdReady) return;
-    try {
-      ensureObd();
-      setObdReady(true);
-    } catch {
-      /* channel appears with the peer */
-    }
-  }, [adapterOnline, ensureObd, obdReady]);
-
-  const readMeter = async () => {
-    if (!adapterOnline || busy) return;
-    setBusy(true);
-    setError(null);
-    await emit("meter_read");
-    try {
-      const result = await ensureObd().readSubaruMeter12ColumnCode("6");
-      const applied = result.match.actualAppliedModel;
-      const option = result.match.actualOptionCode;
-      appliedRef.current = applied;
-      optionRef.current = option;
-      setHasTarget(true);
-      const canada = resolveCanadianOptionCodesForSubaru(applied, option);
-      setMeterLine(`${applied}+${option} · ${result.match.actualRegion}`);
-      setTargetLine(`Цель °C: ${applied}+${canada.primaryC0}`);
-      await emit("meter_ok");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка чтения приборки");
-      await emit("meter_fail");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const readEyesight = async () => {
-    if (!adapterOnline || busy) return;
-    setBusy(true);
-    setError(null);
-    await emit("eyesight_read");
-    try {
-      const result = await ensureObd().readSubaruEyesightVariantCode("6", appliedRef.current || undefined);
-      const hint = result.match.destinationHint ?? "регион не определён";
-      const code = result.match.optionCode ?? "—";
-      setEyesightLine(`EyeSight ${code} · ${hint}`);
-      await emit("eyesight_ok");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка чтения EyeSight");
-      await emit("eyesight_fail");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const writeMeter = async () => {
-    if (!adapterOnline || busy || !appliedRef.current) return;
-    const canada = resolveCanadianOptionCodesForSubaru(appliedRef.current, optionRef.current);
-    setBusy(true);
-    setError(null);
-    await emit("write_start");
-    try {
-      const result = await ensureObd().writeSubaruMeter12ColumnCode(
-        appliedRef.current,
-        canada.primaryC0,
-        "6",
-        undefined,
-        { writeMode: meterMode },
-      );
-      if (!result.success) {
-        setError(result.steps.at(-1) ?? "Запись приборки не подтверждена");
-        await emit("write_fail");
-      } else {
-        meterWrittenRef.current = true;
-        if (eyesightWrittenRef.current) {
-          setRegionReady(true);
-          const current = sessionRef.current;
-          if (current) await markAssistRegionReady(current);
-        }
-        setMeterLine(`${appliedRef.current}+${canada.primaryC0}`);
-        await emit("write_ok");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка записи приборки");
-      await emit("write_fail");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const writeEyesight = async () => {
-    if (!adapterOnline || busy || !appliedRef.current) return;
-    const canada = resolveCanadianOptionCodesForSubaru(appliedRef.current, optionRef.current);
-    setBusy(true);
-    setError(null);
-    await emit("write_start");
-    try {
-      const result = await ensureObd().writeSubaruEyesightVariantCode(
-        appliedRef.current,
-        canada.primaryC0,
-        "6",
-        undefined,
-        { writeMode: eyesightMode },
-      );
-      if (!result.success) {
-        setError(result.steps.at(-1) ?? "Запись EyeSight не подтверждена");
-        await emit("write_fail");
-      } else {
-        eyesightWrittenRef.current = true;
-        if (meterWrittenRef.current) {
-          setRegionReady(true);
-          const current = sessionRef.current;
-          if (current) await markAssistRegionReady(current);
-        }
-        await emit("write_ok");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка записи EyeSight");
-      await emit("write_fail");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const clearHistory = async () => {
-    if (!adapterOnline || busy || !regionReady) return;
-    setBusy(true);
-    setError(null);
-    await emit("clear_start");
-    try {
-      const result = await ensureObd().clearSubaruRegionHistory("6");
-      setClearLine(
-        `Было: приборка ${result.meterBefore.join(", ") || "—"}, EyeSight ${result.eyesightBefore.join(", ") || "—"}. Осталось: приборка ${result.meterAfter.join(", ") || "—"}, EyeSight ${result.eyesightAfter.join(", ") || "—"}.`,
-      );
-      await emit("clear_ok");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сбросить ошибки");
-      await emit("clear_fail");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onImmoProgress = (event: "start" | "ok" | "fail" | "present-key") => {
-    if (!service || service === "celsius") return;
-    if (event === "present-key") {
-      void emit("key_present");
-      return;
-    }
-    const start = service === "key" ? "key_step" : "res_step";
-    const ok = service === "key" ? "key_ok" : "res_ok";
-    const fail = service === "key" ? "key_fail" : "res_fail";
-    void emit(event === "start" ? start : event === "ok" ? ok : fail);
-  };
+  const linkLabel =
+    link === "connected" ? "открыт" : link === "reconnecting" ? "переподключение" : link === "connecting" ? "поднимается" : "нет";
 
   return (
     <div className="space-y-3">
       <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
         <div>
           <h2 className="text-sm font-bold text-gray-900">Удалённое подключение</h2>
-          <p className="text-xs text-gray-500">
-            Создайте комнату и отправьте код клиенту. У него vLinker и зажигание, у вас — то же меню записи, без показа байтов клиенту.
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Комната живёт час и сохраняется на этом телефоне. Можно свернуть приложение, отправить код и вернуться — клиент останется в той же комнате.
+            Переподключение канала между телефонами не глушит зажигание и не отключает vLinker.
           </p>
         </div>
         {!session ? (
@@ -307,133 +285,104 @@ export function SubaruRemoteDesk() {
           </button>
         ) : (
           <div className="space-y-2">
+            {restored && (
+              <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                Вернулись в открытую комнату.
+              </p>
+            )}
             <div className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
-              <div>
+              <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wide text-gray-500">Код комнаты</div>
-                <div className="font-mono text-2xl font-bold tracking-[0.2em] text-gray-900">{session.roomCode}</div>
+                <div className="font-mono text-2xl font-bold tracking-[0.18em] text-gray-900">{session.roomCode}</div>
               </div>
-              <button
-                type="button"
-                onClick={() => void copyCode(session.roomCode).then((ok) => setCopied(ok))}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold"
-              >
-                {copied ? "Скопировано" : "Скопировать"}
-              </button>
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void shareCode()}
+                  className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white"
+                >
+                  Отправить
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyCode(session.roomCode).then((ok) => setCopied(ok))}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold"
+                >
+                  {copied ? "Скопировано" : "Копировать"}
+                </button>
+              </div>
             </div>
-            <Presence service={service} clientHere={clientHere} state={roomState} link={link} />
+            <ul className="grid grid-cols-2 gap-2 text-xs">
+              <li className="rounded-lg border border-gray-200 px-2 py-1.5">
+                <AssistRoomClock expiresAt={expiresAt} />
+              </li>
+              {[
+                ["Клиент", clientHere ? "в комнате" : "ожидание"],
+                ["Сервис", service ? assistServiceLabel(service) : "выберите ниже"],
+                ["Зажигание", roomState?.ignition ? "включено" : "нет"],
+                ["vLinker", roomState?.adapter === "online" ? "подключён" : "нет"],
+                ["Канал", linkLabel],
+              ].map(([label, value]) => (
+                <li key={label} className="rounded-lg border border-gray-200 px-2 py-1.5">
+                  <div className="text-gray-500">{label}</div>
+                  <div className="font-semibold text-gray-900">{value}</div>
+                </li>
+              ))}
+            </ul>
+            {link === "reconnecting" && (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                Канал между телефонами восстанавливается. Запись в машину на это время не обрывается: vLinker клиента остаётся подключённым, повторите действие, если команда не успела завершиться.
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => peerRef.current?.ensureConnected()}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-800"
+            >
+              Переподключить канал
+            </button>
+            <button
+              type="button"
+              onClick={() => void deleteRoom()}
+              className="w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700"
+            >
+              Удалить комнату
+            </button>
+          </div>
+        )}
+        {session && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-gray-800">Сервис выбираете вы. Клиент только включает зажигание и vLinker.</p>
+            <div className="grid grid-cols-2 gap-2">
+              {SERVICES.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => void chooseService(item)}
+                  className={`rounded-xl border px-3 py-2.5 text-left text-xs font-semibold ${
+                    service === item ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-900"
+                  }`}
+                >
+                  {assistServiceLabel(item)}
+                </button>
+              ))}
+            </div>
+            {service === "celsius" && (
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                Ниже то же меню приборки и EyeSight, что на вкладке °F → °C: считанные DID видны, писать можно выбранные DID или весь профиль. EyeSight — все DID или только регион. Чтение идёт тем же списком, но каждый запрос проходит через телефон клиента, поэтому полный проход длиннее, чем с вашим vLinker.
+              </p>
+            )}
+            {service === "diag" && (
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                Ниже тот же опрос блоков, что в Subaru Diagnostics. Клиент видит только статус, без кодов ошибок.
+              </p>
+            )}
           </div>
         )}
         {error && (
           <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-medium text-red-800">{error}</div>
         )}
       </section>
-
-      {session && service === "celsius" && (
-        <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-          <h3 className="text-sm font-bold text-gray-900">Перевод с °F на °C</h3>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <label className="space-y-1">
-              <span className="text-gray-500">Запись приборки</span>
-              <select
-                value={meterMode}
-                onChange={(e) => setMeterMode(e.target.value as SubaruMeterWriteMode)}
-                className="w-full rounded-lg border border-gray-200 px-2 py-2"
-              >
-                <option value="two-did">two-did</option>
-                <option value="full-cgdw">full-cgdw</option>
-              </select>
-            </label>
-            <label className="space-y-1">
-              <span className="text-gray-500">Запись EyeSight</span>
-              <select
-                value={eyesightMode}
-                onChange={(e) => setEyesightMode(e.target.value as SubaruEyesightWriteMode)}
-                className="w-full rounded-lg border border-gray-200 px-2 py-2"
-              >
-                <option value="full-yyw">full-yyw</option>
-                <option value="region-only">region-only</option>
-              </select>
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" disabled={!adapterOnline || busy} onClick={() => void readMeter()} className="rounded-xl bg-blue-800 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
-              Считать приборку
-            </button>
-            <button type="button" disabled={!adapterOnline || busy} onClick={() => void readEyesight()} className="rounded-xl bg-violet-700 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
-              Считать EyeSight
-            </button>
-            <button type="button" disabled={!adapterOnline || busy || !hasTarget} onClick={() => void writeMeter()} className="rounded-xl bg-gray-900 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
-              Перезаписать приборку
-            </button>
-            <button type="button" disabled={!adapterOnline || busy || !hasTarget} onClick={() => void writeEyesight()} className="rounded-xl bg-gray-900 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
-              Перезаписать EyeSight
-            </button>
-          </div>
-          {meterLine && <p className="text-xs text-gray-700">{meterLine}</p>}
-          {eyesightLine && <p className="text-xs text-gray-700">{eyesightLine}</p>}
-          {targetLine && <p className="text-xs font-medium text-gray-900">{targetLine}</p>}
-          <button
-            type="button"
-            disabled={!adapterOnline || busy || !regionReady}
-            onClick={() => void clearHistory()}
-            className="w-full rounded-xl border border-amber-400 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-950 disabled:opacity-40"
-          >
-            Сбросить ошибки history
-          </button>
-          {clearLine && <p className="text-xs text-gray-700">{clearLine}</p>}
-        </section>
-      )}
-
-      {session && (service === "key" || service === "res") && obdReady && obdRef.current && (
-        <section className="space-y-2">
-          <button
-            type="button"
-            onClick={() => void emit("key_present")}
-            className="w-full rounded-xl border border-amber-400 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-950"
-          >
-            Попросить поднести ключ к START
-          </button>
-          <SubaruImmoSection
-            session={obdRef.current}
-            ready
-            busy={busy}
-            setBusy={setBusy}
-            setError={setError}
-            initialSubTab={service === "res" ? "register-res" : "register-key"}
-            onProgress={onImmoProgress}
-          />
-        </section>
-      )}
     </div>
-  );
-}
-
-function Presence({
-  service,
-  clientHere,
-  state,
-  link,
-}: {
-  service: AssistService | null;
-  clientHere: boolean;
-  state: AssistRoomState | null;
-  link: AssistLinkState;
-}) {
-  const rows = [
-    ["Клиент в комнате", clientHere ? "да" : "ожидание"],
-    ["Сервис", service ? assistServiceLabel(service) : "не выбран"],
-    ["Зажигание", state?.ignition ? "включено" : "нет"],
-    ["vLinker", state?.adapter === "online" ? "подключён" : "нет"],
-    ["Канал", link === "connected" ? "открыт" : link === "connecting" ? "поднимается" : "нет"],
-  ];
-  return (
-    <ul className="grid grid-cols-2 gap-2 text-xs">
-      {rows.map(([label, value]) => (
-        <li key={label} className="rounded-lg border border-gray-200 px-2 py-1.5">
-          <div className="text-gray-500">{label}</div>
-          <div className="font-semibold text-gray-900">{value}</div>
-        </li>
-      ))}
-    </ul>
   );
 }

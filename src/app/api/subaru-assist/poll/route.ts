@@ -17,6 +17,7 @@ export async function GET(request: Request) {
       Response.json({
         roomCode: snapshot.room.roomCode,
         closed: snapshot.room.closed,
+        expiresAt: snapshot.room.expiresAt,
         members: snapshot.members,
         state,
         signals,

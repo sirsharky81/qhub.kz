@@ -84,6 +84,10 @@ export async function pushAssistStatus(roomId: string, code: string): Promise<As
   return state;
 }
 
+export async function clearAssistState(roomId: string): Promise<void> {
+  await redis.del(stateKey(roomId));
+}
+
 export async function appendAssistSignal(
   roomId: string,
   fromMemberId: string,

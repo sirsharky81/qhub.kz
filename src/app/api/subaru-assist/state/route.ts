@@ -20,11 +20,10 @@ export async function POST(request: Request) {
     }
 
     if (member.role === "client") {
-      if (body.status || body.regionWriteOk) {
-        return withCors(Response.json({ error: "Недостаточно прав" }, { status: 403 }), request);
+      if (body.status || body.regionWriteOk || body.service) {
+        return withCors(Response.json({ error: "Сервис выбирает мастер" }, { status: 403 }), request);
       }
       const state = await patchAssistClientState(member.roomId, {
-        service: body.service && isAssistService(body.service) ? body.service : undefined,
         ignition: typeof body.ignition === "boolean" ? body.ignition : undefined,
         adapter: body.adapter === "online" || body.adapter === "offline" ? body.adapter : undefined,
       });
@@ -35,7 +34,9 @@ export async function POST(request: Request) {
       return withCors(Response.json({ error: "Недостаточно прав" }, { status: 403 }), request);
     }
 
-    let state = await patchAssistClientState(member.roomId, {});
+    let state = await patchAssistClientState(member.roomId, {
+      service: body.service && isAssistService(body.service) ? body.service : undefined,
+    });
     if (body.regionWriteOk === true) {
       state = await markAssistRegionWriteOk(member.roomId);
     }

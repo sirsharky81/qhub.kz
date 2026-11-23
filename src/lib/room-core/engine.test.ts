@@ -45,4 +45,20 @@ describe("room-core engine", () => {
     const joined = await engine.joinRoom(created.inviteToken, "Guest");
     expect(joined.member.role).toBe("guest");
   });
+
+  it("frees a seat when a guest leaves and lets the owner close the room", async () => {
+    const created = await engine.createRoom("Host");
+    const joined = await engine.joinRoom(created.inviteToken, "Guest");
+    await engine.leaveRoom(joined.member.memberId);
+
+    const again = await engine.joinRoom(created.inviteToken, "Next guest");
+    expect(again.member.role).toBe("guest");
+    const snapshot = await engine.buildSnapshot(created.member.memberId);
+    expect(snapshot?.members.map((member) => member.displayName)).toEqual(["Host", "Next guest"]);
+
+    await expect(engine.closeRoom(again.member.memberId)).resolves.toBe(false);
+    await expect(engine.closeRoom(created.member.memberId)).resolves.toBe(true);
+    expect(await engine.buildSnapshot(created.member.memberId)).toBeNull();
+    await expect(engine.joinRoom(created.room.roomCode, "Late")).rejects.toThrow("room_not_found");
+  });
 });

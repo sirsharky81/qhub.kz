@@ -12,6 +12,7 @@ export interface AssistSession {
 export interface AssistPollSnapshot {
   roomCode: string;
   closed: boolean;
+  expiresAt: number;
   members: Array<{ memberId: string; displayName: string; role: string }>;
   state: AssistRoomState;
   signals: AssistSignal[];
@@ -93,6 +94,25 @@ export async function pushAssistStatusApi(
     method: "POST",
     headers: headers(session),
     body: JSON.stringify({ status: code }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function setAssistService(session: AssistSession, service: AssistService): Promise<AssistRoomState> {
+  const res = await fetch("/api/subaru-assist/state", {
+    method: "POST",
+    headers: headers(session),
+    body: JSON.stringify({ service }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const body = (await res.json()) as { state: AssistRoomState };
+  return body.state;
+}
+
+export async function leaveAssistRoom(session: AssistSession): Promise<void> {
+  const res = await fetch("/api/subaru-assist/room", {
+    method: "DELETE",
+    headers: headers(session),
   });
   if (!res.ok) throw new Error(await readError(res));
 }

@@ -26,6 +26,7 @@ interface Props {
   setBusy: (busy: boolean) => void;
   setError: (error: string | null) => void;
   vinHint?: string | null;
+  onActivity?: (event: "scan" | "scan-ok" | "scan-fail" | "clear" | "clear-ok" | "clear-fail") => void;
 }
 
 type SubaruMainTab = "faults" | "blocks";
@@ -46,6 +47,7 @@ export function SubaruSsmPanel({
   setBusy,
   setError,
   vinHint,
+  onActivity,
 }: Props) {
   const [mainTab, setMainTab] = useState<SubaruMainTab>("faults");
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
@@ -174,6 +176,7 @@ export function SubaruSsmPanel({
     setError(null);
     setScanDoneCount(0);
     setScanProgress("Запуск опроса всех систем Subaru…");
+    onActivity?.("scan");
 
     try {
       const targets = SUBARU_ALL_DTC_TARGETS.map((t) => ({
@@ -203,7 +206,9 @@ export function SubaruSsmPanel({
       setScanProgress(
         stopScanRef.current ? "Сканирование остановлено пользователем." : "Сканирование всех блоков завершено.",
       );
+      onActivity?.("scan-ok");
     } catch (err) {
+      onActivity?.("scan-fail");
       setError(err instanceof Error ? err.message : "Ошибка сканирования всех блоков");
     } finally {
       setScanning(false);
@@ -247,6 +252,7 @@ export function SubaruSsmPanel({
         }));
       }
     } catch (err) {
+      onActivity?.("scan-fail");
       setError(err instanceof Error ? err.message : `Ошибка опроса блока «${title}»`);
     } finally {
       setBusy(false);
@@ -257,9 +263,11 @@ export function SubaruSsmPanel({
     if (!ready || scanning) return;
     setBusy(true);
     setError(null);
+    onActivity?.("clear");
     try {
       await session.clearModuleDtcsSafe("6", txHex, rxHex);
       setStatusMsg(`Ошибки блока «${title}» успешно очищены.`);
+      onActivity?.("clear-ok");
       // Re-scan single module immediately after clear
       const txNum = Number.parseInt(txHex, 16);
       const rxNum = Number.parseInt(rxHex, 16);
@@ -287,6 +295,7 @@ export function SubaruSsmPanel({
         }));
       }
     } catch (err) {
+      onActivity?.("clear-fail");
       setError(err instanceof Error ? err.message : `Ошибка очистки DTC в блоке «${title}»`);
     } finally {
       setBusy(false);
@@ -304,6 +313,7 @@ export function SubaruSsmPanel({
 
     setBusy(true);
     setError(null);
+    onActivity?.("clear");
     try {
       let cleared = 0;
       for (const target of faultedSafe) {
@@ -337,7 +347,9 @@ export function SubaruSsmPanel({
         for (const r of refreshed) next[r.txHex.toUpperCase()] = r;
         return next;
       });
+      onActivity?.("clear-ok");
     } catch (err) {
+      onActivity?.("clear-fail");
       setError(err instanceof Error ? err.message : "Ошибка массовой очистки DTC");
     } finally {
       setBusy(false);

@@ -1,4 +1,4 @@
-export const ASSIST_SERVICES = ["celsius", "key", "res"] as const;
+export const ASSIST_SERVICES = ["celsius", "key", "res", "diag"] as const;
 export type AssistService = (typeof ASSIST_SERVICES)[number];
 
 export const ASSIST_STATUS_TEXT = {
@@ -21,7 +21,11 @@ export const ASSIST_STATUS_TEXT = {
   res_step: "Идёт прописка RES. Не отключайте зажигание и vLinker",
   res_ok: "RES прописан",
   res_fail: "Прописка RES не удалась. Не отключайте зажигание и vLinker",
-  link_lost: "Связь прервана. Не выключайте зажигание",
+  link_lost: "Связь между телефонами прервана. Зажигание и vLinker не отключайте — канал восстановится сам",
+  link_back: "Связь между телефонами восстановлена",
+  dtc_scan: "Считывание ошибок. Не отключайте зажигание и vLinker",
+  dtc_ok: "Ошибки считаны",
+  dtc_fail: "Считать ошибки не удалось",
   adapter_online: "vLinker подключён. Ожидайте мастера",
   ignition_on: "Зажигание включено",
 } as const;
@@ -41,6 +45,8 @@ const WARN_CODES = new Set<AssistStatusCode>([
   "res_step",
   "res_fail",
   "link_lost",
+  "dtc_scan",
+  "dtc_fail",
 ]);
 
 export function isAssistService(value: string): value is AssistService {
@@ -64,7 +70,9 @@ export function assistStatusTone(code: AssistStatusCode): "warn" | "ok" | "info"
     code === "clear_ok" ||
     code === "key_ok" ||
     code === "res_ok" ||
-    code === "adapter_online"
+    code === "adapter_online" ||
+    code === "link_back" ||
+    code === "dtc_ok"
   ) {
     return "ok";
   }
@@ -72,7 +80,8 @@ export function assistStatusTone(code: AssistStatusCode): "warn" | "ok" | "info"
 }
 
 export function assistServiceLabel(service: AssistService): string {
-  if (service === "celsius") return "Перевод градусов";
+  if (service === "celsius") return "Приборка, перевод °F → °C";
   if (service === "key") return "Прописка ключа";
-  return "Прописка RES";
+  if (service === "res") return "Прописка RES";
+  return "Считать ошибки";
 }
