@@ -55,7 +55,11 @@ export async function joinAssistRoom(roomCode: string): Promise<AssistSession> {
 
 export async function pollAssistRoom(session: AssistSession, since: number): Promise<AssistPollSnapshot> {
   const res = await fetch(`/api/subaru-assist/poll?since=${since}`, { headers: headers(session) });
-  if (!res.ok) throw new Error(await readError(res));
+  if (!res.ok) {
+    const error = new Error(await readError(res)) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
+  }
   return (await res.json()) as AssistPollSnapshot;
 }
 

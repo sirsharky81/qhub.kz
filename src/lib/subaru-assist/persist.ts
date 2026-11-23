@@ -12,7 +12,16 @@ function storageKey(role: "master" | "client"): string {
   return role === "master" ? MASTER_KEY : CLIENT_KEY;
 }
 
+let memory: Record<"master" | "client", StoredAssistRoom | null> = {
+  master: null,
+  client: null,
+};
+
 export function loadAssistRoom(role: "master" | "client"): StoredAssistRoom | null {
+  const cached = memory[role];
+  if (cached && cached.expiresAt > Date.now() && cached.session?.roomId && cached.session.accessToken) {
+    return cached;
+  }
   if (typeof localStorage === "undefined") return null;
   try {
     const raw = localStorage.getItem(storageKey(role));
@@ -21,8 +30,10 @@ export function loadAssistRoom(role: "master" | "client"): StoredAssistRoom | nu
     if (!parsed?.session?.roomId || !parsed.session.accessToken || !parsed.session.memberId) return null;
     if (!parsed.expiresAt || parsed.expiresAt <= Date.now()) {
       localStorage.removeItem(storageKey(role));
+      memory[role] = null;
       return null;
     }
+    memory[role] = parsed;
     return parsed;
   } catch {
     return null;
@@ -30,11 +41,21 @@ export function loadAssistRoom(role: "master" | "client"): StoredAssistRoom | nu
 }
 
 export function saveAssistRoom(role: "master" | "client", room: StoredAssistRoom): void {
+  memory[role] = room;
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(storageKey(role), JSON.stringify(room));
+  try {
+    localStorage.setItem(storageKey(role), JSON.stringify(room));
+  } catch {
+    /* the in-memory copy still keeps the room for this page */
+  }
 }
 
 export function clearAssistRoom(role: "master" | "client"): void {
+  memory[role] = null;
   if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(storageKey(role));
+  try {
+    localStorage.removeItem(storageKey(role));
+  } catch {
+    /* ignore */
+  }
 }

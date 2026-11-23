@@ -12,7 +12,7 @@ import {
 } from "@/lib/subaru-assist/client";
 import { AssistElmChannel } from "@/lib/subaru-assist/elm-channel";
 import { AssistPeer, type AssistLinkState } from "@/lib/subaru-assist/peer";
-import { clearAssistRoom, loadAssistRoom, saveAssistRoom } from "@/lib/subaru-assist/persist";
+import { clearAssistRoom, loadAssistRoom, saveAssistRoom, type StoredAssistRoom } from "@/lib/subaru-assist/persist";
 import { RemoteElm327 } from "@/lib/subaru-assist/remote-elm";
 import { ASSIST_ROOM_TTL_MS, assistRemainingMs } from "@/lib/subaru-assist/room-clock";
 import {
@@ -36,14 +36,23 @@ async function copyCode(code: string): Promise<boolean> {
 
 interface Props {
   obd: ObdBleSession;
+  room: StoredAssistRoom | null;
+  onRoomChange: (room: StoredAssistRoom | null) => void;
   onAssistSession: (session: AssistSession | null) => void;
   onAttached: (attached: boolean) => void;
   onService: (service: AssistService | null) => void;
 }
 
-export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }: Props) {
-  const [session, setSession] = useState<AssistSession | null>(null);
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+function rememberRoom(room: StoredAssistRoom | null, onRoomChange: (room: StoredAssistRoom | null) => void): void {
+  if (room) saveAssistRoom("master", room);
+  else clearAssistRoom("master");
+  onRoomChange(room);
+}
+
+export function SubaruRemoteDesk({ obd, room, onRoomChange, onAssistSession, onAttached, onService }: Props) {
+  const stored = room ?? loadAssistRoom("master");
+  const [session, setSession] = useState<AssistSession | null>(stored?.session ?? null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(stored?.expiresAt ?? null);
   const [roomState, setRoomState] = useState<AssistRoomState | null>(null);
   const [link, setLink] = useState<AssistLinkState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -59,11 +68,15 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
   const linkRef = useRef<AssistLinkState>("idle");
   const adapterOnlineRef = useRef(false);
   const onAssistSessionRef = useRef(onAssistSession);
+  const onRoomChangeRef = useRef(onRoomChange);
+  const freshRoomRef = useRef(false);
+  const suppressRestoreRef = useRef(false);
   const onAttachedRef = useRef(onAttached);
   const onServiceRef = useRef(onService);
   obdRef.current = obd;
   sessionRef.current = session;
   onAssistSessionRef.current = onAssistSession;
+  onRoomChangeRef.current = onRoomChange;
   onAttachedRef.current = onAttached;
   onServiceRef.current = onService;
 
@@ -96,11 +109,12 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
 
   const dropRoom = useCallback(
     (message: string | null) => {
+      suppressRestoreRef.current = true;
       peerRef.current?.close();
       peerRef.current = null;
       channelRef.current = null;
       detachElm();
-      clearAssistRoom("master");
+      rememberRoom(null, onRoomChangeRef.current);
       onAssistSessionRef.current(null);
       onServiceRef.current(null);
       setSession(null);
@@ -122,7 +136,8 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
       setExpiresAt(expiry);
       setError(null);
       setRestored(fromStorage);
-      saveAssistRoom("master", { session: next, expiresAt: expiry });
+      const nextRoom = { session: next, expiresAt: expiry };
+      rememberRoom(nextRoom, onRoomChangeRef.current);
       onAssistSessionRef.current(next);
       const peer = new AssistPeer(next, (state) => {
         setLink(state);
@@ -152,18 +167,55 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
   );
 
   useEffect(() => {
-    const stored = loadAssistRoom("master");
-    if (stored) {
-      setRestored(true);
-      void bindSession(stored.session, stored.expiresAt, true).catch((err: unknown) => {
-        dropRoom(err instanceof Error ? err.message : "Не удалось вернуться в комнату");
-      });
+    if (suppressRestoreRef.current) {
+      if (!room) suppressRestoreRef.current = false;
+      return;
     }
-    return () => {
+    if (room && !session) {
+      setSession(room.session);
+      setExpiresAt(room.expiresAt);
+    }
+  }, [room, session]);
+
+  const expiresRef = useRef(expiresAt);
+  const bindSessionRef = useRef(bindSession);
+  const dropRoomRef = useRef(dropRoom);
+  expiresRef.current = expiresAt;
+  bindSessionRef.current = bindSession;
+  dropRoomRef.current = dropRoom;
+  const sessionKey = session?.roomId ?? "";
+
+  useEffect(() => {
+    if (!sessionKey) {
       peerRef.current?.close();
+      peerRef.current = null;
+      channelRef.current = null;
+      detachElm();
+      return;
+    }
+    const current = sessionRef.current;
+    if (!current) return;
+    const expiry = expiresRef.current ?? Date.now() + ASSIST_ROOM_TTL_MS;
+    const fromStorage = !freshRoomRef.current;
+    freshRoomRef.current = false;
+    let cancel = false;
+    void bindSessionRef.current(current, expiry, fromStorage).catch((err: unknown) => {
+      if (cancel) return;
+      const status = (err as { status?: number }).status;
+      if (status === 401 || status === 404) {
+        dropRoomRef.current("Комната больше не действует. Создайте новую.");
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Не удалось открыть канал комнаты");
+    });
+    return () => {
+      cancel = true;
+      peerRef.current?.close();
+      peerRef.current = null;
+      channelRef.current = null;
       detachElm();
     };
-  }, [bindSession, detachElm, dropRoom]);
+  }, [detachElm, sessionKey]);
 
   useEffect(() => {
     if (!session) return;
@@ -194,14 +246,16 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
         if (snapshot.expiresAt) {
           setExpiresAt(snapshot.expiresAt);
           saveAssistRoom("master", { session, expiresAt: snapshot.expiresAt });
+          rememberRoom({ session, expiresAt: snapshot.expiresAt }, onRoomChangeRef.current);
           if (assistRemainingMs(snapshot.expiresAt) <= 0 || snapshot.closed) {
             dropRoom("Час комнаты истёк. Создайте новую и отправьте код ещё раз.");
           }
         }
       } catch (err) {
         if (stop) return;
+        const status = (err as { status?: number }).status;
         const message = err instanceof Error ? err.message : "Комната недоступна";
-        if (/истекл|закрыт|не найден/i.test(message)) dropRoom(message);
+        if (status === 401 || status === 404) dropRoom(message);
         else setError(message);
       }
     };
@@ -217,17 +271,25 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
     setError(null);
     try {
       const created = await createAssistRoom();
-      await bindSession(created, Date.now() + ASSIST_ROOM_TTL_MS);
+      const expiry = Date.now() + ASSIST_ROOM_TTL_MS;
+      freshRoomRef.current = true;
+      setExpiresAt(expiry);
+      setSession(created);
+      rememberRoom({ session: created, expiresAt: expiry }, onRoomChangeRef.current);
+      onAssistSessionRef.current(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать комнату");
     }
   };
 
+  const liveSession = session ?? room?.session ?? null;
+  const liveExpiry = expiresAt ?? room?.expiresAt ?? null;
+
   const chooseService = async (service: AssistService) => {
-    if (!session) return;
+    if (!liveSession) return;
     setError(null);
     try {
-      const state = await setAssistService(session, service);
+      const state = await setAssistService(liveSession, service);
       setRoomState(state);
       onService(service);
     } catch (err) {
@@ -236,11 +298,11 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
   };
 
   const deleteRoom = async () => {
-    if (!session) return;
+    if (!liveSession) return;
     if (!window.confirm("Удалить комнату? Клиент будет отключён, этот код больше не сработает.")) return;
     setError(null);
     try {
-      await leaveAssistRoom(session);
+      await leaveAssistRoom(liveSession);
       dropRoom("Комната удалена.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось удалить комнату");
@@ -248,8 +310,8 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
   };
 
   const shareCode = async () => {
-    if (!session) return;
-    const text = `Код комнаты Subaru: ${session.roomCode}`;
+    if (!liveSession) return;
+    const text = `Код комнаты Subaru: ${liveSession.roomCode}`;
     if (typeof navigator.share === "function") {
       try {
         await navigator.share({ text });
@@ -258,7 +320,7 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
         /* fall through to copy */
       }
     }
-    setCopied(await copyCode(session.roomCode));
+    setCopied(await copyCode(liveSession.roomCode));
   };
 
   const service = roomState?.service ?? null;
@@ -275,7 +337,7 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
             Переподключение канала между телефонами не глушит зажигание и не отключает vLinker.
           </p>
         </div>
-        {!session ? (
+        {!liveSession ? (
           <button
             type="button"
             onClick={() => void createRoom()}
@@ -293,7 +355,7 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
             <div className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wide text-gray-500">Код комнаты</div>
-                <div className="font-mono text-2xl font-bold tracking-[0.18em] text-gray-900">{session.roomCode}</div>
+                <div className="font-mono text-2xl font-bold tracking-[0.18em] text-gray-900">{liveSession.roomCode}</div>
               </div>
               <div className="flex shrink-0 flex-col gap-1.5">
                 <button
@@ -305,7 +367,7 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
                 </button>
                 <button
                   type="button"
-                  onClick={() => void copyCode(session.roomCode).then((ok) => setCopied(ok))}
+                  onClick={() => void copyCode(liveSession.roomCode).then((ok) => setCopied(ok))}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold"
                 >
                   {copied ? "Скопировано" : "Копировать"}
@@ -314,7 +376,7 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
             </div>
             <ul className="grid grid-cols-2 gap-2 text-xs">
               <li className="rounded-lg border border-gray-200 px-2 py-1.5">
-                <AssistRoomClock expiresAt={expiresAt} />
+                <AssistRoomClock expiresAt={liveExpiry} />
               </li>
               {[
                 ["Клиент", clientHere ? "в комнате" : "ожидание"],
@@ -350,7 +412,7 @@ export function SubaruRemoteDesk({ obd, onAssistSession, onAttached, onService }
             </button>
           </div>
         )}
-        {session && (
+        {liveSession && (
           <div className="space-y-2">
             <p className="text-xs font-semibold text-gray-800">Сервис выбираете вы. Клиент только включает зажигание и vLinker.</p>
             <div className="grid grid-cols-2 gap-2">

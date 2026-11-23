@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAccessCheck } from "@/lib/messenger/client";
 import { maskPhone } from "@/lib/messenger/phone-format";
+import { clearAssistRoom, loadAssistRoom, saveAssistRoom, type StoredAssistRoom } from "@/lib/subaru-assist/persist";
 import { formatBleFailure } from "@/lib/obd/ble-error";
 import {
   ObdBleSession,
@@ -114,6 +115,23 @@ export default function SubaruCodingClient() {
   const [session] = useState(() => new ObdBleSession());
   const sessionRef = useRef(session);
   const [remoteAttached, setRemoteAttached] = useState(false);
+  const [assistRoom, setAssistRoom] = useState<StoredAssistRoom | null>(() => loadAssistRoom("master"));
+  const onAssistRoom = useCallback((next: StoredAssistRoom | null) => {
+    if (next) saveAssistRoom("master", next);
+    else clearAssistRoom("master");
+    setAssistRoom((prev) => {
+      if (
+        next &&
+        prev &&
+        prev.session.roomId === next.session.roomId &&
+        prev.session.accessToken === next.session.accessToken &&
+        prev.expiresAt === next.expiresAt
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, []);
   const [remoteService, setRemoteService] = useState<AssistService | null>(null);
   const remoteAssistRef = useRef<AssistSession | null>(null);
   const remoteAttachedRef = useRef(false);
@@ -1276,6 +1294,8 @@ export default function SubaruCodingClient() {
       <div className={tab === "remote" ? "block" : "hidden"}>
         <SubaruRemoteDesk
           obd={session}
+          room={assistRoom}
+          onRoomChange={onAssistRoom}
           onAssistSession={(next) => {
             remoteAssistRef.current = next;
           }}
@@ -1283,6 +1303,19 @@ export default function SubaruCodingClient() {
           onService={setRemoteService}
         />
       </div>
+
+      {assistRoom && tab !== "remote" && (
+        <button
+          type="button"
+          onClick={() => setTab("remote")}
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-left text-xs text-blue-950"
+        >
+          <span>
+            Комната <span className="font-mono font-bold tracking-wide">{assistRoom.session.roomCode}</span> открыта
+          </span>
+          <span className="shrink-0 font-semibold">Вернуться</span>
+        </button>
+      )}
 
       {(tab === "meter" || (tab === "remote" && remoteService === "celsius")) && (
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
