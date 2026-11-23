@@ -87,7 +87,7 @@ afterEach(async () => {
   await redisDel(`${REDIS_OTP_CHALLENGE_PREFIX}${phone}`);
 });
 
-async function confirmIncomingCall() {
+async function confirmIncomingCall(): Promise<{ token: string }> {
   getIncomingCallOtp.mockResolvedValueOnce({
     id: 42,
     callTo: "+77470940670",
@@ -95,7 +95,7 @@ async function confirmIncomingCall() {
   });
   const verified = await pollMessengerIncomingOtp(phone);
   if (!verified.token) throw new Error("expected otp token");
-  return verified;
+  return { token: verified.token };
 }
 
 describe("messenger incoming-call OTP", () => {
