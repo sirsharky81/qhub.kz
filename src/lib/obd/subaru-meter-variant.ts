@@ -1500,7 +1500,10 @@ export async function writeSubaruMeter12ColumnCode(
   // with NRC 31, so never hard-code A002 for the two-did / default path.
   const destinationDid =
     SUBARU_METER_PANEL_PROFILES[
-      detectSubaruMeterPanelKind({ appliedModel: input.appliedModel }).panelKind
+      detectSubaruMeterPanelKind({
+        appliedModel: input.appliedModel,
+        activeDids: (input.currentDids ?? []).map((d) => d.did),
+      }).panelKind
     ].destinationDid;
   const isMetric = destPrefix === "C0" || destPrefix === "C5";
   // Per MET-002.srp / cgdwPHBWHoZ.mLW. A011 = TPMS presence (FF=Function effective, 00=No function).
@@ -1685,6 +1688,7 @@ export async function writeSubaruMeter12ColumnCode(
   let writtenDid: string | null = null;
   let writtenHex: string | null = null;
   let lastSeedHex: string | null = null;
+  let partialA0xxWrite = false;
   const skip0250Candidates = forceA0xxPath || hasA002Snapshot;
 
   const keptGateways: { tx: number; rx: number }[] = [];
@@ -1962,13 +1966,14 @@ export async function writeSubaruMeter12ColumnCode(
             );
 
             if (okA0xx.length > 0) {
-              if (writeMode === "two-did") {
+              const allPlannedA0xxConfirmed = okA0xx.length === a0xxWritePlan.length;
+              if (allPlannedA0xxConfirmed && writeMode === "two-did") {
                 writtenDid = `${destinationDid}/A011`;
                 writtenHex = `${destinationDid}=${destinationTargetByte} A011=${a011TargetByte}`;
                 steps.push(
                   `${txHex}→${rxHex}: вариантные регистры ${destinationDid}/A011 записаны (6E ${destinationDid.slice(0, 2)} ${destinationDid.slice(2)} / 6E A0 11).`,
                 );
-              } else {
+              } else if (allPlannedA0xxConfirmed) {
                 const modeLabel =
                   writeMode === "custom-a0xx"
                     ? "BACKUP"
@@ -1979,6 +1984,11 @@ export async function writeSubaruMeter12ColumnCode(
                 writtenHex = okA0xx.map((x) => `${x.did}=${x.byteHex}`).join(" ");
                 steps.push(
                   `${txHex}→${rxHex}: записано ${okA0xx.length} из ${a0xxWritePlan.length} вариантных A0xx DID${nrc31A0xx.length ? ` (NRC 31 на: ${nrc31A0xx.join(", ")})` : ""}.`,
+                );
+              } else {
+                partialA0xxWrite = true;
+                steps.push(
+                  `${txHex}→${rxHex}: частичная запись A0xx (${okA0xx.length}/${a0xxWritePlan.length}) — операция считается неуспешной; повторная попытка на другой CAN-адрес остановлена, чтобы не смешивать состояние приборки${nrc31A0xx.length ? ` (NRC 31 на: ${nrc31A0xx.join(", ")})` : ""}.`,
                 );
               }
             } else if (sawNrc33OnA0xx) {
@@ -1991,13 +2001,13 @@ export async function writeSubaruMeter12ColumnCode(
         steps.push(`${txHex}→${rxHex}: сессия закрыта (10 01)`);
       }
 
-      if (writtenDid || securityAccessRequired) break;
+      if (writtenDid || securityAccessRequired || partialA0xxWrite) break;
     }
   } finally {
     await closeKeptOpenMeterGateways(elm, keptGateways);
   }
 
-  if (!writtenDid && !securityAccessRequired) {
+  if (!writtenDid && !securityAccessRequired && !partialA0xxWrite) {
     steps.push(
       "Приборка не подтвердила 2E 0250/0251. Проверьте IG ON, адрес 783 и что DID — ASCII, а не битовая маска.",
     );

@@ -221,6 +221,62 @@ describe("subaru-meter-variant", () => {
     expect(elm.sent.some((s) => s.startsWith("2EA002"))).toBe(false);
   });
 
+  it("uses live A001/A002 DIDs over edited Applied Model when choosing the two-did destination", async () => {
+    const elm = scriptedElm({
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
+      "2E10C2FF": "6E 10 C2",
+      "2EA00103": "6E A0 01",
+      "2EA01100": "6E A0 11",
+      "2E10C200": "6E 10 C2",
+    });
+
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "A001", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "two-did",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.writtenDid).toBe("A001/A011");
+    expect(elm.sent.filter((s) => s.startsWith("2EA0"))).toEqual(["2EA00103", "2EA01100"]);
+    expect(elm.sent.some((s) => s.startsWith("2EA002"))).toBe(false);
+  });
+
+  it("fails two-did A0xx writes when only one planned register is accepted", async () => {
+    const elm = scriptedElm({
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
+      "2E10C2FF": "6E 10 C2",
+      "2EA00203": "7F 2E 31",
+      "2EA01100": "6E A0 11",
+      "2E10C200": "6E 10 C2",
+    });
+
+    const result = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "two-did",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.writtenDid).toBeNull();
+    expect(result.steps.join(" ")).toMatch(/частичная запись A0xx \(1\/2\)/);
+    expect(result.steps.join(" ")).toMatch(/NRC 31.*A002/);
+  });
+
   it("unlocks 27 03 -> 27 04 using FHIUtilityCtrlNK GetSecurityAccessSelKey(idx=11 LE, ctrl-mode1) after passcode 0205 when 2E 0250 returns NRC 31 or 2E 10C2 FF returns NRC 33", async () => {
     const seed = [0x12, 0x34, 0x56, 0x78];
     const expectedKey = computeSubaruSecurityKey4Byte(
@@ -386,6 +442,41 @@ describe("subaru-meter-variant", () => {
     expect(blockedRes.success).toBe(false);
     expect(elmBlocked.sent).toHaveLength(0);
     expect(blockedRes.steps.join(" ")).toMatch(/нет в справочнике SSM4 cgdw/);
+  });
+
+  it("fails full-cgdw A0xx writes when the ECU accepts only part of the planned DID set", async () => {
+    const c0qfDids = getSsm4CgdwWriteDids("BTAEYR8", "C0QF");
+    expect(c0qfDids).not.toBeNull();
+
+    const replies: Record<string, string> = {
+      "3101020C": "71 01 02 0C",
+      "2210C2": "62 10 C2 FF",
+      "2E10C2FF": "6E 10 C2",
+      "2E10C200": "6E 10 C2",
+    };
+    for (const item of c0qfDids!) {
+      replies[`2E${item.did}${item.byteHex}`] =
+        item.did === "A024" ? "7F 2E 31" : `6E ${item.did.slice(0, 2)} ${item.did.slice(2)}`;
+    }
+
+    const elm = scriptedElm(replies);
+    const res = await writeSubaruMeter12ColumnCode(elm, {
+      appliedModel: "BTAEYR8",
+      optionCode: "C0QF",
+      currentDids: [
+        { did: "A002", hex: "02" },
+        { did: "A011", hex: "FF" },
+        { did: "A024", hex: "02" },
+      ],
+      txHex: "783",
+      rxHex: "78B",
+      writeMode: "full-cgdw",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.writtenDid).toBeNull();
+    expect(res.steps.join(" ")).toMatch(/частичная запись A0xx \(27\/28\)/);
+    expect(res.steps.join(" ")).toMatch(/NRC 31.*A024/);
   });
 
   it("builds, serializes, validates, and restores 1:1 original backup (even for U45L) via custom-a0xx", async () => {
