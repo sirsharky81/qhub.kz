@@ -80,6 +80,7 @@ export function MessengerLoginClient() {
   const [selfRegistration, setSelfRegistration] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState<string | undefined>(undefined);
+  const [otpPollToken, setOtpPollToken] = useState<string | null>(null);
   const [otpPurpose, setOtpPurpose] = useState<OtpPurpose>("register");
   const [otpChannel, setOtpChannel] = useState<OtpChannel>("call");
   const [callTo, setCallTo] = useState("");
@@ -189,6 +190,7 @@ export function MessengerLoginClient() {
   ) {
     setOtpSending(true);
     setError(null);
+    setOtpPollToken(null);
     try {
       const res = await sendMessengerOtp(targetPhone, purpose, captchaToken ?? undefined);
       if (purpose === "pin_recovery") {
@@ -202,9 +204,16 @@ export function MessengerLoginClient() {
         return false;
       }
       const channel = res.channel ?? "call";
+      const pollToken = typeof res.pollToken === "string" ? res.pollToken : null;
+      if (channel === "call" && !pollToken) {
+        setOtpLive(false);
+        setError("Не удалось начать проверку звонка. Запросите звонок ещё раз.");
+        return false;
+      }
       setOtpPurpose(purpose);
       setOtpChannel(channel);
       setCallTo(res.callTo ?? "");
+      setOtpPollToken(channel === "call" ? pollToken : null);
       setOtpLive(channel === "call");
       setResendAfterSec(res.resendAfterSec ?? OTP_RESEND_COOLDOWN_SEC);
       return true;
@@ -357,6 +366,7 @@ export function MessengerLoginClient() {
     setConfirmPin("");
     setOtpCode("");
     setOtpToken(undefined);
+    setOtpPollToken(null);
     setOtpPurpose("register");
     setOtpChannel("call");
     setCallTo("");
@@ -375,12 +385,12 @@ export function MessengerLoginClient() {
   }
 
   useEffect(() => {
-    if (step !== "otp" || otpChannel !== "call" || !otpLive || !phone) return;
+    if (step !== "otp" || otpChannel !== "call" || !otpLive || !phone || !otpPollToken) return;
     let cancelled = false;
 
     const tick = async () => {
       try {
-        const res = await pollMessengerOtp(phone);
+        const res = await pollMessengerOtp(phone, otpPollToken);
         if (cancelled) return;
         if (res.callTo) setCallTo(res.callTo);
         if (res.pending) setError(null);
@@ -409,7 +419,7 @@ export function MessengerLoginClient() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [step, otpChannel, otpLive, phone, otpPurpose]);
+  }, [step, otpChannel, otpLive, phone, otpPollToken, otpPurpose]);
 
   useEffect(() => {
     if (resendAfterSec <= 0) return;

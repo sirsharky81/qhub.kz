@@ -23,6 +23,7 @@ export type OtpChannel = "push" | "call";
 
 interface OtpChallenge {
   codeHash: string;
+  pollTokenHash: string | null;
   flashCallId: number | null;
   callTo: string | null;
   /** `incoming` — user dials callTo; `code` — push or legacy flash-call digits. */
@@ -118,6 +119,7 @@ export async function sendMessengerOtp(
   resendAfterSec: number;
   channel: OtpChannel;
   callTo: string | null;
+  pollToken: string | null;
 }> {
   const pinStatus = await getPinStatus(phone);
   if (purpose === "register") {
@@ -143,6 +145,7 @@ export async function sendMessengerOtp(
   let flashCallId: number | null = null;
   let callTo: string | null = null;
   let mode: OtpChallenge["mode"] = "code";
+  let pollToken: string | null = null;
 
   if (channel === "push") {
     code = generatePushOtpCode();
@@ -166,10 +169,12 @@ export async function sendMessengerOtp(
       }
       throw err;
     }
+    pollToken = randomBytes(32).toString("hex");
   }
 
   const challenge: OtpChallenge = {
     codeHash: code ? hashOtpCode(phone, code) : "",
+    pollTokenHash: pollToken ? hashOtpCode(phone, pollToken) : null,
     flashCallId,
     callTo,
     mode,
@@ -186,10 +191,11 @@ export async function sendMessengerOtp(
     resendAfterSec: OTP_RESEND_COOLDOWN_SEC,
     channel,
     callTo,
+    pollToken,
   };
 }
 
-export async function pollMessengerIncomingOtp(phone: string): Promise<{
+export async function pollMessengerIncomingOtp(phone: string, pollToken: string | null | undefined): Promise<{
   pending: boolean;
   callTo: string | null;
   token?: string;
@@ -197,6 +203,13 @@ export async function pollMessengerIncomingOtp(phone: string): Promise<{
 }> {
   const challenge = await redisGetJson<OtpChallenge>(challengeKey(phone));
   if (!challenge || challenge.mode !== "incoming" || !challenge.flashCallId) {
+    throw new MessengerAuthError("Запросите звонок ещё раз", 400);
+  }
+  if (
+    !pollToken ||
+    !challenge.pollTokenHash ||
+    !codesEqual(challenge.pollTokenHash, hashOtpCode(phone, pollToken))
+  ) {
     throw new MessengerAuthError("Запросите звонок ещё раз", 400);
   }
 
