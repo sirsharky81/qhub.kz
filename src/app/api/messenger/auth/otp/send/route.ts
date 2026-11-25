@@ -98,6 +98,7 @@ export async function POST(request: Request) {
       resendAfterSec: result.resendAfterSec,
       channel: result.channel,
       callTo: result.callTo,
+      pollToken: result.pollToken,
     });
   } catch (err) {
     if (err instanceof MessengerAuthError) {
