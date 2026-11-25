@@ -87,13 +87,13 @@ afterEach(async () => {
   await redisDel(`${REDIS_OTP_CHALLENGE_PREFIX}${phone}`);
 });
 
-async function confirmIncomingCall(): Promise<{ token: string }> {
+async function confirmIncomingCall(pollToken: string): Promise<{ token: string }> {
   getIncomingCallOtp.mockResolvedValueOnce({
     id: 42,
     callTo: "+77470940670",
     status: "verified",
   });
-  const verified = await pollMessengerIncomingOtp(phone);
+  const verified = await pollMessengerIncomingOtp(phone, pollToken);
   if (!verified.token) throw new Error("expected otp token");
   return { token: verified.token };
 }
@@ -109,6 +109,7 @@ describe("messenger incoming-call OTP", () => {
     expect(sent.digits).toBe(0);
     expect(sent.channel).toBe("call");
     expect(sent.callTo).toBe("+77470940670");
+    expect(sent.pollToken).toMatch(/^[a-f0-9]{64}$/);
     expect(createIncomingCallOtp).toHaveBeenCalledWith({
       number: phone,
       callbackUrl: expect.stringMatching(/\/api\/messenger\/auth\/otp\/hook$/),
@@ -121,8 +122,8 @@ describe("messenger incoming-call OTP", () => {
       callTo: "+77470940670",
       status: "pending",
     });
-    await expect(pollMessengerIncomingOtp(phone)).resolves.toMatchObject({ pending: true });
-    const verified = await confirmIncomingCall();
+    await expect(pollMessengerIncomingOtp(phone, sent.pollToken)).resolves.toMatchObject({ pending: true });
+    const verified = await confirmIncomingCall(sent.pollToken!);
     expect(verified.token).toMatch(/^[a-f0-9]{64}$/);
 
     const consumed = await consumeVerifiedOtp(verified.token);
@@ -139,6 +140,23 @@ describe("messenger incoming-call OTP", () => {
     });
   });
 
+  it("does not expose the verified token without the per-call poll token", async () => {
+    const sent = await sendMessengerOtp(phone);
+    expect(sent.pollToken).toBeTruthy();
+    getIncomingCallOtp.mockResolvedValue({
+      id: 42,
+      callTo: "+77470940670",
+      status: "verified",
+    });
+
+    await expect(pollMessengerIncomingOtp(phone, undefined)).rejects.toThrow("Запросите звонок ещё раз");
+    await expect(pollMessengerIncomingOtp(phone, "wrong-token")).rejects.toThrow("Запросите звонок ещё раз");
+    await expect(pollMessengerIncomingOtp(phone, sent.pollToken)).resolves.toMatchObject({
+      pending: false,
+      token: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+  });
+
   it("does not treat a leftover session as proof after the number was deleted", async () => {
     isPhoneWhitelisted.mockResolvedValue(false);
     await expect(assertPinSetupAllowed({ phone, sessionPhone: phone })).rejects.toThrow(
@@ -147,8 +165,8 @@ describe("messenger incoming-call OTP", () => {
   });
 
   it("allows PIN setup after OTP when the number has no PIN yet", async () => {
-    await sendMessengerOtp(phone);
-    const verified = await confirmIncomingCall();
+    const sent = await sendMessengerOtp(phone);
+    const verified = await confirmIncomingCall(sent.pollToken!);
     await expect(
       assertPinSetupAllowed({ phone, otpToken: verified.token }),
     ).resolves.toEqual({ via: "otp", otpToken: verified.token });
@@ -156,8 +174,8 @@ describe("messenger incoming-call OTP", () => {
   });
 
   it("does not allow registration OTP to overwrite an existing PIN", async () => {
-    await sendMessengerOtp(phone);
-    const verified = await confirmIncomingCall();
+    const sent = await sendMessengerOtp(phone);
+    const verified = await confirmIncomingCall(sent.pollToken!);
     vi.mocked(getPinStatus).mockResolvedValue({
       passwordSet: true,
       mustChangePin: false,
@@ -182,7 +200,7 @@ describe("messenger incoming-call OTP", () => {
     expect(sent.channel).toBe("call");
     expect(createIncomingCallOtp).toHaveBeenCalled();
 
-    const verified = await confirmIncomingCall();
+    const verified = await confirmIncomingCall(sent.pollToken!);
     await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).resolves.toEqual({
       via: "otp",
       otpToken: verified.token,
@@ -237,7 +255,7 @@ describe("messenger PIN recovery OTP", () => {
     });
     expect(notifyPinRecovery).not.toHaveBeenCalled();
 
-    const verified = await confirmIncomingCall();
+    const verified = await confirmIncomingCall(sent.pollToken!);
     await expect(assertPinSetupAllowed({ phone, otpToken: verified.token })).resolves.toEqual({
       via: "otp",
       otpToken: verified.token,

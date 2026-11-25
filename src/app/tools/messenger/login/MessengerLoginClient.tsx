@@ -80,6 +80,7 @@ export function MessengerLoginClient() {
   const [selfRegistration, setSelfRegistration] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState<string | undefined>(undefined);
+  const [otpPollToken, setOtpPollToken] = useState<string | undefined>(undefined);
   const [otpPurpose, setOtpPurpose] = useState<OtpPurpose>("register");
   const [otpChannel, setOtpChannel] = useState<OtpChannel>("call");
   const [callTo, setCallTo] = useState("");
@@ -168,6 +169,7 @@ export function MessengerLoginClient() {
         setOtpChannel("call");
         setOtpCode("");
         setOtpToken(undefined);
+        setOtpPollToken(undefined);
         if (res.selfRegistration) {
           setStep("name");
         } else {
@@ -205,6 +207,7 @@ export function MessengerLoginClient() {
       setOtpPurpose(purpose);
       setOtpChannel(channel);
       setCallTo(res.callTo ?? "");
+      setOtpPollToken(res.pollToken ?? undefined);
       setOtpLive(channel === "call");
       setResendAfterSec(res.resendAfterSec ?? OTP_RESEND_COOLDOWN_SEC);
       return true;
@@ -357,6 +360,7 @@ export function MessengerLoginClient() {
     setConfirmPin("");
     setOtpCode("");
     setOtpToken(undefined);
+    setOtpPollToken(undefined);
     setOtpPurpose("register");
     setOtpChannel("call");
     setCallTo("");
@@ -380,7 +384,7 @@ export function MessengerLoginClient() {
 
     const tick = async () => {
       try {
-        const res = await pollMessengerOtp(phone);
+        const res = await pollMessengerOtp(phone, otpPollToken);
         if (cancelled) return;
         if (res.callTo) setCallTo(res.callTo);
         if (res.pending) setError(null);
@@ -409,7 +413,7 @@ export function MessengerLoginClient() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [step, otpChannel, otpLive, phone, otpPurpose]);
+  }, [step, otpChannel, otpLive, phone, otpPollToken, otpPurpose]);
 
   useEffect(() => {
     if (resendAfterSec <= 0) return;

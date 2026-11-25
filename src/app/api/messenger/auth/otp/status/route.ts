@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { phone?: string };
+  let body: { phone?: string; pollToken?: string };
   try {
     body = await request.json();
   } catch {
@@ -29,7 +29,8 @@ export async function POST(request: Request) {
 
   try {
     const { phone } = await assertMessengerOpenPhone(raw);
-    const result = await pollMessengerIncomingOtp(phone);
+    const pollToken = typeof body.pollToken === "string" ? body.pollToken : undefined;
+    const result = await pollMessengerIncomingOtp(phone, pollToken);
     if (result.token) {
       const jar = await cookies();
       jar.set(messengerOtpCookieOptions(result.token));
