@@ -25,6 +25,7 @@ interface OtpChallenge {
   codeHash: string;
   flashCallId: number | null;
   callTo: string | null;
+  callPollTokenHash?: string | null;
   /** `incoming` — user dials callTo; `code` — push or legacy flash-call digits. */
   mode: "code" | "incoming";
   attempts: number;
@@ -56,6 +57,10 @@ function verifiedKey(token: string): string {
 
 export function hashOtpCode(phone: string, code: string): string {
   return createHmac("sha256", otpPepper()).update(`${phone}:${code}`).digest("hex");
+}
+
+function hashCallPollToken(phone: string, token: string): string {
+  return createHmac("sha256", otpPepper()).update(`${phone}:incoming:${token}`).digest("hex");
 }
 
 export function parseOtpPurpose(value: unknown): OtpPurpose | null {
@@ -118,6 +123,7 @@ export async function sendMessengerOtp(
   resendAfterSec: number;
   channel: OtpChannel;
   callTo: string | null;
+  pollToken?: string;
 }> {
   const pinStatus = await getPinStatus(phone);
   if (purpose === "register") {
@@ -142,6 +148,7 @@ export async function sendMessengerOtp(
   let code = "";
   let flashCallId: number | null = null;
   let callTo: string | null = null;
+  let callPollToken: string | undefined;
   let mode: OtpChallenge["mode"] = "code";
 
   if (channel === "push") {
@@ -160,6 +167,7 @@ export async function sendMessengerOtp(
       });
       flashCallId = incoming.id || null;
       callTo = incoming.callTo;
+      callPollToken = randomBytes(32).toString("hex");
     } catch (err) {
       if (err instanceof AutocallError) {
         throw new MessengerAuthError(err.message, err.status >= 400 ? err.status : 502);
@@ -172,6 +180,7 @@ export async function sendMessengerOtp(
     codeHash: code ? hashOtpCode(phone, code) : "",
     flashCallId,
     callTo,
+    callPollTokenHash: callPollToken ? hashCallPollToken(phone, callPollToken) : null,
     mode,
     attempts: 0,
     createdAt: Date.now(),
@@ -186,10 +195,11 @@ export async function sendMessengerOtp(
     resendAfterSec: OTP_RESEND_COOLDOWN_SEC,
     channel,
     callTo,
+    pollToken: callPollToken,
   };
 }
 
-export async function pollMessengerIncomingOtp(phone: string): Promise<{
+export async function pollMessengerIncomingOtp(phone: string, pollToken: string): Promise<{
   pending: boolean;
   callTo: string | null;
   token?: string;
@@ -197,6 +207,10 @@ export async function pollMessengerIncomingOtp(phone: string): Promise<{
 }> {
   const challenge = await redisGetJson<OtpChallenge>(challengeKey(phone));
   if (!challenge || challenge.mode !== "incoming" || !challenge.flashCallId) {
+    throw new MessengerAuthError("Запросите звонок ещё раз", 400);
+  }
+  const expectedPollToken = challenge.callPollTokenHash;
+  if (!expectedPollToken || !codesEqual(expectedPollToken, hashCallPollToken(phone, pollToken))) {
     throw new MessengerAuthError("Запросите звонок ещё раз", 400);
   }
 
