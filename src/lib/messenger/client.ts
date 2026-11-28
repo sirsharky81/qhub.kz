@@ -43,6 +43,7 @@ export interface MessengerOtpSendResult {
   resendAfterSec?: number;
   channel?: "push" | "call";
   callTo?: string | null;
+  pollToken?: string | null;
   error?: string;
 }
 
@@ -138,11 +139,11 @@ export async function sendMessengerOtp(
   return res.json() as Promise<MessengerOtpSendResult>;
 }
 
-export async function pollMessengerOtp(phone: string): Promise<MessengerOtpPollResult> {
+export async function pollMessengerOtp(phone: string, pollToken: string): Promise<MessengerOtpPollResult> {
   const res = await platformFetch("/api/messenger/auth/otp/status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, pollToken }),
   });
   return res.json() as Promise<MessengerOtpPollResult>;
 }
